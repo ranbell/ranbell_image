@@ -1924,6 +1924,17 @@
     "loungeShared": "楽屋に報告が届きました 💬",
     "loungeReacted": "楽屋にみんなの反応が届きました 💕",
     "loungePitch": "楽屋に提案が届きました 💡",
-    "loungeHabit": "スタジオ手帖に癖メモが増えました 📓"
+    "loungeHabit": "スタジオ手帖に癖メモが増えました 📓",
+    "table": "🎬 スタジオ撮り（班を呼ぶ）",
+    "tableHint": "18役職の撮影班が、会話のたびに一周して台本を詰めます。開くと戻せません",
+    "tableOn": "班 {n}席で撮影中",
+    "tableOpened": "班を開きました",
+    "crewPreset": "撮影班",
+    "crewPresetHint": "班の顔ぶれ。開いたあとは変えられません",
+    "banter": "やじ",
+    "banterOff": "無し（速い）",
+    "banterLight": "軽め",
+    "banterFull": "たっぷり（遅い）",
+    "banterHint": "席の間に入る茶々。light で1ターン +5秒ほど"
   }
 }

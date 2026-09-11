@@ -79,7 +79,26 @@ def _ollama(request: Request):
 
 @router.get("/catalog")
 async def catalog(request: Request):
-    return await build_muse_catalog(request.app)
+    """カタログ ＋ スタジオ撮り（班）の顔ぶれ。
+
+    班のプリセットは `crew.PRESETS` が正本。画面に直書きすると、席を足した日に
+    黙ってずれる。
+    """
+    from ..muse import crew
+
+    out = await build_muse_catalog(request.app)
+    out["crew"] = {
+        "presets": list(crew.PRESETS),
+        "roles": [
+            {
+                "id": rid,
+                "name_ja": str(crew.ROLES[rid].get("name_ja") or ""),
+                "slot": (getattr(crew, "CRAFT_SLOTS", None) or {}).get(rid, ""),
+            }
+            for rid in crew.ROLE_ORDER
+        ],
+    }
+    return out
 
 
 @router.get("/sessions")

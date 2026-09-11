@@ -1924,6 +1924,17 @@
     "loungeShared": "A wrap post landed in the lounge 💬",
     "loungeReacted": "Friends reacted in the lounge 💕",
     "loungePitch": "An idea landed in the lounge 💡",
-    "loungeHabit": "A habit note was added to the handpost 📓"
+    "loungeHabit": "A habit note was added to the handpost 📓",
+    "table": "🎬 Studio shoot (call the crew)",
+    "tableHint": "An 18-role crew works the shot each turn. Opening it is one-way",
+    "tableOn": "Crew of {n} on set",
+    "tableOpened": "The table is open",
+    "crewPreset": "Crew",
+    "crewPresetHint": "Who is at the table. Locked once opened",
+    "banter": "Heckling",
+    "banterOff": "Off (fast)",
+    "banterLight": "Light",
+    "banterFull": "Full (slow)",
+    "banterHint": "Side comments between seats. Light costs about +5s a turn"
   }
 }

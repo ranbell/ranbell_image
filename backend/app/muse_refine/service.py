@@ -109,6 +109,9 @@ def public_view(session: dict[str, Any]) -> dict[str, Any]:
         },
         "diary": session.get("diary") or {},
         "opened": bool(session.get("opened")),
+        # スタジオ撮り（班）。画面はこの二つでボタンの出し分けをする。
+        "crew_open": bool(session.get(crew_room.TABLE_OPEN)),
+        "crew_seats": len(crew_room.cast_of(session)) if session.get(crew_room.TABLE_OPEN) else 0,
         "banned": list(session.get("banned") or [])[-20:],
         "struck": list(session.get("struck") or [])[-20:],
         "taste_chips": vitality.taste_chips(

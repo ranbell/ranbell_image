@@ -242,3 +242,34 @@ def test_there_is_only_one_label_stripper():
     import inspect
     assert not hasattr(C, "_LABEL_HEAD_RE")
     assert "ledger_mod.strip_field_label" in inspect.getsource(C.craft_tags)
+
+
+# ── 画面の配線 ──────────────────────────────────────────────────────────
+def test_the_panel_is_told_whether_the_table_is_open():
+    """ボタンの出し分けは公開ビューの二つで決まる。"""
+    s = _session()
+    v = service.public_view(s)
+    assert v["crew_open"] is False and v["crew_seats"] == 0
+    s[C.TABLE_OPEN] = True
+    v = service.public_view(s)
+    assert v["crew_open"] is True and v["crew_seats"] == 18
+
+
+def test_the_crew_presets_come_from_the_catalogue_not_the_panel():
+    """画面に直書きすると、席を足した日に黙ってずれる。"""
+    panel = __import__("pathlib").Path(
+        "frontend/src/components/MuseRefinePanel.vue"
+    ).read_text(encoding="utf-8")
+    assert "catalog.value?.crew?.presets" in panel
+    for name in ("photoreal", "vivid", "calm"):
+        assert f"'{name}'" not in panel, f"{name} が画面に直書きされている"
+
+
+def test_the_seat_rows_have_their_own_look():
+    """18人が喋るので、彼女の台詞と同じ見た目にしない。"""
+    panel = __import__("pathlib").Path(
+        "frontend/src/components/MuseRefinePanel.vue"
+    ).read_text(encoding="utf-8")
+    for fn in ("isSeatRow", "isHeckleRow"):
+        assert f"function {fn}(row)" in panel
+    assert "'seat'" in panel and "'heckle'" in panel

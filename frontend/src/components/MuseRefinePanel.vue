@@ -117,6 +117,11 @@ const tasteChips = computed(() => session.value?.taste_chips || [])
 const opened = computed(() => !!session.value?.opened)
 // 会話のターンでは散文とタグの組み上げを撮る時まで待つ（裏の `touch_craft`）。
 const craftStale = computed(() => !!craft.value?.stale)
+// スタジオ撮り（班）が開いているか。裏の `crew_room.TABLE_OPEN` と同じ印。
+const tableOpen = computed(() => !!session.value?.crew_open)
+const crewSeats = computed(() => Number(session.value?.crew_seats || 0))
+// 班の顔ぶれは `crew.PRESETS` が正本（カタログ経由）。画面に直書きしない。
+const crewPresets = computed(() => catalog.value?.crew?.presets || [])
 const diaryState = computed(() => session.value?.diary || {})
 const diaryDone = computed(() => diaryState.value.status === 'ok')
 const diaryWriting = computed(() => diaryState.value.status === 'writing')
@@ -709,6 +714,17 @@ function rowChips(row) {
 function isBanterRow(row) {
   return (row?.meta?.kind || row?.kind) === 'banter'
 }
+// 班の席（🎬）と、席の間のやじ（〃）。18人が喋るので、彼女の台詞とは
+// はっきり別の見た目にする —— 主演の声が埋もれないように。
+function isSeatRow(row) {
+  return (row?.meta?.kind) === 'seat'
+}
+function isHeckleRow(row) {
+  return (row?.meta?.kind) === 'heckle'
+}
+function isCrewRow(row) {
+  return isSeatRow(row) || isHeckleRow(row)
+}
 function isChangeRow(row) {
   const kind = row?.meta?.kind
   return kind === 'ledger_change' || kind === 'ledger_missed'
@@ -724,6 +740,7 @@ function rowKindLabel(row, t) {
   if (kind === 'standing') return t('museRefine.standing')
   if (kind === 'contract') return t('museRefine.contract')
   if (kind === 'theme') return t('museRefine.theme')
+  if (kind === 'table_open') return t('museRefine.tableOpened')
   return row.name || row.role
 }
 function isStruckRow(row) {
@@ -910,7 +927,17 @@ function isStruckRow(row) {
                     alt=""
                     class="h-7 w-7 shrink-0 rounded-full object-cover border border-pink-100 shadow-md ring-2 ring-pink-400/80"
                   />
-                  <template v-if="isBanterRow(row)">💭 {{ t('museRefine.asideTitle') }} · {{ row.name }}</template>
+                  <template v-if="isSeatRow(row)">
+                    🎬 {{ row.name }}
+                    <span
+                      v-for="chip in rowChips(row)"
+                      :key="chip.key"
+                      class="inline-flex items-center gap-0.5 rounded-full border border-amber-600/40 bg-amber-950/40 px-1.5 py-0.5 text-[10px] leading-none not-italic text-amber-100"
+                      :title="chip.key"
+                    ><span aria-hidden="true">{{ chip.icon }}</span><span>{{ chip.label }}</span></span>
+                  </template>
+                  <template v-else-if="isHeckleRow(row)">〃 {{ row.name }}</template>
+                  <template v-else-if="isBanterRow(row)">💭 {{ t('museRefine.asideTitle') }} · {{ row.name }}</template>
                   <template v-else-if="isSayRow(row)">
                     🌸 {{ row.name || waitName }}
                     <span
@@ -986,6 +1013,10 @@ function isStruckRow(row) {
                       ? (isStruckRow(row)
                         ? 'rounded-2xl rounded-tr-sm border border-gray-700/50 bg-gray-900/50 px-3.5 py-2 text-[12px] text-gray-500 line-through decoration-amber-700/80'
                         : 'rounded-2xl rounded-tr-sm border border-emerald-500/40 bg-emerald-950/50 px-3.5 py-2 text-[12px] text-emerald-100')
+                      : isSeatRow(row)
+                        ? 'rounded-lg border border-amber-800/30 bg-amber-950/15 px-3 py-1.5 text-[11px] text-amber-50/90'
+                      : isHeckleRow(row)
+                        ? 'ml-4 rounded-lg border border-dashed border-slate-600/40 bg-slate-900/40 px-2.5 py-1 text-[10px] italic text-gray-400'
                       : isBanterRow(row)
                         ? 'ml-1 rounded-2xl rounded-tl-sm border border-dashed border-pink-400/45 bg-gradient-to-br from-pink-950/50 via-rose-950/40 to-fuchsia-950/30 px-3 py-1.5 text-[11px] italic text-pink-200/95'
                         : row.meta?.kind === 'verify_ok' || row.meta?.kind === 'verify_repaired'
@@ -1061,6 +1092,24 @@ function isStruckRow(row) {
                 >「{{ opt }}」</button>
               </div>
               <div class="flex flex-wrap items-center gap-2">
+                <!--
+                  スタジオ撮り（班）。**明示的に開ける** —— `crew_preset` は既定で
+                  `standard` が入っているので、勝手に開くと一人撮りが18席になる。
+                  開いたあとは会話のたびに班が一周するので、ボタンは消える。
+                -->
+                <button
+                  v-if="!tableOpen"
+                  type="button"
+                  class="rounded-lg border border-amber-600/50 bg-amber-950/30 px-2.5 py-1.5 text-[10px] font-medium text-amber-100 hover:bg-amber-900/40 disabled:opacity-40"
+                  :disabled="chatLocked || !inputs.character_id"
+                  :title="t('museRefine.tableHint')"
+                  @click="runStage('table')"
+                >{{ t('museRefine.table') }}</button>
+                <span
+                  v-else
+                  class="rounded-lg border border-amber-700/40 bg-amber-950/20 px-2.5 py-1.5 text-[10px] text-amber-200/80"
+                  :title="t('museRefine.tableHint')"
+                >🎬 {{ t('museRefine.tableOn', { n: crewSeats }) }}</span>
                 <button
                   type="button"
                   class="rounded-lg border border-pink-500/40 bg-pink-950/40 px-2.5 py-1.5 text-[10px] font-medium text-pink-100 hover:bg-pink-900/50 disabled:opacity-40"
@@ -1302,6 +1351,32 @@ function isStruckRow(row) {
                 >
                   <option v-for="m in models" :key="m" :value="m">{{ m }}</option>
                 </select>
+              </label>
+              <!-- スタジオ撮り（班）の設定。開く前に決めておくもの。 -->
+              <label class="block">
+                <span class="mb-1 block text-gray-500">{{ t('museRefine.crewPreset') }}</span>
+                <select
+                  class="w-full rounded border border-gray-700 bg-gray-900 px-2 py-1.5 disabled:opacity-40"
+                  :value="inputs.crew_preset || 'standard'"
+                  :disabled="tableOpen"
+                  @change="patchInputs({ crew_preset: $event.target.value })"
+                >
+                  <option v-for="p in crewPresets" :key="p" :value="p">{{ p }}</option>
+                </select>
+                <span class="mt-1 block text-[10px] text-gray-500">{{ t('museRefine.crewPresetHint') }}</span>
+              </label>
+              <label class="block">
+                <span class="mb-1 block text-gray-500">{{ t('museRefine.banter') }}</span>
+                <select
+                  class="w-full rounded border border-gray-700 bg-gray-900 px-2 py-1.5"
+                  :value="inputs.banter_mode || 'light'"
+                  @change="patchInputs({ banter_mode: $event.target.value })"
+                >
+                  <option value="off">{{ t('museRefine.banterOff') }}</option>
+                  <option value="light">{{ t('museRefine.banterLight') }}</option>
+                  <option value="full">{{ t('museRefine.banterFull') }}</option>
+                </select>
+                <span class="mt-1 block text-[10px] text-gray-500">{{ t('museRefine.banterHint') }}</span>
               </label>
             </div>
 
