@@ -247,8 +247,15 @@ def seat_prompt(session: dict[str, Any], muse_id: str, *,
             "absolute value — never a direction of change."
         )
     if floor:
+        # **言葉を借りない。** 実機の開幕で、撮影の席が衣装の席の一文目を
+        # そのまま写した（「西日が差し込むなら、光を吸い込むベルベットか…」）。
+        # 条文にも「Do not restate another Muse's phrase」とあるが、直前の発言を
+        # 見せる以上、ここでもう一度言う。
         bits.append(
-            "RECENT TABLE TALK (react to it, then add the one thing nobody named):\n"
+            "THE FLOOR SO FAR — react to it, then add the one thing nobody has "
+            "named yet. **Do not reuse their words, images or metaphors.** If "
+            "the last speakers already reached for your idea, that idea is "
+            "finished; say the part of the picture still missing.\n"
             + "\n".join(f"  {f['name']}: {str(f['say'])[:160]}" for f in floor[-3:])
         )
     bits.append(f"SHOWRUNNER:\n{director_line.strip()}")
@@ -380,6 +387,21 @@ async def run_table(db, ollama, session: dict[str, Any], *,
     return floor
 
 
+def craft_tags(craft: str) -> str:
+    """`CRAFT: <tags> | <prose>` の**タグ側だけ**。（2026-09-11）
+
+    classic の CRAFT は二部構成 —— 左が danbooru 語、右が散文。台帳は
+    **英語の絶対句一つ**なので、右half をそのまま渡すと欄にパイプと日本語が
+    入り、しかも欄をまたいで混ざった（実機で `light` に
+    `translucent_fabric | 襟が夕陽を透かす` が着いた）。
+
+    散文の側は捨てていない —— 席の SAY として会話欄に出ているし、絵の散文は
+    `assemble.scene_prose` が台帳から組み直す。ここは**台帳の材料**だけ。
+    """
+    left = str(craft or "").split("|", 1)[0]
+    return " ".join(left.split()).strip(" ,")
+
+
 def craft_block(floor: list[dict[str, Any]]) -> str:
     """席が出した CRAFT を、writer に渡せる形にまとめる。
 
@@ -389,10 +411,11 @@ def craft_block(floor: list[dict[str, Any]]) -> str:
     """
     by_field: dict[str, list[str]] = {}
     for row in floor:
-        field, craft = str(row.get("field") or ""), str(row.get("craft") or "").strip()
-        if not field or not craft:
+        field = str(row.get("field") or "")
+        tags = craft_tags(row.get("craft") or "")
+        if not field or not tags:
             continue
-        by_field.setdefault(field, []).append(f"{row['name']}（{row['role']}）: {craft}")
+        by_field.setdefault(field, []).append(tags)
     if not by_field:
         return ""
     lines = [
@@ -404,6 +427,12 @@ def craft_block(floor: list[dict[str, Any]]) -> str:
     ]
     for field in ledger_mod.LEDGER_KEYS:
         if field in by_field:
-            lines.append(f"  {field}:")
-            lines.extend(f"    {c}" for c in by_field[field])
+            # 一欄一行。席の名前も落とす —— 誰が言ったかは会話欄に出ている。
+            # ここに書くと、名前まで欄に写す（実機で踏んだ）。
+            seen: list[str] = []
+            for tags in by_field[field]:
+                for t in (x.strip() for x in tags.split(",")):
+                    if t and t.lower() not in {s.lower() for s in seen}:
+                        seen.append(t)
+            lines.append(f"  {field}: {', '.join(seen)}")
     return "\n".join(lines)

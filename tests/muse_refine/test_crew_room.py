@@ -114,18 +114,49 @@ def test_omit_words_count_as_no_craft():
 
 
 # ── writer への材料 ─────────────────────────────────────────────────────
+def test_only_the_tag_half_reaches_the_ledger():
+    """`CRAFT: <tags> | <prose>` の散文側は台帳に渡さない。
+
+    実機で渡したら、欄にパイプと日本語が入り、しかも欄をまたいで混ざった
+    （`light` に `translucent_fabric | 襟が夕陽を透かす` が着いた）。
+    """
+    assert C.craft_tags("backlight, rim_light | golden hour, warm") == "backlight, rim_light"
+    assert C.craft_tags("sitting") == "sitting"
+    assert C.craft_tags("") == ""
+
+
 def test_the_craft_is_grouped_by_field_not_interleaved():
-    """**欄ごとにまとめる。** 交互に並べると writer がどちらを採るか迷う。"""
+    """**欄ごとに一行。** 交互に並べると writer がどちらを採るか迷う。"""
     got = C.craft_block([
         {"name": "照明", "role": "gaffer", "field": "light", "craft": "rim_light | low sun"},
         {"name": "演出", "role": "beat", "field": "beat", "craft": "sitting | weight left"},
-        {"name": "振付", "role": "spine", "field": "beat", "craft": "leaning | elbows"},
+        {"name": "振付", "role": "spine", "field": "beat", "craft": "leaning, sitting | elbows"},
         {"name": "やじ", "role": "hook", "field": "", "craft": ""},
     ])
     assert got.index("beat:") < got.index("light:")        # 台帳の欄順
-    body = got[got.index("beat:"):got.index("light:")]
-    assert "演出" in body and "振付" in body               # 同じ欄は隣り合う
+    assert "beat: sitting, leaning" in got                 # 同じ欄は一行に畳む
+    assert "low sun" not in got                            # 散文側は渡さない
     assert "やじ" not in got                               # craft の無い発言は入らない
+
+
+def test_a_field_never_repeats_a_tag():
+    got = C.craft_block([
+        {"name": "演出", "role": "beat", "field": "beat", "craft": "sitting, calm"},
+        {"name": "振付", "role": "spine", "field": "beat", "craft": "SITTING, leaning"},
+    ])
+    assert got.count("sitting") + got.count("SITTING") == 1
+
+
+def test_the_seat_format_overrides_the_classic_one():
+    """職能文の直後に classic の OUTPUT（TAGS/SCENE）が来る。最後に上書きする。"""
+    assert "REPLACES any format above" in C.SEAT_OUTPUT
+    assert "CRAFT:" in C.SEAT_OUTPUT
+    # TAGS は**禁止として**だけ出てくる（求めてはいない）
+    assert "Never write a TAGS: or SCENE: block" in C.SEAT_OUTPUT
+    import inspect
+    src = inspect.getsource(C._seat_turn)
+    assert "SEAT_OUTPUT" in src and "system_prompt_for" in src
+    assert src.index("system_prompt_for") < src.index("SEAT_OUTPUT"), "上書きは後ろ"
 
 
 def test_no_crew_means_no_block():
