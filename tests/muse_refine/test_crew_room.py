@@ -172,3 +172,38 @@ def test_the_writer_only_hears_the_crew_when_there_is_one():
     src = inspect.getsource(writer.write_patch)
     assert "crew_craft" in src
     assert 'if str(crew_craft or "").strip() else ""' in src
+
+
+# ── 手帖の欄名が漏れてくる（実機 2026-09-11）─────────────────────────────
+def test_a_notebook_label_never_reaches_the_ledger():
+    """席の職能文は `BEAT` `WEARING` を名指しで説明するので、模型が写す。
+
+    実機で台帳にこう着いた:
+
+        wearing: "BEAT: standing still, eyes towards the light"
+        bg:      "ATMOSPHERE:"        ← 中身すら無い
+
+    条文でも禁じたが、**届く手前でも落とす**。模型の行儀に台帳の綺麗さを
+    預けない（[[feedback-a-box-or-it-wont-land]] の裏返し）。
+    """
+    assert C.craft_tags("BEAT: standing still, eyes towards the light | 重心") \
+        == "standing still, eyes towards the light"
+    assert C.craft_tags("WEARING: BEAT: sitting | x") == "sitting"   # 重なっても剥がす
+    assert C.craft_tags("ATMOSPHERE:") == ""                          # 空ラベルは消える
+    assert C.craft_tags("ATMOSPHERE: | dusty air") == ""
+
+
+def test_an_ordinary_tag_that_looks_like_a_label_survives():
+    """`atmospheric` は欄名ではない。コロンが無いものは剥がさない。"""
+    assert C.craft_tags("atmospheric, dusty") == "atmospheric, dusty"
+    assert C.craft_tags("backlight, rim_light") == "backlight, rim_light"
+
+
+def test_an_empty_craft_makes_no_line():
+    assert C.craft_block([
+        {"name": "美術", "role": "propshop", "field": "bg", "craft": "ATMOSPHERE:"},
+    ]) == ""
+
+
+def test_the_seat_contract_forbids_labels_too():
+    assert "No field label inside CRAFT" in C.SEAT_OUTPUT

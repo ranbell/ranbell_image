@@ -68,6 +68,14 @@ MUTED: frozenset[str] = frozenset(
 
 _CRAFT_LINE_RE = re.compile(r"(?im)^CRAFT\s*:\s*(.+?)\s*$")
 
+#: CRAFT の頭に付いてくる手帖の欄名。**繰り返し剥がす**（`BEAT: WEARING: …`）。
+_LABEL_HEAD_RE = re.compile(
+    r"^\s*(?:PLACE|HOUR|SCENE|WEARING(?:_B)?|BEAT(?:_B)?|EXPRESSION(?:_B)?|"
+    r"FACE|FRAME|LIGHT|BG|BACKGROUND|ATMOSPHERE|MOOD|LOOK|STYLE|LETTERING|"
+    r"TEXT|CLOTH|BODY|OPTICS|COLOUR|PROPS|AIR|SHAPE|RENDER|FINISH|TAGS)\s*[:：]\s*",
+    re.I,
+)
+
 #: 席の出力書式。**classic の条文の末尾を上書きする。**（2026-09-11）
 #:
 #: `crew.system_prompt_for` は職能文（「TAGS と SCENE は書くな、君の CRAFT slot は
@@ -87,6 +95,8 @@ commit ONE concrete thing from your own specialty. No danbooru tags in SAY.
 
 CRAFT: <danbooru tags> | <short prose>
 Your slot only. Absolute values — never "darker" / "softer" / "more".
+**No field label inside CRAFT.** Not `BEAT:`, not `WEARING:`, not
+`ATMOSPHERE:` — the tags alone. The Scripter knows which field is yours.
 Omit the whole CRAFT line when your slot should not move this turn.
 """.strip()
 
@@ -399,6 +409,21 @@ def craft_tags(craft: str) -> str:
     `assemble.scene_prose` が台帳から組み直す。ここは**台帳の材料**だけ。
     """
     left = str(craft or "").split("|", 1)[0]
+    # **手帖の欄名が頭に付いてくる（2026-09-11 実測）。** 席の職能文は
+    # `BEAT` `WEARING` `ATMOSPHERE` といった手帖のラベルを名指しで説明して
+    # いるので、模型がそれを CRAFT の頭に写す:
+    #
+    #     CRAFT: BEAT: standing still, eyes towards the light | …
+    #     CRAFT: ATMOSPHERE: | …        ← 中身が無いことすらある
+    #
+    # 台帳に `wearing: "BEAT: standing still…"` と `bg: "ATMOSPHERE:"` が
+    # 着いた。条文でも禁じたが、**届く手前でも落とす** —— 模型の行儀に
+    # 台帳の綺麗さを預けない。
+    for _ in range(4):          # `WEARING: BEAT: …` のように重なることがある
+        stripped = _LABEL_HEAD_RE.sub("", left, count=1)
+        if stripped == left:
+            break
+        left = stripped
     return " ".join(left.split()).strip(" ,")
 
 
