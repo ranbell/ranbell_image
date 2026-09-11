@@ -26,6 +26,12 @@ import pytest
 PKG = Path(__file__).resolve().parents[2] / "backend" / "app" / "muse_refine"
 
 
+#: 模型を叩く口。`ollama.generate_*` の直呼びだけでなく、**classic の
+#: `chain` 経由**も数える —— スタジオ撮り（班）は `chain._call` を通るので、
+#: `generate_` だけ見ていると素通りする（2026-09-12 に気づいた穴）。
+_VIA_CHAIN = {"_call", "_call_seeing"}
+
+
 def _generate_calls():
     for path in sorted(PKG.glob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -33,7 +39,9 @@ def _generate_calls():
             if not isinstance(node, ast.Call):
                 continue
             fn = node.func
-            if isinstance(fn, ast.Attribute) and fn.attr.startswith("generate_"):
+            if not isinstance(fn, ast.Attribute):
+                continue
+            if fn.attr.startswith("generate_") or fn.attr in _VIA_CHAIN:
                 yield path.name, node
 
 
@@ -46,7 +54,7 @@ def test_every_llm_call_says_think_false():
         val = kw.get("think")
         if not (isinstance(val, ast.Constant) and val.value is False):
             missing.append(f"{name}:{node.lineno}")
-    assert seen >= 6, "呼び出しが見つからない —— 試験のほうが古い"
+    assert seen >= 7, "呼び出しが見つからない —— 試験のほうが古い"
     assert not missing, (
         "think=False を送っていない呼び出し: " + ", ".join(missing)
     )

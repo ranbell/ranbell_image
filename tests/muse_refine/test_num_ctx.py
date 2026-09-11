@@ -51,12 +51,19 @@ def test_every_llm_call_carries_a_context_length():
             if not isinstance(node, ast.Call):
                 continue
             fn = node.func
-            if not (isinstance(fn, ast.Attribute)
-                    and fn.attr.startswith("generate_")):
+            if not isinstance(fn, ast.Attribute):
+                continue
+            # **classic の `chain` 経由も数える。** スタジオ撮り（班）は
+            # `chain._call` / `chain.run_banter` を通るので、`generate_` だけ
+            # 見ていると素通りする（2026-09-12 に気づいた穴）。あちらは
+            # `options` ではなく `num_ctx=` という名前で受ける。
+            via_chain = fn.attr in ("_call", "_call_seeing", "run_banter")
+            if not (fn.attr.startswith("generate_") or via_chain):
                 continue
             seen += 1
             kw = {k.arg for k in node.keywords}
-            if "options" not in kw:
+            wanted = "num_ctx" if via_chain else "options"
+            if wanted not in kw:
                 missing.append(f"{path.name}:{node.lineno}")
-    assert seen >= 6, "呼び出しが見つからない —— 試験のほうが古い"
+    assert seen >= 8, "呼び出しが見つからない —— 試験のほうが古い"
     assert not missing, f"文脈長を渡していない呼び出し: {missing}"
