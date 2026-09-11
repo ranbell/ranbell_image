@@ -38,6 +38,28 @@ const streamLive = ref(false)
 const speaking = ref(false)
 // 彼女が喋っている最中の、まだ確定していない一行（`chat_delta`）。
 const liveSay = ref('')
+// 流れている台詞の主。班だと席が次々に替わる。
+const liveName = ref('')
+const liveIsLead = ref(true)
+
+/**
+ * 喋りの後始末。**`speaking` は `busy` より長生きしてはいけない。**
+ *
+ * 総監督「会話終了処理がよくなくて、busy になり続けるのでその後一切の入力が
+ * できなくなる」。原因は `speaking` のほう —— `chatLocked` は
+ * `busy || renderLocked || speaking` で、SSE の `muse_speaking` が立てた旗を
+ * 下ろすのは `chat` / `session_updated` の分岐だけ、しかも **`!busy` のとき
+ * だけ**だった。POST の最中に届いた合図はそこで捨てられるので、POST が
+ * 終わったときには誰も下ろす人が居ない。
+ *
+ * スタジオ撮りで踏み抜いた —— 班を開くと席が3〜6回 `muse_speaking` を出し、
+ * `runStage` は `busy` しか下ろさないので、そのまま入力が死んだ。
+ */
+function stopSpeaking() {
+  speaking.value = false
+  liveSay.value = ''
+  liveName.value = ''
+}
 // W撮りでは `A:` / `B:` が行頭に付いてくる（誰の台詞かの目印）。**確定した行は
 // 名前で分かれて出る**ので、流れている間だけの目印は画面に出さない。
 const liveText = computed(() =>
@@ -122,6 +144,9 @@ const tableOpen = computed(() => !!session.value?.crew_open)
 const crewSeats = computed(() => Number(session.value?.crew_seats || 0))
 // 班の顔ぶれは `crew.PRESETS` が正本（カタログ経由）。画面に直書きしない。
 const crewPresets = computed(() => catalog.value?.crew?.presets || [])
+// 開く前に選ぶ撮り方。開いたあとはセッションの印が正本。
+const shootMode = ref('solo')
+watch(tableOpen, (on) => { if (on) shootMode.value = 'studio' })
 const diaryState = computed(() => session.value?.diary || {})
 const diaryDone = computed(() => diaryState.value.status === 'ok')
 const diaryWriting = computed(() => diaryState.value.status === 'writing')
@@ -336,8 +361,10 @@ async function openSession() {
     if (themeDraft.value.trim() && themeDraft.value.trim() !== (inputs.value.theme || '')) {
       await patchInputs({ theme: themeDraft.value.trim() })
     }
+    // スタジオ撮りは別の扉。班は途中から呼べないので、開始のときに決まる。
+    const door = shootMode.value === 'studio' && !tableOpen.value ? 'table' : 'open'
     session.value = await api(
-      `/api/muse-refine/sessions/${session.value.session_id}/open`,
+      `/api/muse-refine/sessions/${session.value.session_id}/${door}`,
       { method: 'POST' },
     )
     await scrollChat()
@@ -345,7 +372,7 @@ async function openSession() {
     fail(err)
   } finally {
     busy.value = false
-    speaking.value = false
+    stopSpeaking()
     startedAt = 0
     elapsed.value = 0
   }
@@ -399,6 +426,7 @@ async function finishSession() {
     fail(err)
   } finally {
     busy.value = false
+    stopSpeaking()
   }
 }
 
@@ -451,7 +479,7 @@ async function sendChat() {
     fail(err)
   } finally {
     busy.value = false
-    speaking.value = false
+    stopSpeaking()
     startedAt = 0
     elapsed.value = 0
   }
@@ -493,6 +521,7 @@ async function runStage(path) {
     fail(err)
   } finally {
     busy.value = false
+    stopSpeaking()
   }
 }
 
@@ -539,6 +568,11 @@ function openStream(id) {
     if (data.type === 'muse_speaking') {
       speaking.value = true
       liveSay.value = ''
+      // **誰が喋っているか。** スタジオ撮りでは18人が順に喋るので、流れている
+      // 吹き出しに主演の名前を出しっぱなしにすると、誰の言葉か分からない。
+      liveName.value = String(data.name || '')
+      liveIsLead.value = !data.muse_id
+        || String(data.muse_id) === String(session.value?.character?.character_id || '')
       if (!startedAt) startedAt = Date.now()
       return
     }
@@ -560,6 +594,7 @@ function openStream(id) {
     if (data.type === 'chat' || data.type === 'chat_message') {
       // 確定した行が来たら、流れていた下書きは役目を終える。
       liveSay.value = ''
+      liveName.value = ''
       // Local sendChat owns speaking/busy until POST returns.
       if (!busy.value) speaking.value = false
       scheduleRefresh(true)
@@ -698,6 +733,12 @@ watch(() => props.show, async (open) => {
   } catch (err) {
     fail(err)
   }
+})
+
+// **保険。** どこかで後始末を書き忘れても、`busy` が下りた時点で必ず下ろす。
+// 入力が二度と戻らない、という壊れ方だけは作らない。
+watch(busy, (now) => {
+  if (!now) stopSpeaking()
 })
 
 onBeforeUnmount(() => {
@@ -855,6 +896,31 @@ function isStruckRow(row) {
                 </select>
                 <span class="text-[10px] font-medium uppercase tracking-wide text-pink-400/80">NOW</span>
               </div>
+              <!--
+                主演撮り / スタジオ撮り。**開く前に選ぶ**（classic の setup と
+                同じ作り）。開いたあとは替えられない —— 班は途中から呼べない。
+              -->
+              <div class="mt-2 grid grid-cols-2 gap-2">
+                <button
+                  v-for="m in [{ id: 'solo', k: 'modeSolo' }, { id: 'studio', k: 'modeStudio' }]"
+                  :key="m.id"
+                  type="button"
+                  class="rounded-lg border p-2 text-left transition-colors disabled:opacity-50"
+                  :class="shootMode === m.id
+                    ? 'border-amber-500/60 bg-amber-950/25'
+                    : 'border-white/10 hover:border-white/25'"
+                  :disabled="chatLocked || opened"
+                  @click="shootMode = m.id"
+                >
+                  <span class="block text-[11px] text-gray-200">{{ t(`museRefine.${m.k}`) }}</span>
+                  <span class="mt-0.5 block text-[10px] leading-snug text-gray-500">
+                    {{ t(`museRefine.${m.k}Hint`) }}
+                  </span>
+                </button>
+              </div>
+              <p v-if="tableOpen" class="mt-1 text-[10px] text-amber-200/70">
+                🎬 {{ t('museRefine.tableOn', { n: crewSeats }) }}
+              </p>
               <div class="mt-2 flex flex-wrap items-center gap-2">
                 <input
                   v-model="themeDraft"
@@ -1056,17 +1122,23 @@ function isStruckRow(row) {
                 見えないようにする。
               -->
               <div v-if="liveSay" class="flex flex-col items-start gap-1">
-                <span class="flex items-center gap-1.5 px-0.5 text-[10px] font-medium text-pink-300/80">
+                <span
+                  class="flex items-center gap-1.5 px-0.5 text-[10px] font-medium"
+                  :class="liveIsLead ? 'text-pink-300/80' : 'text-amber-200/80'"
+                >
                   <img
-                    v-if="leadFace"
+                    v-if="liveIsLead && leadFace"
                     :src="leadFace"
                     alt=""
                     class="h-7 w-7 shrink-0 rounded-full object-cover border border-pink-100 shadow-md ring-2 ring-pink-400/80"
                   />
-                  🌸 {{ waitName }}
+                  {{ liveIsLead ? '🌸' : '🎬' }} {{ liveName || waitName }}
                 </span>
                 <div
-                  class="max-w-[90%] whitespace-pre-wrap rounded-2xl rounded-tl-sm border border-pink-500/30 bg-slate-900/80 px-3.5 py-2 text-[12px] leading-relaxed text-pink-50 shadow-sm"
+                  class="max-w-[90%] whitespace-pre-wrap shadow-sm"
+                  :class="liveIsLead
+                    ? 'rounded-2xl rounded-tl-sm border border-pink-500/30 bg-slate-900/80 px-3.5 py-2 text-[12px] leading-relaxed text-pink-50'
+                    : 'rounded-lg border border-amber-800/30 bg-amber-950/15 px-3 py-1.5 text-[11px] leading-relaxed text-amber-50/90'"
                 >{{ liveText }}<span class="refine-caret">▌</span></div>
               </div>
               <p v-if="!chat.length && !waitingOnModel" class="text-xs text-gray-500">{{ t('museRefine.chatHint') }}</p>
@@ -1092,24 +1164,6 @@ function isStruckRow(row) {
                 >「{{ opt }}」</button>
               </div>
               <div class="flex flex-wrap items-center gap-2">
-                <!--
-                  スタジオ撮り（班）。**明示的に開ける** —— `crew_preset` は既定で
-                  `standard` が入っているので、勝手に開くと一人撮りが18席になる。
-                  開いたあとは会話のたびに班が一周するので、ボタンは消える。
-                -->
-                <button
-                  v-if="!tableOpen"
-                  type="button"
-                  class="rounded-lg border border-amber-600/50 bg-amber-950/30 px-2.5 py-1.5 text-[10px] font-medium text-amber-100 hover:bg-amber-900/40 disabled:opacity-40"
-                  :disabled="chatLocked || !inputs.character_id"
-                  :title="t('museRefine.tableHint')"
-                  @click="runStage('table')"
-                >{{ t('museRefine.table') }}</button>
-                <span
-                  v-else
-                  class="rounded-lg border border-amber-700/40 bg-amber-950/20 px-2.5 py-1.5 text-[10px] text-amber-200/80"
-                  :title="t('museRefine.tableHint')"
-                >🎬 {{ t('museRefine.tableOn', { n: crewSeats }) }}</span>
                 <button
                   type="button"
                   class="rounded-lg border border-pink-500/40 bg-pink-950/40 px-2.5 py-1.5 text-[10px] font-medium text-pink-100 hover:bg-pink-900/50 disabled:opacity-40"

@@ -273,3 +273,48 @@ def test_the_seat_rows_have_their_own_look():
     for fn in ("isSeatRow", "isHeckleRow"):
         assert f"function {fn}(row)" in panel
     assert "'seat'" in panel and "'heckle'" in panel
+
+
+def test_the_mode_is_chosen_before_the_session_opens():
+    """総監督「監督のみ / スタジオ撮りは Muse Classic のUI のような選択がいい」。
+
+    班は途中から呼べない（開幕の三席が当たりを付けてから全班、という順番が
+    classic の設計）ので、**開始の扉で分かれる**。
+    """
+    panel = __import__("pathlib").Path(
+        "frontend/src/components/MuseRefinePanel.vue"
+    ).read_text(encoding="utf-8")
+    # 文言はテンプレートリテラル経由（`t(\`museRefine.${m.k}\`)`）なので鍵で見る
+    assert "k: 'modeSolo'" in panel and "k: 'modeStudio'" in panel
+    # 開始ボタンが扉を振り分ける
+    assert "shootMode.value === 'studio' && !tableOpen.value ? 'table' : 'open'" in panel
+    # 開いたあとは選び直せない
+    assert ':disabled="chatLocked || opened"' in panel
+
+
+def test_the_seat_rows_do_not_show_the_say_label():
+    """総監督「スタジオ撮りだと SAY: が露出する」。"""
+    say, craft = C.split_craft("SAY: 総監督、いいですね。\nCRAFT: rim_light | low sun")
+    assert say == "総監督、いいですね。"
+    assert not say.startswith("SAY")
+    assert craft == "rim_light | low sun"
+
+
+def test_the_stream_stops_before_the_craft_line():
+    """流れている間も danbooru 語を出さない。"""
+    from app.muse import shared
+
+    out = []
+    feed = shared._say_only(out.append)
+    for ch in "SAY: 総監督、いいですね。\nCRAFT: rim_light | low sun\n":
+        feed(ch)
+    got = "".join(out)
+    assert "いいですね" in got
+    assert "rim_light" not in got and "CRAFT" not in got
+
+
+def test_the_seats_stream_too():
+    """総監督「streaming 表示しないので待たされる感覚がかなり大きい」。"""
+    import inspect
+    assert "on_token=_stream_to(session, muse_id)" in inspect.getsource(C._seat_turn)
+    assert "on_token=_stream_to(session, muse_id)" in inspect.getsource(C._banter_turn)

@@ -31,7 +31,7 @@ import re
 import time
 from typing import Any
 
-from ..muse import chain, crew, events
+from ..muse import chain, crew, events, identity
 from . import debug as debug_mod
 from . import ledger as ledger_mod
 from .ctx import refine_num_ctx
@@ -152,16 +152,22 @@ def opening_seats(cast: list[str]) -> list[str]:
 
 
 def split_craft(body: str) -> tuple[str, str]:
-    """一席の返事を、喋りと CRAFT 行に分ける。classic の `_split_craft_line` と同じ。"""
+    """一席の返事を、喋りと CRAFT 行に分ける。classic の `_split_craft_line` と同じ。
+
+    **`SAY:` の札は画面に出さない（2026-09-12）。** 総監督「スタジオ撮りだと
+    SAY: が露出する」。席の返事は `SAY: …` で始まるので、そのまま積むと
+    吹き出しに札が残る。剥がすのは classic の `identity.sanitize_muse_say`
+    ——「欄の名前が漏れたら切る」という仕事を既にしている一本。
+    """
     text = str(body or "")
     m = _CRAFT_LINE_RE.search(text)
     if not m:
-        return text.strip(), ""
+        return identity.sanitize_muse_say(text, locale="ja"), ""
     clause = str(m.group(1) or "").strip()
-    say = _CRAFT_LINE_RE.sub("", text).strip()
+    say = _CRAFT_LINE_RE.sub("", text)
     if clause.lower() in ("none", "-", "n/a", "omit", "(omit)"):
         clause = ""
-    return say, clause[:280]
+    return identity.sanitize_muse_say(say, locale="ja"), clause[:280]
 
 
 def banter_mode(session: dict[str, Any]) -> str:
@@ -264,6 +270,22 @@ def seat_prompt(session: dict[str, Any], muse_id: str, *,
     return "\n\n".join(bits)
 
 
+def _stream_to(session: dict[str, Any], muse_id: str):
+    """席の台詞を流す口。**`SAY:` の中だけ**通る（`_say_only`）。
+
+    総監督「streaming 表示しないので待たされる感覚がかなり大きい」。18席が
+    順に喋るあいだ無言だと、1分以上なにも起きないように見える。女優の段で
+    やっているのと同じ仕掛けを席にも回す。
+    """
+    try:
+        from ..muse import shared as muse_shared
+
+        return muse_shared._token_publisher(str(session.get("session_id") or ""), muse_id)
+    except Exception:
+        logger.debug("[muse_refine] seat token publisher unavailable", exc_info=True)
+        return None
+
+
 async def _seat_turn(ollama, session: dict[str, Any], muse_id: str, *,
                      model: str, prompt: str) -> str:
     """一席ぶんの呼び出し。**絵は渡さない**（板を見せるのは女優の段の仕事）。"""
@@ -284,12 +306,17 @@ async def _seat_turn(ollama, session: dict[str, Any], muse_id: str, *,
         images=None,
         num_ctx=refine_num_ctx(session),
         think=False,
+        on_token=_stream_to(session, muse_id),
     )
 
 
 async def _banter_turn(ollama, session: dict[str, Any], muse_id: str, *,
                        model: str, about_name: str, about_text: str) -> str:
     """やじ一言。短く、craft は書かせない。"""
+    events.publish(str(session.get("session_id") or ""), {
+        "type": "muse_speaking", "muse_id": muse_id,
+        "name": seat_name(session, muse_id),
+    })
     return await chain.run_banter(
         ollama, muse_id=muse_id,
         user_prompt=(
@@ -300,6 +327,7 @@ async def _banter_turn(ollama, session: dict[str, Any], muse_id: str, *,
         model=model,
         num_ctx=refine_num_ctx(session),
         character=session.get("character") or {},
+        on_token=_stream_to(session, muse_id),
     )
 
 

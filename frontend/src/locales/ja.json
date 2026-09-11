@@ -1925,7 +1925,6 @@
     "loungeReacted": "楽屋にみんなの反応が届きました 💕",
     "loungePitch": "楽屋に提案が届きました 💡",
     "loungeHabit": "スタジオ手帖に癖メモが増えました 📓",
-    "table": "🎬 スタジオ撮り（班を呼ぶ）",
     "tableHint": "18役職の撮影班が、会話のたびに一周して台本を詰めます。開くと戻せません",
     "tableOn": "班 {n}席で撮影中",
     "tableOpened": "班を開きました",
@@ -1935,6 +1934,10 @@
     "banterOff": "無し（速い）",
     "banterLight": "軽め",
     "banterFull": "たっぷり（遅い）",
-    "banterHint": "席の間に入る茶々。light で1ターン +5秒ほど"
+    "banterHint": "席の間に入る茶々。light で1ターン +5秒ほど",
+    "modeSolo": "主演撮り",
+    "modeSoloHint": "監督と彼女だけ。話しながら詰める（速い）",
+    "modeStudio": "スタジオ撮り",
+    "modeStudioHint": "18役職の撮影班が毎ターン一周する（1ターン 1分強）"
   }
 }

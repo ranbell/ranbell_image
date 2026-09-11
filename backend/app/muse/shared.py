@@ -348,8 +348,11 @@ _SAY_OPEN_RE = re.compile(r"(?im)^[\s>*_-]*SAY\s*[:：][ \t]*")
 #: 同じ文が二度出る。`CARD` / `TAGS` は画面に出す物ではない。**行頭だけ**を
 #: 見るので `.match()` で使う。
 _SAY_SHUT_RE = re.compile(
-    r"(?i)^[ \t>*_-]*(ASIDE|CARD|PITCH|MY_FEEL|ROLE_FEEL|TAGS|SCENE|WEARING|"
-    r"BEAT|FRAME|PLACE|HOUR|LIGHT|ACTION)\s*[:：]"
+    # `CRAFT` は 2026-09-12 に足した —— スタジオ撮りの席は `SAY:` のあとに
+    # `CRAFT: rim_light | low sun` を書く。止めないと、流れている間だけ
+    # danbooru 語が吹き出しに出る（総監督「SAY: が露出する」と同じ穴の隣）。
+    r"(?i)^[ \t>*_-]*(ASIDE|CARD|CRAFT|PITCH|MY_FEEL|ROLE_FEEL|TAGS|SCENE|"
+    r"WEARING|BEAT|FRAME|PLACE|HOUR|LIGHT|ACTION)\s*[:：]"
 )
 #: 行頭がこの形なら、まだ欄名に育ちうる（`AS` → `ASIDE:`）。ここから外れた
 #: 時点で欄名ではないので、待たずに出す。W撮りの `A:` `B:` もここで抜ける。
