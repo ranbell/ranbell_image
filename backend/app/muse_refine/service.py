@@ -10,7 +10,8 @@ from ..characters import presets as presets_db
 from ..muse import events, session_db, vitality
 from ..muse.defaults import ALL_DEFAULTS
 from ..muse.notebook import blank as notebook_blank
-from . import assemble, debug as debug_mod, ledger as ledger_mod, persona, pipeline_view, talk, writer
+from . import assemble, crew_room, debug as debug_mod, ledger as ledger_mod
+from . import persona, pipeline_view, talk, writer
 from .ctx import refine_num_ctx
 
 logger = logging.getLogger(__name__)
@@ -539,6 +540,36 @@ def _change_event(
     )
 
 
+def _publish_floor(
+    session: dict[str, Any], floor: list[dict[str, Any]], *, locale: str,
+) -> None:
+    """班の発言を会話欄に積む。（2026-09-11）
+
+    席の一言は `kind: "seat"`、やじは `kind: "heckle"`。どちらも
+    **画面では彼女の台詞と別の見た目**にする —— 18人が喋るので、主演の声が
+    埋もれないように。欄を持つ席には、その欄の名前を旗として付ける。
+    """
+    for row in floor:
+        meta: dict[str, Any] = {
+            "kind": str(row.get("kind") or "seat"),
+            "muse_id": str(row.get("muse_id") or ""),
+            "role": str(row.get("role") or ""),
+        }
+        field = str(row.get("field") or "")
+        if field and str(row.get("craft") or "").strip():
+            meta["fields"] = [field]
+            meta["chips"] = ledger_mod.chips_for([field], locale=locale)
+        _append_chat(
+            session, role="assistant", name=str(row.get("name") or ""),
+            text=str(row.get("say") or ""), meta=meta,
+        )
+        events.publish(session["session_id"], {
+            "type": "chat", "role": "assistant",
+            "name": row.get("name"), "text": row.get("say"),
+            "kind": meta["kind"],
+        })
+
+
 def _mark_turn_shot(
     session: dict[str, Any], *, mark: int, before: dict[str, str],
 ) -> None:
@@ -749,6 +780,23 @@ async def chat(
 
     led = dict(before)
     director_recent = _director_tail(session)
+
+    # **班が居るなら、writer の手前で一周する（2026-09-11）。** 総監督
+    # 「スタジオ撮りを Muse refine に取り込みたい」。席は台帳に直接書かない ——
+    # classic の「書くのは Scripter 一人」をそのまま持ってきていて、Refine では
+    # その Scripter が下の `write_patch`。門は `mode` ではなく席の実体。
+    crew_craft = ""
+    if crew_room.has_crew(session):
+        t0 = time.monotonic()
+        floor = await crew_room.run_table(db, ollama, session, director_line=text)
+        debug_mod.stage(session, "crew_table", t0)
+        _publish_floor(session, floor, locale=locale)
+        crew_craft = crew_room.craft_block(floor)
+        debug_mod.note(
+            session, "crew_table",
+            detail=f"{len(floor)}発言（うち craft {sum(1 for f in floor if f.get('craft'))}）",
+        )
+
     t0 = time.monotonic()
     patch = await writer.write_patch(
         ollama,
@@ -758,6 +806,7 @@ async def chat(
         recent=director_recent,
         partner=has_partner, name_a=name, name_b=name_b,
         num_ctx=refine_num_ctx(session),
+        crew_craft=crew_craft,
     )
     debug_mod.stage(session, "writer", t0)
 
@@ -1470,3 +1519,81 @@ async def list_refine_sessions(db, *, limit: int = 20) -> list[dict[str, Any]]:
         if len(out) >= limit:
             break
     return out
+
+
+async def open_table(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
+    """班を開く —— 開幕の三席が当たりを付ける。（2026-09-11）
+
+    総監督「スタジオ撮り（複数の撮影スタッフのモード）を Muse refine に取り込みたい」。
+
+    classic の `start_table` と同じ二段構え。まず**衣装 → 撮影 → 主演**の三席だけで
+    場所と芝居を決め、そこから先は総監督が絵を見て注文する。全18席が空の台帳を
+    前に二十ターン頷き合う、という classic の失敗を繰り返さないため。
+
+    **開けるのはここだけ。** 印（`crew_room.TABLE_OPEN`）が立っていない
+    セッションでは、会話のターンで班は一度も回らない。
+    """
+    if not (session.get("character") or {}).get("character_id"):
+        raise RefineError(
+            "キャラを選んでから班を開いてください。"
+            if str(_inputs(session).get("locale") or "ja").startswith("ja") else
+            "Cast the lead before opening the table."
+        )
+    cast = crew_room.cast_of(session)
+    if not cast:
+        raise RefineError("撮影班が組めていません")
+
+    locale = str(_inputs(session).get("locale") or "ja")
+    session[crew_room.TABLE_OPEN] = True
+    session.setdefault("opened", True)
+    _append_chat(
+        session, role="system", name="Studio",
+        text=(
+            "総監督、まず場所と芝居だけ決めます。衣装・撮影・主演の三人で当たりを"
+            "付けますので、そのあと「こういう絵が欲しい」を聞かせてください。"
+            "そこから全班で詰めます。"
+            if locale.startswith("ja") else
+            "Showrunner — place and performance first. Wardrobe, the camera and "
+            "the Lead will rough it in; tell us what picture you want off that, "
+            "and the full crew takes it from there."
+        ),
+        meta={"kind": "table_open", "seats": len(cast)},
+    )
+    await session_db.save(db, session)
+
+    t0 = time.monotonic()
+    floor = await crew_room.run_table(
+        db, ollama, session,
+        director_line=str(_inputs(session).get("theme") or "").strip()
+        or "今日の当たりを付けて。",
+        opening=True,
+    )
+    debug_mod.stage(session, "crew_opening", t0)
+    _publish_floor(session, floor, locale=locale)
+
+    craft = crew_room.craft_block(floor)
+    if craft:
+        led = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
+        before = dict(led)
+        patch = await writer.write_patch(
+            ollama,
+            model=str(_inputs(session).get("model") or ""),
+            user_line=str(_inputs(session).get("theme") or "").strip()
+            or "今日の当たり",
+            ledger=led,
+            recent="",
+            num_ctx=refine_num_ctx(session),
+            crew_craft=craft,
+        )
+        patch = ledger_mod.scrub_patch(patch, led, allow_clear=set())
+        if ledger_mod.touched_picture(patch):
+            led = ledger_mod.apply_patch(led, patch)
+            session["refine_ledger"] = led
+            _change_event(
+                session, source="crew_opening", patch=patch,
+                before=before, after=led, locale=locale,
+            )
+    assemble.touch_craft(session)
+    session["status"] = "chat"
+    await session_db.save(db, session)
+    return session

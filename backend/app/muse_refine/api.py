@@ -210,6 +210,23 @@ async def open_session(session_id: str, request: Request):
     return service.public_view(session)
 
 
+@router.post("/sessions/{session_id}/table")
+async def open_table(session_id: str, request: Request):
+    """班を開く（スタジオ撮り）。開幕の三席が当たりを付ける。
+
+    **明示的な開扉**。`inputs.crew_preset` は既定で `"standard"` が入るので、
+    席の有無で判断すると一人撮りでも16席が回ってしまう。
+    """
+    session = await _session(request, session_id)
+    try:
+        session = await service.open_table(
+            _db(request), _ollama(request), session,
+        )
+    except service.RefineError as exc:
+        raise HTTPException(400, exc.message) from exc
+    return service.public_view(session)
+
+
 @router.post("/sessions/{session_id}/banned/restore")
 async def restore_banned(session_id: str, body: RestoreBody, request: Request):
     session = await _session(request, session_id)

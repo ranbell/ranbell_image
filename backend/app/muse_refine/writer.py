@@ -129,6 +129,7 @@ async def write_patch(
     partner: bool = False,
     name_a: str = "",
     name_b: str = "",
+    crew_craft: str = "",
 ) -> dict[str, str]:
     """One LLM call → absolute patch (may be empty).
 
@@ -137,12 +138,25 @@ async def write_patch(
     欄を落とし（`ledger.for_model`）、一行で人数を言う（`ledger.cast_line`）。
     """
     head = WRITER_RETRY if retry else WRITER_SYSTEM
+    # **班が喋った回は、その材料も読む（2026-09-11）。** 席は台帳に直接書かない
+    # ——「書くのは Scripter 一人」という classic の契約をそのまま持ってきていて、
+    # Refine ではその Scripter がここ。欄ごとにまとまって届く（`crew_room.craft_block`）。
+    # 規則も**班が喋った回にだけ**届ける。条文に常設すると、一人撮りの
+    # プロンプトが一字動く（無い箱の説明を読ませることになる）。
+    crew_block = (
+        "\n" + crew_craft.strip() + "\n"
+        "Each of those lines is a seat that OWNS that field — take their\n"
+        "absolute values, they are the specialists. Override a seat only when\n"
+        "the director's latest line contradicts her.\n"
+        if str(crew_craft or "").strip() else ""
+    )
     prompt = (
         f"{head}\n\n"
         f"{ledger_mod.cast_line(partner=partner, name_a=name_a, name_b=name_b)}\n\n"
         f"LEDGER NOW:\n"
         f"{json.dumps(ledger_mod.for_model(ledger, partner=partner), ensure_ascii=False)}\n\n"
-        f"RECENT DIRECTOR LINES:\n{recent or '(none)'}\n\n"
+        f"RECENT DIRECTOR LINES:\n{recent or '(none)'}\n"
+        f"{crew_block}\n"
         f"LATEST LINE:\n{user_line.strip()}\n"
     )
     try:
