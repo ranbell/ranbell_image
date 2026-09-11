@@ -23,6 +23,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 from app.muse import chain, crew, service  # noqa: E402
+from app.muse import shared
 
 
 # ── the lesson is read off what he said ─────────────────────────────────────
@@ -232,7 +233,7 @@ async def test_an_unreadable_photo_falls_back(tmp_path):
 @pytest.mark.asyncio
 async def test_a_model_that_cannot_see_is_treated_as_not_having_looked(monkeypatch):
     """A blind model returns nothing rather than erroring — a known trap here."""
-    monkeypatch.setattr(service, "images_by_sha", _fake_images)
+    monkeypatch.setattr(shared, "images_by_sha", _fake_images)
     got = await service._read_the_photo(
         _ImageDb(), _SeeingOllama("", blind=True), _shot_session(), "aaa",
     )
@@ -241,7 +242,7 @@ async def test_a_model_that_cannot_see_is_treated_as_not_having_looked(monkeypat
 
 @pytest.mark.asyncio
 async def test_what_the_photo_shows_is_what_she_writes_about(monkeypatch):
-    monkeypatch.setattr(service, "images_by_sha", _fake_images)
+    monkeypatch.setattr(shared, "images_by_sha", _fake_images)
     seeing = _SeeingOllama(
         "She sits at a piano in an empty music room. Her face is wet with tears."
     )

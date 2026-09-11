@@ -21,7 +21,7 @@ import inspect
 
 import pytest
 
-from app.muse import identity, service as muse_service
+from app.muse import identity, service as muse_service, shared
 
 #: 主演／相方がどちら側か。**直書きしない**（`identity.LEAD_SIDE` を替えたら追従）。
 LEAD_JA = identity.side_of(lead=True)[1]
@@ -155,7 +155,7 @@ def _shot_session(*, partner: bool):
 
 @pytest.mark.asyncio
 async def test_two_in_frame_are_read_separately(monkeypatch):
-    monkeypatch.setattr(muse_service, "images_by_sha", _fake_images)
+    monkeypatch.setattr(shared, "images_by_sha", _fake_images)
     seeing = _Seeing()
     await muse_service._read_the_photo(
         _ImageDb(), seeing, _shot_session(partner=True), "aaa",
@@ -169,7 +169,7 @@ async def test_two_in_frame_are_read_separately(monkeypatch):
 @pytest.mark.asyncio
 async def test_one_in_frame_is_read_exactly_as_before(monkeypatch):
     """**一人の撮影を壊さない。** 文面は改修前と一字も変わらない。"""
-    monkeypatch.setattr(muse_service, "images_by_sha", _fake_images)
+    monkeypatch.setattr(shared, "images_by_sha", _fake_images)
     seeing = _Seeing()
     await muse_service._read_the_photo(
         _ImageDb(), seeing, _shot_session(partner=False), "aaa",
