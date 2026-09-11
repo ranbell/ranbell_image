@@ -41,6 +41,8 @@ const liveSay = ref('')
 // 流れている台詞の主。班だと席が次々に替わる。
 const liveName = ref('')
 const liveIsLead = ref(true)
+// このターンで流し終えた席。確定した行が届くまでの間だけ画面に残す。
+const liveDone = ref([])
 
 /**
  * 喋りの後始末。**`speaking` は `busy` より長生きしてはいけない。**
@@ -59,6 +61,8 @@ function stopSpeaking() {
   speaking.value = false
   liveSay.value = ''
   liveName.value = ''
+  // 確定した行が `session.chat` で届くので、流していたぶんは役目を終える。
+  liveDone.value = []
 }
 // W撮りでは `A:` / `B:` が行頭に付いてくる（誰の台詞かの目印）。**確定した行は
 // 名前で分かれて出る**ので、流れている間だけの目印は画面に出さない。
@@ -367,6 +371,7 @@ async function openSession() {
       `/api/muse-refine/sessions/${session.value.session_id}/${door}`,
       { method: 'POST' },
     )
+    stopSpeaking()
     await scrollChat()
   } catch (err) {
     fail(err)
@@ -474,6 +479,9 @@ async function sendChat() {
       `/api/muse-refine/sessions/${session.value.session_id}/chat`,
       { method: 'POST', body: JSON.stringify({ message: msg }) },
     )
+    // 本物の行が入った。流していたぶんは**ここで**畳む —— finally まで
+    // 待つと、その一瞬だけ同じ台詞が二度出る。
+    stopSpeaking()
     await scrollChat()
   } catch (err) {
     fail(err)
@@ -516,6 +524,7 @@ async function runStage(path) {
       `/api/muse-refine/sessions/${session.value.session_id}/${path}`,
       { method: 'POST' },
     )
+    stopSpeaking()
     sampleJob()
   } catch (err) {
     fail(err)
@@ -567,6 +576,20 @@ function openStream(id) {
     }
     if (data.type === 'muse_speaking') {
       speaking.value = true
+      // **前の席の言葉を消さない（2026-09-12）。** 総監督「役が話す毎に
+      // リセット処理が入るのか、毎回巻き戻されてしまいます」。
+      //
+      // 確定した行が画面に出るのは POST が返ってから（ターンの途中では
+      // `refresh` が `busy` で止まる）。だから流し終えた席をここで畳んで
+      // おかないと、次の席が始まった瞬間に前の席の言葉が消える —— 18席ぶん
+      // それが起きるので、ずっと巻き戻って見える。
+      if (liveSay.value.trim()) {
+        liveDone.value = [...liveDone.value, {
+          name: liveName.value,
+          text: liveText.value,
+          lead: liveIsLead.value,
+        }].slice(-24)
+      }
       liveSay.value = ''
       // **誰が喋っているか。** スタジオ撮りでは18人が順に喋るので、流れている
       // 吹き出しに主演の名前を出しっぱなしにすると、誰の言葉か分からない。
@@ -1121,6 +1144,26 @@ function isStruckRow(row) {
                 文字が出る。見た目は確定した台詞と同じにして、途切れて
                 見えないようにする。
               -->
+              <!--
+                このターンで流し終えた席。見た目は確定した行と同じにして、
+                POST が返って本物に差し替わったとき動いて見えないようにする。
+              -->
+              <div
+                v-for="(done, di) in liveDone"
+                :key="`done-${di}`"
+                class="flex flex-col items-start gap-1"
+              >
+                <span
+                  class="flex items-center gap-1.5 px-0.5 text-[10px] font-medium"
+                  :class="done.lead ? 'text-pink-300/80' : 'text-amber-200/80'"
+                >{{ done.lead ? '🌸' : '🎬' }} {{ done.name }}</span>
+                <div
+                  class="max-w-[90%] whitespace-pre-wrap shadow-sm"
+                  :class="done.lead
+                    ? 'rounded-2xl rounded-tl-sm border border-pink-500/30 bg-slate-900/80 px-3.5 py-2 text-[12px] leading-relaxed text-pink-50'
+                    : 'rounded-lg border border-amber-800/30 bg-amber-950/15 px-3 py-1.5 text-[11px] leading-relaxed text-amber-50/90'"
+                >{{ done.text }}</div>
+              </div>
               <div v-if="liveSay" class="flex flex-col items-start gap-1">
                 <span
                   class="flex items-center gap-1.5 px-0.5 text-[10px] font-medium"

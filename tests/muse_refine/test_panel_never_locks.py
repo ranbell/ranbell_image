@@ -63,3 +63,44 @@ def test_the_lock_is_still_the_three_flags():
     m = re.search(r"const chatLocked = computed\(\(\) => (.+?)\)\n", SRC)
     assert m, "chatLocked が見つからない"
     assert m.group(1).strip() == "busy.value || renderLocked.value || speaking.value"
+
+
+# ── 流れている表示が巻き戻らないこと（2026-09-12）───────────────────────
+def test_a_finished_seat_is_kept_on_screen():
+    """総監督「役が話す毎にリセット処理が入るのか、毎回巻き戻されてしまいます」。
+
+    確定した行が画面に出るのは POST が返ってから（ターンの途中では `refresh` が
+    `busy` で止まる）。だから流し終えた席を畳んでおかないと、次の席が始まった
+    瞬間に前の席の言葉が消える —— 18席ぶんそれが起きる。
+    """
+    handler = SRC[SRC.index("if (data.type === 'muse_speaking')"):]
+    handler = handler[: handler.index("return\n    }")]
+    # 空にする前に畳む
+    assert handler.index("liveDone.value = [") < handler.index("liveSay.value = ''")
+    assert "if (liveSay.value.trim())" in handler
+
+
+def test_the_kept_lines_go_away_when_the_real_ones_arrive():
+    fn = SRC[SRC.index("function stopSpeaking()"):]
+    fn = fn[: fn.index("\n}\n") + 2]
+    assert "liveDone.value = []" in fn
+
+
+@pytest.mark.parametrize("fn", ["sendChat", "runStage", "openSession"])
+def test_the_swap_has_no_double_showing_window(fn):
+    """本物の行が入った直後に畳む。finally まで待つと一瞬だけ二度出る。"""
+    body = _body(fn)
+    post = body.index("await api(")
+    tail = body[post:]
+    # 区切りは実際の `} finally {` だけ。説明文の「finally」に当たらないように。
+    cut = tail.index("} finally {") if "} finally {" in tail else len(tail)
+    assert "stopSpeaking()" in tail[:cut], f"{fn}: POST の直後に畳んでいない"
+
+
+def test_the_kept_lines_look_like_the_real_ones():
+    """差し替わったときに動いて見えないよう、確定した行と同じ見た目にする。"""
+    block = SRC[SRC.index('v-for="(done, di) in liveDone"'):]
+    block = block[: block.index("<div v-if=\"liveSay\"")]
+    for cls in ("border-amber-800/30", "border-pink-500/30"):
+        assert cls in block, cls
+    assert "done.lead ? '🌸' : '🎬'" in block
