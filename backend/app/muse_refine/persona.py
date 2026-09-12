@@ -127,7 +127,7 @@ _CARD_LINE_RE = re.compile(
 def memory_prompt_blocks(session: dict[str, Any]) -> str:
     """Bond + memories + caught diary — Muse-only colour, fenced from the shot."""
     try:
-        from ..muse import service as muse_service
+        from ..muse import shared as muse_service
     except Exception:
         logger.debug("[muse_refine] muse.service unavailable for memory", exc_info=True)
         return ""
@@ -343,7 +343,7 @@ def actress_system(
 async def load_memory(db, session: dict[str, Any]) -> None:
     """Same sticky/diary/bond/caught load as original Muse open."""
     try:
-        from ..muse import service as muse_service
+        from ..muse import shared as muse_service
         await muse_service._load_actress_memory(db, session)
     except Exception:
         logger.exception("[muse_refine] load memory failed")
@@ -357,7 +357,7 @@ async def load_memory(db, session: dict[str, Any]) -> None:
 
 async def consume_caught(db, session: dict[str, Any]) -> None:
     try:
-        from ..muse import service as muse_service
+        from ..muse import shared as muse_service
         await muse_service._consume_caught(db, session)
     except Exception:
         logger.debug("[muse_refine] consume_caught failed", exc_info=True)
@@ -378,7 +378,7 @@ def clear_reunion(session: dict[str, Any]) -> None:
 
 def log_feel(session: dict[str, Any], word: str) -> None:
     try:
-        from ..muse import service as muse_service
+        from ..muse import shared as muse_service
         muse_service._log_feel(session, word)
         return
     except Exception:
@@ -440,7 +440,7 @@ async def contract_check_with_db(db, ollama, session: dict[str, Any], text: str)
     if ollama is None or not str(text or "").strip():
         return ""
     try:
-        from ..muse import service as muse_service
+        from ..muse import shared as muse_service
         from ..runtime_config import get_runtime_config
         cfg = await get_runtime_config(db)
         session["_runtime_cfg"] = cfg

@@ -195,7 +195,7 @@ async def finish_shoot(db, session_id: str, *, error: str = "", ollama=None) -> 
     # Continuity memory is written only after a successful final take.
     if shoot.get("images") and not error:
         try:
-            from . import service as muse_service
+            from . import shared as muse_service
             await muse_service.record_shoot_continuity(db, session, ollama=ollama)
         except Exception:
             logger.warning("[muse] continuity write failed", exc_info=True)

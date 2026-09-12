@@ -917,7 +917,7 @@ async def chat(
 
     lead_cid = str(char.get("character_id") or "")
     try:
-        from ..muse import service as muse_service
+        from ..muse import shared as muse_service
         on_token = muse_service._token_publisher(session["session_id"], lead_cid)
     except Exception:
         logger.debug("[muse_refine] token publisher unavailable", exc_info=True)
@@ -932,7 +932,7 @@ async def chat(
     # 読み込みもあちらが見ていて、板が無い・生成中・読めないときは空が返る）。
     board_shots: list[bytes] = []
     try:
-        from ..muse import service as muse_service
+        from ..muse import shared as muse_service
         board_shots = await muse_service.board_images(db, session)
     except Exception:
         logger.debug("[muse_refine] board image unavailable", exc_info=True)
@@ -1346,7 +1346,7 @@ async def start_shoot(db, request, session: dict[str, Any]) -> dict[str, Any]:
     #
     # 既定は `unload_vlm: True`（`ALL_DEFAULTS` から来る）。切り替えの意味も
     # 判定も Muse と同じものを使う —— 二つ目の実装を持たない。
-    from ..muse import service as muse_service
+    from ..muse import shared as muse_service
     await muse_service._maybe_unload(request.app.state.ollama, session)
 
     spooler = request.app.state.spooler
@@ -1414,7 +1414,7 @@ async def start_board(db, request, session: dict[str, Any]) -> dict[str, Any]:
     #
     # 既定は `unload_vlm: True`（`ALL_DEFAULTS` から来る）。切り替えの意味も
     # 判定も Muse と同じものを使う —— 二つ目の実装を持たない。
-    from ..muse import service as muse_service
+    from ..muse import shared as muse_service
     await muse_service._maybe_unload(request.app.state.ollama, session)
 
     spooler = request.app.state.spooler
@@ -1478,7 +1478,7 @@ async def finish_session(db, request, session: dict[str, Any]) -> dict[str, Any]
 
     # Prefer Muse diary pipeline when available.
     try:
-        from ..muse import service as muse_service
+        from ..muse import shared as muse_service
         session["studio"] = STUDIO  # keep identity
         # Temporarily mark so Muse finish accepts shoot images.
         return await muse_service.finish_session(

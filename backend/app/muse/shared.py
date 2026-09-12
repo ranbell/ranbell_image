@@ -2260,3 +2260,337 @@ async def run_generate_handpost_habit_job(
         events.publish(sid, {"type": "lounge_status", "status": "habit", "page_id": page["id"]})
     _report(reporter, 1.0, "手帖に書き留めました")
     return {"status": "ok", "page_id": page["id"]}
+
+# ── 記憶のブロックと、撮影の引き継ぎ（2026-09-12 に追加）──────────────────
+#
+# **`getattr` 越しの依存は、第2段の走査（AST）に映っていなかった。**
+# `muse_refine.persona.memory_prompt_blocks` は
+#
+#     for name in ("_memory_block", "_bond_block", "_caught_block",
+#                  "_taste_block", "_chemistry_block"):
+#         fn = getattr(muse_service, name, None)
+#
+# という引き方をしていて、呼び出しの形をしていないので閉包に入らなかった。
+# `record_shoot_continuity` も同じ —— `session_db` が遅延 import で呼んでいる。
+#
+# classic を退役させる段になって、`service.py` への辺が残っていることで気づいた。
+def uses_notebook(session: dict[str, Any]) -> bool:
+    """Living notebook owns craft compile — 主演撮り always; 制作スタッフ once seeded."""
+    if is_duet(session):
+        return True
+    return bool(session.get("notebook_craft"))
+def _memory_block(session: dict[str, Any]) -> str:
+    """What she remembers of the last few shoots (sticky recaps + diary).
+
+    Labelled with what it is not, for the reason REFERENCE is fenced: material
+    handed over as plain text becomes something the picture has to contain, and
+    last month's umbrella turns up in today's frame. It is here to colour how
+    she meets the Showrunner, not to be described. Never handed to the scripter.
+    """
+    lines = [str(m).strip() for m in (session.get("memories") or []) if str(m).strip()]
+    diaries = [
+        str(m).strip() for m in (session.get("diary_memories") or []) if str(m).strip()
+    ]
+    partner = [
+        str(m).strip() for m in (session.get("partner_memories") or []) if str(m).strip()
+    ]
+    circle = [
+        str(m).strip() for m in (session.get("circle") or []) if str(m).strip()
+    ]
+    if not lines and not diaries and not partner and not circle:
+        return ""
+    parts: list[str] = []
+    if lines:
+        parts += [
+            "MEMORIES with the Showrunner (sticky recaps. Picture facts from "
+            "recent shoots. NOT material for today's picture, unless he asks "
+            "for it out loud — see the diary note below):",
+            *(f"- {m}" for m in lines[:3]),
+        ]
+    if diaries:
+        parts += [
+            "SECRET DIARY — her pages, by title. She wrote them; she does "
+            "not have them open. Ask her about one and it comes back whole "
+            "to answer from — until then soft-miss the specifics, never "
+            "invent them. These are past shoots: they colour how she meets "
+            "him, not today's picture. Unless he asks for the past out loud "
+            "(「前と同じ感じで」「またあの衣装で」) — then it is what he ordered:",
+            *(f"- {m}" for m in diaries[:3]),
+        ]
+    if partner:
+        parts += [
+            "Partner Muse memories (short; colour distance in banter only; "
+            "never paint into the shot):",
+            *(f"- {m}" for m in partner[:2]),
+        ]
+    if circle:
+        who = str(session.get("circle_who") or "").strip()
+        parts += [
+            "HER CIRCLE — days off with her friends, away from the studio. "
+            "Not material for today's picture. She has a life outside these "
+            "walls and these are the people in it:",
+            *(f"- {m}" for m in circle[:CIRCLE_MAX_LINES]),
+            # 名前だけだと、モデルは苗字に「くん」を付ける（実測）
+            *([f"- (they are: {who})"] if who else []),
+        ]
+    return "\n".join(parts)
+def _bond_block(session: dict[str, Any]) -> str:
+    bond = session.get("bond") or {}
+    if not isinstance(bond, dict):
+        return ""
+    parts = [str(bond.get(k) or "").strip() for k in ("distance", "inside", "last")]
+    parts = [p for p in parts if p]
+    if not parts:
+        return ""
+    return "\n".join([
+        "BOND with this Showrunner (do not paint into the shot; answer from "
+        "this if asked):",
+        *(f"- {p}" for p in parts),
+    ])
+def _taste_block(session: dict[str, Any]) -> str:
+    taste = session.get("showrunner_taste") or {}
+    if not isinstance(taste, dict):
+        return ""
+    lines = []
+    if taste.get("prefers"):
+        lines.append(f"prefers: {taste['prefers']}")
+    if taste.get("avoids"):
+        lines.append(f"avoids: {taste['avoids']}")
+    if taste.get("notes"):
+        lines.append(f"notes: {taste['notes']}")
+    if not lines:
+        return ""
+    return "\n".join([
+        "SHOWRUNNER_TASTE (do not force into the picture):",
+        *lines,
+    ])
+def _chemistry_block(session: dict[str, Any]) -> str:
+    lines = [str(m).strip() for m in (session.get("chemistry_notes") or []) if str(m).strip()]
+    if not lines:
+        return ""
+    return "\n".join([
+        "CHEMISTRY notes (distance/temperature between the two Muses only — "
+        "never props or place):",
+        *(f"- {m}" for m in lines[:2]),
+    ])
+def _bond_from_snapshot(session: dict[str, Any]) -> dict[str, str]:
+    """What the last take was, in one line. Deterministic, no LLM.
+
+    This is memory of the picture — where they were, what she had on, how it
+    was framed — and a snapshot is exactly the right source for it. What she
+    LEARNED is a different question and lives in `_learned_taste`.
+    """
+    snap = session.get("continuity_snapshot") or {}
+    nb = snap.get("notebook") or {}
+    when = str(nb.get("atmosphere") or nb.get("scene") or snap.get("theme") or "").strip()
+    vibe = str(nb.get("vibe") or "").strip()
+    wearing = str(nb.get("wearing") or "").strip()
+    frame = str(nb.get("frame") or "").strip()
+    open_ = str(nb.get("open") or "").strip()
+    # **行き先を先に決めない。**
+    #
+    # 既定が「すこしずつ距離が縮まっている」だった —— これは「これから近づく」
+    # と読める。一度も撮っていない段階から、関係の向かう先が書いてあった。
+    # 実測（2026-08-23）で、初回の日記が丸ごと総監督への恋愛感情になった。
+    #
+    # 総監督の指定:「気心の知れた仕事仲間同士であり、これからの日記の内容で
+    # 今後の関係性が築かれる」
+    #
+    # 回数で段階を作らない。**最初から気心は知れていて、その先は決めない。**
+    # 決めるのは積み上がった日記のほう（`diary_memories` として戻っている）。
+    bond = {
+        "distance": "気心の知れた仕事仲間",
+        "inside": (vibe or "撮影の空気を共有している")[:240],
+        "last": " / ".join(p for p in (when, wearing, frame) if p)[:240],
+    }
+    # The taste half used to be derived here too, from the same snapshot: the
+    # word "low" anywhere in `frame` taught her 「ローアングルの近い距離」 and
+    # whatever she happened to be wearing became a preference. That is a
+    # description of the take, not a thing learned from it, and it read none of
+    # what the showrunner actually said. `_learned_taste` asks his words now.
+    _ = (open_, wearing, frame)
+    return bond
+async def _learned_taste(
+    ollama, session: dict[str, Any], *, cfg: dict[str, Any],
+) -> dict[str, str]:
+    """What she takes into the next shoot — read off what he said, not what he shot.
+
+    Praise is what to do more of; a correction is what to fix. Both live in his
+    words. Empty when he said nothing evaluative: a shoot that taught nothing
+    should teach nothing, and a card filled in anyway turns the next session
+    into a rerun of this one.
+    """
+    exchanges = _director_exchanges(session)
+    if ollama is None or not exchanges.strip():
+        return {}
+    inputs = _inputs(session)
+    snap = (session.get("continuity_snapshot") or {}).get("notebook") or {}
+    scene = " / ".join(p for p in (
+        str(snap.get("scene") or "").strip(),
+        str(snap.get("atmosphere") or "").strip(),
+        str(snap.get("beat") or "").strip()[:80],
+    ) if p)
+    char = session.get("character") or {}
+    try:
+        return await chain.run_showrunner_taste(
+            ollama,
+            system=crew.showrunner_taste_prompt(
+                exchanges=exchanges, scene=scene,
+                muse_name=str(char.get("name_ja") or char.get("name") or ""),
+            ),
+            model=_text_model(inputs),
+            num_ctx=_num_ctx(inputs, cfg),
+        )
+    except Exception:
+        logger.warning("[muse] taste turn failed", exc_info=True)
+        return {}
+def _caught_block(session: dict[str, Any]) -> str:
+    """The one-off line about her diary having been read, if one is owed."""
+    caught = session.get("caught") or {}
+    if not caught.get("ids"):
+        return ""
+    return crew.caught_block(str(caught.get("summary") or ""))
+def _recap_from_snapshot(session: dict[str, Any]) -> dict[str, Any]:
+    snap = session.get("continuity_snapshot") or {}
+    nb = snap.get("notebook") or {}
+    theme = str(snap.get("theme") or _inputs(session).get("theme") or "").strip()
+    when = str(nb.get("atmosphere") or nb.get("scene") or theme or "").strip()[:160]
+    feel = str(nb.get("vibe") or "").strip()[:200]
+    shot = " / ".join(
+        p for p in (
+            str(nb.get("wearing") or "").strip(),
+            str(nb.get("beat") or "").strip(),
+            str(nb.get("frame") or "").strip(),
+        ) if p
+    )[:280]
+    liked = str(nb.get("open") or "").strip()[:160]
+    return {
+        "when": when or theme or "撮影",
+        "feel": feel,
+        "liked": liked,
+        "shot": shot or str(snap.get("craft_tags") or "")[:200],
+        "session_id": str(session.get("session_id") or ""),
+        "timestamp": time.time(),
+    }
+async def record_shoot_continuity(db, session: dict[str, Any], ollama=None) -> None:
+    """After a successful ③ take: sticky recap + embed overflow into muse_memories.
+
+    Everything she keeps from a shoot is written here, and twice now a live run
+    has ended with `continuity: None` — nothing kept, no error surfaced. The
+    guards below each have a reason and each returns silently, so the first job
+    is being able to tell which one fired.
+    """
+    sid = str(session.get("session_id") or "")
+    if not uses_notebook(session) and not session.get("continuity_snapshot"):
+        # Still record a light recap for duet even if snapshot missing.
+        if not is_duet(session):
+            logger.info("[muse] continuity skipped (%s): no notebook, no snapshot", sid[:8])
+            return
+    char_id = str(_inputs(session).get("character_id") or "")
+    if not char_id:
+        logger.info("[muse] continuity skipped (%s): nobody cast", sid[:8])
+        return
+    if (session.get("continuity") or {}).get("written_at"):
+        logger.info("[muse] continuity skipped (%s): already written", sid[:8])
+        return
+    logger.info("[muse] continuity starting (%s)", sid[:8])
+    recap = _recap_from_snapshot(session)
+    try:
+        overflow = await presets_db.push_shoot_recap(db, char_id, recap)
+    except Exception:
+        logger.warning("[muse] sticky recap failed", exc_info=True)
+        overflow = None
+    if overflow is not None:
+        if ollama is not None:
+            try:
+                await memories_db.upsert_summary(
+                    db, ollama, character_id=char_id, recap=overflow,
+                    session_id=str(overflow.get("session_id") or ""),
+                )
+            except Exception:
+                logger.warning("[muse] embed overflow recap failed", exc_info=True)
+                session.setdefault("pending_memory_embeds", []).append(overflow)
+        else:
+            # Shoot job may not carry ollama — flush later from finish_session.
+            session.setdefault("pending_memory_embeds", []).append(overflow)
+    # Short Muse-only continuity cards — not scripter inputs.
+    written: dict[str, Any] = {}
+    try:
+        written["bond"] = await presets_db.update_bond(
+            db, char_id, _bond_from_snapshot(session),
+        )
+        # Only overwrite what she learned when this shoot actually taught her
+        # something. A silent shoot must not wipe the card she was carrying.
+        taste = await _learned_taste(ollama, session, cfg=await get_runtime_config(db))
+        if any(str(v or "").strip() for v in taste.values()):
+            written["showrunner_taste"] = await presets_db.update_showrunner_taste(
+                db, char_id, taste,
+            )
+    except Exception:
+        logger.warning("[muse] bond/taste write failed", exc_info=True)
+    written["continuity"] = {"written_at": time.time()}
+    session.update(written)
+    # This runs in the render job, after `finish_shoot` has already published
+    # `status: done` — so the showrunner is free to type the moment the take
+    # lands, and their turn loads, edits and saves the session while this is
+    # still working. Saving the copy loaded before their line would erase it;
+    # saving after it, as this used to, threw away everything they just said —
+    # or, measured on a real run, lost this write instead and left her carrying
+    # the last session's clothes as what she had learned.
+    #
+    # Merge under the session's own lock: re-read, lay only these keys on top,
+    # write back. Whatever else the turn changed stays changed.
+    async with _finish_locks[str(session.get("session_id") or "")]:
+        fresh = await session_db.load(db, str(session.get("session_id") or ""))
+        if fresh is None:
+            await session_db.save(db, session, publish=False)
+            return
+        fresh.update(written)
+        for key in ("memories", "pending_memory_embeds"):
+            if session.get(key) is not None:
+                fresh[key] = session[key]
+        await session_db.save(db, fresh, publish=False)
+def _director_exchanges(session: dict[str, Any], *, limit: int = 14) -> str:
+    """Each thing the showrunner said, with what she was doing when he said it.
+
+    A bare 「いいね」 carries nothing on its own — it means something only
+    against the beat she had just described. And a correction is not a rule:
+    「震えはいらない」 was said to one quiet scene where she had her fingertips
+    shaking, and carried forward as a standing preference it would break the
+    next shoot that needs a tremble.
+
+    So the pair is the unit, not the line. Her contract makes her restate a
+    direction in her own words before she plays it, which means the reply that
+    follows each of his lines already says what she was about to do — the
+    pairing needs no extra call, only the order it already happened in.
+    """
+    rows = [
+        m for m in _chat_rows(session)
+        if m.get("role") in ("user", "muse")
+        and m.get("kind") != "banter" and str(m.get("text") or "").strip()
+    ]
+    out: list[str] = []
+    for i, msg in enumerate(rows):
+        if msg.get("role") != "user":
+            continue
+        # Praise points backwards and a direction points forwards, so both
+        # sides are shown. 「いいね」 at the end of a shoot has all of its
+        # meaning in the line before it and none of its own.
+        before = next(
+            (str(r.get("text") or "").strip() for r in reversed(rows[:i])
+             if r.get("role") == "muse"),
+            "",
+        )
+        after = next(
+            (str(r.get("text") or "").strip() for r in rows[i + 1:i + 3]
+             if r.get("role") == "muse"),
+            "",
+        )
+        block = []
+        if before:
+            block.append(f"（直前の私: {before[:160]}）")
+        block.append(f"総監督: {str(msg.get('text') or '').strip()[:200]}")
+        if after:
+            block.append(f"私: {after[:160]}")
+        out.append("\n".join(block))
+    return "\n\n".join(out[-max(1, int(limit)):])
