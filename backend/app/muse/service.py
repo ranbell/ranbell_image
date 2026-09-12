@@ -1276,6 +1276,26 @@ async def rebuild(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
     return session
 
 
+def _board_seed(board: dict[str, Any]) -> int:
+    """OK を出した試し撮りが実際に使った種。
+
+    正本は `board["seed"]`（描き終わったときに `session_db.attach_board_image`
+    が書き戻す）。**それが空の古い行のために写真の側からも拾う** —— 種は昔から
+    一枚ごとの meta に残っていたが、欄へ上げる道が無かった。
+
+    一回の試し撮りは一つの種（ComfyUI の batch なので、枚数が複数でも種は同じで
+    添字で絵が分かれる）。本番も同じ枚数で撮るので、添字どおりに対応する。
+    """
+    seed = int(board.get("seed") or 0)
+    if seed:
+        return seed
+    for shot in reversed(list(board.get("images") or [])):
+        got = int(shot.get("seed") or 0)
+        if got:
+            return got
+    return 0
+
+
 async def start_shoot(db, request, session: dict[str, Any]) -> dict[str, Any]:
     """Approve board → final shoot. Requires a finished board (OK gate)."""
     from . import runner
@@ -1335,7 +1355,16 @@ async def start_shoot(db, request, session: dict[str, Any]) -> dict[str, Any]:
         "error": "",
         "images": [],
         "pending": True,
-        "seed": int(board.get("seed") or 0),
+        # **試し撮りと同じ種で撮る（総監督・2026-09-12）。**
+        #
+        #   「試し撮りでいいシーンがあったら、そのシードを変更せず同じプロンプトで
+        #     高画質の画像を取得するという設計です」
+        #
+        # canvas は試し撮りと本番で同じで、変わるのは steps と cfg だけ
+        # （12/4.0 → 30/4.5）。だから種を揃えると**OK を出したのと同じ絵の
+        # 仕上げ版**になる。0 を渡すと `runner` が `None` に畳んで引き直すので、
+        # ここが空振りすると黙って別の絵が出る（実機6件すべてで不一致だった）。
+        "seed": _board_seed(board),
         "job_id": "",
     }
     session["status"] = "shooting"
@@ -1401,6 +1430,13 @@ async def start_board(db, request, session: dict[str, Any]) -> dict[str, Any]:
         "error": "",
         "images": [],
         "pending": True,
+        # **毎回引き直す。0 は「引き直して」の意味（総監督・2026-09-12）。**
+        #
+        #   「試し撮りを押すと seed が変わるのは、撮影の際に何枚も写真を取って
+        #     いいシーンを選び出すのと同じ」
+        #
+        # セッションに一つの種を持たせる形（classic の `session_seed`）には
+        # **しない**。選ぶための枚数がそこから出てくる。
         "seed": 0,
         "job_id": "",
         "ledger_fp": "|".join(str(led.get(k) or "") for k in ledger_mod.LEDGER_KEYS),

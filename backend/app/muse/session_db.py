@@ -130,10 +130,18 @@ async def attach_board_image(db, session_id: str, image_id: str, meta: dict) -> 
         return
     board = session.setdefault("board", {})
     images = board.setdefault("images", [])
+    used = meta.get("seed", board.get("seed"))
     images.append({
         "index": len(images), "image_id": image_id,
-        "seed": meta.get("seed", board.get("seed")),
+        "seed": used,
     })
+    # **この回に実際に使った種を欄に書き戻す。** 頼むときは 0（＝引き直して）で
+    # 出すので、描き終わるまで欄は嘘をついていた。本番はこの欄を読む
+    # （`service.approve_and_shoot`）—— 書き戻さないと 0 のまま渡り、
+    # **総監督が OK を出した絵とは違う種で本番が走る**（2026-09-12 に実機の
+    # 6セッションすべてで不一致を確認した）。
+    if not board.get("seed") and used:
+        board["seed"] = int(used)
     await save(db, session, publish=False)
     events.publish(session_id, {
         "type": "board_attached", "index": len(images) - 1, "image_id": image_id,
@@ -169,10 +177,15 @@ async def attach_shoot_image(db, session_id: str, image_id: str, meta: dict) -> 
         return
     shoot = session.setdefault("shoot", {})
     images = shoot.setdefault("images", [])
+    used = meta.get("seed", shoot.get("seed"))
     images.append({
         "index": len(images), "image_id": image_id,
-        "seed": meta.get("seed", shoot.get("seed")),
+        "seed": used,
     })
+    # 本番は board から種を受け取っているので既に入っているが、受け取れなかった
+    # 古い行のために同じ形で書き戻す。
+    if not shoot.get("seed") and used:
+        shoot["seed"] = int(used)
     await save(db, session, publish=False)
     events.publish(session_id, {
         "type": "shoot_attached", "index": len(images) - 1, "image_id": image_id,
