@@ -7,6 +7,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getToken } from '../apiToken.js'
 import ActressDiaryModal from './muse/ActressDiaryModal.vue'
+import CharacterGallery from './CharacterGallery.vue'
 
 const props = defineProps({
   show: { type: Boolean, default: false },
@@ -20,6 +21,9 @@ const props = defineProps({
 const emit = defineEmits(['update:show', 'toast', 'select-image', 'session-state'])
 const { t, locale } = useI18n()
 
+//: 名簿（`CharacterGallery`）の開閉。classic と同じ二枚 —— 主演と相方。
+const showPicker = ref(false)
+const showPartnerPicker = ref(false)
 const session = ref(null)
 const catalog = ref(null)
 const characterList = ref([])
@@ -140,10 +144,8 @@ const shootError = computed(() => String(session.value?.shoot?.error || '').trim
 const sessionStatus = computed(() => String(session.value?.status || ''))
 const partner = computed(() => session.value?.partner_character || {})
 const standing = computed(() => session.value?.standing || [])
-const lastPitch = computed(() => session.value?.last_pitch || [])
 const bond = computed(() => session.value?.bond || {})
 const banned = computed(() => session.value?.banned || [])
-const tasteChips = computed(() => session.value?.taste_chips || [])
 const opened = computed(() => !!session.value?.opened)
 // 会話のターンでは散文とタグの組み上げを撮る時まで待つ（裏の `touch_craft`）。
 const craftStale = computed(() => !!craft.value?.stale)
@@ -313,6 +315,7 @@ async function patchInputs(patch) {
 }
 
 async function pickCharacter(id) {
+  showPicker.value = false
   if (!id) return
   if (!session.value?.session_id) {
     await startFresh(id)
@@ -332,6 +335,7 @@ async function pickCharacter(id) {
 }
 
 async function pickPartner(id) {
+  showPartnerPicker.value = false
   if (!session.value?.session_id) return
   busy.value = true
   try {
@@ -348,11 +352,6 @@ async function pickPartner(id) {
 
 async function sendPitch(opt) {
   chatInput.value = `「${opt}」がいいな`
-  await sendChat()
-}
-
-async function insertChip(text) {
-  chatInput.value = text
   await sendChat()
 }
 
@@ -846,11 +845,16 @@ function isStruckRow(row) {
   <Teleport to="body">
     <div
       v-if="show"
-      class="fixed inset-0 z-[var(--z-panel-muse)] flex items-stretch justify-end bg-black/70"
+      class="fixed inset-0 z-[var(--z-panel-muse)] flex items-stretch justify-center bg-black/70"
       @keydown.esc.stop="close"
     >
+      <!--
+        **中央に寄せて左右を広く使う（総監督・2026-09-12）。** 右端に寄せた
+        `max-w-5xl` の柱だと、会話と台帳が同じ幅を取り合って両方狭かった。
+        画面いっぱいまで伸ばし、広い画面では端を切る（`max-w-[1680px]`）。
+      -->
       <div
-        class="flex h-full w-full max-w-5xl flex-col border-l border-pink-500/30 bg-slate-900/95 text-gray-100 shadow-2xl"
+        class="flex h-full w-full max-w-[1680px] flex-col border-x border-pink-500/30 bg-slate-900/95 text-gray-100 shadow-2xl"
       >
         <header class="flex items-center gap-2 border-b border-pink-500/20 bg-pink-950/20 px-4 py-3">
           <div class="flex shrink-0 items-center -space-x-2">
@@ -917,36 +921,59 @@ function isStruckRow(row) {
           <section class="flex min-h-0 flex-col border-r border-pink-500/15">
             <div class="border-b border-pink-500/15 px-3 py-2">
               <div class="flex flex-wrap items-center gap-2">
-                <select
-                  class="max-w-[10rem] truncate rounded-md border border-pink-500/30 bg-pink-950/30 px-2 py-1 text-xs text-pink-100"
-                  :value="inputs.character_id || ''"
+                <!--
+                  **プルダウンをやめて一覧に戻す（総監督・2026-09-12）。**
+                  「Muse の選択切り替えは Muse Classic と同じようにして。
+                  プルダウンではなく Muse 一覧を表示」。名簿は
+                  `CharacterGallery` —— classic が開いていたのと同じ一枚。
+                -->
+                <button
+                  type="button"
+                  class="flex min-w-0 items-center gap-2 rounded-lg border border-pink-500/30 bg-pink-950/30 px-2 py-1.5 text-left hover:border-pink-400/60 disabled:opacity-40"
                   :disabled="chatLocked"
-                  @change="pickCharacter($event.target.value)"
+                  @click="showPicker = true"
                 >
-                  <option value="">{{ t('muse.pickCharacter') }}</option>
-                  <option
-                    v-for="c in characters"
-                    :key="c.id"
-                    :value="c.id"
-                  >
-                    {{ (isJa ? (c.name_ja || c.name) : (c.name || c.name_ja)) || c.id }}
-                  </option>
-                </select>
-                <select
-                  class="max-w-[10rem] truncate rounded-md border border-fuchsia-900/40 bg-fuchsia-950/30 px-2 py-1 text-xs text-fuchsia-100"
-                  :value="inputs.partner_preset || ''"
+                  <img
+                    v-if="leadFace"
+                    :src="leadFace"
+                    class="h-9 w-7 shrink-0 rounded object-cover"
+                    alt=""
+                  />
+                  <span v-else class="h-9 w-7 shrink-0 rounded bg-black/40"></span>
+                  <span class="min-w-0">
+                    <span class="block truncate text-xs text-pink-100">
+                      {{ (isJa ? (leadCharacter.name_ja || leadCharacter.name) : (leadCharacter.name || leadCharacter.name_ja)) || t('muse.pickCharacter') }}
+                    </span>
+                    <span class="block text-[9px] text-pink-300/60">{{ t('muse.pickCharacter') }}</span>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  class="flex min-w-0 items-center gap-2 rounded-lg border border-fuchsia-900/40 bg-fuchsia-950/30 px-2 py-1.5 text-left hover:border-fuchsia-500/60 disabled:opacity-40"
                   :disabled="chatLocked || !inputs.character_id"
-                  @change="pickPartner($event.target.value)"
+                  @click="showPartnerPicker = true"
                 >
-                  <option value="">{{ t('muse.noPartner') }}</option>
-                  <option
-                    v-for="c in characters.filter(x => x.id !== inputs.character_id)"
-                    :key="`p-${c.id}`"
-                    :value="c.id"
-                  >
-                    {{ (isJa ? (c.name_ja || c.name) : (c.name || c.name_ja)) || c.id }}
-                  </option>
-                </select>
+                  <img
+                    v-if="partnerFace"
+                    :src="partnerFace"
+                    class="h-9 w-7 shrink-0 rounded object-cover"
+                    alt=""
+                  />
+                  <span v-else class="h-9 w-7 shrink-0 rounded bg-black/40"></span>
+                  <span class="min-w-0">
+                    <span class="block truncate text-xs text-fuchsia-100">
+                      {{ (isJa ? (partner.name_ja || partner.name) : (partner.name || partner.name_ja)) || t('muse.noPartner') }}
+                    </span>
+                    <span class="block text-[9px] text-fuchsia-300/60">{{ t('muse.partnerCharacter') }}</span>
+                  </span>
+                </button>
+                <button
+                  v-if="inputs.partner_preset"
+                  type="button"
+                  class="rounded-full border border-white/10 px-2 py-1 text-[10px] text-gray-400 hover:text-gray-200 disabled:opacity-40"
+                  :disabled="chatLocked"
+                  @click="pickPartner('')"
+                >{{ t('muse.noPartner') }}</button>
                 <span class="text-[10px] font-medium uppercase tracking-wide text-pink-400/80">NOW</span>
               </div>
               <!--
@@ -1218,24 +1245,13 @@ function isStruckRow(row) {
             </div>
 
             <form class="flex flex-col gap-2 border-t border-pink-500/15 p-3" @submit.prevent="sendChat">
-              <div v-if="tasteChips.length || lastPitch.length" class="flex flex-wrap gap-1.5">
-                <button
-                  v-for="chip in tasteChips"
-                  :key="`taste-${chip}`"
-                  type="button"
-                  class="rounded-full border border-sky-800/50 bg-sky-950/40 px-2.5 py-1 text-[11px] text-sky-100 hover:bg-sky-900/50 disabled:opacity-40"
-                  :disabled="chatLocked"
-                  @click="insertChip(chip)"
-                >{{ chip }}</button>
-                <button
-                  v-for="opt in lastPitch"
-                  :key="opt"
-                  type="button"
-                  class="rounded-full border border-violet-700/50 bg-violet-950/40 px-2.5 py-1 text-[11px] text-violet-100 hover:bg-violet-900/50 disabled:opacity-40"
-                  :disabled="chatLocked"
-                  @click="sendPitch(opt)"
-                >「{{ opt }}」</button>
-              </div>
+              <!--
+                **入力欄の上の追加推測指示は出さない（総監督・2026-09-12）。**
+                「添付画像の赤丸の部分の追加推測指示は表示要らないです」。
+                提案（PITCH）は会話の中の押せるカードとして出ているので、
+                入力欄の上の受け皿は二重になっていた。学んだ好み（taste）も
+                ここに並べない —— 撮る手を止めて読むものではない。
+              -->
               <div class="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
@@ -1628,6 +1644,35 @@ function isStruckRow(row) {
       </div>
     </div>
   </Teleport>
+
+  <!--
+    **Muse の一覧。** classic が開いていたのと同じ `CharacterGallery`
+    （総監督・2026-09-12「プルダウンではなく Muse 一覧を表示」）。
+    ワークフローの選びもあちらが持っているので、そのまま繋ぐ。
+  -->
+  <CharacterGallery
+    :show="showPicker"
+    :selected-id="inputs.character_id || ''"
+    :workflows="workflows"
+    :workflow="inputs.workflow || ''"
+    :get-jobs-map="props.getJobsMap"
+    @pick="pickCharacter"
+    @close="showPicker = false"
+    @toast="emit('toast', $event)"
+    @update:workflow="patchInputs({ workflow: $event })"
+  />
+
+  <CharacterGallery
+    :show="showPartnerPicker"
+    :selected-id="inputs.partner_preset || ''"
+    :workflows="workflows"
+    :workflow="inputs.workflow || ''"
+    :get-jobs-map="props.getJobsMap"
+    @pick="pickPartner"
+    @close="showPartnerPicker = false"
+    @toast="emit('toast', $event)"
+    @update:workflow="patchInputs({ workflow: $event })"
+  />
 
   <ActressDiaryModal
     v-if="showDiary && inputs.character_id"
