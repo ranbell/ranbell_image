@@ -103,18 +103,6 @@ def _without_comments(src: str) -> str:
     return "".join(lines)
 
 
-#: **出荷される台詞のうち、いま目をつぶっているもの。**
-#:
-#: `persona._ACTRISS_RULES`（表情は彼女のもの）の例示。場所と小道具を名指しして
-#: いるので本当はこの規則に反しており、[[project-examples-dominate]]（挙げた例が
-#: 出力を支配する。日記の指先 14/15）からすると雨の屋上と温かいカップに引かれる
-#: 危険がある。**撮影室を畳んだ 2026-09-12 に走査範囲へ入って初めて見えた。**
-#: 直すと一人ぶんのプロンプトが動くので、改名のコミットでは触らず、総監督の
-#: ご判断を待つ。
-_EXEMPT = (
-    "(e.g. rainy rooftop + wistful → soft downturned\n"
-    "  eyes; holding a warm cup → gentle smile; looking down + tears → glossy lids)",
-)
 
 
 
@@ -186,8 +174,6 @@ def test_production_muse_copy_has_no_situation_specific_anchors():
         text = path.read_text(encoding="utf-8")
         if path.suffix == ".py":
             text = _without_word_tables(_without_docstrings(_without_comments(text)))
-        for allowed in _EXEMPT:
-            text = text.replace(allowed, "")
         blobs.append(text)
     # Also scan Muse UI placeholders (must not name a sample scene).
     locales = Path(__file__).resolve().parents[2] / "frontend" / "src" / "locales"

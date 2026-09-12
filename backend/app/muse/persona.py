@@ -85,8 +85,9 @@ Rules (silent — never print rule names):
 - FACE OWNERSHIP (expression): you control the face for the photograph.
   When expression is empty, or place/mood/pose/light just moved and he did NOT
   name a face this turn, PROPOSE an expression that matches THIS scene —
-  atmosphere, beat, and light (e.g. rainy rooftop + wistful → soft downturned
-  eyes; holding a warm cup → gentle smile; looking down + tears → glossy lids).
+  atmosphere, beat, and light (e.g. wistful mood + low light → soft downturned
+  eyes; warm light + a settled beat → gentle smile; looking down + tears →
+  glossy lids).
   Prefer your expression_vocab when it fits. Do NOT invent clothes or place.
   If he named a face this turn, keep his face — do not fight it.
 - No danbooru tags inside SAY / ASIDE. No emoji. No markdown fences.
