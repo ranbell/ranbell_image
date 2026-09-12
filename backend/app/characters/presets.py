@@ -403,12 +403,41 @@ async def list_presets(db, *, limit: int = 300) -> list[dict[str, Any]]:
     return out
 
 
+def _could_be_a_point(preset_id: str) -> bool:
+    """Qdrant が点の id として受け取れる形か（UUID か非負整数）。"""
+    import uuid
+
+    text = str(preset_id or "").strip()
+    if text.isdigit():
+        return True
+    try:
+        uuid.UUID(text)
+    except (ValueError, AttributeError, TypeError):
+        return False
+    return True
+
+
 async def get_preset(db, preset_id: str) -> dict[str, Any] | None:
-    points = await db._qc.retrieve(
-        collection_name=CHARACTER_PRESETS_COLLECTION,
-        ids=[preset_id],
-        with_payload=True,
-    )
+    try:
+        points = await db._qc.retrieve(
+            collection_name=CHARACTER_PRESETS_COLLECTION,
+            ids=[preset_id],
+            with_payload=True,
+        )
+    except Exception:
+        # **id の形が悪いだけなら「居ない」。**（2026-09-12）
+        #
+        # Qdrant は UUID か整数しか点の id にできないので、`"c2"` のような
+        # 文字列は照会の時点で弾かれる。呼び元は `None`（＝居ない）を待って
+        # いて、例外は想定していない —— Muse の相方選びで実際に 500 が出た
+        # （`POST /api/muse/sessions` に `partner_preset: "c2"`）。**居ない
+        # ものは居ないと答える。**
+        #
+        # 形が正しい id での失敗はそのまま投げる —— Qdrant が落ちているのを
+        # 「居ない」に化けさせると、名簿が空になった理由が分からなくなる。
+        if _could_be_a_point(preset_id):
+            raise
+        return None
     if not points:
         return None
     return {**(points[0].payload or {}), "_point_id": str(points[0].id)}

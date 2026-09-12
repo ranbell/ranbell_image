@@ -704,3 +704,61 @@ def test_every_colour_on_the_roster_has_a_swatch():
             if base_of(tag, noun) not in bases:
                 unpaintable.add(tag)
     assert not unpaintable, f"no swatch for {sorted(unpaintable)}"
+
+
+# ── 点の id にできない文字列 ─────────────────────────────────────────────────
+
+class _QdrantThatOnlyHoldsUuids:
+    """Qdrant の写し。**UUID か整数しか点の id にできない。**"""
+
+    def __init__(self, rows=None):
+        self.rows = rows or {}
+        self.asked: list[list[str]] = []
+        self._qc = self
+
+    async def retrieve(self, collection_name, ids, with_payload=True):
+        self.asked.append(list(ids))
+        import uuid
+
+        for point_id in ids:
+            if not str(point_id).isdigit():
+                uuid.UUID(str(point_id))   # 形が悪ければここで ValueError
+        return [SimpleNamespace(id=i, payload=self.rows[i]) for i in ids if i in self.rows]
+
+
+def test_an_id_qdrant_cannot_even_hold_is_simply_not_found():
+    """**居ないものは居ないと答える。**（2026-09-12）
+
+    Muse の相方選びで実機の 500 を踏んだ —— `POST /api/muse/sessions` に
+    `partner_preset: "c2"`。`pick_partner` は「見つからない」を待っていて
+    `RefineError` → 400 になるはずが、その手前の照会で例外が上がっていた。
+    """
+    from app.characters.presets import get_preset
+
+    db = _QdrantThatOnlyHoldsUuids()
+    assert asyncio.run(get_preset(db, "c2")) is None
+    assert db.asked == [["c2"]], "投げてはみる（形だけで門前払いしない）"
+
+
+def test_a_well_formed_id_that_fails_is_still_an_error():
+    """**Qdrant が落ちているのを「居ない」に化けさせない。**
+
+    化けさせると、名簿が空になった理由が分からなくなる。
+    """
+    from app.characters.presets import get_preset
+
+    class _Down(_QdrantThatOnlyHoldsUuids):
+        async def retrieve(self, collection_name, ids, with_payload=True):
+            raise ConnectionError("qdrant is down")
+
+    with pytest.raises(ConnectionError):
+        asyncio.run(get_preset(_Down(), "38814c43-824f-5a42-96ca-e3afc00f76cf"))
+
+
+def test_a_real_id_still_reads_its_payload():
+    from app.characters.presets import get_preset
+
+    sha = "38814c43-824f-5a42-96ca-e3afc00f76cf"
+    db = _QdrantThatOnlyHoldsUuids({sha: {"name": "Mio"}})
+    got = asyncio.run(get_preset(db, sha))
+    assert got["name"] == "Mio" and got["_point_id"] == sha
