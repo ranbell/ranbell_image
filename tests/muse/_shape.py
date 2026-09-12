@@ -5,7 +5,7 @@ Muse Classic の `schema.new_session` が持っていた形を、**試験側に�
 いまも `backend/app/muse/` に残っている土台で、それを試すには入れ物が要る ——
 けれど器そのものは classic の器だったので、`private/muse_classic/` に退いた。
 
-ここは**撮影の正本ではない**。いまの正本は `muse_refine.service.new_session`。
+ここは**撮影の正本ではない**。いまの正本は `muse.service.new_session`。
 この器は「土台のモジュールを単体で叩くための皿」以上のものではないので、
 Refine の形に合わせて直す必要はない。
 """

@@ -63,10 +63,12 @@ async def list_recent(
 ) -> list[dict[str, Any]]:
     """最近のセッション。`studio` でスタジオを選ぶ。
 
-    `None` は全部（既定・これまでどおり）、`""` は classic Muse だけ、
-    `"muse_refine"` は Refine だけ。**混ざったままにできない** ―― classic の
-    一覧から Refine のセッションを開くと、手帖の無いセッションを classic の
-    経路が読むことになり、席の成績レポートも数字が薄まる。
+    `None` は全部（既定）、`""` は退役した classic が書いた行、`"muse_refine"` は
+    いまの撮影室（`service.STUDIO`。**保存値なので名前が古いまま**）。
+
+    classic は退役した（2026-09-12）ので仕切りの意味は変わった —— いまは
+    「開ける行」と「もう開けない古い行」の区別。残しているのは、古い行が
+    一覧に混ざると開けないものを開こうとしてしまうから。
     """
     rows: list[dict[str, Any]] = []
     offset = None

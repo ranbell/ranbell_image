@@ -1,11 +1,13 @@
 """**Muse Classic を退役させても、楽屋は絶対に残す。**（2026-09-12）
 
-総監督のご判断で Muse Refine を正規の Muse にした。撮影室は一つになったが、
-**楽屋と手帖だけは classic のルーターに同居していた** —— `/api/muse` の下に
-撮影室の23本と楽屋の6本が並んでいた。
+総監督のご判断で Muse Refine を正規の Muse にした。撮影室は一つ。classic の
+ターンエンジンと画面は `private/muse_classic/` へ退き、撮影室は
+`backend/app/muse/` に畳んで `/api/muse` から出している。
 
-撮影室は退役、楽屋は据え置き（[[project-muse-circle-must-stay]]）。
-URL は変えない —— 画面（`CharacterGallery` / `LoungePanel`）がそう叩いている。
+楽屋は据え置き（[[project-muse-circle-must-stay]]）。URL も変えない ——
+画面（`CharacterGallery` / `LoungePanel`）がそう叩いている。撮影室の口も
+`/api/muse` に来たので、**楽屋と同じ屋根の下で経路がぶつからないこと**が
+ここの見どころになった。
 """
 from __future__ import annotations
 
@@ -51,26 +53,43 @@ def test_the_lounge_urls_did_not_move():
                 assert call in served, f"{panel} が叩く {call} が出ていない"
 
 
-def test_the_studio_routes_are_gone():
-    """撮影室は Muse Refine 一つ。classic の口は main に載せない。"""
+def test_there_is_one_studio_and_it_answers_under_api_muse():
+    """撮影室は一つ。classic の口は載せず、Refine の口は `muse` に畳んだ。"""
     from app.main import app
 
     src = Path("backend/app/main.py").read_text(encoding="utf-8")
-    assert "from .muse.api import router" not in src
+    # classic の router も、畳む前の名前も、もう出てこない
+    assert "muse_refine_router" not in src
+    assert "from .muse_refine" not in src
     assert "muse_lounge_router" in src
-    assert "muse_refine_router" in src
+    assert "from .muse.api import router as muse_router" in src
     assert app is not None
 
 
+def test_the_two_routers_under_api_muse_do_not_collide():
+    """撮影室と楽屋が同じ接頭辞に並んだ。**同じ経路を二度出したら後が勝つ。**"""
+    from app.muse import lounge_api
+    from app.muse import api as studio_api
+
+    studio = _paths(studio_api.router)
+    lounge = _paths(lounge_api.router)
+    assert studio and lounge
+    assert not (studio & lounge), sorted(studio & lounge)
+    for path in studio | lounge:
+        assert path.startswith("/api/muse/"), path
+
+
+#: classic だけが出していた経路。**`/api/muse/sessions` は入れない** ——
+#: あれは畳んだ撮影室が正しく出している（2026-09-12）。
 @pytest.mark.parametrize("path", [
-    "/api/muse/sessions", "/api/muse/report", "/api/muse/steps", "/api/muse/roster",
+    "/api/muse/report", "/api/muse/steps", "/api/muse/roster",
 ])
 def test_a_retired_route_is_not_served(path):
+    from app.muse import api as studio_api
     from app.muse import lounge_api
-    from app.muse_refine import api as refine_api
 
     assert path not in _paths(lounge_api.router)
-    assert path not in _paths(refine_api.router)
+    assert path not in _paths(studio_api.router)
 
 
 def test_the_lounge_router_does_not_drag_the_turn_engine_in():
@@ -92,7 +111,11 @@ def test_the_lounge_router_does_not_drag_the_turn_engine_in():
 
 
 #: `private/muse_classic/` へ退いたもの。`backend/app/` の側からは、もう引けない。
-RETIRED = ("service", "schema", "report", "pipeline_view", "harvest", "api")
+#:
+#: **`service` / `api` / `pipeline_view` は一覧から外した。** 撮影室を `muse` に
+#: 畳んだとき（2026-09-12）、同じ名前が**撮影室自身のモジュール**として戻ってきた
+#: ので、名前で見分けられなくなった。残っているのは classic にしか無かった三つ。
+RETIRED = ("schema", "report", "harvest")
 
 
 def test_nothing_living_reaches_for_a_retired_module():
@@ -129,3 +152,19 @@ def test_nothing_living_reaches_for_a_retired_module():
                     if len(parts) > 1 and parts[-2] == "muse" and parts[-1] in RETIRED:
                         bad.append(f"{path}:{node.lineno} import {a.name}")
     assert not bad, "退役したモジュールを引いている:\n" + "\n".join(bad)
+
+
+def test_the_studio_marker_on_the_saved_rows_is_not_tidied_up():
+    """**`STUDIO` の文字列は保存値。名前が古く見えても動かさない。**
+
+    撮影室を `muse_refine` から `muse` に畳んだ（2026-09-12）ときも、この一語は
+    据え置いた —— セッションの行に書いてあり、`_require_studio` が「自分の行か」を
+    これで見分ける。揃えたくなって直すと、**これまでの行が全部開かなくなる**。
+    """
+    from app.muse import service
+
+    assert service.STUDIO == "muse_refine"
+    src = Path("backend/app/muse/service.py").read_text(encoding="utf-8")
+    head = src[:src.index("STUDIO =")]
+    assert "保存されている値なので変えない" in head, "理由を添えずに置かない"
+

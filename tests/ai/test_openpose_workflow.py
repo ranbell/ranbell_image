@@ -7,7 +7,7 @@ import json
 
 from backend.app.ai.comfy import ComfyUIClient
 from backend.app.muse import runner as muse_runner
-from backend.app.muse_refine.service import public_view
+from backend.app.muse.service import public_view
 
 
 def _openpose_graph() -> dict:

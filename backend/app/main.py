@@ -23,7 +23,7 @@ from .api.health import router as health_router
 from .api.admin import router as admin_router
 from .api.comfy import router as comfy_router
 from .api.inspire import router as inspire_router
-from .muse_refine.api import router as muse_refine_router
+from .muse.api import router as muse_router
 from .api.jobs import router as jobs_router
 from .api.analyzer import router as analyzer_router
 from .api.alignment import router as alignment_router
@@ -228,7 +228,7 @@ app.include_router(alignment_router)
 app.include_router(invoke_router)
 app.include_router(characters_router)
 app.include_router(muse_lounge_router)
-app.include_router(muse_refine_router)
+app.include_router(muse_router)
 
 
 @app.get("/api/token")

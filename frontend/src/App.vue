@@ -7,7 +7,7 @@ import AnalyzerModal from './components/AnalyzerModal.vue'
 import AdminModal from './components/AdminModal.vue'
 import InspirePanel from './components/InspirePanel.vue'
 import InvokePanel from './components/InvokePanel.vue'
-import MuseRefinePanel from './components/MuseRefinePanel.vue'
+import MusePanel from './components/MusePanel.vue'
 import CharacterGallery from './components/CharacterGallery.vue'
 import ActressDiaryModal from './components/muse/ActressDiaryModal.vue'
 import CharacterDossier from './components/muse/CharacterDossier.vue'
@@ -2664,7 +2664,7 @@ const showInvoke = ref(false)
 // 現れる前に決まる。名簿で一人選ぶと撮影室が開く（`pickMuseCharacter`）。
 //
 // **2026-09-12、Muse Classic を退役させた。** 撮影室は Muse Refine 一つ。
-const showMuseRefine = ref(false)
+const showMuse = ref(false)
 const showMuseGallery = ref(false)
 const museGalleryWorkflow = ref('')
 // 名簿が決めた相手。開いた一度だけ読まれる（パネル側が自分のセッションと
@@ -2679,7 +2679,7 @@ function startDuetPair({ leadId, partnerId }) {
   showMuseGallery.value = false
   musePendingCharacterId.value = leadId
   musePendingPartnerId.value = partnerId
-  showMuseRefine.value = true
+  showMuse.value = true
 }
 
 async function openMuse() {
@@ -2705,11 +2705,11 @@ function pickMuseCharacter(id) {
   musePendingPartnerId.value = ''
   // パネルは v-if で消さない —— セッションは開け閉めで残るので、
   // `show` を振っても作り直されない。
-  showMuseRefine.value = true
+  showMuse.value = true
 }
 
 function onMuseShow(open) {
-  showMuseRefine.value = open
+  showMuse.value = open
   if (open) {
     selected.value = null
     return
@@ -2732,7 +2732,7 @@ function resumeMuseSession() {
   // 指名を空にすると、止めてあったセッションにそのまま座り直す。
   musePendingCharacterId.value = ''
   musePendingPartnerId.value = ''
-  showMuseRefine.value = true
+  showMuse.value = true
 }
 
 function openImageBySha(sha256) {
@@ -5391,7 +5391,7 @@ onUnmounted(() => {
       :workflows="workflows"
       :workflow="museGalleryWorkflow"
       :get-jobs-map="getJobsMap"
-      :resume-available="museResume.available && !showMuseRefine"
+      :resume-available="museResume.available && !showMuse"
       :resume-name="museResume.name"
       @pick="pickMuseCharacter"
       @close="showMuseGallery = false"
@@ -5422,8 +5422,8 @@ onUnmounted(() => {
       @update:workflow="museGalleryWorkflow = $event"
     />
 
-    <MuseRefinePanel
-      :show="showMuseRefine"
+    <MusePanel
+      :show="showMuse"
       :comfyOffline="comfyOffline"
       :get-jobs-map="getJobsMap"
       :initial-character-id="musePendingCharacterId"

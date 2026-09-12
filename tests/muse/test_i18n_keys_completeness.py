@@ -10,54 +10,45 @@ JA_JSON_PATH = Path(__file__).parent.parent.parent / "frontend/src/locales/ja.js
 EN_JSON_PATH = Path(__file__).parent.parent.parent / "frontend/src/locales/en.json"
 
 
-def test_i18n_ja_en_keys_match_and_complete():
-    """Verify all keys in ja.json and en.json for muse section match 100% with no missing translations."""
-    assert JA_JSON_PATH.exists(), "ja.json does not exist!"
-    assert EN_JSON_PATH.exists(), "en.json does not exist!"
+def test_every_key_the_panel_asks_for_exists_in_both_locales():
+    """**画面が引く鍵を、画面から読む。**
 
+    元は手で並べた一覧だった（`partnerCharacter` / `wMuseMode` / `quick.*` …）。
+    あれは classic の画面の契約で、画面ごと退役した（2026-09-12）ので、
+    並べ直す代わりに**撮影室の画面そのものから抜く**ことにした。手で足すのを
+    忘れても落ちる。
+
+    組み立てる鍵（`muse.` に変数を継ぐ書き方）は写らない —— 画風（`muse.looks.*`）と
+    欄（`muse.fields.*`）と姿勢の下絵（`muse.poseSketch.*`）がそれで、
+    下の鍵の左右対称の試験が受け持つ。
+    """
+    import re
+
+    ja, en = _locales()
+    panels = [Path(__file__).parent.parent.parent / "frontend/src/components" / name
+              for name in ("MusePanel.vue", "CharacterGallery.vue")]
+    asked: set[str] = set()
+    for panel in panels:
+        src = panel.read_text(encoding="utf-8")
+        asked |= set(re.findall(r"""t\(\s*['"]muse\.([A-Za-z0-9_.]+)['"]""", src))
+    assert len(asked) > 60, f"画面から鍵が読めていない（{len(asked)}本）"
+
+    for key in sorted(asked):
+        for name, data in (("ja", ja), ("en", en)):
+            node = data
+            for part in key.split("."):
+                assert isinstance(node, dict) and part in node, \
+                    f"muse.{key} が {name}.json に無い（画面は引いている）"
+                node = node[part]
+            assert isinstance(node, str) and node, f"muse.{key} が空（{name}）"
+
+
+def _locales() -> tuple[dict, dict]:
     with JA_JSON_PATH.open(encoding="utf-8") as f:
-        ja_data = json.load(f)
+        ja = json.load(f)["muse"]
     with EN_JSON_PATH.open(encoding="utf-8") as f:
-        en_data = json.load(f)
-
-    ja_muse = ja_data.get("muse", {})
-    en_muse = en_data.get("muse", {})
-
-    required_new_keys = [
-        "partnerCharacter",
-        "pickPartnerCharacter",
-        "noPartner",
-        "wMuseMode",
-        "firstPerson",
-        "userAddress",
-        "talkQuirks",
-        "sayExamples",
-        "wMuseSessionActive",
-        "chemistryActive",
-        "defaultActressName",
-    ]
-
-    for key in required_new_keys:
-        assert key in ja_muse, f"Key '{key}' missing from ja.json muse section!"
-        assert key in en_muse, f"Key '{key}' missing from en.json muse section!"
-        assert isinstance(ja_muse[key], str) and len(ja_muse[key]) > 0
-        assert isinstance(en_muse[key], str) and len(en_muse[key]) > 0
-
-    required_new_quick_keys = [
-        "backToBack",
-        "backToBackPrompt",
-        "handInHand",
-        "handInHandPrompt",
-        "secretTalk",
-        "secretTalkPrompt",
-    ]
-    ja_quick = ja_muse.get("quick", {})
-    en_quick = en_muse.get("quick", {})
-    for key in required_new_quick_keys:
-        assert key in ja_quick, f"Key 'quick.{key}' missing from ja.json muse section!"
-        assert key in en_quick, f"Key 'quick.{key}' missing from en.json muse section!"
-        assert isinstance(ja_quick[key], str) and len(ja_quick[key]) > 0
-        assert isinstance(en_quick[key], str) and len(en_quick[key]) > 0
+        en = json.load(f)["muse"]
+    return ja, en
 
 
 def _flat(data: dict, prefix: str = "") -> set[str]:
@@ -81,25 +72,6 @@ def test_every_muse_key_exists_in_both_locales():
 
     assert not ja - en, f"muse keys in ja.json but not en.json: {sorted(ja - en)}"
     assert not en - ja, f"muse keys in en.json but not ja.json: {sorted(en - ja)}"
-
-
-def test_the_facet_panel_is_translated():
-    """The shot is shown in parts, and every part needs a name in both."""
-    with JA_JSON_PATH.open(encoding="utf-8") as f:
-        ja = json.load(f)["muse"]
-    with EN_JSON_PATH.open(encoding="utf-8") as f:
-        en = json.load(f)["muse"]
-
-    for key in ("facets", "facetsHint", "facetLock", "facetLocked",
-                "facetEmpty", "facetBy", "facetConflict", "digest", "digestHint"):
-        for name, data in (("ja", ja), ("en", en)):
-            assert isinstance(data.get(key), str) and data[key], \
-                f"muse.{key} missing from {name}.json"
-    for part in ("place", "hour", "light", "props", "costume", "pose",
-                 "expression", "camera"):
-        for name, data in (("ja", ja), ("en", en)):
-            assert (data.get("facetNames") or {}).get(part), \
-                f"muse.facetNames.{part} missing from {name}.json"
 
 
 def test_i18n_all_top_level_keys_symmetry():

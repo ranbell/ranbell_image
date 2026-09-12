@@ -2264,7 +2264,7 @@ async def run_generate_handpost_habit_job(
 # ── 記憶のブロックと、撮影の引き継ぎ（2026-09-12 に追加）──────────────────
 #
 # **`getattr` 越しの依存は、第2段の走査（AST）に映っていなかった。**
-# `muse_refine.persona.memory_prompt_blocks` は
+# `persona.memory_prompt_blocks` は
 #
 #     for name in ("_memory_block", "_bond_block", "_caught_block",
 #                  "_taste_block", "_chemistry_block"):
