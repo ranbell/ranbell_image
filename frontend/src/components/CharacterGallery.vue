@@ -47,6 +47,12 @@ const props = defineProps({
   getJobsMap: { type: Function, default: () => () => new Map() },
   // Parked Muse studio session (closed by ✕, still in memory) — show Resume.
   resumeAvailable: { type: Boolean, default: false },
+  // **どの段に出すか。**（2026-09-13）
+  //
+  // 既定は `--z-panel`（600）。Muse の画面（`--z-panel-muse` 640）の中から
+  // 開くと**裏に出て、押しても何も起きないように見えた** —— 総監督が踏んだ。
+  // 呼ぶ側が `--z-panel-muse-child`（650）を渡せるようにする。
+  layerClass: { type: String, default: 'z-[var(--z-panel)]' },
   resumeName: { type: String, default: '' },
 })
 const emit = defineEmits(['pick', 'close', 'toast', 'update:workflow', 'start-duet-pair', 'resume'])
@@ -408,8 +414,9 @@ onUnmounted(() => {
 <template>
   <div
     v-if="show"
-    class="fixed inset-0 z-[var(--z-panel)] flex items-stretch justify-center
+    class="fixed inset-0 flex items-stretch justify-center
            bg-black/80 backdrop-blur-sm p-3"
+    :class="layerClass"
     @mousedown.self="emit('close')"
   >
     <div class="sb-shell w-full max-w-[1600px] flex flex-col min-h-0">

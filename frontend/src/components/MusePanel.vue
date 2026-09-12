@@ -967,13 +967,19 @@ function isStruckRow(row) {
                     <span class="block text-[9px] text-fuchsia-300/60">{{ t('muse.partnerCharacter') }}</span>
                   </span>
                 </button>
+                <!--
+                  **相方は無選択に戻せる（総監督・2026-09-13）。** 名簿には
+                  「選ばない」札が無いので、外した操作はここに置く。カードの
+                  すぐ隣に ✕ —— 離れた所に置くと、選んだ後に戻せないように見える。
+                -->
                 <button
                   v-if="inputs.partner_preset"
                   type="button"
-                  class="rounded-full border border-white/10 px-2 py-1 text-[10px] text-gray-400 hover:text-gray-200 disabled:opacity-40"
+                  class="-ml-1 rounded-full border border-fuchsia-900/40 px-2 py-1.5 text-[11px] text-fuchsia-300/80 hover:border-fuchsia-500/60 hover:text-fuchsia-100 disabled:opacity-40"
                   :disabled="chatLocked"
+                  :title="t('muse.noPartner')"
                   @click="pickPartner('')"
-                >{{ t('muse.noPartner') }}</button>
+                >✕</button>
                 <span class="text-[10px] font-medium uppercase tracking-wide text-pink-400/80">NOW</span>
               </div>
               <!--
@@ -1284,14 +1290,20 @@ function isStruckRow(row) {
               <p v-if="craft.prompt && !boardReady" class="text-[10px] text-gray-500">
                 {{ t('muse.approveNeedsBoard') }}
               </p>
-              <div class="flex gap-2">
-                <input
+              <!--
+                **3行の入力欄。改行できてスクロールする（総監督・2026-09-13）。**
+                Enter は送信のまま（手が覚えている）、**Shift+Enter で改行**。
+                縁を掴めば伸ばせる（`resize-y`）。
+              -->
+              <div class="flex items-end gap-2">
+                <textarea
                   v-model="chatInput"
-                  type="text"
-                  class="min-w-0 flex-1 rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-pink-500"
+                  rows="3"
+                  class="min-w-0 flex-1 resize-y overflow-y-auto rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-sm leading-relaxed outline-none focus:border-pink-500"
                   :placeholder="t('muse.chatPlaceholder')"
                   :disabled="chatLocked || !session"
-                />
+                  @keydown.enter.exact.prevent="sendChat"
+                ></textarea>
                 <button
                   type="submit"
                   class="rounded-lg bg-pink-600 px-3 py-2 text-sm font-medium text-white hover:bg-pink-500 disabled:opacity-40"
@@ -1652,6 +1664,7 @@ function isStruckRow(row) {
   -->
   <CharacterGallery
     :show="showPicker"
+    layer-class="z-[var(--z-panel-muse-child)]"
     :selected-id="inputs.character_id || ''"
     :workflows="workflows"
     :workflow="inputs.workflow || ''"
@@ -1664,6 +1677,7 @@ function isStruckRow(row) {
 
   <CharacterGallery
     :show="showPartnerPicker"
+    layer-class="z-[var(--z-panel-muse-child)]"
     :selected-id="inputs.partner_preset || ''"
     :workflows="workflows"
     :workflow="inputs.workflow || ''"
