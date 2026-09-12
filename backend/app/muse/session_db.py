@@ -216,15 +216,6 @@ async def finish_shoot(db, session_id: str, *, error: str = "", ollama=None) -> 
             logger.warning("[muse] continuity write failed", exc_info=True)
 
 
-# Legacy aliases used by older draft helpers / tests.
-async def attach_draft_image(db, session_id: str, image_id: str, meta: dict) -> None:
-    await attach_board_image(db, session_id, image_id, meta)
-
-
-async def finish_draft(db, session_id: str, *, error: str = "") -> None:
-    await finish_board(db, session_id, error=error)
-
-
 def log(session: dict[str, Any], step: str, detail: str) -> None:
     session.setdefault("timeline", []).append({
         "at": time.time(), "step": step, "detail": detail,

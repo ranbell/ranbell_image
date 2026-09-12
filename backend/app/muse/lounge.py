@@ -207,10 +207,6 @@ def season_ja(when: float | None = None) -> str:
     return ""
 
 
-def outing_occasions() -> tuple[str, ...]:
-    return tuple(name for name, _ in _OUTINGS)
-
-
 def normalize_outing(
     parsed: dict[str, str],
     cast: list[dict[str, Any]],

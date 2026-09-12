@@ -105,16 +105,6 @@ def _normalize_topic_token(tok: str) -> str:
     return (tok or "").lower().replace("_", " ").strip()
 
 
-def _is_ja_script_token(tok: str) -> bool:
-    """True when token is mostly CJK / kana (cannot hit an English-only blob)."""
-    if not tok:
-        return False
-    return any(
-        "\u3400" <= c <= "\u9fff" or "\u3040" <= c <= "\u30ff"
-        for c in tok
-    )
-
-
 def topic_anchor_groups(
     user_topic: str, topic_directive: str = "",
 ) -> list[list[str]]:

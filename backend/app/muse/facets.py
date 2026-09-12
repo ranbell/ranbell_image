@@ -543,16 +543,6 @@ def table_block(
     return "\n".join(lines)
 
 
-def standing_block(standing: list[str] | None) -> str:
-    kept = [str(s).strip() for s in (standing or []) if str(s).strip()]
-    if not kept:
-        return ""
-    return "\n".join([
-        "STANDING RULES (true for the whole shoot, whatever else changes):",
-        *[f"- {s}" for s in kept],
-    ])
-
-
 # ── Projections onto the blocks the rest of Muse already reads ──────────────
 # `plan` and `costume` are not a second source of truth any more; they are this
 # table, in the shape `brief.plan_block` / `brief.costume_block` expect. Keeping

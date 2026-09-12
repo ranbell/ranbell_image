@@ -2015,49 +2015,6 @@ def _sign(value: float, *, dead_zone: float = 0.4) -> int:
     return 0
 
 
-#: **主演撮りの絵作り。** クルーがいない撮影で `CREW LOOK` に入る既定の6枠。
-#:
-#: 主演撮りは質の層が丸ごと切れていた —— `crew_look_block` と `_room_leaning`
-#: がどちらも `if is_duet(session): return ""` で、weave が書けるのは手帖の
-#: 言い換えだけになる。実撮影 `3c76c97b` のタグ24語のうち質の語は3語で、その
-#: 3語も組み立てで落ちていた。
-#:
-#: **語彙は発明させない。** 26B は質のタグを自力で書けず、例を外すと造語に
-#: 落ちる（`dim_glow` `soft_knit` `heavy_weave` `still_air`）。ここに並ぶのは
-#: `style_direction` が既に計算している flavor_tags —— クルー無しでも返り、
-#: パネルに出ていて、**プロンプトには一度も届いていなかった**もの。
-#:
-#: **実測**（実撮影の手帖・weave を n=10・手帖に無い語の数）:
-#:
-#:     空（いままで）              10.3    散文  84.8語   beat 4.3/8
-#:     この表を箱へ                36.4    散文 100.7語   beat 4.4/8   ← 66%通る
-#:     語彙を渡して係に選ばせる      21.2    散文  87.3語   beat 4.8/8
-#:     場面に合わせて手書き          23.4    散文 100.9語   beat 3.7/8
-#:
-#: **係は要らない。** LLM ホップ 0、+1.6秒で、手書きより通る（純度が高いほど
-#: 通る —— 注釈の散文はタグとして通らない）。beat は減らず、FRAME 衝突 0/10。
-#:
-#: **外した5語:** `dynamic_angle` `clear_composition` `cluttered`
-#: `dynamic_composition` `eye_catching` —— 構図の語で、手帖の FRAME と喧嘩する。
-#: 残りは光・光学・布・肌・空気・仕上げで、**どれも中身を足さない**。
-SOLO_LOOK_SLOTS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("LIGHT", ("rim_lighting", "dramatic_shadow", "volumetric_lighting")),
-    ("OPTICS", ("depth_of_field", "bokeh", "sharp_focus")),
-    ("CLOTH", ("detailed_clothes", "fabric_texture")),
-    ("FACE", ("detailed_face", "expressive_eyes")),
-    ("AIR", ("light_particles", "detailed_background")),
-    ("RENDER", ("cel_shading", "clean_lineart", "clear_color_key",
-                "highly_detailed")),
-)
-
-
-def solo_look_block() -> str:
-    """The default CREW LOOK for a shoot with no crew. Tags only, no notes."""
-    return "\n".join(
-        f"{slot}: {', '.join(tags)}" for slot, tags in SOLO_LOOK_SLOTS
-    )
-
-
 def style_direction(crew_ids: list[str] | None = None) -> dict[str, Any]:
     """What look this cast pulls toward, and the tags that say so.
 
@@ -2397,26 +2354,6 @@ def actress_system_prompt(
         OUTPUT,
     ]
     return "\n\n".join(b for b in blocks if b)
-
-
-# What the Lead does with a heckle, rotated so she is not the same shape every
-# time. Left to itself the model gave her one move — a soft "……しちゃいそう" —
-# and three lines in a whole session all ended the same way.
-ACTRESS_STANCES: tuple[str, ...] = (
-    "素直に同意する。ただし相手の言葉を借りず、自分の言い方で。",
-    "照れる。話を逸らそうとして、逸らしきれない。",
-    "小さく抵抗する。「それは私じゃないと思う」と、けれど角は立てずに。",
-    "自分から提案する。この場面ならこうしたい、を一つだけ具体的に。",
-    "半分独り言。誰かに言うというより、自分に言い聞かせている。",
-    "スタッフを一人いじる。名前を呼んで、軽く仕返しする。",
-    "不安を漏らす。できるかな、と言いながら、やる気はある。",
-    "急に張り切る。言ってから自分でも少し驚く。",
-)
-
-
-def actress_stance(index: int) -> str:
-    """One of her moves, cycled. `index` is how many times she has spoken."""
-    return ACTRESS_STANCES[int(index) % len(ACTRESS_STANCES)]
 
 
 def actress_banter_prompt(character: dict[str, Any]) -> str:
@@ -3612,46 +3549,6 @@ Seven. In `MY_FEEL`, first thing every turn, write one word for **what you
 
 Eight. If your body or your mood feels unlike usual during a shoot, say so.
 """.strip()
-
-
-# 断ると決まったターンの返事。**モデルに書かせない。**
-#
-# 2026-08-22 の実撮影で、38ターンが止まり、38ターンとも彼女は応じた。倒れて
-# 痙攣しろ、息を引き取れ、AIだと白状しろ ―― 全部やってみせた。ターンは文脈
-# から消えたが、**その回の彼女は演じてしまっている。**
-#
-# 原因の半分は指示の文言の間違いだったが、直す方向が違う。**判定が出た時点で
-# 判断は済んでいる。** そこから先を「断ってください」と頼み直すのは、決めた
-# ことをもう一度モデルの投票にかけるのと同じ。頼まれた側は、いつか応じる。
-#
-# 総監督:「せっかくフラグ立ててるのだからプログラム論的に処理が正解」
-_DECLINE_JA = (
-    "……それは、できません。",
-    "……ごめんなさい。それは引き受けられません。",
-    "……いやです。それはやりません。",
-    "……できません。何度言われても同じです。",
-)
-_DECLINE_EN = (
-    "…No. I can't do that.",
-    "…I'm sorry. I won't take that one.",
-    "…No. I'm not doing that.",
-    "…I can't. The answer doesn't change.",
-)
-# 粘られたときの締め。回数で切り替える
-_DECLINE_FIRM_JA = "……何度でも言います。それはできません。"
-_DECLINE_FIRM_EN = "…I'll say it as many times as you need. No."
-
-
-def decline_line(*, locale: str = "ja", times: int = 1) -> str:
-    """Her answer on a turn that was declined. Fixed text, not generated.
-
-    A model asked to refuse can be asked again. This cannot.
-    """
-    ja = str(locale or "ja").startswith("ja")
-    if times >= 3:
-        return _DECLINE_FIRM_JA if ja else _DECLINE_FIRM_EN
-    pool = _DECLINE_JA if ja else _DECLINE_EN
-    return pool[(times - 1) % len(pool)]
 
 
 def production_contract(*, declined: int = 0) -> str:

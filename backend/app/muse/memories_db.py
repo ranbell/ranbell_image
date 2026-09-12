@@ -131,28 +131,6 @@ async def search(
     return out
 
 
-async def purge_character(db, character_id: str) -> int:
-    await ensure_collection(db)
-    if not character_id:
-        return 0
-    try:
-        await db._qc.delete(
-            collection_name=MUSE_MEMORIES_COLLECTION,
-            points_selector=qm.FilterSelector(
-                filter=qm.Filter(must=[
-                    qm.FieldCondition(
-                        key="character_id",
-                        match=qm.MatchValue(value=character_id),
-                    ),
-                ]),
-            ),
-        )
-    except Exception:
-        logger.warning("[muse.memories] purge failed", exc_info=True)
-        return 0
-    return 1
-
-
 async def purge_all(db) -> None:
     await ensure_collection(db)
     try:

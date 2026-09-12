@@ -116,68 +116,6 @@ def pose_tags_are_thin(tags: list[str] | None, *, min_words: int = 5) -> bool:
     return False
 
 
-def ensure_pose_tags_min_words(
-    cats: dict[str, list[str]] | None,
-    *,
-    min_words: int = 5,
-    fillers: list[str] | None = None,
-) -> dict[str, list[str]]:
-    """Guarantee pose_tags has ≥ ``min_words`` concrete action words.
-
-    Mutates and returns ``cats`` (empty dict if None). Idle-only buckets are
-    expanded from ``fillers`` (focal / activity tokens) first.
-    """
-    out: dict[str, list[str]] = dict(cats or {})
-    pose = list(out.get("pose_tags") or [])
-    seen = {t.lower() for t in pose}
-
-    def _add(tag: str) -> None:
-        t = str(tag).strip().replace(" ", "_")
-        k = t.lower()
-        if not t or k in seen:
-            return
-        # Prefer non-idle fillers when reseeding an idle-only bucket.
-        pose.append(t)
-        seen.add(k)
-
-    if pose_tags_are_thin(pose, min_words=min_words):
-        # Drop pure idle if we have fillers to rebuild from.
-        non_idle_fillers = [
-            str(t).strip().replace(" ", "_")
-            for t in (fillers or [])
-            if str(t).strip()
-            and str(t).strip().replace(" ", "_").lower() not in _POSE_IDLE_ONLY
-        ]
-        if non_idle_fillers and (
-            not pose or all(p.lower() in _POSE_IDLE_ONLY for p in pose)
-        ):
-            pose = []
-            seen = set()
-        for t in non_idle_fillers:
-            _add(t)
-            if pose_word_count(pose) >= min_words and not pose_tags_are_thin(
-                pose, min_words=min_words
-            ):
-                break
-        # Keep any prior non-idle tags.
-        for t in list(out.get("pose_tags") or []):
-            if t.lower() not in _POSE_IDLE_ONLY:
-                _add(t)
-
-    # Pad with remaining fillers until word budget met.
-    for t in fillers or []:
-        if pose_word_count(pose) >= min_words and not all(
-            p.lower() in _POSE_IDLE_ONLY for p in pose
-        ):
-            break
-        _add(str(t))
-
-    if pose:
-        out["pose_tags"] = pose
-    elif "pose_tags" in out:
-        del out["pose_tags"]
-    return out
-
 SECTION_MARKER_RE = re.compile(
     r"\[(?:CHARACTER|ACTION|SCENE|DETAIL|MOOD)\]\s*", re.I
 )
@@ -222,21 +160,3 @@ def parse_visual_script(text: str) -> tuple[str, dict[str, list[str]]]:
     return prose, cats
 
 
-def merge_category_tags(
-    *sources: dict[str, list[str]] | None,
-) -> dict[str, list[str]]:
-    """Merge category dicts; first occurrence of each tag wins globally."""
-    out: dict[str, list[str]] = {k: [] for k in VISUAL_SPEC_CAT_FIELDS}
-    seen_global: set[str] = set()
-    for src in sources:
-        if not src:
-            continue
-        for key in VISUAL_SPEC_CAT_FIELDS:
-            for tag in src.get(key) or []:
-                t = str(tag).strip().replace(" ", "_")
-                k = t.lower()
-                if not t or k in seen_global:
-                    continue
-                seen_global.add(k)
-                out[key].append(t)
-    return {k: v for k, v in out.items() if v}

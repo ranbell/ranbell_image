@@ -37,11 +37,6 @@ def family_sampling(model: str) -> dict[str, Any]:
     return {}
 
 
-def default_temperature(model: str) -> float | None:
-    """What the UI should pre-fill for this model (None → the model's own)."""
-    return family_sampling(model).get("temperature")
-
-
 def llm_options(
     options: dict[str, Any] | None = None,
     *,

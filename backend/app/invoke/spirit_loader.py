@@ -23,10 +23,6 @@ def load_spirit(name: str) -> dict:
     return data
 
 
-def list_spirits() -> list[str]:
-    return SPIRIT_NAMES
-
-
 def preload_all() -> None:
     for name in SPIRIT_NAMES:
         try:

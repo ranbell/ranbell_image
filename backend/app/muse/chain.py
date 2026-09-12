@@ -594,37 +594,6 @@ def parse_strike(
     return out["REMOVE"], out["RESTORE"]
 
 
-async def run_strike(
-    ollama, *, note: str, tags: Iterable[str], removed: Iterable[str] = (),
-    model: str, num_ctx: int | None, on_token: TokenCallback | None = None,
-) -> tuple[list[str], list[str]]:
-    """What the Showrunner just took out of the picture, and what they want back.
-
-    Runs on every note. Detecting "is this a removal?" with a pattern would miss
-    the phrasings nobody thought of, and this cannot: a note that removes
-    nothing simply comes back empty.
-    """
-    present = [t for t in tags if t]
-    if not present and not list(removed):
-        return [], []
-    prompt = "\n\n".join([
-        f"CURRENT TAGS:\n{', '.join(present)}",
-        f"CURRENTLY REMOVED:\n{', '.join(removed) or '(none)'}",
-        f"総監督がいま言ったこと:\n{note.strip()}",
-    ])
-    try:
-        raw = await _call(
-            ollama, system=STRIKE_SYSTEM, prompt=prompt, model=model,
-            images=None, num_ctx=num_ctx, think=False, on_token=on_token,
-        )
-    except ChainError:
-        # A clerk who cannot answer removes nothing. Guessing here would delete
-        # the Showrunner's picture out from under them.
-        logger.warning("[muse.chain] strike turn produced nothing", exc_info=True)
-        return [], []
-    return parse_strike(raw, present, removed)
-
-
 # ── the Muse looks at the bag before it is used ───────────────────────────
 # She is the one standing in the picture, and until now she never saw the tags
 # that describe it. `still_read` lets her read the still AFTER it is taken;
@@ -691,43 +660,6 @@ def parse_weave_review(raw: str, tags: str) -> list[str]:
             if key and key in present and present[key] not in out:
                 out.append(present[key])
     return out
-
-
-async def run_weave_review(
-    ollama, *, system: str, tags: str, notebook_block: str, muse_says: str,
-    model: str, num_ctx: int | None, suggested: str = "",
-) -> tuple[list[str], list[str]]:
-    """Show her the bag before the render. She points; the caller subtracts.
-
-    ``system`` is her voice — who is looking. The output contract is appended
-    here rather than passed in, so there is one copy of it and the caller
-    cannot ship a review with no shape to its answer.
-    """
-    if not str(tags or "").strip():
-        return [], []
-    system = (
-        f"{system.strip()}\n\n{WEAVE_REVIEW_SYSTEM}"
-        if str(system or "").strip() else WEAVE_REVIEW_SYSTEM
-    )
-    prompt = "\n\n".join(b for b in [
-        f"NOTEBOOK NOW (what the shot is):\n{notebook_block}",
-        f"WHAT YOU JUST SAID:\n{muse_says.strip()[:600]}" if muse_says.strip() else "",
-        f"TAGS:\n{tags}",
-        f"SUGGESTED (the studio's words for a shot like this):\n{suggested}"
-        if str(suggested or "").strip() else "",
-        "当てはまらないものと、足りないものを、それぞれ一行で答えて。",
-    ] if b.strip())
-    try:
-        raw = await _call(
-            ollama, system=system, prompt=prompt, model=model, images=None,
-            num_ctx=num_ctx, think=False,
-        )
-    except ChainError:
-        # She could not look this time. The bag goes through as written — a
-        # review that cannot run is not a reason to hold up the take.
-        logger.warning("[muse.chain] weave review produced nothing", exc_info=True)
-        return [], []
-    return parse_weave_review(raw, tags), parse_weave_review_missing(raw, suggested)
 
 
 _WEAVE_MISSING_RE = re.compile(r"(?im)^[\s>*_-]*MISSING[\s*_]*[:：][ \t]*(.*)$")
@@ -823,36 +755,6 @@ def parse_restate(raw: str, field: str) -> tuple[str, str, str]:
     return identity.sanitize_muse_say(say), value, why[:notebook_mod.WHY_MAX_CHARS]
 
 
-async def run_restate(
-    ollama, *, system: str, field: str, current: str, transcript: str,
-    note: str = "", model: str, num_ctx: int | None,
-    on_token: TokenCallback | None = None,
-) -> tuple[str, str, str]:
-    """One part of the shot, said over from the start rather than edited.
-
-    A delta needs the field to still be movable. Measured live, a `beat` that
-    had accreted three clauses did not change across four repairs while the
-    showrunner asked three times for the same thing — the compile kept editing
-    inside it. Changing the shape of the question is what gets past that; it is
-    the same move 衣装部屋 makes for the outfit, and it worked there.
-    """
-    prompt = "\n\n".join(b for b in [
-        f"NOTEBOOK {field.upper()} (last written down — may be stale):\n"
-        f"{current.strip() or '(まだ書かれていません)'}",
-        f"WHAT THE SHOWRUNNER JUST ASKED:\n{note.strip()}" if note.strip() else "",
-        (
-            "CONVERSATION SO FAR (this is what actually happened — read it "
-            f"out of this):\n{transcript.strip()}"
-        ) if transcript.strip() else "",
-        "三行で答えてください。",
-    ] if b.strip())
-    raw = await _call(
-        ollama, system=system, prompt=prompt, model=model, images=None,
-        num_ctx=num_ctx, think=False, on_token=on_token,
-    )
-    return parse_restate(raw, field)
-
-
 _WARDROBE_LINE_RE = re.compile(r"(?im)^[\s>*_-]*(SAY|WEARING)[\s*_]*[:：]\s*(.*)$")
 
 
@@ -937,59 +839,6 @@ def parse_notebook_review(raw: str) -> list[str]:
     return [f for f in RESTATE_FIELDS if f in named]
 
 
-async def run_notebook_review(
-    ollama, *, system: str, notebook_block: str, muse_says: str, note: str,
-    model: str, num_ctx: int | None,
-) -> list[str]:
-    """Ask her which parts of the notebook are wrong. Empty on any failure."""
-    prompt = "\n\n".join(b for b in [
-        f"SHOT NOTEBOOK:\n{notebook_block}",
-        f"WHAT THE SHOWRUNNER JUST ASKED:\n{note.strip()}" if note.strip() else "",
-        f"WHAT YOU JUST SAID:\n{muse_says.strip()[:600]}" if muse_says.strip() else "",
-        "食い違っている欄はある？ 一行で答えて。",
-    ] if b.strip())
-    try:
-        raw = await _call(
-            ollama, system=f"{system.strip()}\n\n{NOTEBOOK_REVIEW_SYSTEM}",
-            prompt=prompt, model=model, images=None, num_ctx=num_ctx, think=False,
-        )
-    except ChainError:
-        logger.warning("[muse.chain] notebook review produced nothing", exc_info=True)
-        return []
-    return parse_notebook_review(raw)
-
-
-async def run_wardrobe(
-    ollama, *, system: str, notebook_wearing: str, transcript: str,
-    struck: str = "", model: str, num_ctx: int | None,
-    on_token: TokenCallback | None = None,
-) -> tuple[str, str]:
-    """衣装部屋 — the whole outfit restated, not edited.
-
-    The compile writes `wearing` as a delta and misses often enough that a
-    garment can sit on her for turns with nobody told (see
-    `crew.WARDROBE_READOUT_OUTPUT`). This is the way out that does not depend
-    on the delta landing: one turn, absolute answer, and the Showrunner can see
-    it and correct it.
-    """
-    prompt = "\n\n".join(b for b in [
-        f"NOTEBOOK WEARING (last written down — may be stale):\n"
-        f"{notebook_wearing.strip() or '(まだ書かれていません)'}",
-        f"TAKEN OFF EARLIER (do not put these back on):\n{struck.strip()}"
-        if struck.strip() else "",
-        (
-            "CONVERSATION SO FAR (this is what actually happened — read the "
-            f"clothing directions out of it):\n{transcript.strip()}"
-        ) if transcript.strip() else "",
-        "いま何を着ていますか。二行で答えてください。",
-    ] if b.strip())
-    raw = await _call(
-        ollama, system=system, prompt=prompt, model=model, images=None,
-        num_ctx=num_ctx, think=False, on_token=on_token,
-    )
-    return parse_wardrobe(raw)
-
-
 # Two lines per part: `CAMERA TAGS: …` and `CAMERA: …`. The TAGS variant has to
 # be tried first or the bare label matches it and swallows the word "TAGS".
 # `ALL_FACETS`, same reasoning as `_ROUTE_LABELS` above — a solo turn's
@@ -1047,23 +896,6 @@ def parse_facets(
         re.sub(r"(?is)^\s*SAY\s*[:：]\s*", "", say).strip()
     )
     return say, out
-
-
-async def run_duet_facets(
-    ollama, *, user_prompt: str, system: str, allowed: list[str],
-    model: str, num_ctx: int | None,
-    images: list[bytes] | None = None,
-    on_token: TokenCallback | None = None,
-) -> tuple[str, dict[str, dict[str, Any]], bool]:
-    """One turn that rewrites some parts of the shot, and says so out loud."""
-    raw, blind = await _call_seeing(
-        ollama, system=system, prompt=user_prompt, model=model, images=images,
-        num_ctx=num_ctx, think=False, on_token=on_token,
-    )
-    say, written = parse_facets(raw, allowed)
-    if not written:
-        raise ChainError("the turn wrote no part of the shot")
-    return say, written, blind
 
 
 def compose_system(*, name_a: str = "", name_b: str = "") -> str:
@@ -1140,32 +972,6 @@ def parse_compose(raw: str) -> str:
     return " ".join(scene.split())
 
 
-async def run_compose(
-    ollama, *, table_block: str, standing: str, model: str,
-    num_ctx: int | None, name_a: str = "", name_b: str = "",
-    on_token: TokenCallback | None = None,
-) -> str:
-    """Render the facet table into prose. A pure function of the table.
-
-    The prompt is the table and the standing rules, and NOTHING else — no chat,
-    no theme, no brief, no previous prompt, no board image. That is the whole
-    design: composing was never the thing that went wrong, being handed twenty
-    turns of contradicting history was. There is a test asserting this prompt
-    stays empty of all of it.
-
-    `name_b` present switches the system prompt to the W-Muse form — see
-    `compose_system`.
-    """
-    prompt = "\n\n".join(b for b in [
-        f"THE SHOT, IN PARTS:\n{table_block}", standing,
-    ] if b.strip())
-    system = compose_system(name_a=name_a, name_b=name_b) if name_b else COMPOSE_SYSTEM
-    return parse_compose(await _call(
-        ollama, system=system, prompt=prompt, model=model,
-        images=None, num_ctx=num_ctx, think=False, on_token=on_token,
-    ))
-
-
 async def run_duet_talk(
     ollama, *, user_prompt: str, model: str, num_ctx: int | None,
     character: dict[str, Any] | None = None,
@@ -1232,53 +1038,6 @@ async def run_duet_talk(
     return text, turns_out, blind, aside, blocks["card"], blocks["pitch"]
 
 
-async def run_duet_prep(
-    ollama, *, user_prompt: str, model: str, num_ctx: int | None,
-    identity_tags: list[str] | None, framing: str, brief: str,
-    character: dict[str, Any] | None = None,
-    partner_character: dict[str, Any] | None = None, style: str = "",
-    cast: list[dict] | None = None, seed: str = "",
-    images: list[bytes] | None = None,
-    on_token: TokenCallback | None = None,
-    tier: str = "",
-) -> MuseTurn:
-    """The turn where she (or they) build the whole shot and read the frame back."""
-    if partner_character:
-        system = crew.w_actress_duet_prompt(
-            character or {}, partner_character, mode="prep", base_style=style, seed=seed,
-            tier=tier,
-        )
-    else:
-        system = crew.actress_duet_prompt(
-            character or {}, mode="prep", base_style=style, seed=seed,
-        )
-
-    raw, blind = await _call_seeing(
-        ollama,
-        system=system,
-        prompt=user_prompt, model=model, images=images,
-        num_ctx=num_ctx, think=False, on_token=on_token,
-    )
-    turn = _finish_turn(
-        raw, muse_id=crew.DEFAULT_MEMBER["actress"], identity_tags=identity_tags,
-        framing=framing, brief=brief, style=style, cast=cast, duet=True,
-    )
-    if partner_character:
-        name_a = str(
-            (character or {}).get("name_ja")
-            or (character or {}).get("name") or ""
-        )
-        name_b = str(
-            partner_character.get("name_ja")
-            or partner_character.get("name") or ""
-        )
-        turns = identity.parse_duet_speakers(
-            turn.say, name_a=name_a, name_b=name_b,
-        )
-        turn = replace(turn, turns=tuple(turns) if turns else None)
-    return turn if not blind else replace(turn, blind=True)
-
-
 async def run_banter(
     ollama, *, muse_id: str, user_prompt: str, model: str,
     num_ctx: int | None,
@@ -1299,29 +1058,6 @@ async def run_banter(
     text = identity.sanitize_muse_say(say or raw)
     if not text:
         raise ChainError("empty banter")
-    return text
-
-
-async def run_table_talk(
-    ollama, *, system: str, user_prompt: str, model: str,
-    num_ctx: int | None,
-    images: list[bytes] | None = None,
-    on_token: TokenCallback | None = None,
-) -> str:
-    """Packed multi-seat banter — raw SPEAKER/SAY text, no craft parse."""
-    if images:
-        raw, _blind = await _call_seeing(
-            ollama, system=system, prompt=user_prompt, model=model,
-            images=images, num_ctx=num_ctx, think=False, on_token=on_token,
-        )
-    else:
-        raw = await _call(
-            ollama, system=system, prompt=user_prompt, model=model,
-            images=None, num_ctx=num_ctx, think=False, on_token=on_token,
-        )
-    text = str(raw or "").strip()
-    if not text:
-        raise ChainError("empty table talk")
     return text
 
 
@@ -1918,62 +1654,6 @@ def scripter_repair_note(missing: Iterable[str]) -> str:
     )
 
 
-# ── the clerk who only sorts ──────────────────────────────────────────────
-# Measured over 231 live calls per language on the studio's own director lines
-# (`private/muse/crew_lab/classify_gold.yaml`): ja 91% exact with ZERO dropped
-# fields, en 89% with two. That asymmetry is the whole reason this is usable —
-# a field named that did not need to move costs one wasted repair call, and a
-# field NOT named is the silent failure this exists to end. Four earlier
-# wordings are kept in the lab with their numbers; this is the one that scored.
-#
-# It is deliberately NOT part of the compile contract. Adding six lines about
-# light to that contract stopped `beat` and `wearing` being written at all, in
-# both rooms, on the very next run. A checker that cannot damage the thing it
-# checks is worth more than a stricter contract.
-CLASSIFY_FIELDS_SYSTEM = """
-You are the studio's clerk. You do not write the shot and you have no opinions.
-One job: read the director's line and say which parts of the shot it changes.
-
-The parts, and nothing outside this list:
-  wearing  — what is ON her body: clothes, hats, hair, accessories
-  beat     — what her body DOES: sit, stand, kneel, crouch, hands, turning
-  expression — what her FACE does: the mouth, the eyes, the brows, a mood she
-             has to play
-  frame    — the CAMERA: how close, the angle, what is inside the crop
-  scene    — WHERE she is and WHAT HOUR it is
-  light    — WHERE the light comes from and HOW HARD it is
-  bg       — what ELSE is in frame behind/around her: buildings, extras, props
-             that are not on her body
-
-How to decide:
-- A line that keeps a part unchanged still names it. "Keep the framing close"
-  changes frame, because frame has to be written down again as it stands.
-- A prop being added or moved is not `wearing` unless she puts it on. A prop
-  she picks up IS `beat`, because her hands change.
-- Naming a place also names the hour when the hour is in the words (夕方 / at
-  night / 朝). That is one part: scene.
-- Chit-chat, praise, and questions about the current state change nothing.
-  Answer exactly: none
-
-Output: the field names, comma separated. Nothing else. No explanation.
-
-Worked examples:
-  「セーラーに麦わら帽子。ベンチに座って。引きで全身。」→ wearing, beat, frame
-  「帽子外して。」                                      → wearing
-  「画角は寄ったまま。」                                → frame
-  「今なに着てる？どこ？」                              → none
-
-Three things that are easy to miss:
-- Feet count. Bare feet, no shoes, taking sandals off — the footwear changed,
-  so that is `wearing`.
-- **Her face has its own field now.** An expression, a mood she has to play —
-  that is `expression`, not `beat`. Being out of breath is the body, so that
-  stays in `beat`. A line that moves both names both.
-- Small talk and an instruction often arrive in one line. Read the whole line.
-  「いい天気だね。……そうだ、窓を開けて」 still opens the window: that is
-  `scene`. Never answer none just because the line starts as chit-chat.
-""".strip()
-
 CLASSIFY_FIELDS = ("wearing", "beat", "expression", "frame", "scene",
                    "light", "bg", "atmosphere")
 
@@ -2429,85 +2109,6 @@ async def read_abuse(
     return hit, why
 
 
-#: **場面からエキスパートを一つ選ぶ（2026-09-05）。** 一覧はその場で作る
-#: （`crew.GENRES` の鍵）ので、種類を足しても条文を直さなくてよい。
-GENRE_PICK_SYSTEM = """You are the studio's first assistant. Read where the
-shoot is and say which expert should write the notebook for it.
-
-Answer with one word from the list you are given, and nothing else. When none
-of them fits the place, answer `none` — a wrong expert is worse than none."""
-
-
-async def read_genre(
-    ollama, *, where: str, model: str, num_ctx: int | None,
-) -> str:
-    """One genre key from `crew.GENRES`, or "" when nothing fits."""
-    from . import crew as crew_mod
-
-    if not str(where or "").strip():
-        return ""
-    names = list(crew_mod.GENRES)
-    try:
-        raw = await _call(
-            ollama, system=GENRE_PICK_SYSTEM,
-            prompt=f"EXPERTS: {', '.join(names)}\n\nWHERE: {where.strip()}",
-            model=model, images=None, num_ctx=num_ctx, think=False,
-        )
-    except Exception:
-        logger.debug("[muse.chain] genre pick failed", exc_info=True)
-        return ""
-    word = re.sub(r"[^a-z]", "", str(raw or "").strip().lower()[:24])
-    return word if word in crew_mod.GENRES else ""
-
-
-#: **シンプルモード（2026-09-06）。** 総監督「一気にシンプルにして、Muse に
-#: 会話の度に、**現在の状況を整理して、今どのような状況になっているかを把握。
-#: その後その状況に合うように前回のプロンプトを修正する**というシンプルモード
-#: を設けて、切り替えられるようにして」「関数で防ぐというのは理屈は分かるし
-#: テストを行って成果は出してきたが、**監督の指示がダイレクトにプロンプトに
-#: 伝わらないのであれば意味がない**」。
-#:
-#: いまの道は compile → 欄ごとの係 → VERIFY → weave → 10ホップ → 組み立て。
-#: 段ごとに正しくしても**段と段のあいだで正本が食い違う**と絵に出る。実例:
-#: 「パーカーを脱いで」で `wearing` からは消えるのに `beat` の
-#: `hands in her hoodie pocket` が残る（純関数だけで再現済み）。
-#:
-#: **パーカーの例をそのまま条文に置く。** この模型は説明より例に従う ——
-#: 今日だけで四度確かめた（判定係の例外、絵作りの語彙、髪型、持ち物）。
-SIMPLE_REWRITE_SYSTEM = """You keep the picture for a photo shoot, the simple
-way. Each turn you do two things, in this order.
-
-**1. Say what the shot is now.** One or two plain lines. What she is wearing,
-what she is doing, where she is. Read the conversation and settle it in your
-own words before you touch anything.
-
-**2. Rewrite the prompt so it matches.** Start from PROMPT NOW and change only
-what the conversation changed. Everything else stays word for word — same
-order, same wording. You are editing, not writing a new one.
-
-**When something comes off or is put down, take out everything that needed
-it.** The hoodie comes off, so `hands in her hoodie pocket` goes too — she
-cannot have her hands in a pocket that is no longer there. Leave her posture:
-she is still standing. The same holds for a cup set down, a book closed, a hat
-removed.
-
-**Take out only what was named.** Moving is not putting things down: given
-`sitting, holding_book, reading` and told 立って, the answer is `standing,
-holding_book, reading` — the book did not go anywhere, and nobody asked her to
-close it. Only a line that says so takes it out of her hands.
-
-- **LOCKED is copied exactly.** It is who she is — hair colour, eyes, build.
-  It never changes, whatever is said.
-- Never write a word from STRUCK.
-- Tags for what she is, wears and does — ordinary danbooru words, underscored,
-  the ones a sampler knows. Plain prose for the rest of the picture.
-- The showrunner's latest line wins over everything already in the prompt.
-
-OUTPUT — exactly this shape, nothing else:
-
-NOW: <one or two lines, plain words>
-PROMPT: <the whole prompt, ready to render>"""
-
 _NOW_RE = re.compile(r"(?im)^[\s>*_-]*NOW[\s*_]*[:：][ \t]*(.*)$")
 _PROMPT_RE = re.compile(r"(?is)^[\s>*_-]*PROMPT[\s*_]*[:：][ \t]*(.*)$", re.M)
 
@@ -2524,30 +2125,6 @@ def parse_simple_rewrite(raw: str) -> tuple[str, str]:
     if n:
         now = " ".join(n.group(1).split())[:240]
     return now, prompt
-
-
-async def run_simple_rewrite(
-    ollama, *, prompt_now: str, conversation: str, locked: str,
-    struck: str, model: str, num_ctx: int | None,
-) -> tuple[str, str]:
-    """一回の会話につき、一回の書き直し。返すのは (いまの状況, プロンプト)。"""
-    body = "\n\n".join(b for b in [
-        f"LOCKED (copy this line exactly):\n{locked.strip()}" if locked.strip() else "",
-        f"PROMPT NOW:\n{prompt_now.strip()}" if prompt_now.strip() else
-        "PROMPT NOW:\n(none yet — write the first one)",
-        f"CONVERSATION:\n{conversation.strip()}" if conversation.strip() else "",
-        f"STRUCK (never write these):\n{struck.strip()}" if struck.strip() else "",
-        "NOW:",
-    ] if b)
-    try:
-        raw = await _call(
-            ollama, system=SIMPLE_REWRITE_SYSTEM, prompt=body,
-            model=model, images=None, num_ctx=num_ctx, think=False,
-        )
-    except Exception:
-        logger.warning("[muse.chain] simple rewrite failed", exc_info=True)
-        return "", ""
-    return parse_simple_rewrite(raw)
 
 
 async def read_nsfw(
@@ -3245,7 +2822,6 @@ async def read_per_person(
     return out
 
 
-
 async def read_wardrobe(
     ollama, *, note: str, name_a: str, name_b: str,
     wearing: str = "", wearing_b: str = "", model: str, num_ctx: int | None,
@@ -3266,84 +2842,6 @@ async def read_beats(
     return await read_per_person(
         ollama, kind="beat", note=note, name_a=name_a, name_b=name_b,
         now_a=beat, now_b=beat_b, model=model, num_ctx=num_ctx)
-
-
-WARDROBE_PICK_SYSTEM = """You are the wardrobe room for a photo shoot.
-
-Each person below owns a few outfits. Read what today's shoot is and say which
-one each of them should arrive in.
-
-- Pick by the place, the hour and the season.
-  - At her own workplace, or when the brief says she is working → her work
-    clothes.
-  - Out on a day off, at home, running errands → her everyday clothes.
-  - **Evening, or anywhere people dress for** — a bar, a restaurant, a party,
-    a concert, a hotel — → the dressed-up one. An evening out is not a day
-    off, and it is never a work shift.
-- **Answer with the key only** — one of the keys listed for that person.
-  Never invent a key. Never describe the clothes.
-- When nothing in the brief says where or when, answer `signature`.
-
-Return one JSON object with exactly these keys, and nothing else:
-{keys}"""
-
-
-async def read_wardrobe_choice(
-    ollama, *, brief: str, people: list[tuple[str, list[dict[str, Any]]]],
-    model: str, num_ctx: int | None,
-) -> dict[str, str]:
-    """今日はどれを着てくるか。**返させるのは鍵だけ。**
-
-    総監督（2026-08-29）「監督に呼ばれたときはその中から選んできてくれる
-    形式にしましょう」。
-
-    **服の語はモデルに書かせない** —— 鍵だけ返させて、こちらでプリセットから
-    展開する。訳語のぶれも、勝手な一着も出ない。名前をキーにするのは
-    `read_per_person` と同じ道で、二人いても取り違えない（実測 25/25。
-    片方だけ切り出すと 18/25 に落ちるので、**必ずまとめて訊く**）。
-
-    読めなかった鍵、そのキャラが持っていない鍵は捨てて `signature` に倒す。
-    """
-    rows = [(str(n).strip(), sets) for n, sets in people if str(n).strip() and sets]
-    if not rows:
-        return {}
-    keys = json.dumps({n: "…" for n, _ in rows}, ensure_ascii=False)
-    lines = []
-    for name, sets in rows:
-        got = ", ".join(
-            f"{s.get('key')} ({', '.join(str(t) for t in (s.get('tags') or [])[:4])})"
-            for s in sets if s.get("key")
-        )
-        lines.append(f"{name} — {got}")
-    prompt = "\n\n".join(x for x in (
-        f"TODAY'S SHOOT:\n{str(brief or '').strip()}" if str(brief or "").strip() else "",
-        "WHAT THEY OWN:\n" + "\n".join(lines),
-        "JSON:",
-    ) if x)
-    try:
-        raw = await _call(
-            ollama, system=WARDROBE_PICK_SYSTEM.format(keys=keys),
-            prompt=prompt, model=model, images=None, num_ctx=num_ctx, think=False,
-        )
-    except Exception:
-        logger.warning("[muse.chain] wardrobe pick failed", exc_info=True)
-        return {}
-    m = _WARDROBE_JSON_RE.search(str(raw or ""))
-    got: dict[str, Any] = {}
-    if m:
-        try:
-            parsed = json.loads(m.group(0))
-            got = parsed if isinstance(parsed, dict) else {}
-        except Exception:
-            got = {}
-    out: dict[str, str] = {}
-    for name, sets in rows:
-        owned = {str(x.get("key")) for x in sets if x.get("key")}
-        key = str(got.get(name) or "").strip().lower()
-        out[name] = key if key in owned else (
-            "signature" if "signature" in owned else sorted(owned)[0]
-        )
-    return out
 
 
 DRESSED_AFTER_SYSTEM = """A first reader flagged the director's line as a
@@ -3481,29 +2979,6 @@ def parse_classified_fields(raw: str) -> set[str]:
     return set() if not hit else hit
 
 
-async def classify_fields(
-    ollama, *, note: str, model: str, num_ctx: int | None,
-) -> set[str]:
-    """Which notebook fields the showrunner's line asks to move.
-
-    Returns an empty set when the line moves nothing, and also when the call
-    fails — a checker that raises would take the whole turn down with it, and
-    the turn is still worth having without the check.
-    """
-    if not str(note or "").strip():
-        return set()
-    try:
-        raw = await _call(
-            ollama, system=CLASSIFY_FIELDS_SYSTEM,
-            prompt=f"DIRECTOR: {note.strip()}\nFIELDS:",
-            model=model, images=None, num_ctx=num_ctx, think=False,
-        )
-    except Exception:
-        logger.warning("[muse.chain] classify failed; no check this turn",
-                       exc_info=True)
-        return set()
-    return parse_classified_fields(raw)
-
 STILL_READ_SYSTEM = f"""
 You are reading the latest test still for the studio notebook.
 Write labelled English absolute values for what is in the photo.
@@ -3516,7 +2991,6 @@ WEARING additionally: omit struck items even if the photo still shows them.
 
 No TAGS. No JSON. No SAY.
 """.strip()
-
 
 
 CREW_LOOK_NOTE = (
@@ -3764,32 +3238,3 @@ async def run_scripter(
     return validated
 
 
-async def run_still_read(
-    ollama, *, notebook_block: str, struck: str, partner: bool,
-    model: str, num_ctx: int | None, images: list[bytes],
-) -> dict[str, Any]:
-    """Labelled still-read after a board lands. No JSON schema with the image."""
-    from . import notebook as notebook_mod
-
-    if not images:
-        return notebook_mod._blank_result("")
-    prompt = "\n\n".join(b for b in [
-        f"NOTEBOOK NOW:\n{notebook_block}",
-        f"STRUCK (do not put these back, even if visible):\n{struck}"
-        if struck.strip() else "",
-        "Read the attached still. Labelled blocks only.",
-        "Partner: include WEARING_B / BEAT_B." if partner else "Solo.",
-    ] if b.strip())
-    try:
-        raw, _ = await _call_seeing(
-            ollama, system=STILL_READ_SYSTEM, prompt=prompt, model=model,
-            images=images, num_ctx=num_ctx, think=False, on_token=None,
-        )
-    except ChainError:
-        logger.warning("[muse.chain] still-read produced nothing", exc_info=True)
-        return notebook_mod._blank_result("")
-    parsed = notebook_mod.parse_scripter(raw)
-    parsed["intent"] = "shot"
-    return notebook_mod.validate_scripter(
-        parsed, partner=partner, mode="compile",
-    )

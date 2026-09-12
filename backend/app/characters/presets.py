@@ -1188,26 +1188,6 @@ async def add_social_seed(db, preset_id: str, seed: dict[str, Any]) -> dict[str,
         return entry
 
 
-async def consume_social_seeds(db, preset_id: str, seed_ids: list[str]) -> None:
-    """Decrement uses_left for seeds that coloured a session; drop spent ones."""
-    wanted = {str(i) for i in seed_ids if i}
-    if not wanted:
-        return
-    async with _social_seeds_lock:
-        preset = await get_preset(db, preset_id)
-        if not preset:
-            return
-        kept: list[dict[str, Any]] = []
-        for seed in list(preset.get("social_seeds") or []):
-            if str(seed.get("id") or "") in wanted:
-                left = int(seed.get("uses_left") or 0) - 1
-                if left <= 0:
-                    continue
-                seed = {**seed, "uses_left": left}
-            kept.append(seed)
-        await update_preset(db, preset_id, {"social_seeds": kept[:MAX_SOCIAL_SEEDS]})
-
-
 # ── Memory erase (admin) ─────────────────────────────────────────────────────
 # "記憶の消去" — reset every character's accrued memory (diary, chemistry notes,
 # lounge whispers) while leaving the character sheet, board and gallery photos

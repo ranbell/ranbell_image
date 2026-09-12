@@ -81,14 +81,6 @@ async def list_dirs_route(request: Request):
     return {"dirs": await _dirs_cache.get(_build)}
 
 
-def _as_str(v) -> str:
-    if v is None:
-        return ""
-    if isinstance(v, list):
-        return ", ".join(str(x) for x in v)
-    return str(v)
-
-
 def _db(request: Request) -> QdrantDBClient:
     return request.app.state.db
 
@@ -527,7 +519,6 @@ async def suggest_tags(q: str = "", limit: int = 10):
     starts = [t for t in source if t["tag"].startswith(q_lower)]
     contains = [t for t in source if q_lower in t["tag"] and not t["tag"].startswith(q_lower)]
     return (starts + contains)[:limit]
-
 
 
 @router.get("/thumbnails/{sha256}.webp")

@@ -9,11 +9,6 @@ through to identity and got locked to the character forever.
 """
 from __future__ import annotations
 
-# What a danbooru-style tag looks like. Anything else (a sentence, a Japanese
-# phrase) is not forced into tag shape — it goes to the prompt's prose side.
-_MAX_TAG_WORDS = 4
-_MAX_TAG_CHARS = 40
-_SENTENCE_MARKS = (".", ",", "!", "?", ";", ":", "'", '"')
 
 _IDENTITY_SUBJECTS = frozenset({
     "1girl", "1boy", "1other", "solo", "multiple_girls", "multiple_boys",
@@ -39,23 +34,6 @@ def soft_normalize_tag(tag: str) -> str:
     if t == "close_up":
         return "close-up"
     return t
-
-
-def is_tag_like(value: str) -> bool:
-    """True when a value can go in the tag list without being mangled.
-
-    Prose fails here and is routed to the prose side of the prompt instead of
-    being underscore-joined into a fake tag like
-    ``the_character's_strained_expression_during_the_peak_rotation_of_the_ride.``
-    """
-    raw = (value or "").strip()
-    if not raw or not raw.isascii():
-        return False
-    if len(raw) > _MAX_TAG_CHARS:
-        return False
-    if any(mark in raw for mark in _SENTENCE_MARKS):
-        return False
-    return len(raw.replace("_", " ").split()) <= _MAX_TAG_WORDS
 
 
 def tag_layer(tag: str) -> str | None:

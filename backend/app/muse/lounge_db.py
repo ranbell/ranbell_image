@@ -177,14 +177,6 @@ async def set_thread_liked(
     return await save_thread(db, thread)
 
 
-async def mark_recommended(db, thread_id: str) -> dict[str, Any] | None:
-    thread = await get_thread(db, thread_id)
-    if thread is None:
-        return None
-    thread["recommended_at"] = time.time()
-    return await save_thread(db, thread)
-
-
 async def next_liked_pitch(db, character_id: str) -> dict[str, Any] | None:
     """Newest liked pitch for this Muse that has not been recommended yet."""
     if not character_id:
@@ -201,15 +193,3 @@ async def next_liked_pitch(db, character_id: str) -> dict[str, Any] | None:
     return None
 
 
-async def append_message(db, thread_id: str, message: dict[str, Any]) -> dict[str, Any] | None:
-    thread = await get_thread(db, thread_id)
-    if thread is None:
-        return None
-    messages = list(thread.get("messages") or [])
-    msg = dict(message)
-    msg.setdefault("id", str(uuid.uuid4()))
-    msg.setdefault("turn", len(messages))
-    messages.append(msg)
-    thread["messages"] = messages
-    thread["updated_at"] = time.time()
-    return await save_thread(db, thread)

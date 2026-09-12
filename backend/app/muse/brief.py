@@ -477,14 +477,3 @@ def build(
     ] if b)
 
 
-def with_previous(
-    brief: str, previous: str, *, pose: str = "", analysis: str = "",
-) -> str:
-    """Table-read / pickup input: brief, frozen pose, analysis, previous craft."""
-    parts = [brief]
-    if pose.strip():
-        parts.append(f"Pose intent: {pose.strip()}")
-    if analysis.strip():
-        parts.append(f"Screening notes:\n{analysis.strip()}")
-    body = "\n\n".join(parts)
-    return f"{body},{previous}" if previous.strip() else body

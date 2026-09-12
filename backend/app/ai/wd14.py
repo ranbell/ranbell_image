@@ -165,17 +165,6 @@ def _predict_sync_scored(
     return results
 
 
-async def predict_tags(
-    image_path: Path,
-    threshold: float | None = None,
-    model_dir: str | None = None,
-) -> list[str]:
-    t = threshold if threshold is not None else settings.wd14_threshold
-    d = model_dir if model_dir is not None else settings.wd14_model_dir
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _predict_sync, image_path, t, d)
-
-
 async def predict_tags_scored(
     image_path: Path,
     threshold: float | None = None,
@@ -223,40 +212,6 @@ def _predict_sync_typed(
         out.append((str(row["name"]).replace("_", " "), float(p), category))
     out.sort(key=lambda x: x[1], reverse=True)
     return out
-
-
-async def tags_scored_from_bytes(
-    img_bytes: bytes,
-    *,
-    threshold: float,
-    model_dir: str | None = None,
-    suffix: str = ".png",
-) -> list[tuple[str, float, int]]:
-    """WD14-scan bytes → ``(underscore_name, confidence, category)``, best first.
-
-    ``tags_from_path``/``tags_from_bytes`` drop the confidences, and ``_tag_doc``
-    refuses to re-tag a document that already has tags — so neither can be used
-    to read an image back at a different threshold. This can.
-    """
-    import tempfile
-
-    d = model_dir if model_dir is not None else settings.wd14_model_dir
-    path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-            tmp.write(img_bytes)
-            path = Path(tmp.name)
-        loop = asyncio.get_event_loop()
-        scored = await loop.run_in_executor(
-            None, _predict_sync_typed, path, float(threshold), d,
-        )
-    finally:
-        if path is not None:
-            try:
-                path.unlink(missing_ok=True)
-            except Exception as exc:
-                logger.debug("wd14 tempfile cleanup failed: %s", exc)
-    return [(name.strip().replace(" ", "_"), score, cat) for name, score, cat in scored]
 
 
 def _normalize_tag_names(scored: list[tuple[str, float]]) -> list[str]:

@@ -120,32 +120,6 @@ def tag_to_anima_spaces(token: str) -> str:
     return text.replace("_", " ")
 
 
-def _format_tag_line(line: str) -> str:
-    """Rewrite one ownership / tag line to Anima spacing, no weights."""
-    text = (line or "").rstrip()
-    if not text:
-        return ""
-    # Preserve structural prefixes: "2girls, Mio and Sumire," / "Mio is …," / "Mio: …,"
-    trailing_comma = text.endswith(",")
-    body = text[:-1] if trailing_comma else text
-
-    # Named dynamic / identity lines keep the label, rewrite the tag run.
-    for sep in (": ", " is "):
-        if sep in body:
-            head, _, rest = body.partition(sep)
-            # Only treat as Muse ownership when head looks like a short name.
-            if 0 < len(head.split()) <= 4 and "," not in head:
-                parts = [tag_to_anima_spaces(p) for p in rest.split(",")]
-                parts = [p for p in parts if p]
-                rebuilt = f"{head}{sep}" + ", ".join(parts)
-                return rebuilt + ("," if trailing_comma else "")
-
-    parts = [tag_to_anima_spaces(p) for p in body.split(",")]
-    parts = [p for p in parts if p]
-    rebuilt = ", ".join(parts)
-    return rebuilt + ("," if trailing_comma and rebuilt else "")
-
-
 def _looks_like_prose_line(line: str) -> bool:
     text = (line or "").strip()
     if not text:

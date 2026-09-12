@@ -66,19 +66,6 @@ async def list_pages(db, *, pinned_only: bool = False) -> list[dict[str, Any]]:
     return rows
 
 
-async def delete_page(db, page_id: str) -> bool:
-    if not page_id:
-        return False
-    existing = await get_page(db, page_id)
-    if existing is None:
-        return False
-    await db._qc.delete(
-        collection_name=MUSE_HANDPOST_COLLECTION,
-        points_selector=qm.PointIdsList(points=[page_id]),
-    )
-    return True
-
-
 def _is_generated(page: dict[str, Any]) -> bool:
     """True for pages the studio wrote on its own (habit notes, promoted
     pitches). Legacy director-typed notices (no source ids, author director)
