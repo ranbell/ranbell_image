@@ -29,7 +29,10 @@ from .api.analyzer import router as analyzer_router
 from .api.alignment import router as alignment_router
 from .api.invoke import router as invoke_router
 from .characters.api import router as characters_router
-from .muse.api import router as muse_router
+# **Muse Classic は退役した（2026-09-12）。** 撮影室は Muse Refine 一つ。
+# 楽屋と手帖だけは classic のルーターに同居していたので、そこだけ独立させた
+# （URL は `/api/muse/lounge/...` のまま —— 画面がそう叩いている）。
+from .muse.lounge_api import router as muse_lounge_router
 
 
 def _abort(msg: str) -> None:
@@ -224,7 +227,7 @@ app.include_router(analyzer_router)
 app.include_router(alignment_router)
 app.include_router(invoke_router)
 app.include_router(characters_router)
-app.include_router(muse_router)
+app.include_router(muse_lounge_router)
 app.include_router(muse_refine_router)
 
 
