@@ -3686,6 +3686,49 @@ def plan_system_prompt(muse_id: str = "", *, seed: str = "") -> str:
     ])
 
 
+
+#: **席ぶんの CARRY。**（2026-09-13）
+#:
+#: `CARRY`（3,088字）は classic の機構に宛てた条文 —— 「前の TAGS/SCENE を
+#: 書き直している」「COSTUME ブロック」「PLAN」「brief」「STRUCK FROM THE SET」。
+#: いまの席は TAGS も SCENE も書かず（`crew_room.SEAT_OUTPUT`）、COSTUME ブロックも
+#: PLAN も brief も無い。**宛先の無い条文を毎席送っていた。**
+#:
+#: ただし丸ごとは捨てられない。二つだけ、いまも席に効いている:
+#:
+#:   ① 拒否されたものを**名指ししない**（否定するために名前を出すと、
+#:      その語がセッション中ずっと絵に残る。実測で踏んだ）
+#:   ② **相対指定の禁止**。席は直列なので「もっと暗く」が下流で積もり、
+#:      絵が底を打つ。だから絶対値を言う
+#:
+#: 実測（台・同じ12席）: `CARRY` と `OUTPUT` を外すと 160.6s → 87.1s（-46%）。
+#: SAY は 75→96字と短くなっていないので、会話が痩せる削りではない。
+SEAT_CARRY = """
+WHAT THE SHOWRUNNER HAS REFUSED
+When a standing order says something was just removed, it is already out and it
+stays out — you do not need to do anything about it.
+- Do NOT name it. Not in CRAFT, and NOT IN SAY EITHER — not even to agree that
+  it is gone, not even to say what you are replacing it with. Naming a thing to
+  deny it is how it stayed in the picture for a whole session.
+- Do not ask what was removed, do not guess, do not refer to "the thing we took
+  out". Say what IS in the frame.
+
+NO RELATIVE ADJUSTMENTS (this is how a frame bottoms out)
+Every seat sharpens the seat before it, so a nudge in one direction is applied
+again by everyone downstream until the picture saturates.
+- Never write "darker", "brighter", "deeper shadows", "more contrast",
+  "push saturation", "richer", "lower the key" — not in SAY, not in CRAFT.
+- State the ABSOLUTE state instead: what the light IS, what the key IS.
+- If the shot already matches what was asked, keep it and say it is already right.
+
+KEEP WHAT IS NOT YOURS
+- ADD and SHARPEN in your specialty only. Move another seat's field only when
+  the Showrunner's latest line told you to.
+- NEVER change hair style, hair colour, eye colour, or figure/body size.
+- What she is WEARING is Wardrobe's (衣装). A garment word anywhere else is an
+  object in the room, not what she has on.
+""".strip()
+
 def system_prompt_for(
     muse_id: str, character: dict[str, Any] | None = None,
     *, base_style: str = "", seed: str = "",
@@ -3720,9 +3763,13 @@ def system_prompt_for(
         "When the Lead (selected character) has spoken, honour her personality "
         "choice — do not flatten her back into a generic cute face.",
         _style_block(mid, base_style),
-        CARRY,
+        # **席には席ぶんの条文だけ（2026-09-13）。** `CARRY` と `OUTPUT` は
+        # classic の TAGS/SCENE 機構に宛てたもので、`OUTPUT` に至っては
+        # `crew_room.SEAT_OUTPUT` が「this REPLACES any format above」と
+        # 打ち消していた —— 毎席 5,900字を送って毎席取り消していたことになる。
+        # 出力の形は `SEAT_OUTPUT` が最後に言う（あちらが唯一の形式）。
+        SEAT_CARRY,
         m["specialty"],
-        OUTPUT,
         WARDROBE_COSTUME_TAIL if role_of(mid) == "wardrobe" else "",
     ]
     return "\n\n".join(b for b in blocks if b)

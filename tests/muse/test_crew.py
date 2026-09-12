@@ -60,17 +60,28 @@ def test_actress_prompt_pulls_selected_character_personality():
     assert "never props" in text.lower() or "Never draw likes" in text
 
 
-def test_system_prompt_keeps_say_tags_scene_and_english_craft():
+def test_the_seat_prompt_is_voice_plus_specialty_and_nothing_classic():
+    """**席の前置きは、声と職能と席ぶんの条文だけ。**（2026-09-13）
+
+    元は「SAY / TAGS / SCENE の三ブロック」を確かめる試験だった。いまの席は
+    **TAGS も SCENE も書かない**（書くのは台本係一人）ので、あの契約はもう無い。
+
+    毎席 5,900字を送って毎席打ち消していた —— `crew.OUTPUT` は
+    `crew_room.SEAT_OUTPUT` の「this REPLACES any format above」に潰され、
+    `crew.CARRY` は COSTUME ブロックや PLAN という**存在しない機構**に宛てた
+    条文だった。外して 8,792字 → 4,517字（台の実測で 1ターン -46%）。
+    """
     text = crew.system_prompt_for("beat")
-    assert "OUTPUT FORMAT" in text
-    assert "SAY:" in text
-    assert "TAGS:" in text
-    assert "SCENE:" in text
-    assert "English only" in text
+    assert "SAY:" not in text, "出力の形は SEAT_OUTPUT が最後に言う"
+    assert crew.OUTPUT not in text and crew.CARRY not in text
+    # 声と職能は残っている
     assert "演出" in text and "一秒" in text
     assert "口調 (JA)" in text
     assert "EXAMPLE SAY" in text
     assert "conversation" in text.lower() or "RECENT TABLE TALK" in text
+    # 席ぶんの条文（拒否したものを名指ししない／相対指定の禁止）は残す
+    assert "Do NOT name it" in text
+    assert "NO RELATIVE ADJUSTMENTS" in text
     assert len(crew.MUSES["beat:ichibyou"]["say_examples"]) >= 3
     assert (crew.MUSES["spine:bane"]["voice_ja"]
             != crew.MUSES["faces:mabataki"]["voice_ja"])
@@ -555,3 +566,26 @@ def test_the_weave_is_told_to_call_a_garment_one_name():
     """gown を dress と言い換えると、二人しかいない画に服が三着になる。"""
     from app.muse import chain
     assert "ONE NAME PER GARMENT" in chain.SCRIPTER_WEAVE_SYSTEM
+
+
+def test_the_seat_still_hears_the_rules_that_were_doing_work():
+    """外した 5,900字のうち、**効いていたものは席に残っている**こと。
+
+    `crew.OUTPUT` の言語・声の規則は `crew_room.SEAT_OUTPUT` へ引き取った。
+    `crew.CARRY` の二つ（拒否したものを名指ししない／相対指定の禁止）は
+    `crew.SEAT_CARRY` として席に残した。
+    """
+    from app.muse import crew_room
+
+    seat = crew.system_prompt_for("gaffer") + "\n\n" + crew_room.SEAT_OUTPUT
+    for must in ("LANGUAGE", "口調", "Do NOT name it", "NO RELATIVE ADJUSTMENTS",
+                 "CRAFT:", "Never write a TAGS: or SCENE: block"):
+        assert must in seat, must
+    assert len(seat) < 5500, f"席の前置きが太った（{len(seat)}字）"
+
+
+def test_the_actress_keeps_the_classic_contract():
+    """**一人撮りの正本は触らない。** 女優の前置きは今も CARRY と OUTPUT を読む。"""
+    text = crew.actress_system_prompt({"name": "Mio", "name_ja": "みお"})
+    assert crew.CARRY in text
+    assert crew.OUTPUT in text

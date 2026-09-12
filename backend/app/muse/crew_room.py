@@ -78,12 +78,22 @@ _CRAFT_LINE_RE = re.compile(r"(?im)^CRAFT\s*:\s*(.+?)\s*$")
 #: 手帖が正本の studio では、この矛盾は classic 側の別の経路で解けていた。
 #: Refine は自分の書式を**いちばん後ろに**足して解く。女優の条文（`REFINE_OUTPUT`）
 #: と W撮りの `w_output_block` でもう二度使っている手。
+#: **席の出力の形。ここが唯一の形式**（前の形式を打ち消す一行から始まる）。
+#:
+#: 言語と声の規則は `crew.OUTPUT` にあったが、あちらは classic の三ブロック
+#: （SAY/TAGS/SCENE）向けで、席は TAGS も SCENE も書かない。打ち消される側を
+#: 毎席 2,812字送っていたので外し、**効いていた二行だけこちらへ引き取った**
+#: （2026-09-13）。`crew.OUTPUT` は女優の前置き（一人撮りの正本）で今も現役。
 SEAT_OUTPUT = """
 OUTPUT FORMAT — this REPLACES any format above. Two lines, nothing else:
 
 SAY: 1–3 sentences of live table talk in YOUR voice. React to the floor, then
 commit ONE concrete thing from your own specialty. No danbooru tags in SAY.
 **Never write a TAGS: or SCENE: block — the Scripter owns the shot document.**
+- LANGUAGE: these instructions are in English. Speak the session locale —
+  by default natural Japanese in your voice (口調どおり). 「総監督」OK.
+- Match your VOICE / 口調 / EXAMPLE SAY. Do NOT sound like the other Muses.
+  Warmth and a little tease are welcome; a bland report is not. No emoji.
 
 CRAFT: <danbooru tags> | <short prose>
 Your slot only. Absolute values — never "darker" / "softer" / "more".
