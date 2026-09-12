@@ -158,9 +158,13 @@ _BODY_AXES: tuple[tuple[str, tuple[str, ...], dict[str, tuple[str, ...]]], ...] 
     # **部位の語を要らない軸。** 掴んでいるのは定義上その手なので、
     # `hugging tray`（手の字が無い）も同じ軸に乗る。空の組がその印。
     ("hold", (), {
+        # **支える言い方も掴み（2026-09-12 の実機）。** `right arm holding tray`
+        # と `forearm_supporting_tray` が二重で残った —— `supporting` を
+        # 入れていなかったので軸に乗らなかった。
         "hold": ("holding", "hold", "clutching", "clutch", "gripping", "grip",
                  "grasping", "grasp", "steadying", "steady", "hugging", "hug",
-                 "carrying", "carry", "clasping", "clasp"),
+                 "carrying", "carry", "clasping", "clasp", "supporting",
+                 "support", "cradling", "cradle", "propping", "balancing"),
         "free": ("releasing", "release", "letting go", "let go", "lowering",
                  "setting down", "putting down", "open palms", "empty"),
     }),

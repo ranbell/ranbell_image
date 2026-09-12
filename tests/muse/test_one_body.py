@@ -188,3 +188,20 @@ def test_the_posture_words_come_from_the_one_list_we_already_have():
 
     src = inspect.getsource(L._posture_of)
     assert "conflict.slot_of" in src and "posture" in src
+
+
+def test_supporting_a_thing_is_holding_it():
+    """実機（2026-09-12・2回目の再現）で残った二重。
+
+        right arm holding tray, forearm_supporting_tray
+
+    `supporting` を掴みの語に入れていなかったので軸に乗らなかった。**左手は腰・
+    右手はトレイ**という書き分けは残したまま、トレイの二重だけ落ちること。
+    """
+    kept, dropped = L.one_body(
+        "standing, weight on back leg, left hand on hip, right arm holding tray, "
+        "elbows flared outward, forearm_supporting_tray"
+    )
+    assert dropped == ["forearm_supporting_tray"]
+    assert "left hand on hip" in kept and "right arm holding tray" in kept
+    assert kept.startswith("standing, ")
