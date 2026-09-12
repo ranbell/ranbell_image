@@ -121,7 +121,7 @@ def test_an_angle_keeps_the_gaze_that_belongs_to_it():
 
 
 def test_a_facets_own_write_cannot_contradict_itself():
-    """A real e2e run against fredrezones55/Gemma-4-Uncensored-HauhauCS-Aggressive
+    """A real e2e run against a local 26B model
     produced a CAMERA TAGS line answering "shoot from below" that named the
     intended low angle plus a trailing high-angle hedge left in from the shot
     it was replacing — both in the same line. Nothing used to look for a

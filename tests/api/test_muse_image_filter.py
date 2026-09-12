@@ -78,7 +78,7 @@ def test_stage_and_session_narrow_without_disturbing_the_rest():
 def test_a_muse_filter_composes_with_the_searches_already_there():
     """The whole point of reusing `_make_filter`: nothing is a special case."""
     f = _db()._make_filter(
-        character_id=MIO, keyword="rooftop", models=["nyaIris.safetensors"],
+        character_id=MIO, keyword="rooftop", models=["checkpoint_a.safetensors"],
         tags_exclude=["monochrome"], category="AI",
     )
     assert {"character_id", "positive_prompt", "model_name",
