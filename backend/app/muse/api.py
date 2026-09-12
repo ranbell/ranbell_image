@@ -32,6 +32,16 @@ class InputsPatch(BaseModel):
     theme: str | None = None
     character_id: str | None = None
     partner_preset: str | None = None
+    # **撮影班のプリセット（2026-09-13 に欠けていたのを足した）。**
+    #
+    # 画面には前から選択が出ていた（`muse.crewPreset`）が、ここに欄が無いので
+    # pydantic が黙って捨てていた —— `{"crew_preset": "photoreal"}` が `{}` に
+    # なり、**スタジオ撮りは常に `standard` の18席**で回っていた。総監督
+    # 「photorealistic, vivid, flat などがうまく機能することを祈っています」。
+    crew_preset: str | None = None
+    #: やじ（off / light / full）。これも画面には前から出ていて、受け取る欄が
+    #: 無かった —— 呼び出し回数の半分はやじなので、**速さの手が一つ塞がっていた**。
+    banter_mode: str | None = None
     workflow: str | None = None
     model: str | None = None
     locale: str | None = None

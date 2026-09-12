@@ -160,6 +160,7 @@ Ranbell Image は**完全ローカル動作**のアプリケーションです�
 
 | 機能 | 使い方を知りたい | 仕組みを深く知りたい |
 |---|---|---|
+| **Muse（会話で撮る）** | [クリエイターガイド →](docs/guide/muse.ja.md) | 近日公開 |
 | **召喚（Invoke）** | [クリエイターガイド →](docs/guide/invoke.ja.md) | 近日公開 |
 | **インスパイア & ブレスト** | [クリエイターガイド →](docs/guide/inspire-brainstorm.ja.md) | [技術リファレンス →](docs/tech/inspire-brainstorm.ja.md) |
 | **プロンプト錬成** | [クリエイターガイド →](docs/guide/prompt-alchemy.ja.md) | [技術リファレンス →](docs/tech/prompt-alchemy.ja.md) |
