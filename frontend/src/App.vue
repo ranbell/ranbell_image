@@ -7,7 +7,6 @@ import AnalyzerModal from './components/AnalyzerModal.vue'
 import AdminModal from './components/AdminModal.vue'
 import InspirePanel from './components/InspirePanel.vue'
 import InvokePanel from './components/InvokePanel.vue'
-import MusePanel from './components/MusePanel.vue'
 import MuseRefinePanel from './components/MuseRefinePanel.vue'
 import CharacterGallery from './components/CharacterGallery.vue'
 import ActressDiaryModal from './components/muse/ActressDiaryModal.vue'
@@ -73,7 +72,7 @@ async function waitForBackend() {
 
 // ── Job stream ────────────────────────────────────────────────────────────────
 const jobsMap = ref(new Map())   // job.id -> job dict
-// Stable getter so MusePanel can sample jobs without re-rendering on every map update.
+// 仕事の一覧を毎回作り直さずに渡すための getter（撮影室が進捗を拾う）。
 function getJobsMap() { return jobsMap.value }
 let _jobEventSource = null
 
@@ -2661,28 +2660,26 @@ function openInspire() { showInspire.value = true }
 const showInvoke = ref(false)
 
 // ── Muse ──────────────────────────────────────────────────────────────────────
-// The header button opens the roster first, not the studio directly — who to
-// shoot with is chosen before the shooting screen exists at all. Picking one
-// there is what actually opens MusePanel (`pickMuseCharacter`, below).
-const showMuse = ref(false)
+// ヘッダのボタンは撮影室ではなく**名簿**を開く —— 誰と撮るかは、撮影の画面が
+// 現れる前に決まる。名簿で一人選ぶと撮影室が開く（`pickMuseCharacter`）。
+//
+// **2026-09-12、Muse Classic を退役させた。** 撮影室は Muse Refine 一つ。
 const showMuseRefine = ref(false)
 const showMuseGallery = ref(false)
 const museGalleryWorkflow = ref('')
-// What the roster screen decided, read by MusePanel once on the tick `showMuse`
-// flips true. Left as-is (not cleared) afterward — MusePanel compares it
-// against its own session and no-ops once it has already been applied.
+// 名簿が決めた相手。開いた一度だけ読まれる（パネル側が自分のセッションと
+// 見比べて、同じなら何もしない）。
 const musePendingCharacterId = ref('')
-// Set alongside it when the Compat Viewer's "start a duet with these two"
-// action fires — read once by MusePanel the same tick `showMuse` flips true.
+// 相性ビューアの「この二人で撮る」から、相方も一緒に来る。
 const musePendingPartnerId = ref('')
-// Parked studio session (MusePanel stays mounted). Roster shows 「撮影中」.
+// 止めてある撮影。名簿に「撮影中」を出すために持っている。
 const museResume = ref({ available: false, name: '', sessionId: '' })
 
 function startDuetPair({ leadId, partnerId }) {
   showMuseGallery.value = false
   musePendingCharacterId.value = leadId
   musePendingPartnerId.value = partnerId
-  showMuse.value = true
+  showMuseRefine.value = true
 }
 
 async function openMuse() {
@@ -2706,9 +2703,19 @@ function pickMuseCharacter(id) {
   showMuseGallery.value = false
   musePendingCharacterId.value = id
   musePendingPartnerId.value = ''
-  // MusePanel is not v-if'd away — it keeps its session across open/close, so
-  // do not bounce `show` expecting a remount.
-  showMuse.value = true
+  // パネルは v-if で消さない —— セッションは開け閉めで残るので、
+  // `show` を振っても作り直されない。
+  showMuseRefine.value = true
+}
+
+function onMuseShow(open) {
+  showMuseRefine.value = open
+  if (open) {
+    selected.value = null
+    return
+  }
+  // ✕ を押し間違えたとき、虚無ではなく名簿（「撮影中」つき）に降りる。
+  if (museResume.value.available) showMuseGallery.value = true
 }
 
 function onMuseSessionState(state) {
@@ -2722,20 +2729,10 @@ function onMuseSessionState(state) {
 function resumeMuseSession() {
   selected.value = null
   showMuseGallery.value = false
-  // Empty pending ids → MusePanel reconnects the parked session as-is.
+  // 指名を空にすると、止めてあったセッションにそのまま座り直す。
   musePendingCharacterId.value = ''
   musePendingPartnerId.value = ''
-  showMuse.value = true
-}
-
-function onMuseShow(open) {
-  showMuse.value = open
-  if (open) {
-    selected.value = null
-    return
-  }
-  // Accidental ✕: land on the roster with 「撮影中」ready instead of the void.
-  if (museResume.value.available) showMuseGallery.value = true
+  showMuseRefine.value = true
 }
 
 function openImageBySha(sha256) {
@@ -3054,11 +3051,6 @@ onUnmounted(() => {
             :title="$t('header.museTitle')"
             class="px-3 py-1.5 bg-cyan-900/70 hover:bg-cyan-800/80 border border-cyan-600/40 hover:border-cyan-500/60 rounded-lg text-xs font-medium text-cyan-200 transition-colors whitespace-nowrap">
             {{ $t('header.muse') }}
-          </button>
-          <button @click="showMuseRefine = true"
-            :title="$t('header.museRefineTitle')"
-            class="px-3 py-1.5 bg-teal-900/70 hover:bg-teal-800/80 border border-teal-600/40 hover:border-teal-500/60 rounded-lg text-xs font-medium text-teal-200 transition-colors whitespace-nowrap">
-            {{ $t('header.museRefine') }}
           </button>
           <button @click="triggerScan" :disabled="scanState?.state === 'running'"
             class="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 rounded-lg text-xs font-medium transition-colors whitespace-nowrap">
@@ -5391,16 +5383,15 @@ onUnmounted(() => {
     />
 
     <!-- Muse roster — the "who with" screen, one layer under the studio.
-         Plain --z-panel (600) here is deliberate: MusePanel's root forces
-         --z-panel-muse (640) via the .muse-root rule in night-archive.css
-         regardless of DOM order, so the studio always paints over this list
-         once picking a Muse opens it. Do not raise this above --z-panel-muse. -->
+         ここが素の --z-panel (600) なのは意図的 —— 撮影室は night-archive.css の
+         .muse-root で --z-panel-muse (640) を強制するので、DOM の順に関わらず
+         名簿の上に出る。ここを --z-panel-muse より上げないこと。 -->
     <CharacterGallery
       :show="showMuseGallery"
       :workflows="workflows"
       :workflow="museGalleryWorkflow"
       :get-jobs-map="getJobsMap"
-      :resume-available="museResume.available && !showMuse"
+      :resume-available="museResume.available && !showMuseRefine"
       :resume-name="museResume.name"
       @pick="pickMuseCharacter"
       @close="showMuseGallery = false"
@@ -5431,23 +5422,14 @@ onUnmounted(() => {
       @update:workflow="museGalleryWorkflow = $event"
     />
 
-    <MusePanel
-      :show="showMuse"
+    <MuseRefinePanel
+      :show="showMuseRefine"
       :comfyOffline="comfyOffline"
       :get-jobs-map="getJobsMap"
       :initial-character-id="musePendingCharacterId"
       :initial-partner-id="musePendingPartnerId"
       @update:show="onMuseShow"
       @session-state="onMuseSessionState"
-      @select-image="openImageBySha($event)"
-      @toast="showToast($event.msg, $event.type)"
-    />
-
-    <MuseRefinePanel
-      :show="showMuseRefine"
-      :comfyOffline="comfyOffline"
-      :get-jobs-map="getJobsMap"
-      @update:show="showMuseRefine = $event"
       @select-image="openImageBySha($event)"
       @toast="showToast($event.msg, $event.type)"
     />

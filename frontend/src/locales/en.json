@@ -631,9 +631,7 @@
       "lastError": "Last error:"
     },
     "muse": "Muse",
-    "museTitle": "Build an image board from a theme and a character",
-    "museRefine": "Muse Refine",
-    "museRefineTitle": "Independent ledger studio — separate from classic Muse"
+    "museTitle": "Build an image board from a theme and a character"
   },
   "about": {
     "tagline": "Local AI-powered image management and generation.\nSemantic search, similarity search, and prompt refinement pipeline.",

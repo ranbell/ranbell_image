@@ -12,8 +12,12 @@ const props = defineProps({
   show: { type: Boolean, default: false },
   comfyOffline: { type: Boolean, default: false },
   getJobsMap: { type: Function, default: () => () => new Map() },
+  // 名簿（`CharacterGallery`）が選んだ相手。**開いた一度だけ**読む。
+  // classic の退役で、名簿からの導線がこちらへ来る（2026-09-12）。
+  initialCharacterId: { type: String, default: '' },
+  initialPartnerId: { type: String, default: '' },
 })
-const emit = defineEmits(['update:show', 'toast', 'select-image'])
+const emit = defineEmits(['update:show', 'toast', 'select-image', 'session-state'])
 const { t, locale } = useI18n()
 
 const session = ref(null)
@@ -751,12 +755,38 @@ watch(() => props.show, async (open) => {
   }
   try {
     await ensureCatalog()
+    // 名簿が別の相手を指したら、その人で撮り直す。同じ人なら座ったまま
+    // （セッションは開け閉めで消えない）。
+    const wanted = String(props.initialCharacterId || '')
+    const seated = String(session.value?.inputs?.character_id || '')
+    if (wanted && wanted !== seated) {
+      await startFresh(wanted)
+      if (props.initialPartnerId) await pickPartner(props.initialPartnerId)
+      return
+    }
     if (!session.value) await startFresh()
     else openStream(session.value.session_id)
   } catch (err) {
     fail(err)
   }
 })
+
+// 止めてある撮影を名簿に知らせる（「撮影中」の札）。閉じてもセッションは
+// 残るので、閉じたあとに戻れることを名簿の側が知っている必要がある。
+function publishSessionState() {
+  const s = session.value
+  emit('session-state', {
+    available: Boolean(s?.session_id && s.status !== 'finished'),
+    name: String(s?.character?.name || ''),
+    sessionId: String(s?.session_id || ''),
+  })
+}
+watch(
+  [() => session.value?.session_id, () => session.value?.status,
+   () => session.value?.character?.name],
+  publishSessionState,
+  { immediate: true },
+)
 
 // **保険。** どこかで後始末を書き忘れても、`busy` が下りた時点で必ず下ろす。
 // 入力が二度と戻らない、という壊れ方だけは作らない。

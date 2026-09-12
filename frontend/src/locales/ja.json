@@ -631,9 +631,7 @@
       "lastError": "最終エラー:"
     },
     "muse": "Muse",
-    "museTitle": "お題とキャラからイメージボードを作る",
-    "museRefine": "Muse Refine",
-    "museRefineTitle": "独立の台本スタジオ（ledger）。既存 Muse とは別経路"
+    "museTitle": "お題とキャラからイメージボードを作る"
   },
   "about": {
     "tagline": "ローカル AI で動く画像管理・生成システム。\n意味検索・類似検索・錬成パイプラインを統合。",
