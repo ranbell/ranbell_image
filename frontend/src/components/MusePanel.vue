@@ -1,7 +1,10 @@
 <script setup>
 /*
- * Muse Refine — independent ledger studio.
- * Does not share MusePanel state or the full notebook pipeline.
+ * Muse —— 総監督スタジオ。台帳（ledger）が正本。
+ *
+ * classic を退役させて撮影室は一つになった（2026-09-12）。名前に `Refine` が
+ * 残っているのは保存値（`service.STUDIO`）と観測の識別子だけで、画面と URL は
+ * `muse` に畳んである。
  */
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -1291,8 +1294,10 @@ function isStruckRow(row) {
                 {{ t('muse.approveNeedsBoard') }}
               </p>
               <!--
-                **3行の入力欄。改行できてスクロールする（総監督・2026-09-13）。**
-                Enter は送信のまま（手が覚えている）、**Shift+Enter で改行**。
+                **3行の入力欄。Enter は素の改行（総監督・2026-09-13）。**
+                「文字送信は送信ボタンでおねがい。日本語ユーザが困るので」——
+                かな漢字変換の確定で Enter を押すので、Enter を送信にすると
+                **変換の途中で飛んでいく**。送信はボタン一つだけにする。
                 縁を掴めば伸ばせる（`resize-y`）。
               -->
               <div class="flex items-end gap-2">
@@ -1302,7 +1307,6 @@ function isStruckRow(row) {
                   class="min-w-0 flex-1 resize-y overflow-y-auto rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-sm leading-relaxed outline-none focus:border-pink-500"
                   :placeholder="t('muse.chatPlaceholder')"
                   :disabled="chatLocked || !session"
-                  @keydown.enter.exact.prevent="sendChat"
                 ></textarea>
                 <button
                   type="submit"

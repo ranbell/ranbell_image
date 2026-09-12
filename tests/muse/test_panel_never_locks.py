@@ -104,3 +104,28 @@ def test_the_kept_lines_look_like_the_real_ones():
     for cls in ("border-amber-800/30", "border-pink-500/30"):
         assert cls in block, cls
     assert "done.lead ? '🌸' : '🎬'" in block
+
+
+# ── かな漢字変換の途中で送らない ──────────────────────────────────────────
+
+def test_enter_is_a_newline_not_a_send():
+    """**Enter を送信にしない。**（2026-09-13）
+
+    総監督「対話入力欄は改行で単純に改行にして。文字送信は送信ボタンで
+    おねがい。日本語ユーザが困るので」。
+
+    かな漢字変換の確定で Enter を押すので、Enter を送信にすると**変換の途中で
+    飛んでいく**。`Shift+Enter で改行` という妥協も、確定の Enter は素の Enter
+    なので効かない。**送信はボタン一つだけ。**
+    """
+    box = SRC[SRC.index("<textarea"):SRC.index("</textarea>")]
+    assert 'v-model="chatInput"' in box
+    assert "keydown.enter" not in box, "Enter に何かを結ぶと変換の途中で飛ぶ"
+    assert 'rows="3"' in box, "標準3行"
+
+
+def test_the_send_button_is_how_a_line_is_sent():
+    """送る道が消えていないこと（Enter を外したので、ここが唯一の口）。"""
+    assert '@submit.prevent="sendChat"' in SRC
+    form = SRC[SRC.index('@submit.prevent="sendChat"'):]
+    assert 'type="submit"' in form

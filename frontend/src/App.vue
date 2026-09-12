@@ -2663,7 +2663,7 @@ const showInvoke = ref(false)
 // ヘッダのボタンは撮影室ではなく**名簿**を開く —— 誰と撮るかは、撮影の画面が
 // 現れる前に決まる。名簿で一人選ぶと撮影室が開く（`pickMuseCharacter`）。
 //
-// **2026-09-12、Muse Classic を退役させた。** 撮影室は Muse Refine 一つ。
+// **2026-09-12、Muse Classic を退役させた。** 撮影室は Muse 一つ。
 const showMuse = ref(false)
 const showMuseGallery = ref(false)
 const museGalleryWorkflow = ref('')

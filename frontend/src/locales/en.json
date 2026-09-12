@@ -1318,8 +1318,8 @@
     "comfyOfflineHint": "ComfyUI is unreachable — images will queue and generate when it reconnects."
   },
   "muse": {
-    "title": "Muse Refine",
-    "subtitle": "Independent ledger studio — separate from classic Muse",
+    "title": "Muse",
+    "subtitle": "Make the shot with Muse, check a board, OK to shoot",
     "close": "Close",
     "zoomImage": "Zoom image",
     "reset": "New",

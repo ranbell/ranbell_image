@@ -1318,8 +1318,8 @@
     "comfyOfflineHint": "ComfyUI に接続できません — 画像は再接続後に生成されます。"
   },
   "muse": {
-    "title": "Muse Refine",
-    "subtitle": "既存 Muse とは別の台本スタジオ。ledger が正本です",
+    "title": "Muse",
+    "subtitle": "Museと話しながら撮影をつくり、ボードで見て、OKで本番へ",
     "close": "閉じる",
     "zoomImage": "拡大表示",
     "reset": "新規",
