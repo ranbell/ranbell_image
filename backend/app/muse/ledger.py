@@ -108,7 +108,151 @@ def strip_field_label(value: str) -> str:
     return text.strip()
 
 
-def normalize_patch(raw: dict[str, Any] | None) -> dict[str, str]:
+# ── 一つの体は一つの答えしか持たない ────────────────────────────────────────
+#
+# **18席が同じ欄に順に書くので、言い換えと矛盾が積もる。** 実機（2026-09-12・
+# 「今日もメイドさんで」の再現）で `beat` が 13語になり、こうなっていた:
+#
+#     weight on right leg      ↔  weight on back foot      体重が二箇所
+#     hips jutting out sharply ↔  hips pushed forward      同じことを二度
+#     hands_clutching_tray_edge ↔ hugging tray             同じことを三度
+#     （前ターンでは hands releasing ↔ hands_clutching ↔ hands steadying）
+#
+# 同じ記録の元のセッションは8語で、**部位ごとに一語ずつ**だった
+# （`standing, weight_on_front_foot, one_hand_on_hip, other_arm_holding_tray_at_waist…`）。
+#
+# `tags.conflict.SLOTS` は当たらない —— あれは danbooru の**正確な語**の表で、
+# ここに来るのは自由文（`weight on right leg`）。語の表を増やす話ではない。
+#
+# **軸で見る。** 一つの軸（体重・腰の向き・頭の向き・手の掴み）に二つ目の答えが
+# 来たら落とす。反対の答え（矛盾）でも同じ答え（言い換え）でも、どちらも落とす ——
+# 絵にとってはどちらも雑音だから。**最初の答えが勝つ**のは `facets` と同じ規則で、
+# 実測でも監督の一言が先に来ていた（writer は指示を書いてから席の細部を足す）。
+#
+# 部位を名指ししただけでは落とさない。**手は二本ある** ——
+# `left hand on hip` と `other_arm_holding_tray` は両方立つ。だから軸は
+# 「部位＋向き」で、向きの語が無い句はどの軸にも乗らない
+# （`tags/conflict.py` 冒頭の「取りすぎのほうが高くつく」と同じ判断）。
+_BODY_AXES: tuple[tuple[str, tuple[str, ...], dict[str, tuple[str, ...]]], ...] = (
+    # 軸の名前, 部位の語, 向き → その向きを表す語
+    ("weight", ("weight", "leaning", "balance"), {
+        "front": ("front", "forward", "fore"),
+        "back": ("back", "rear", "behind", "heel"),
+        "left": ("left",),
+        "right": ("right",),
+        "both": ("both", "even", "evenly", "center", "centre"),
+    }),
+    ("hips", ("hip", "hips", "pelvis", "waist"), {
+        "out": ("forward", "out", "jutting", "jut", "thrust", "thrusting",
+                "pushed", "push", "pushing", "ahead"),
+        "in": ("back", "retracted", "retract", "pulled", "pull", "tucked",
+               "tuck", "drawn"),
+    }),
+    ("head", ("head", "chin", "face", "gaze direction", "neck"), {
+        "up": ("up", "lifted", "lift", "raised", "raise", "tilted_up", "upward"),
+        "down": ("down", "lowered", "lower", "dropped", "downward", "tucked"),
+        "to_camera": ("toward camera", "to camera", "at the camera", "at viewer",
+                      "toward the viewer", "turned toward camera", "facing camera"),
+        "away": ("away", "aside", "over her shoulder", "to the side"),
+    }),
+    # **部位の語を要らない軸。** 掴んでいるのは定義上その手なので、
+    # `hugging tray`（手の字が無い）も同じ軸に乗る。空の組がその印。
+    ("hold", (), {
+        "hold": ("holding", "hold", "clutching", "clutch", "gripping", "grip",
+                 "grasping", "grasp", "steadying", "steady", "hugging", "hug",
+                 "carrying", "carry", "clasping", "clasp"),
+        "free": ("releasing", "release", "letting go", "let go", "lowering",
+                 "setting down", "putting down", "open palms", "empty"),
+    }),
+)
+
+
+#: 掴みの軸で「何を」掴んでいるかを取り出すときに落とす語 —— 動詞・体の部位・
+#: 助詞・様子の形容。残るのが**物**。`holding tray` と `holding coffee cup` は
+#: 別の物なので**両方立つ**（手は二本ある）。`holding tray` と
+#: `holding order_tray` は同じ物なので言い換え。
+_NOT_THE_OBJECT = frozenset({
+    "hand", "hands", "finger", "fingers", "palm", "palms", "arm", "arms",
+    "forearm", "forearms", "elbow", "elbows", "knuckle", "knuckles", "wrist",
+    "on", "at", "the", "a", "an", "with", "to", "of", "in", "into", "onto",
+    "her", "his", "its", "own", "both", "one", "other", "and",
+    "white", "tight", "tightly", "tense", "tensed", "trembling", "slightly",
+    "gently", "firmly", "sharply", "lightly", "barely", "still",
+})
+
+
+def _axis_of(phrase: str) -> tuple[str, str, frozenset[str]] | None:
+    """この句が答えている軸・その答え・軸の中の鍵。乗らないなら `None`。
+
+    鍵は掴みの軸だけで意味を持つ —— **掴んでいる物**。物が違えば同じ軸でも
+    別の答えとして両方立つ。ほかの軸（体重・腰・頭）は体に一つしかないので
+    鍵は空。
+    """
+    words = re.sub(r"[_\-]+", " ", phrase.lower())
+    for axis, parts, answers in _BODY_AXES:
+        if parts and not any(
+            re.search(rf"(?<![a-z]){re.escape(part)}(?![a-z])", words)
+            for part in parts
+        ):
+            continue
+        for answer, cues in answers.items():
+            for cue in cues:
+                if not re.search(rf"(?<![a-z]){re.escape(cue)}(?![a-z])", words):
+                    continue
+                if axis != "hold":
+                    return axis, answer, frozenset()
+                spent = {w for a in answers.values() for c in a for w in c.split()}
+                obj = {
+                    w for w in re.findall(r"[a-z]+", words)
+                    if w not in spent and w not in _NOT_THE_OBJECT
+                }
+                return axis, answer, frozenset(obj)
+    return None
+
+
+def one_body(value: str) -> tuple[str, list[str]]:
+    """`beat` を一つの体に畳む。残した句と、落とした句を返す。
+
+    落とすのは**同じ軸の二つ目**だけ。部位を名指ししただけの句や、向きの語が
+    無い句（`arms_stiff` / `forearms tensed` / `standing`）には触らない。
+    掴みの軸は**物ごと**に数えるので、トレイとカップは両方立つ。
+
+    完全に同じ句と、他の句に語として含まれてしまう句（`hand on hip` は
+    `left hand on hip` の中にある）も落とす —— 同じことを二度言っている。
+    """
+    parts = [p.strip() for p in str(value or "").replace(";", ",").split(",")]
+    parts = [p for p in parts if p]
+    kept: list[str] = []
+    dropped: list[str] = []
+    seen: dict[str, list[frozenset[str]]] = {}
+    for phrase in parts:
+        axis = _axis_of(phrase)
+        if axis is not None:
+            name, _answer, key = axis
+            before = seen.setdefault(name, [])
+            if name == "hold":
+                # 物が重なっていたら同じ物の話 —— 言い換えでも反対でも落とす。
+                # 物が読めなかった句（`open palms`）は、既にある掴みに合流する。
+                if any(not key or not k or (key & k) for k in before):
+                    dropped.append(phrase)
+                    continue
+            elif before:
+                dropped.append(phrase)
+                continue
+            before.append(key)
+        low = re.sub(r"[_\-]+", " ", phrase.lower()).strip()
+        if any(low in re.sub(r"[_\-]+", " ", k.lower()) for k in kept):
+            dropped.append(phrase)
+            continue
+        kept.append(phrase)
+    return ", ".join(kept), dropped
+
+
+def normalize_patch(
+    raw: dict[str, Any] | None,
+    *,
+    report: dict[str, list[str]] | None = None,
+) -> dict[str, str]:
     """Keep only known keys; coerce to stripped strings.
 
     値の頭に付いた欄名もここで落とす —— 台帳への入口はここ一つ。
@@ -123,6 +267,13 @@ def normalize_patch(raw: dict[str, Any] | None) -> dict[str, str]:
         if val is None:
             continue
         text = strip_field_label(str(val).strip())
+        if key in BODY_KEYS and text:
+            # **一つの体に畳む。** 入口はここ一つなので、席の経路でも
+            # カードの経路でも同じように効く（欄名を落とすのと同じ判断）。
+            text, gone = one_body(text)
+            if gone and report is not None:
+                # 黙って捨てない —— 落とした句は呼び元が記録に残せる。
+                report.setdefault(key, []).extend(gone)
         if key == "wearing_drop" and not text:
             continue
         out[key] = text
@@ -150,17 +301,55 @@ def apply_patch(ledger: dict[str, str], patch: dict[str, str]) -> dict[str, str]
     return next_ledger
 
 
+def _posture_of(value: str) -> str:
+    """この体が名指している姿勢（`standing` / `sitting` …）。無ければ空。
+
+    語の表は `tags.conflict` の `posture` 槽をそのまま使う —— 姿勢の語は
+    danbooru の正確な語で来るので、あちらが当たる（自由文の向きとは違う）。
+    二つ持つと必ずずれるので、ここで列を作らない。
+    """
+    from ..tags import conflict
+
+    for phrase in str(value or "").replace(";", ",").split(","):
+        for word in re.findall(r"[A-Za-z_]+", phrase):
+            if conflict.slot_of(word) == "posture":
+                return word.lower()
+    return ""
+
+
+def keep_the_posture(new: str, before: str) -> str:
+    """姿勢を名指し忘れた体に、前の姿勢を戻す。
+
+    **欄は丸ごと書き直す所なので、書かれなかったものは消える。** 実測
+    （2026-09-12・台で A/B）: 「一つの体」の条文を足すと矛盾は消えたが、
+    同じ回で `standing` が落ちた —— 台本係が「既に分かっていること」として
+    省いた。条文の言い回しでは戻らなかったので、ここで守る。
+
+    戻すのは**新しい体が姿勢を一つも名指していないとき**だけ。名指していれば
+    そちらが正しい（「座って」と言われた回を立たせない）。
+    """
+    if not str(new or "").strip():
+        return new
+    if _posture_of(new):
+        return new
+    was = _posture_of(before)
+    if not was:
+        return new
+    return f"{was}, {new}"
+
+
 def scrub_patch(
     patch: dict[str, str] | None,
     ledger: dict[str, str] | None,
     *,
     allow_clear: set[str] | frozenset[str] | None = None,
+    report: dict[str, list[str]] | None = None,
 ) -> dict[str, str]:
     """Drop accidental empty clears so long chats keep clothes / mood / look.
 
     Empty string still clears when ``allow_clear`` names the key (explicit reset).
     """
-    raw = normalize_patch(patch)
+    raw = normalize_patch(patch, report=report)
     if not raw:
         return {}
     allow = set(allow_clear or ())
@@ -178,6 +367,9 @@ def scrub_patch(
             and key not in allow
         ):
             continue
+        if key in BODY_KEYS and val:
+            # 姿勢を名指し忘れたら前の姿勢を戻す（`keep_the_posture`）。
+            val = keep_the_posture(val, str(cur.get(key) or ""))
         out[key] = val
     return out
 
@@ -288,6 +480,9 @@ def chips_for(fields: list[str], *, locale: str = "ja") -> list[dict[str, str]]:
 
 #: 二人目の欄。一人しかいない撮影では**見せない**。
 PARTNER_KEYS: tuple[str, ...] = ("wearing_b", "beat_b", "expression_b")
+
+#: 体の姿勢の欄。二人ぶんある（`one_body` を掛ける先）。
+BODY_KEYS: tuple[str, ...] = ("beat", "beat_b")
 
 
 def for_model(ledger: dict[str, str], *, partner: bool) -> dict[str, str]:

@@ -43,6 +43,15 @@ Rules:
   anything not explicitly stated that must naturally appear in the image
   (e.g., if the wind blows and her hair sweeps aside,
   the nape of the neck becomes visible).
+- ONE BODY, ONE INSTANT (beat): the field is rewritten WHOLE, so it must still
+  name the posture she is in and everything the body is doing — this is not a
+  reason to write less. What it must not contain is the same part of her
+  answered twice: not as a contradiction (weight on the front foot AND on the
+  back foot) and not as a restatement in other words (hips thrust forward AND
+  hips pushed out, or the same object held twice). When the crew offers a
+  second wording for something already in the field, keep the one the director
+  asked for and leave the other out. Her two hands are two different things:
+  one on her hip while the other carries something is one body.
 - If the line is only emotion / banter / acknowledgement with NO picture or
   mood/look change, return {}.
 - Multiple fields in one line → include all of them in one object.
@@ -149,6 +158,13 @@ async def write_patch(
         "INTO the field, keeping what is already there** — they shape under the\n"
         "key, they do not replace it. Drop a seat's note only when the\n"
         "director's latest line contradicts her.\n"
+        # **最後に読む語が勝つ（実測・何度も）。** 条文の側（`WRITER_SYSTEM`）に
+        # 「一つの体」を書いても、ここで「横に足せ」が最後に来ると積み上げになる。
+        # 班が喋った回だけ届くので、一人撮りのプロンプトは一字も動かない。
+        "**A seat that says in other words something the field already says adds\n"
+        "NOTHING — keep the field as it is.** One weight, one set of hips, one\n"
+        "head, and each object in her hands named once. Two seats describing the\n"
+        "same part of her body is one answer, not two.\n"
         if str(crew_craft or "").strip() else ""
     )
     prompt = (

@@ -465,7 +465,15 @@ def craft_block(floor: list[dict[str, Any]]) -> str:
         "its craft should READ. **They shape under the key; they do not replace "
         "it.** Keep what the director already put in the field and fold the "
         "seat's detail in beside it — a wardrobe note about fabric never "
-        "removes the garment, a gaffer note never removes the director's hour.",
+        "removes the garment, a gaffer note never removes the director's hour. "
+        # **積み上げではない（2026-09-12）。** 同じ欄を複数の席が見るので、
+        # 「横に足せ」だけだと言い換えと矛盾が積もる（実機で beat が 13語に
+        # なり、体重が二箇所・腰が二方向になった）。足せるのは**まだ言って
+        # いないこと**だけ、と明示する。
+        "FOLD IN ONLY WHAT IS NOT THERE YET: when a seat says in other words "
+        "something the field already says, or says the opposite of it, the "
+        "field keeps what it has. Never let the same part of the body, or the "
+        "same object in her hands, appear twice in one field.",
     ]
     for field in ledger_mod.LEDGER_KEYS:
         if field in by_field:

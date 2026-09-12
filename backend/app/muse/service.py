@@ -844,7 +844,17 @@ async def chat(
         debug_mod.note(session, "atm_look_cue", detail=str(cue), patch=patch)
 
     # Long-chat durability: drop accidental empty clears; track director sticky touches.
-    patch = ledger_mod.scrub_patch(patch, led, allow_clear=allow_clear)
+    # **一つの体に畳んだぶんは記録に残す（2026-09-12）。** 18席が同じ欄に順に
+    # 書くので、言い換えと矛盾が積もる。落としたのは「同じ軸の二つ目」だけで、
+    # 何を落としたかは画面のデバッグ枠から読める。
+    folded: dict[str, list[str]] = {}
+    patch = ledger_mod.scrub_patch(patch, led, allow_clear=allow_clear, report=folded)
+    if folded:
+        debug_mod.note(
+            session, "one_body",
+            detail="; ".join(f"{k}: {', '.join(v)}" for k, v in folded.items()),
+            dropped=folded,
+        )
     director_sticky = {
         k for k in ledger_mod.STICKY_KEYS
         if k in patch
