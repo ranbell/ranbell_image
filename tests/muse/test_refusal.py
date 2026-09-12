@@ -26,17 +26,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 import pytest
 
-from app.muse import brief, chain, runtime, service, session_db
-from tests.muse.test_service import (  # noqa: E402
-    FakeComfy, FakeDb, FakeOllama, FakeSpooler,
-)
+from app.muse import brief, chain, runtime, shared
 
 
 @pytest.fixture(autouse=True)
 def _no_runtime_config(monkeypatch):
     async def _cfg(db):
         return {"ollama_num_ctx": 16000}
-    monkeypatch.setattr(service, "get_runtime_config", _cfg)
+    monkeypatch.setattr(shared, "get_runtime_config", _cfg)
 
 
 # ── the closed list ─────────────────────────────────────────────────────────
@@ -82,37 +79,6 @@ def _session(tags: str) -> dict:
     }
 
 
-def test_a_refusal_takes_it_out_now_and_keeps_it_out():
-    session = _session("standing, cleaning_rag, bucket, wooden_floor")
-    removed, _ = service.apply_removals(session, ["cleaning_rag"], [])
-
-    assert removed == ["cleaning_rag"]
-    assert "cleaning_rag" not in session["craft"]["tags"]
-    assert "bucket" in session["craft"]["tags"]
-    assert session["banned"] == ["cleaning_rag"]
-    # And the prompt was rebuilt, not left stale.
-    assert "cleaning_rag" not in session["craft"]["prompt"]
-
-
-def test_a_seat_reaching_for_it_again_is_filtered_not_argued_with():
-    """Enforcement is a filter. Telling seats not to reintroduce something means
-    naming it in their prompt every turn, which is the original disease."""
-    session = _session("standing")
-    service.apply_removals(session, [], [])
-    session["banned"] = ["cleaning_rag"]
-
-    kept = service.drop_banned(session, "standing, cleaning_rag, mop, bucket")
-    assert "cleaning_rag" not in kept
-    assert "mop" in kept and "bucket" in kept
-
-
-def test_emphasis_cannot_smuggle_a_refused_tag_back_in():
-    session = _session("standing")
-    session["banned"] = ["cleaning_rag"]
-    assert "cleaning_rag" not in service.drop_banned(
-        session, "standing, (cleaning_rag:1.3)")
-
-
 def test_the_sampler_finally_hears_the_word_no():
     """The negative prompt is the only place in the pipeline where "do not draw
     this" is a mechanism rather than a request."""
@@ -120,21 +86,6 @@ def test_the_sampler_finally_hears_the_word_no():
     session["banned"] = ["cleaning_rag", "mop"]
     negative = runtime.negative_for(session)
     assert "cleaning_rag" in negative and "mop" in negative
-
-
-def test_the_render_path_and_the_service_build_the_same_negative():
-    """`service` had a copy nothing called while the runner kept its own, so
-    anything added to the service version reached no render at all."""
-    assert service.negative_for is runtime.negative_for
-
-
-def test_asking_for_it_back_un_bans_it():
-    session = _session("standing, bucket")
-    session["banned"] = ["cleaning_rag"]
-    removed, restored = service.apply_removals(session, [], ["cleaning_rag"])
-    assert restored == ["cleaning_rag"] and removed == []
-    assert session["banned"] == []
-    assert service.drop_banned(session, "cleaning_rag") == "cleaning_rag"
 
 
 # ── what the crew is told ───────────────────────────────────────────────────
@@ -166,53 +117,6 @@ def test_every_seat_is_told_not_to_name_it_even_to_deny_it():
         assert "NOT IN SAY EITHER" in text, mid
 
 
-# ── end to end through a note ───────────────────────────────────────────────
-class StrikingOllama(FakeOllama):
-    """Answers the clerk's question; everything else is an ordinary craft turn."""
-
-    def generate_text_stream(self, prompt, **kw):
-        self.calls.append({**kw, "prompt": prompt})
-        if "CURRENT TAGS:" in str(prompt):
-            text = "REMOVE: cleaning_rag\nRESTORE: none"
-        else:
-            text = ("SAY: はい。\n\nTAGS: standing, bucket, cleaning_rag\n\n"
-                    "SCENE: She stands in the room.")
-
-        async def _stream():
-            yield {"type": "token", "text": text}
-        return _stream()
-
-
-@pytest.mark.asyncio
-async def test_a_note_removes_the_prop_and_the_next_seat_cannot_put_it_back():
-    db, ollama = FakeDb(), StrikingOllama()
-    session = await service.create_session(db, {
-        "theme": "掃除している", "character_id": "c1",
-        "workflow": "w.json", "model": "m",
-    })
-    session["character"] = {"identity_tags": ["1girl"], "personality": {},
-                            "palette": [], "signature_prop": ""}
-    session["craft"] = {"tags": "standing, cleaning_rag, bucket",
-                        "scene": "x", "prompt": "", "pose_intent": ""}
-    await session_db.save(db, session)
-
-    removed, _ = await service.take_note(
-        db, ollama, session, "雑巾は使わないで", cfg={},
-    )
-
-    assert removed == ["cleaning_rag"]
-    assert "cleaning_rag" not in session["craft"]["tags"]
-    # The note's index is marked, so its words leave the standing orders.
-    assert session["carried_out"] == [0]
-    assert "cleaning_rag" in runtime.negative_for(session)
-    # A seat writing it again gets it stripped on the way in.
-    turn = chain.MuseTurn(
-        muse_id="propshop:takarabako", say="はい", prompt="p",
-        pose_intent="", tags="standing, bucket, cleaning_rag", scene="x", raw="",
-    )
-    service._apply_turn(session, turn)
-    assert "cleaning_rag" not in session["craft"]["tags"]
-    assert "bucket" in session["craft"]["tags"]
 
 
 def test_the_contract_lets_her_decide_when_she_is_asked_to():

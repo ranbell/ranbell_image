@@ -21,43 +21,17 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
-from app.muse import chain, facets, service, session_db
+from app.muse import chain, shared, session_db
 from tests.muse.test_duet import _duet_session  # noqa: E402
-from tests.muse.test_service import FakeDb, FakeOllama  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
 def _no_runtime_config(monkeypatch):
     async def _cfg(db):
         return {"ollama_num_ctx": 16000}
-    monkeypatch.setattr(service, "get_runtime_config", _cfg)
+    monkeypatch.setattr(shared, "get_runtime_config", _cfg)
 
 
-class RoutingOllama(FakeOllama):
-    """Routes on the note, and says one line for everything else."""
-
-    def __init__(self, routes: dict[str, str]):
-        super().__init__()
-        self.routes = routes
-
-    def generate_text_stream(self, prompt, **kw):
-        self.calls.append({**kw, "prompt": prompt})
-        system = str(kw.get("system") or "")
-        text = "SAY: はい。"
-        if "script supervisor" in system and (
-            "eight parts" in system or "eleven parts" in system
-        ):
-            text = next(
-                (v for k, v in self.routes.items() if k in str(prompt)),
-                "FACETS: none\nSTANDING: none",
-            )
-
-        async def _stream():
-            yield {"type": "token", "text": text}
-        return _stream()
-
-    def systems(self) -> str:
-        return "\n".join(str(c.get("system") or "") for c in self.calls)
 
 
 # ── the parser ──────────────────────────────────────────────────────────────
@@ -182,45 +156,11 @@ def test_digest_prose_cannot_be_mistaken_for_a_facet_line():
 
 # ── reconciliation ──────────────────────────────────────────────────────────
 
-@pytest.mark.asyncio
-async def test_a_second_camera_note_replaces_the_first():
-    """The long-session fix, in one assertion. Direction does not stack."""
-    db = FakeDb()
-    ollama = RoutingOllama({
-        "上から": "FACETS: camera\nCAMERA: 上から見下ろす",
-        "下から": "FACETS: camera\nCAMERA: 下から煽る",
-    })
-    s = await _duet_session(db)
-
-    await service.route_note(db, ollama, s, "上から見下ろす感じで", cfg={})
-    assert list(s["directives"]) == ["camera"]
-
-    await service.route_note(db, ollama, s, "やっぱり下から煽って", cfg={})
-    assert list(s["directives"]) == ["camera"], "a second camera order stacked"
-    assert s["directives"]["camera"]["text"] == "下から煽る"
-
-
-@pytest.mark.asyncio
-async def test_direction_for_different_parts_sits_side_by_side():
-    db = FakeDb()
-    ollama = RoutingOllama({
-        "下から": "FACETS: camera\nCAMERA: 下から煽る",
-        "上着": "FACETS: costume\nCOSTUME: 上着なし",
-    })
-    s = await _duet_session(db)
-    await service.route_note(db, ollama, s, "下から撮って", cfg={})
-    await service.route_note(db, ollama, s, "上着は脱いで", cfg={})
-
-    assert set(s["directives"]) == {"camera", "costume"}
-    block = service.directives_block(s)
-    assert "CAMERA: 下から煽る" in block
-    assert "COSTUME: 上着なし" in block
-
 
 async def _w_duet_session(db, **over):
     """A W-Muse session whose partner is already cached, so `_partner_character`
     resolves without a DB round trip — `FakeDb` has no character presets to
-    look up, only session rows (see `service._partner_character`'s cache-hit
+    look up, only session rows (see `shared._partner_character`'s cache-hit
     branch: a `character_id` match on the cached dict short-circuits the
     lookup)."""
     session = await _duet_session(db, partner_preset="c2", **over)
@@ -231,117 +171,6 @@ async def _w_duet_session(db, **over):
     }
     await session_db.save(db, session)
     return session
-
-
-@pytest.mark.asyncio
-async def test_route_note_hands_the_router_the_eleven_part_w_muse_prompt():
-    """`route_note` threads both names through to `chain.run_route`, which is
-    what switches the system prompt from eight parts to eleven — the fix for
-    the attribution problem in private/muse/e2e_2026-08-11_wmuse/REPORT.md."""
-    db = FakeDb()
-    ollama = RoutingOllama({
-        "麦わら帽子": "FACETS: costume_b\nCOSTUME_B: 麦わら帽子をかぶっている",
-    })
-    s = await _w_duet_session(db)
-
-    await service.route_note(db, ollama, s, "みなもに麦わら帽子をかぶせて", cfg={})
-
-    assert "eleven parts" in ollama.systems()
-    assert "みなも" in ollama.systems()
-    assert list(s["directives"]) == ["costume_b"]
-    assert s["directives"]["costume_b"]["text"] == "麦わら帽子をかぶっている"
-
-
-@pytest.mark.asyncio
-async def test_the_direction_block_cannot_outgrow_the_shot():
-    """Twenty turns hand over the same eight lines a two-turn session does."""
-    db = FakeDb()
-    ollama = RoutingOllama({"": "FACETS: camera\nCAMERA: 下から煽る"})
-    s = await _duet_session(db)
-    for i in range(20):
-        await service.route_note(db, ollama, s, f"note {i}", cfg={})
-    assert len(service.directives_block(s).splitlines()) == 2  # header + one line
-
-
-@pytest.mark.asyncio
-async def test_a_rule_for_the_whole_shoot_is_not_a_part():
-    db = FakeDb()
-    ollama = RoutingOllama({
-        "足": "FACETS: none\nSTANDING: 足は絶対に映さない",
-    })
-    s = await _duet_session(db)
-    named, standing = await service.route_note(db, ollama, s, "足は映さないで", cfg={})
-
-    assert named == []
-    assert s["standing"] == ["足は絶対に映さない"]
-    assert "足は絶対に映さない" in facets.standing_block(s["standing"])
-
-
-@pytest.mark.asyncio
-async def test_a_standing_rule_is_not_added_twice():
-    db = FakeDb()
-    ollama = RoutingOllama({"足": "FACETS: none\nSTANDING: 足は絶対に映さない"})
-    s = await _duet_session(db)
-    await service.route_note(db, ollama, s, "足は映さないで", cfg={})
-    await service.route_note(db, ollama, s, "足は映さないで", cfg={})
-    assert s["standing"] == ["足は絶対に映さない"]
-
-
-@pytest.mark.asyncio
-async def test_a_locked_part_is_never_routed_to():
-    """The Showrunner pinned it. A note cannot quietly unpin it.
-
-    `named` still reports costume — the note WAS about costume, pinned or not,
-    and the caller (`post_duet_chat`) needs that to route this to the "nothing
-    to do" path rather than the strike clerk. Only the write side (directives,
-    `session["routed"]`) is filtered.
-    """
-    db = FakeDb()
-    ollama = RoutingOllama({"上着": "FACETS: costume\nCOSTUME: 上着なし"})
-    s = await _duet_session(db)
-    facets.set_lock(s, "costume", True)
-    named, _ = await service.route_note(db, ollama, s, "上着は脱いで", cfg={})
-    assert named == ["costume"]
-    assert "costume" not in s["directives"]
-    assert s["routed"] == []
-    assert s["locked_conflicts"] == ["costume"]
-
-
-@pytest.mark.asyncio
-async def test_a_note_about_a_locked_part_does_not_fall_through_to_the_clerk():
-    """Found by the 2026-08-11 real-model e2e run (turn 15).
-
-    Camera was locked. 「カメラ、真横から撮ってみて」routed to `camera` — a
-    replacement-shaped note, correctly recognised as being about the camera.
-    But `route_note` used to filter locked facets out of `named` itself, so
-    `post_duet_chat` saw an EMPTY list and fell through to the strike clerk as
-    if this were an unroutable refusal. The real clerk, given the note text and
-    the current camera tags, judged (not unreasonably) that `from_front` no
-    longer applied and struck it — and `facets.strike` sweeps locked facets on
-    purpose, because a genuine refusal outranks a pin. The bug was that this
-    was never a refusal; the lock only looked like one to the branch that
-    decides, and the strike clerk should never have run at all.
-    """
-    db = FakeDb()
-    ollama = RoutingOllama({
-        "真横": "FACETS: camera\nCAMERA: 真横から",
-    })
-    s = await _duet_session(db)
-    facets.write(s, "camera", tags="from_front, low_angle", nl="From the front, low.")
-    facets.set_lock(s, "camera", True)
-    before = dict(facets.table_of(s)["camera"])
-
-    await service.post_duet_chat(db, ollama, s, "カメラ、真横から撮ってみて")
-
-    assert "script supervisor's clerk" not in ollama.systems(), (
-        "a note the router recognised as being about a locked part must not "
-        "reach the refusal clerk"
-    )
-    after = facets.table_of(s)["camera"]
-    assert after["tags"] == before["tags"]
-    assert after["nl"] == before["nl"]
-    assert after["rev"] == before["rev"]
-    assert s["banned"] == []
 
 
 @pytest.mark.asyncio
@@ -361,107 +190,6 @@ async def test_a_note_about_a_locked_part_says_so_instead_of_doing_nothing_silen
 # time it is rewritten for any reason at all — that the hat is no longer
 # wanted. Nothing strips the tag after the fact; the model is told the truth.
 
-@pytest.mark.asyncio
-async def test_a_new_decision_is_recorded_in_the_digest():
-    db = FakeDb()
-    ollama = RoutingOllama({
-        "帽子": "FACETS: costume\nCOSTUME: 上着なし\nSTANDING: none\n"
-                "DIGEST: 麦わら帽子は一度使ったが、以降は使わないことに決定。",
-    })
-    s = await _duet_session(db)
-    await service.route_note(db, ollama, s, "麦わら帽子はもう要らない", cfg={})
-    assert "麦わら帽子" in s["digest"]
-    assert "使わない" in s["digest"]
-
-
-@pytest.mark.asyncio
-async def test_a_malformed_digest_does_not_overwrite_a_good_one():
-    """The digest is the one thing every future turn is told to prioritise
-    over the conversation itself (`_facet_prep_prompt`), so a bad rewrite
-    here does more damage than anywhere else — a real session's report of
-    a decision getting permanently 'stuck' is consistent with this. A bad
-    revision must not replace a good one, the same rule already covers a
-    bad `nl` write."""
-    db = FakeDb()
-    ollama = RoutingOllama({
-        "かぶせて": "FACETS: costume\nCOSTUME: 帽子あり\nDIGEST: 麦わら帽子: 着用中。",
-        "変な": "FACETS: costume\nCOSTUME: 帽子なし\n"
-               "DIGEST: 帽子 (→ **もう要らない**、以降は使わない)。",
-    })
-    s = await _duet_session(db)
-    await service.route_note(db, ollama, s, "麦わら帽子をかぶせて", cfg={})
-    good_digest = s["digest"]
-    assert good_digest == "麦わら帽子: 着用中。"
-
-    await service.route_note(db, ollama, s, "変な指示", cfg={})
-    assert s["digest"] == good_digest, "a malformed digest overwrote a good one"
-
-
-@pytest.mark.asyncio
-async def test_the_digest_is_revised_not_appended():
-    """"Added, then decided against" collapses to one line instead of surviving
-    as two contradictory facts."""
-    db = FakeDb()
-    ollama = RoutingOllama({
-        "かぶせて": "FACETS: costume\nCOSTUME: 帽子あり\nDIGEST: 麦わら帽子: 着用中。",
-        "もう要らない": "FACETS: costume\nCOSTUME: 帽子なし\n"
-                       "DIGEST: 麦わら帽子: 一度使ったが、以降は使わないことに決定。",
-    })
-    s = await _duet_session(db)
-    await service.route_note(db, ollama, s, "麦わら帽子をかぶせて", cfg={})
-    assert s["digest"] == "麦わら帽子: 着用中。"
-
-    await service.route_note(db, ollama, s, "麦わら帽子はもう要らない", cfg={})
-    assert s["digest"] == "麦わら帽子: 一度使ったが、以降は使わないことに決定。"
-    assert "着用中" not in s["digest"], "the old, contradicted line must not survive"
-
-
-@pytest.mark.asyncio
-async def test_a_turn_that_leaves_the_digest_unchanged_does_not_erase_it():
-    db = FakeDb()
-    ollama = RoutingOllama({
-        "かぶせて": "FACETS: costume\nDIGEST: 麦わら帽子: 着用中。",
-        "笑顔": "FACETS: expression\nEXPRESSION: 笑顔\nDIGEST: unchanged",
-    })
-    s = await _duet_session(db)
-    await service.route_note(db, ollama, s, "麦わら帽子をかぶせて", cfg={})
-    await service.route_note(db, ollama, s, "笑顔にして", cfg={})
-    assert s["digest"] == "麦わら帽子: 着用中。"
-
-
-@pytest.mark.asyncio
-async def test_the_digest_reaches_a_facet_the_router_did_not_name_today():
-    """The core mechanism. `costume` is not named this turn — only `expression`
-    is — but the digest still has to be visible to costume's NEXT rewrite,
-    whenever and for whatever reason that happens, because that is the only
-    turn that can actually leave the stale duplicate out."""
-    db = FakeDb()
-    ollama = RoutingOllama({
-        "帽子": "FACETS: props\nPROPS: 帽子なし\n"
-               "DIGEST: 麦わら帽子: 一度使ったが、以降は使わないことに決定。",
-    })
-    s = await _duet_session(db)
-    facets.write(s, "place", tags="rooftop", nl="A rooftop laundry line.", by="actress:cast")
-    await service.route_note(db, ollama, s, "麦わら帽子はもう要らない", cfg={})
-    assert s["digest"]
-
-    # A later prep that rewrites costume for an unrelated reason must still be
-    # handed the digest — costume was never routed to on the removal turn.
-    prompt = service._facet_prep_prompt(s, ["costume"])
-    assert "麦わら帽子" in prompt
-    assert "使わない" in prompt
-    assert prompt.index("ここまでの決定") < prompt.index("いまの画")
-
-
-@pytest.mark.asyncio
-async def test_the_crewed_studio_never_gets_a_digest():
-    db = FakeDb()
-    ollama = RoutingOllama({"帽子": "FACETS: costume\nDIGEST: 麦わら帽子はもう使わない。"})
-    s = await _duet_session(db)
-    s["mode"] = ""
-    await service.route_note(db, ollama, s, "麦わら帽子はもう要らない", cfg={})
-    assert s["digest"] == ""
-
 
 def test_a_bare_digest_with_no_other_fields_still_parses():
     _, _, _, digest = chain.parse_route("DIGEST: 麦わら帽子はもう使わない。")
@@ -470,60 +198,4 @@ def test_a_bare_digest_with_no_other_fields_still_parses():
 
 # ── the clerk stands down on a replacement ──────────────────────────────────
 
-@pytest.mark.asyncio
-async def test_a_routed_note_does_not_ban_anything():
-    """Router path: a costume replacement must not hit the strike clerk."""
-    db = FakeDb()
-    ollama = RoutingOllama({"上着": "FACETS: costume\nCOSTUME: 上着なし"})
-    s = await _duet_session(db)
-    named, _ = await service.route_note(db, ollama, s, "上着は脱いで", cfg={})
 
-    assert named == ["costume"]
-    assert s["banned"] == []
-    assert "costume" in s["directives"]
-    assert "script supervisor's clerk" not in ollama.systems()
-
-
-@pytest.mark.asyncio
-async def test_an_unroutable_note_still_reaches_the_strike_clerk():
-    """Strike clerk still owns standing refusals when called via take_note."""
-    db = FakeDb()
-    ollama = RoutingOllama({})       # everything routes to none
-    s = await _duet_session(db)
-    # The clerk picks from the tags in the script, so there has to be a script.
-    facets.write(s, "props", tags="glasses, desk")
-    service._reassemble(s)
-    named, _ = await service.route_note(db, ollama, s, "メガネは今後一切なし", cfg={})
-    if not named:
-        await service.take_note(db, ollama, s, "メガネは今後一切なし", cfg={})
-
-    assert s["directives"] == {}
-    assert "script supervisor's clerk" in ollama.systems()
-
-
-@pytest.mark.asyncio
-async def test_a_router_that_cannot_answer_changes_nothing():
-    """Guessing which part to rewrite would throw away a part of the picture
-    the Showrunner never asked about."""
-    class MuteOllama(FakeOllama):
-        def generate_text_stream(self, prompt, **kw):
-            async def _stream():
-                yield {"type": "token", "text": ""}
-            return _stream()
-
-    db = FakeDb()
-    s = await _duet_session(db)
-    named, standing = await service.route_note(db, MuteOllama(), s, "下から", cfg={})
-    assert named == [] and standing == ""
-    assert s["directives"] == {}
-
-
-@pytest.mark.asyncio
-async def test_the_crewed_studio_is_never_routed():
-    db = FakeDb()
-    ollama = RoutingOllama({"下から": "FACETS: camera\nCAMERA: 下から煽る"})
-    s = await _duet_session(db)
-    s["mode"] = ""
-    named, _ = await service.route_note(db, ollama, s, "下から撮って", cfg={})
-    assert named == []
-    assert ollama.calls == []

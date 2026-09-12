@@ -6,7 +6,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 import pytest
 from unittest.mock import MagicMock, AsyncMock
 
-from app.muse import catalog, harvest
+from app.muse import catalog
 
 
 @pytest.mark.asyncio
@@ -27,32 +27,3 @@ async def test_build_muse_catalog():
     assert isinstance(data, dict)
 
 
-@pytest.mark.asyncio
-async def test_harvest_read_tags(monkeypatch):
-    """Test harvest.read_tags tags extraction from image bytes."""
-    # Re-import here rather than using the module-level `harvest`: some
-    # sibling test directories purge every "app.*" entry from sys.modules
-    # during collection, so by the time this test runs, `app.muse.harvest`
-    # in sys.modules can be a different object than the one bound above at
-    # collection time. monkeypatch.setattr resolves the string target
-    # against sys.modules, so patching and calling must use the same object.
-    from app.muse import harvest as live_harvest
-
-    async def mock_tags_scored(img_bytes, threshold, model_dir=None):
-        return [
-            ("1girl", 0.95, 0),
-            ("solo", 0.90, 0),
-            ("silver_hair", 0.85, 0),
-            ("explicit_rating", 0.99, 4), # Rating tag
-        ]
-
-    monkeypatch.setattr("app.muse.harvest.tags_scored_from_bytes", mock_tags_scored)
-
-    res = await live_harvest.read_tags(
-        b"fake_image_bytes",
-        threshold=0.3,
-        drop_rating_tags=True,
-    )
-    assert isinstance(res, str)
-    assert "1girl" in res
-    assert "silver_hair" in res

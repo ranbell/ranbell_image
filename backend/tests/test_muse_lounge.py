@@ -224,7 +224,7 @@ def test_the_occasions_are_never_about_work():
 
 
 # ── 彼女の手元に残る分 ──────────────────────────────────────────────────────
-from backend.app.muse import service as muse_service  # noqa: E402
+from backend.app.muse import shared as muse_service  # noqa: E402
 
 
 def test_the_circle_block_stays_small():
@@ -244,35 +244,8 @@ def test_the_circle_block_stays_small():
     assert muse_service.CIRCLE_MAX_CHARS <= 150
 
 
-def test_she_may_bring_her_friends_up_but_only_so_often():
-    """禁じずに理由を渡し、上限だけ置く。数えるのは**実際に言った時**。
-
-    毎ターン言えとするとくどくなる。訊かれた時だけとすると、休みの日が
-    無かったのと同じになる。
-    """
-    session = {
-        "circle": ["この前の日曜、ゆかりとパンケーキ"],
-        "circle_names": ["ゆかり"], "circle_mentions": 0,
-        "chat": [{"role": "muse", "text": "……この前、ゆかりちゃんと行ったんです。"}],
-    }
-    assert muse_service._circle_note(session), "最初は出る"
-
-    muse_service._count_circle_mention(session)
-    assert session["circle_mentions"] == 1
-
-    # 触れていないターンは数えない ―― 使わなかった分は残る
-    session["chat"].append({"role": "muse", "text": "はい、そこに座りますね。"})
-    muse_service._count_circle_mention(session)
-    assert session["circle_mentions"] == 1
-
-    session["circle_mentions"] = muse_service.CIRCLE_MENTION_MAX
-    assert not muse_service._circle_note(session), "上限で黙る"
 
 
-def test_no_circle_no_note():
-    """お出かけの記録が無ければ、プロンプトは一文字も増えない。"""
-    assert muse_service._circle_note({"circle": []}) == ""
-    assert muse_service._memory_block({"circle": []}) == ""
 
 
 @pytest.mark.asyncio
@@ -282,7 +255,7 @@ async def test_a_day_off_only_comes_round_every_few_shoots(monkeypatch):
     回数は preset の `shoot_count`（既にある・`push_shoot_recap` が進める）と、
     直近の一件が持つ `shoot_count` の差で見る。**preset に欄を足さない。**
     """
-    from backend.app.muse import service as svc
+    from backend.app.muse import shared as svc
 
     preset = {"shoot_count": 13}
     threads: list[dict] = []
@@ -312,7 +285,7 @@ async def test_a_day_off_only_comes_round_every_few_shoots(monkeypatch):
 @pytest.mark.asyncio
 async def test_no_shoots_yet_means_no_day_off(monkeypatch):
     """撮ったことのない子に、思い出だけ先にある状態を作らない。"""
-    from backend.app.muse import service as svc
+    from backend.app.muse import shared as svc
     monkeypatch.setattr(svc.presets_db, "get_preset",
                         lambda db, cid: _async({"shoot_count": 0}))
     monkeypatch.setattr(svc.lounge_db, "list_threads", lambda db, **kw: _async([]))
@@ -485,15 +458,3 @@ def test_the_output_contract_does_not_show_an_english_value():
     assert "同じ本文を英語で" in got
 
 
-def test_pages_already_saved_are_cleaned_when_read():
-    """既に保存されている頁も、読むときに整える。
-
-    書く側を直しても、**壊れたまま残っている頁は新しいものが来るまで
-    表示され続ける**（総監督が見たのは 4頁中2頁）。保存し直しはしない ——
-    読むたびに切るだけで足りる。
-    """
-    import inspect
-    from backend.app.muse import api as muse_api
-    src = inspect.getsource(muse_api.handpost_list)
-    assert "split_trailing_english" in src
-    assert "body_ja" in src and "body_en" in src

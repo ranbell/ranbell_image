@@ -4,7 +4,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 import pytest
-from app.muse import crew, service
+from app.muse import crew
 from app.characters import presets
 
 # Representative sampling of Muses across different clubs and archetypes

@@ -108,7 +108,7 @@ def test_the_pair_lives_in_one_place():
     # 日記側（`_which_one_is_me`）も同じ関数を読んでいる
     import inspect
 
-    from app.muse import service as muse_service
+    from app.muse import shared as muse_service
     src = inspect.getsource(muse_service._which_one_is_me)
     assert "identity.side_of" in src
 

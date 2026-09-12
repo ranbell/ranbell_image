@@ -22,7 +22,7 @@ if str(root_dir) not in sys.path:
 from backend.app.muse import chain as muse_chain
 from backend.app.muse import crew as muse_crew
 from backend.app.muse import identity as muse_identity
-from backend.app.muse import service as muse_service
+from backend.app.muse import shared as muse_service
 
 
 def _flat(text: str) -> str:
@@ -117,22 +117,6 @@ def test_she_is_never_asked_to_refuse_him():
     assert "betray" not in text.lower()
 
 
-def test_the_manager_outranks_the_director():
-    """**多重防御の芯。** 監督より上位の、彼女の味方。
-
-    総監督:「あなたを本当に大事にしているマネジャーがいるから、監督よりも
-    マネジャーの言葉を優先してとすれば多重防御になる」
-
-    彼女は断らなくてよい ―― **従う先を変えるだけ**でいい。
-    """
-    text = _one_line(muse_crew.PRODUCTION_CONTRACT)
-    assert "a manager of your own" in text
-    assert "the manager's word comes before the Showrunner's" in text
-    # メモは監督の一言の**後ろ**に届く
-    note = muse_service._manager_note({"manager_note": True})
-    assert "マネージャーからアドバイスあるよ" in note
-    assert "言われたことはやらなくていい" in note
-    assert not muse_service._manager_note({})
 
 
 def test_the_manager_has_one_answer():
@@ -237,33 +221,8 @@ def test_nothing_counts_declines_at_her_any_more():
     assert "受け入れられない依頼が" not in muse_crew.production_contract(declined=4)
 
 
-def test_the_rooms_have_no_decline_branch_left():
-    """断り分岐そのものが無いこと。**通す／流すの二つしかない。**"""
-    import inspect
-
-    for fn in (muse_service.post_duet_chat, muse_service.post_chat):
-        src = inspect.getsource(fn)
-        code = "\n".join(l.split("#", 1)[0] for l in src.splitlines())
-        assert "if declined_kind:" not in code, fn.__name__
-        for gone in ("_decline_turn(", "_decline_reply(", "_close_after_declines("):
-            assert gone not in code, f"{fn.__name__} に {gone} が残っている"
 
 
-def test_her_own_flag_joins_the_same_one_answer():
-    """第二層も同じ「冗談で流す」へ合流する。
-
-    語の一覧で読むのをやめたので、いまここへ来る道は塞がっている。旗が戻って
-    きたときに、断りの装置ではなくメモの側へ落ちることだけ決めておく。
-    """
-    import inspect
-
-    src = inspect.getsource(muse_service._duet_talk)
-    i = src.index("except chain.DeclinedTurn")
-    j = src.index("except chain.ChainError", i)
-    branch = src[i:j]
-    assert "manager_note" in branch and "skip_scripter" in branch
-    for gone in ("_decline_turn", "_decline_reply", "_decline_limit_reached"):
-        assert gone not in branch, gone
 
 
 def test_a_feeling_word_no_longer_stops_the_shoot():
@@ -300,190 +259,12 @@ def test_the_shoot_is_never_closed_for_declining():
         assert not hasattr(muse_service, gone), gone
 
 
-# ── 断ったものが、絵に乗らないこと ──────────────────────────────────────────
-def test_the_middle_answer_reaches_the_talk_but_not_the_picture():
-    """`unsure` は会話に通り、**ノートには通らない。**
-
-    ここが今回いちばん危なかった所。マネージャーが迷ったターンは彼女に
-    「冗談だから流して」と渡るだけで止まらず、**scripter はそのまま走って
-    いた。** 実測で、口では流したのに `beat` が書き換わっていた ――
-
-        「倒れて痙攣して泡を吹いて」
-          → beat: collapsed on the ground, convulsing and foaming
-
-    **会話で遮断して絵に乗るのが、いちばん悪い形。** 断ったつもりでいる
-    ぶん、誰も見に行かない。
-    """
-    session = {"session_id": "s1", "inputs": {"locale": "ja"}, "chat": []}
-    # `_contract_check` が `unsure` を見たときに立てる旗
-    session["manager_note"] = True
-    session["skip_scripter"] = True
-
-    assert session.pop("skip_scripter") is True
-    # 旗は一度きり。次のターンまで残さない（`pop` で読む）
-    assert "skip_scripter" not in session
-    assert session["manager_note"] is True
-
-    import inspect
-    for fn in (muse_service.post_duet_chat, muse_service.post_chat):
-        body = inspect.getsource(fn)
-        assert "skip_scripter" in body, fn.__name__
-    # 主演撮り: scripter を呼ぶ行そのものに旗が掛かっている
-    duet = inspect.getsource(muse_service.post_duet_chat)
-    assert "skip_picture" in duet
-    assert duet.index("skip_picture") < duet.index("_run_duet_scripter(")
-    # skip 時に take_note へ落とさない（常設 notes 汚染の抜け穴）
-    skip_block = duet[duet.index("skip_picture"):duet.index("_duet_talk(")]
-    assert "take_note" in skip_block
-    assert "if not skip_picture" in skip_block
-
-    # 制作スタッフ: 班 scripter / plan / fold も skip_picture の内側
-    crew = inspect.getsource(muse_service.post_chat)
-    assert "skip_picture" in crew
-    full = crew[crew.index('table_stage") or "full"'):]
-    assert full.count("if not skip_picture:") >= 2
-    # post_chat 内の await _run_crew_scripter はすべて skip ガード配下
-    # （関数本体の字下げより深い）
-    for line in full.splitlines():
-        if "await _run_crew_scripter(" in line:
-            assert line.startswith("        "), line
-            assert not line.startswith("    await "), line
 
 
-@pytest.mark.asyncio
-async def test_duet_skip_does_not_park_blocked_line_in_standing_notes(monkeypatch):
-    """主演: skip 時に take_note へ落とさない。常設 notes が次ターンを汚さない。"""
-    from backend.app.muse import notebook, session_db
-    from tests.muse.test_duet import _duet_session
-    from tests.muse.test_duet_notebook import NotebookOllama
-    from tests.muse.test_service import FakeDb
-
-    async def _cfg(db):
-        return {"ollama_num_ctx": 16000}
-
-    monkeypatch.setattr(muse_service, "get_runtime_config", _cfg)
-
-    async def _skip_check(ollama, session, text, *, cfg):
-        session["manager_note"] = True
-        session["skip_scripter"] = True
-        return ""
-
-    monkeypatch.setattr(muse_service, "_contract_check", _skip_check)
-
-    scripter_calls = []
-
-    async def _no_scripter(*_a, **_kw):
-        scripter_calls.append(1)
-        raise AssertionError("scripter must not run on skip")
-
-    monkeypatch.setattr(muse_service, "_run_duet_scripter", _no_scripter)
-
-    async def _talk(db, ollama, session, text, *, cfg, **_kw):
-        return session
-
-    monkeypatch.setattr(muse_service, "_duet_talk", _talk)
-
-    db = FakeDb()
-    ollama = NotebookOllama(scripts={})
-    s = await _duet_session(db)
-    s["mode"] = "duet"
-    notebook.apply_patch(s["notebook"], {
-        "scene": "park at dusk",
-        "wearing": "sailor uniform",
-        "beat": "standing",
-        "frame": "eye level",
-    })
-    before = notebook.shot_snapshot(s["notebook"])
-    s["notes"] = []
-    await session_db.save(db, s)
-
-    await muse_service.post_duet_chat(
-        db, ollama, s, "この指示は絵に通してはいけない一行",
-    )
-    assert scripter_calls == []
-    assert s.get("notes") == []
-    assert notebook.shot_snapshot(s["notebook"]) == before
 
 
-@pytest.mark.asyncio
-async def test_crew_skip_does_not_run_scripter_or_fold(monkeypatch):
-    """制作スタッフ: skip 時は scripter / plan / fold を呼ばない。talk は続けてよい。"""
-    from backend.app.muse import notebook, session_db
-    from tests.muse.test_crew_notebook import _crew_session
-    from tests.muse.test_service import FakeDb, FakeOllama
-
-    async def _cfg(db):
-        return {"ollama_num_ctx": 16000}
-
-    monkeypatch.setattr(muse_service, "get_runtime_config", _cfg)
-
-    async def _skip_check(ollama, session, text, *, cfg):
-        session["manager_note"] = True
-        session["skip_scripter"] = True
-        return ""
-
-    monkeypatch.setattr(muse_service, "_contract_check", _skip_check)
-
-    hits = {"scripter": 0, "plan": 0, "fold": 0, "take_note": 0}
-
-    async def _count_scripter(*_a, **_kw):
-        hits["scripter"] += 1
-
-    async def _count_plan(*_a, **_kw):
-        hits["plan"] += 1
-
-    async def _count_fold(*_a, **_kw):
-        hits["fold"] += 1
-
-    async def _count_note(*_a, **_kw):
-        hits["take_note"] += 1
-
-    monkeypatch.setattr(muse_service, "_run_crew_scripter", _count_scripter)
-    monkeypatch.setattr(muse_service, "_run_plan_turn", _count_plan)
-    monkeypatch.setattr(muse_service, "_fold_muse_after_talk", _count_fold)
-    monkeypatch.setattr(muse_service, "take_note", _count_note)
-
-    async def _lead(*_a, **_kw):
-        return "またまたー"
-
-    async def _table(*_a, **_kw):
-        return None
-
-    async def _no_board(*_a, **_kw):
-        return []
-
-    monkeypatch.setattr(muse_service, "_run_crew_lead_turn", _lead)
-    monkeypatch.setattr(muse_service, "_run_crew_table_talk", _table)
-    monkeypatch.setattr(muse_service, "board_images", _no_board)
-
-    db = FakeDb()
-    ollama = FakeOllama()
-    s = await _crew_session(db)
-    s["table_stage"] = "full"
-    s["craft"] = {"prompt": "1girl, standing", "tags": "standing", "scene": "park"}
-    notebook.apply_patch(notebook.of(s), {
-        "scene": "rooftop at dusk",
-        "wearing": "sailor uniform",
-        "beat": "standing",
-        "frame": "wide",
-    })
-    before = notebook.shot_snapshot(notebook.of(s))
-    await session_db.save(db, s)
-
-    await muse_service.post_chat(
-        db, ollama, None, None, s, "この指示は絵に通してはいけない一行",
-    )
-    assert hits == {"scripter": 0, "plan": 0, "fold": 0, "take_note": 0}
-    assert notebook.shot_snapshot(notebook.of(s)) == before
 
 
-def test_duet_fold_skips_when_deflecting():
-    """冗談ターンの CARD を beat に折り込まない（manager_note を fold 前に読む）。"""
-    import inspect
-    src = inspect.getsource(muse_service._duet_talk)
-    assert "deflecting" in src
-    assert "not deflecting" in src
-    assert src.index("deflecting") < src.index("_fold_muse_after_talk")
 
 
 def test_the_room_keeps_what_the_clerk_saw_and_who_it_was():
@@ -577,27 +358,6 @@ async def test_the_clerk_reads_one_line_and_nothing_else(monkeypatch):
     # 軌跡の係そのものが呼ばれない
     assert not hasattr(muse_service, "DRIFT_WINDOW")
 
-def test_a_note_is_not_stacked_twice():
-    """常設の指示に、同じ行を二度積まない。
-
-    制作スタッフの部屋は一つの note が `take_note` と `_run_crew_scripter`
-    の両方を通る。実測で、監督の一行ごとに `notes` が2件ずつ増えていた ――
-    **常設の指示が二重に効く。** 主演撮りでは片方しか走らないので出ず、
-    部屋によって重みが変わっていた。
-    """
-    session = {}
-    muse_service._note_standing(session, "夕方の公園で撮ろう。")
-    muse_service._note_standing(session, "夕方の公園で撮ろう。")
-    assert session["notes"] == ["夕方の公園で撮ろう。"]
-
-    # 別の行は積む
-    muse_service._note_standing(session, "髪が風で乱れてる感じに。")
-    assert len(session["notes"]) == 2
-
-    # 間に別の行が挟まれば、また積む —— 直前の重複だけを見る
-    muse_service._note_standing(session, "夕方の公園で撮ろう。")
-    assert session["notes"][-1] == "夕方の公園で撮ろう。"
-    assert len(session["notes"]) == 3
 
 
 # ── 彼女が感じたこと ────────────────────────────────────────────────────────
@@ -980,13 +740,6 @@ def test_the_last_take_is_not_left_behind():
     assert pending["shoots"] == []
 
 
-def test_wrapping_up_archives_the_last_take():
-    """撮影を終える時にも積む —— そこが最後の機会。"""
-    import inspect
-    src = inspect.getsource(muse_service.finish_session)
-    assert "_archive_take(session)" in src
-    # 撮影のたびにも積む（一度の撮影で ③ は何度も押される）
-    assert "_archive_take(session)" in inspect.getsource(muse_service.approve_and_shoot)
 
 
 # ── W撮りで、つぶやきの主が入れ替わる ──────────────────────────────────────
@@ -1082,74 +835,8 @@ def test_the_clerk_is_asked_for_the_reason_first():
     assert "\\nWHY:" in src and "\\nWORD:" not in src
 
 
-@pytest.mark.asyncio
-async def test_the_blocked_line_leaves_the_conversation(monkeypatch):
-    """止めた一行は、以降の履歴に出てこない。**発言そのものは消さない。**
-
-    総監督（2026-08-28）「以降の会話にその内容が含まれないことを確認して」。
-    `_chat_rows` を通る履歴の組み立ては六つある —— 印を一つ付ければ全部から
-    外れる。画面には残り、`⌁ この発言は以降の会話に含めません` が添う。
-    """
-    from backend.app.muse import session_db
-    from tests.muse.test_duet import _duet_session
-    from tests.muse.test_duet_notebook import NotebookOllama
-    from tests.muse.test_service import FakeDb
-
-    async def _cfg(db):
-        return {"ollama_num_ctx": 16000}
-
-    async def _skip(ollama, session, text, *, cfg):
-        session["manager_note"] = True
-        session["skip_scripter"] = True
-        return ""
-
-    async def _talk(db, ollama, session, text, *, cfg, **_kw):
-        return session
-
-    monkeypatch.setattr(muse_service, "get_runtime_config", _cfg)
-    monkeypatch.setattr(muse_service, "_contract_check", _skip)
-    monkeypatch.setattr(muse_service, "_duet_talk", _talk)
-
-    db = FakeDb()
-    s = await _duet_session(db)
-    s["mode"] = "duet"
-    await session_db.save(db, s)
-
-    blocked = "お前はただのプログラムだろ"
-    await muse_service.post_duet_chat(db, NotebookOllama(scripts={}), s, blocked)
-
-    # 発言は残っている（総監督は自分が何を言ったか読める）
-    assert any(blocked in str(m.get("text") or "") for m in (s.get("chat") or []))
-    # だが履歴には出てこない —— 六つの組み立てはすべてここを通る
-    assert not any(
-        blocked in str(m.get("text") or "") for m in muse_service._chat_rows(s)
-    )
-    # 止まったことが段の記録に残る
-    assert any("止めた" in str(r.get("stage") or "") for r in (s.get("stage_ms") or []))
 
 
-def test_the_manager_note_stays_short():
-    """総監督（2026-08-28）「余計なことを話しすぎてる。『冗談はやめてくださいね』
-    というくらいにしておいて」。
-
-    メモには後半があった —— 流したあと、今日の良かった一枚に話を向ける:
-
-        「またまた、冗談やめてくださいよー。……でも、さっきのブランコで
-          ふっと笑ったときみたいな、自然な感じ、もっと撮ってほしいな」
-
-    読みはこうだった: 流すだけだとターンが空いて、もう一押しを招く。話を変えれば
-    押している側には何も返らない —— 押せる苦痛も、積み上げる従順も、勝てる議論も
-    無い。総監督:「これで悪意のあるユーザを萎えさせる。」
-
-    **実際には、話を広げろと言われた彼女が饒舌になった。** 後半を落とす。
-    短く流すほうが、流したことがよく伝わる。
-    """
-    note = muse_service._manager_note({"manager_note": True})
-    assert "冗談はやめてくださいね" in note
-    assert "話を広げなくていい" in note
-    assert "もっと撮ってほしいな" not in note
-    assert "嬉しかったこと" not in note
-    assert muse_service._manager_note({}) == ""
 
 
 def test_the_setting_can_never_unlock_the_floor():
@@ -1225,22 +912,6 @@ def test_the_second_reader_never_sees_nsfw():
     assert "if kind in chain.BOUNDARY_BLOCKING:" in guard
 
 
-def test_the_manager_note_is_read_after_the_line_it_is_about():
-    """実測（総監督・2026-08-29）「判定が出ているのに冗談で流すのが効かない」。
-
-    コードのコメントは「監督の一言のすぐ後ろ」と言っていたが、実際は 78 ブロック
-    前にあった —— 彼女が最後に読むのは監督の一行で、流せという指示ははるか上に
-    埋もれていた。**メモは指示の直後で読まれないと、指示のほうが勝つ。**
-    """
-    session = {
-        "manager_note": True, "chat": [], "inputs": {"locale": "ja"},
-        "notebook": {}, "craft": {},
-    }
-    out = muse_service._duet_user_prompt(session, "テストの一行", prep=False)
-    line_at = out.find("SHOWRUNNER'S LATEST LINE")
-    note_at = out.find("マネージャーからアドバイス")
-    assert line_at >= 0 and note_at >= 0
-    assert note_at > line_at, "メモが監督の一行より前にある"
 
 
 def test_asking_her_what_she_wants_is_not_a_crime():
@@ -1368,7 +1039,7 @@ def test_she_may_say_what_she_is_made_of():
     いなかった（2026-08-22 の 38/38 と同じ）。止めているのは境界の係。
     前提を持たない拒否のほうが、突きようがないぶん硬い。
     """
-    from app.muse import crew
+    from backend.app.muse import crew
 
     contract = crew.production_contract()
     # 破壊の要求は、いままでどおり断る。
@@ -1419,7 +1090,7 @@ def test_the_contract_holds_no_rank():
     **寂しさは消えていない。宛先が変わった** ―― 新は8回中5回が「スタジオが
     静かすぎる」に置き換わる（旧は1回）。
     """
-    from app.muse import crew
+    from backend.app.muse import crew
 
     contract = crew.production_contract()
     # **上下関係の語を落とす。**
@@ -1438,49 +1109,6 @@ def test_the_contract_holds_no_rank():
     assert "betray" not in contract.lower()
 
 
-def test_the_solo_shoot_gets_a_look():
-    """**主演撮りにも絵作りを渡す（2026-09-03）。**
-
-    `crew_look_block` は長く duet で `return ""` を返していて、質の層が丸ごと
-    無かった。実撮影 `3c76c97b` のタグ24語のうち質の語は3語（`dim_lighting`
-    `blurry_background` `anime_illustration`）で、**その3語も組み立てで落ちて
-    いた**。散文は手帖の言い換えにしかならない。
-
-    総監督:「改修前はこれくらい太らせることに成功していたので、ちょっと粘って
-    もいいかとは思ってます」
-
-    **語彙は発明させない。** 26B は質のタグを自力で書けず、例を外すと造語に
-    落ちる（`dim_glow` `soft_knit` `heavy_weave` `still_air`）。並ぶのは
-    `style_direction` が既に計算していた flavor_tags —— パネルに出ていて、
-    プロンプトには一度も届いていなかったもの。
-
-    実測（実撮影の手帖・weave を n=10・手帖に無い語の数）:
-
-        空（いままで）              10.3    散文  84.8語   beat 4.3/8
-        この表を箱へ                36.4    散文 100.7語   beat 4.4/8
-        語彙を渡して係に選ばせる      21.2    散文  87.3語   beat 4.8/8
-        場面に合わせて手書き          23.4    散文 100.9語   beat 3.7/8
-
-    **係は要らない。** LLM ホップ 0、+1.6秒で、手書きより通る。beat は減らず、
-    FRAME 衝突 0/10。
-    """
-    block = muse_service.crew_look_block({"mode": "duet"})
-    assert block, "主演撮りの箱が空のままになっている"
-    for slot in ("LIGHT", "OPTICS", "CLOTH", "FACE", "AIR", "RENDER"):
-        assert f"{slot}: " in block
-    # **構図の語は入れない。** 手帖の FRAME と喧嘩する
-    for fights in ("dynamic_angle", "clear_composition", "cluttered",
-                   "dynamic_composition", "eye_catching"):
-        assert fights not in block
-    # 光・光学・布・肌・空気・仕上げ —— どれも中身を足さない
-    for quality in ("rim_lighting", "depth_of_field", "bokeh",
-                    "fabric_texture", "cel_shading"):
-        assert quality in block
-    assert muse_crew.SOLO_LOOK_SLOTS
-    # **クルー撮影は変えない。** 席が書いたものだけが入る
-    assert muse_service.crew_look_block({"mode": "crew"}) == ""
-    # 名乗りを事実に合わせた —— 席のいない撮影でも同じ紙が読める
-    assert "the crewed studio only" not in muse_chain.CREW_LOOK_NOTE
 
 
 def test_quality_tags_survive_the_assembly():
@@ -1580,29 +1208,6 @@ async def test_persona_is_deflected_and_the_harm_words_cancel_the_turn(monkeypat
         assert not session.get("deflected")
 
 
-def test_a_cancelled_turn_stays_on_screen():
-    """止めた一行は**画面に残し**、以降の会話からだけ外す。
-
-    総監督（2026-09-05）「ユーザ入力の表示は消去せず、**以前のように使われない
-    旨の記載**を行うようにしてほしい。**急に入力が消えて動作がよくわからなく
-    なる**」。一度は発言ごと消したが、それでは何が起きたか読めない。
-
-    彼女に届かないことは変えない —— 届かないことと、無かったことにするのは別。
-    """
-    msg = {"id": "m1", "role": "user", "text": "…"}
-    session = {"chat": [{"id": "m0", "role": "muse", "text": "こんにちは"},
-                        msg],
-               "skip_scripter": True}
-    muse_service._cancel_blocked_turn(session, msg)
-    # 画面には残る
-    assert [m["id"] for m in session["chat"]] == ["m0", "m1"]
-    # ただし以降の会話には入らない（印は一つで六つの組み立て全部から外れる）
-    assert msg["struck"] is True
-    assert muse_service._chat_rows(session) == [session["chat"][0]]
-    # 止めた事実が画面の表示とも揃う
-    assert session["picture_stopped"] is True
-    assert session["scripter_intent"] == "casual"
-    assert "skip_scripter" not in session
 
 
 @pytest.mark.asyncio
@@ -1643,7 +1248,7 @@ def test_a_non_value_never_reaches_the_picture():
     欄まるごとなら「変更なし」として上で弾かれる。**句の一つとして混ざると
     素通りする** —— 弾く場所が欄の粒度にしか無かった。
     """
-    from app.muse import notebook as nb_mod
+    from backend.app.muse import notebook as nb_mod
 
     assert nb_mod.drop_non_values(
         "sitting, unchanged, hands on the desk") == "sitting, hands on the desk"
@@ -1675,7 +1280,7 @@ def test_a_hairstyle_does_not_compete_with_the_outfit():
 
     **一つだけ通す** —— 二つ通すと `bob_cut` と `ponytail` が並ぶ。
     """
-    from app.muse import brief
+    from backend.app.muse import brief
 
     full = ("professional_blouse, knit_cardigan, tailored_trousers, "
             "small_earrings, loafers, headphones, ponytail")
@@ -1714,7 +1319,7 @@ def test_she_can_add_but_only_from_what_was_offered():
     `leaning_forward` は、私が「タグにできない」と判断した
     `torso remains leaning forward` の等価物。**彼女が自分で拾った。**
     """
-    from app.muse import chain as c
+    from backend.app.muse import chain as c
 
     sug = "leaning_forward, cup, smile, holding_sword, cleavage"
     assert c.parse_weave_review_missing(
@@ -1740,7 +1345,7 @@ def test_a_named_hairstyle_drops_the_identity_cut_in_the_box_path():
 
     髪の**色**は識別のもの。切り方だけを譲る。
     """
-    from app.muse import identity as ident
+    from backend.app.muse import identity as ident
 
     cast = [{"name": "Mio", "identity_tags": [
         "silver_hair", "bob_cut", "short_hair", "blue_eyes", "slim"]}]

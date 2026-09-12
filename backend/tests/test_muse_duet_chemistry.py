@@ -20,7 +20,7 @@ from backend.app.characters import compat as compat_mod
 from backend.app.characters import presets as presets_db
 from backend.app.muse import chain as muse_chain
 from backend.app.muse import identity as muse_identity
-from backend.app.muse import service as muse_service
+from backend.app.muse import shared as muse_service
 
 
 class FakeSessionQC:

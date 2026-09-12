@@ -4,9 +4,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock
 
-from app.muse import runner, events, identity, runtime
+from app.muse import events, identity, runtime
 
 
 @pytest.mark.asyncio
@@ -113,10 +112,3 @@ def test_the_chosen_look_rules_its_opposite_out():
     assert crew.look_negative(runtime.style_for(plain)) == []
 
 
-def test_style_for_is_one_answer_for_both_halves_of_the_prompt():
-    """ポジとネガが別々にルックを決めると、片方だけ効く事故になる。"""
-    from app.muse import crew, service
-    duet = {"mode": "duet", "inputs": {"look": "flat"}}
-    assert runtime.style_for(duet) == "flat anime cel shading"
-    assert service._style(duet) == runtime.style_for(duet)
-    assert runtime.style_for({"mode": "duet", "inputs": {}}) == crew.NEUTRAL_LOOK

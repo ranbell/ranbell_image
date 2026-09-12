@@ -21,60 +21,13 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
-from app.muse import chain, crew, service  # noqa: E402
+from app.muse import chain, crew  # noqa: E402
 
 
 # ── one seed for the whole shoot ────────────────────────────────────────────
 
-def test_the_seed_is_drawn_once_and_then_held():
-    """Two takes of one picture must differ only by the words."""
-    session = {}
-    first = service.session_seed(session)
-
-    assert service.session_seed(session) == first
-    assert service.session_seed(session) == first
-    assert session["seed"] == first
-
-
-def test_a_seed_already_on_the_session_is_not_redrawn():
-    session = {"seed": 12345}
-    assert service.session_seed(session) == 12345
-
-
-def test_two_shoots_do_not_share_a_seed():
-    a, b = {}, {}
-    assert service.session_seed(a) != service.session_seed(b)
-
 
 # ── the gaze gate is gone ───────────────────────────────────────────────────
-
-def test_a_low_camera_and_a_lifted_face_are_allowed():
-    """「ローアングル気味に。顔はもう少し撮りたいな」 — a real shot.
-
-    The pianist tilts her face up into the last of the resonance and the camera
-    is low. Both tags belong. This used to bin the whole weave.
-    """
-    session = {"session_id": "s1", "craft": {"tags": "OLD", "scene": "OLD"},
-               "notebook": {}, "inputs": {}}
-    tags = "sitting, piano, low_angle, from_below, looking_up, sad, deep_shadows"
-
-    assert service._apply_compiled_craft(session, tags, "A low angle holds her face.")
-    assert "looking_up" in session["craft"]["tags"]
-    assert "sad" in session["craft"]["tags"], "the expression must survive too"
-
-
-def test_the_mirror_case_is_allowed_as_well():
-    """`high_angle` + `looking_down` was already let through. Same rule now."""
-    session = {"session_id": "s1", "craft": {}, "notebook": {}, "inputs": {}}
-    tags = "standing, high_angle, from_above, looking_down"
-
-    assert service._apply_compiled_craft(session, tags, "From above.")
-
-
-def test_an_empty_compile_is_still_refused():
-    """The one wholesale refusal that was always right stays."""
-    session = {"session_id": "s1", "craft": {}, "notebook": {}, "inputs": {}}
-    assert not service._apply_compiled_craft(session, "", "")
 
 
 # ── she may point, and only at what is there ────────────────────────────────
@@ -118,16 +71,6 @@ def test_the_contract_tells_her_the_two_things_that_burned_us():
 
 # ── the subtraction the caller does ─────────────────────────────────────────
 
-class _ReviewOllama:
-    def __init__(self, reply):
-        self.reply = reply
-
-    def generate_text_stream(self, prompt, **kw):
-        reply = self.reply
-
-        async def _stream():
-            yield {"type": "token", "text": reply}
-        return _stream()
 
 
 def _session():
@@ -138,65 +81,3 @@ def _session():
     }
 
 
-@pytest.mark.asyncio
-async def test_what_she_disowns_leaves_the_bag():
-    bag = "sailor_fuku, straw_hat, sitting, low_angle"
-    out = await service._muse_reviews_weave(
-        _ReviewOllama("WRONG: straw_hat"), _session(), bag,
-        cfg={}, name_a="各務 みお", name_b="", partner=False,
-    )
-    assert "straw_hat" not in out
-    assert "sailor_fuku" in out and "low_angle" in out
-
-
-@pytest.mark.asyncio
-async def test_a_quiet_review_clears_the_last_one():
-    """Caught live: the field only ever grew, so a take where she said nothing
-    still showed the tag she disowned two takes ago."""
-    session = _session()
-    session["weave_review"] = ["looking_down"]
-
-    await service._muse_reviews_weave(
-        _ReviewOllama("WRONG: none"), session, "sailor_fuku, sitting",
-        cfg={}, name_a="各務 みお", name_b="", partner=False,
-    )
-
-    assert session["weave_review"] == []
-
-
-@pytest.mark.asyncio
-async def test_a_review_that_wants_to_gut_the_bag_is_ignored():
-    """Her own contract says two or three; a dozen means she misread it."""
-    bag = "a_one, b_two, c_three, d_four, e_five, f_six, g_seven"
-    out = await service._muse_reviews_weave(
-        _ReviewOllama("WRONG: a_one, b_two, c_three, d_four, e_five"),
-        _session(), bag, cfg={}, name_a="各務 みお", name_b="", partner=False,
-    )
-    assert out == bag
-
-
-@pytest.mark.asyncio
-async def test_a_review_that_cannot_run_leaves_the_bag_alone():
-    class _Dead:
-        def generate_text_stream(self, prompt, **kw):
-            async def _stream():
-                yield {"type": "token", "text": ""}
-            return _stream()
-
-    bag = "sailor_fuku, sitting"
-    out = await service._muse_reviews_weave(
-        _Dead(), _session(), bag,
-        cfg={}, name_a="各務 みお", name_b="", partner=False,
-    )
-    assert out == bag
-
-
-@pytest.mark.asyncio
-async def test_she_cannot_empty_the_bag():
-    """Subtracting everything would be a blank picture, so it is refused."""
-    bag = "sailor_fuku"
-    out = await service._muse_reviews_weave(
-        _ReviewOllama("WRONG: sailor_fuku"), _session(), bag,
-        cfg={}, name_a="各務 みお", name_b="", partner=False,
-    )
-    assert out == bag

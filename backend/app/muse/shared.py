@@ -2594,3 +2594,59 @@ def _director_exchanges(session: dict[str, Any], *, limit: int = 14) -> str:
             block.append(f"私: {after[:160]}")
         out.append("\n".join(block))
     return "\n\n".join(out[-max(1, int(limit)):])
+
+
+def banned_tags(session: dict[str, Any]) -> list[str]:
+    """Everything the Showrunner has taken out of this picture."""
+    return [str(t) for t in (session.get("banned") or []) if str(t).strip()]
+
+
+def banned_now(session: dict[str, Any]) -> list[str]:
+    """禁止のうち、**いま手帖が名指ししていないもの**だけ。
+
+    `live_struck` は模型に見せる追放を手帖で剪定するのに、執行側の
+    `drop_banned` は剪定していなかった。二つの仕組みが食い違っていて、
+    実測（2026-08-30）でこうなる:
+
+        手帖が「daytime」と言っている状態で
+           live_struck  []          ← 模型には「禁止」と伝わらない
+           drop_banned  daytime を落とす
+
+    一度でも `daytime` を禁止すると、**後から手帖が昼に戻っても絵は戻れ
+    ない。** weave は毎ターン書き、毎ターン黙って消される。総監督の
+    「場所が入れ替わらない」の一形態。
+
+    原則は `_sane_strike` に既に書いてある —— *The notebook is the shot.
+    Nothing it currently names can be struck.* 従っていたのは表示側だけ
+    だった。ここで執行側を揃える。
+
+    **総監督の拒否を弱めるものではない。** 禁止は立ち続ける —— 手帖が
+    その語を名指しし直したときだけ引っ込む。そして手帖にそれが載るのは、
+    総監督がそう言ったときだけ。
+
+    帳簿（`banned_tags`）はそのまま。足し引きの勘定は生の状態で行う
+    （`apply_removals` が「もう禁止されているか」を数え違える）。
+    """
+    live = notebook_mod.shot_tokens(notebook_mod.of(session))
+    return [
+        t for t in banned_tags(session)
+        if not (notebook_mod.wearing_tokens(t) & live)
+        and identity.bare_tag(t) not in live
+    ]
+
+
+def drop_banned(session: dict[str, Any], tags: str) -> str:
+    """Strip anything the Showrunner has refused, whoever just wrote it.
+
+    This is the enforcement. Telling seats not to reintroduce something means
+    naming it in their prompt every turn, which is what kept a refused prop
+    alive in the conversation for the rest of the session. A filter needs to
+    say nothing at all.
+    """
+    gone = set(banned_now(session))
+    if not gone or not str(tags or "").strip():
+        return tags
+    return ", ".join(
+        p.strip() for p in str(tags).split(",")
+        if p.strip() and identity.bare_tag(p) not in gone
+    )

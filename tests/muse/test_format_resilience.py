@@ -8,17 +8,14 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
-from app.muse import identity, notebook, service, session_db
-from tests.muse.test_duet import _duet_session
-from tests.muse.test_duet_notebook import NotebookOllama, _scripter_block
-from tests.muse.test_service import FakeDb, FakeOllama
+from app.muse import identity, notebook, shared
 
 
 @pytest.fixture(autouse=True)
 def _no_runtime_config(monkeypatch):
     async def _cfg(db):
         return {"ollama_num_ctx": 16000}
-    monkeypatch.setattr(service, "get_runtime_config", _cfg)
+    monkeypatch.setattr(shared, "get_runtime_config", _cfg)
 
 
 def test_sanitize_strips_truncated_tags_leak():
@@ -128,76 +125,3 @@ def test_scripter_json_salvages_truncated_object():
     assert out.get("raw") == raw or out.get("valid") in (True, False)
 
 
-@pytest.mark.asyncio
-async def test_scripter_repair_pass_on_invalid(monkeypatch):
-    """Invalid first output → one repair call can salvage craft."""
-    class RepairOllama(FakeOllama):
-        def __init__(self):
-            super().__init__()
-            self.n = 0
-
-        async def generate_text(self, prompt, **kw):
-            kw.pop("fmt", None)
-            self.calls.append({**kw, "prompt": prompt})
-            system = str(kw.get("system") or "")
-            if "studio scripter" in system or "shot notebook" in system:
-                self.n += 1
-                if self.n == 1:
-                    return (
-                        "INTENT: shot\nWEARING: jacket\nBEAT: standing\nFRAME: low\n"
-                        "TAGS: from_below, looking_up, jacket\n"
-                        "CRAFT_SCENE: Broken.\n"
-                    )
-                return _scripter_block(
-                    intent="shot",
-                    wearing="jacket",
-                    beat="standing",
-                    frame="low angle, looking down",
-                    tags="from_below, looking_down, jacket",
-                    craft_scene="Low angle fixed.",
-                )
-            return "SAY: うん、下からね。見下ろす形。"
-
-        def generate_text_stream(self, prompt, **kw):
-            async def _s():
-                text = await self.generate_text(prompt, **kw)
-                yield {"type": "token", "text": text}
-            return _s()
-
-    db = FakeDb()
-    ollama = RepairOllama()
-    s = await _duet_session(db)
-    s["mode"] = "duet"
-    s["craft"] = {
-        "tags": "straw_hat, standing",
-        "scene": "Hat.",
-        "prompt": "1girl, straw_hat",
-        "pose_intent": "",
-    }
-    await session_db.save(db, s)
-    await service.post_duet_chat(db, ollama, s, "壊す指示で煽りと見上げ同時だけど直して")
-    # Repair should land looking_down craft, or keep prior if repair also fails.
-    assert ollama.n >= 1
-    tags = str((s.get("craft") or {}).get("tags") or "")
-    assert "looking_up" not in tags or s.get("craft_dirty") is True
-
-
-@pytest.mark.asyncio
-async def test_invalid_scripter_marks_dirty_event_fields():
-    db = FakeDb()
-    ollama = NotebookOllama(scripts={
-        "帽子": _scripter_block(
-            intent="shot", wearing="hat", beat="stand", frame="eye",
-            tags="hat, standing", craft_scene="Hat.",
-        ),
-        "壊": (
-            "INTENT: shot\nWEARING: x\nBEAT: y\nFRAME: low\n"
-            "TAGS: from_below, looking_up\nCRAFT_SCENE: bad\n"
-        ),
-    })
-    s = await _duet_session(db)
-    s["mode"] = "duet"
-    await session_db.save(db, s)
-    await service.post_duet_chat(db, ollama, s, "麦わら帽子")
-    await service.post_duet_chat(db, ollama, s, "壊す煽り見上げ")
-    assert s.get("craft_dirty") is True

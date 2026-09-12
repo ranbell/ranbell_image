@@ -22,7 +22,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
-from app.muse import chain, crew, service  # noqa: E402
+from app.muse import chain, crew, shared as service  # noqa: E402
 from app.muse import shared
 
 

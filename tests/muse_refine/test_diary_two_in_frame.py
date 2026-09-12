@@ -21,7 +21,7 @@ import inspect
 
 import pytest
 
-from app.muse import identity, service as muse_service, shared
+from app.muse import identity, shared as muse_service, shared
 
 #: 主演／相方がどちら側か。**直書きしない**（`identity.LEAD_SIDE` を替えたら追従）。
 LEAD_JA = identity.side_of(lead=True)[1]

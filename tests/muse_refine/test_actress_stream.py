@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 
-from app.muse import service as muse_service
+from app.muse import shared as muse_service
 from app.muse_refine import ledger as L, writer
 
 

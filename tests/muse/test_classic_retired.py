@@ -89,3 +89,43 @@ def test_the_lounge_router_does_not_drag_the_turn_engine_in():
         "handpost_db", "lounge_db", "lounge as lounge_mod", "lounge",
         "presets as presets_db", "presets",
     }, imported
+
+
+#: `private/muse_classic/` へ退いたもの。`backend/app/` の側からは、もう引けない。
+RETIRED = ("service", "schema", "report", "pipeline_view", "harvest", "api")
+
+
+def test_nothing_living_reaches_for_a_retired_module():
+    """土台が退役したモジュールを引いていないこと。
+
+    **実際に踏んだ。** `facets.write_facet` が `from .service import drop_banned`
+    を関数の中でやっていたので、import では気付かず、その行を通る試験だけが
+    `ModuleNotFoundError` で落ちた。関数の中に隠れた import は AST でしか見えない
+    —— だから行ごとではなく**木で**見る。
+    """
+    import ast
+
+    bad: list[str] = []
+    for path in sorted(Path("backend/app").rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        pkg_muse = path.parts[2:3] == ("muse",)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                mod = node.module or ""
+                # `from .service import x` / `from ..muse.service import x`
+                if mod.split(".")[-1] in RETIRED and (
+                    mod.endswith("muse." + mod.split(".")[-1])
+                    or (pkg_muse and node.level and "." not in mod)
+                ):
+                    bad.append(f"{path}:{node.lineno} from {'.' * node.level}{mod}")
+                # `from .muse import service` / `from . import service`
+                if pkg_muse and node.level and not mod:
+                    for a in node.names:
+                        if a.name in RETIRED:
+                            bad.append(f"{path}:{node.lineno} import {a.name}")
+            elif isinstance(node, ast.Import):
+                for a in node.names:
+                    parts = a.name.split(".")
+                    if len(parts) > 1 and parts[-2] == "muse" and parts[-1] in RETIRED:
+                        bad.append(f"{path}:{node.lineno} import {a.name}")
+    assert not bad, "退役したモジュールを引いている:\n" + "\n".join(bad)

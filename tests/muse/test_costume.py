@@ -20,14 +20,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
+from tests.muse import _shape
 from app.muse import brief as brief_mod
-from app.muse import chain, crew, notebook, schema, service
+from app.muse import chain, notebook
 
 GARMENTS = "top=school_swimsuit / bottom=covered_by_top / feet=barefoot / extras=goggles"
 
 
 def _session() -> dict:
-    s = schema.new_session({
+    s = _shape.new_session({
         "theme": "泳ぐ話", "character_id": "c1", "workflow": "w.json", "model": "m",
         "crew_preset": "standard",
     })
@@ -38,12 +39,6 @@ def _session() -> dict:
     return s
 
 
-def _costume(**over) -> dict:
-    cos = {"silhouette": "sporty one-piece", "layers": "swimsuit", "colourway": "navy",
-           "pattern": "solid", "fabric": "nylon", "condition": "damp",
-           "hero": "goggles", "garments": GARMENTS}
-    cos.update(over)
-    return cos
 
 
 def _turn(muse_id: str, tags: str, *, costume=None) -> chain.MuseTurn:
@@ -108,166 +103,6 @@ def test_garment_tags_survives_how_the_models_actually_write_the_slots():
     for raw, want in shapes.items():
         assert brief_mod.garment_tags({"garments": raw}) == want, raw
         assert not any("=" in t for t in brief_mod.garment_tags({"garments": raw}))
-
-
-# ── the costume tag set is clothes, and only clothes ────────────────────────
-def test_costume_tags_are_the_garments_not_everything_wardrobe_added():
-    """The bug this replaced: `costume["tags"]` was the turn's ledger diff, so a
-    real session recorded the entire pool set as part of her outfit."""
-    s = _session()
-    service._apply_turn(s, _turn(
-        "wardrobe:shiwa",
-        "school_swimsuit, goggles, barefoot, poolside, blue_tile_coping, "
-        "drain_grate, midday",
-        costume=_costume(),
-    ))
-    assert s["costume"]["tags"] == ["school_swimsuit", "barefoot", "goggles"]
-    assert "drain_grate" not in s["costume"]["tags"]
-    assert "COSTUME (LOCKED" in s["brief"]         # re-stated for the next seat
-
-    # The camera cannot own the outfit: a lens turn never sets costume.
-    s2 = _session()
-    service._apply_turn(s2, _turn("lens:pinto", "school_swimsuit", costume=None))
-    assert s2["costume"] == {}
-
-
-def test_a_garment_named_in_costume_but_missing_from_tags_is_put_back():
-    s = _session()
-    service._apply_turn(s, _turn("wardrobe:shiwa", "poolside, midday",
-                                 costume=_costume()))
-    tags = [t.strip() for t in s["craft"]["tags"].split(",")]
-    assert "school_swimsuit" in tags and "goggles" in tags
-    assert "school_swimsuit" in s["craft"]["prompt"]   # positive rebuilt too
-
-
-def test_a_refused_garment_is_not_put_back_by_the_costume_block():
-    """The one way past `drop_banned`.
-
-    A Showrunner who says「上着脱いで」has the garment struck from the craft and
-    banned. The next wardrobe turn then re-read a COSTUME block that still named
-    it, and `_ensure_garments` stapled it straight back on — so it came back as
-    many times as she asked for it to go.
-    """
-    s = _session()
-    service._apply_turn(s, _turn("wardrobe:shiwa", "poolside, midday",
-                                 costume=_costume()))
-    assert "goggles" in s["craft"]["tags"]
-
-    service.apply_removals(s, ["goggles"], [])
-    assert "goggles" not in s["craft"]["tags"]
-
-    # Wardrobe speaks again, still describing the goggles in her COSTUME block.
-    service._apply_turn(s, _turn("wardrobe:shiwa", "poolside, sunlight",
-                                 costume=_costume()))
-    assert "goggles" not in s["craft"]["tags"]
-    assert "goggles" not in s["craft"]["prompt"]
-    # The rest of the outfit is untouched — this is a refusal, not an undress.
-    assert "school_swimsuit" in s["craft"]["tags"]
-
-
-def test_a_turn_without_garments_keeps_the_outfit_and_strikes_nothing():
-    s = _session()
-    service._apply_turn(s, _turn("wardrobe:shiwa", "school_swimsuit",
-                                 costume=_costume()))
-    before = list(s["costume"]["tags"])
-    service._apply_turn(s, _turn("wardrobe:shiwa", "school_swimsuit, sunlight",
-                                 costume=_costume(garments="")))
-    assert s["costume"]["tags"] == before          # last known outfit held
-    assert "school_swimsuit" in s["craft"]["tags"]
-    assert not s.get("struck")                     # nothing removed on a blank
-
-
-def test_showrunner_change_strikes_the_old_outfit_keeps_the_room():
-    """§2-5: when Wardrobe rebuilds COSTUME, last outfit's garments are struck
-    from the craft, but the room's props are not."""
-    s = _session()
-    s["craft"] = {"tags": "rush_guard, poolside, lane_rope", "scene": "at the pool.",
-                  "prompt": "", "pose_intent": ""}
-    s["costume"] = {"tags": ["school_swimsuit"]}   # Wardrobe just rebuilt it
-    struck = service.strike_dropped_costume(s, {"tags": ["rush_guard"]})
-    assert struck == ["rush_guard"]
-    tags = [t.strip() for t in s["craft"]["tags"].split(",")]
-    assert "rush_guard" not in tags                # old garment gone
-    assert "poolside" in tags and "lane_rope" in tags   # room kept
-    assert "rush_guard" in (s.get("struck") or [])      # surfaced to later seats
-
-
-def test_changing_clothes_no_longer_strikes_the_location():
-    """The pool used to ride in `costume["tags"]`, so a change of clothes took
-    the set down with it."""
-    s = _session()
-    service._apply_turn(s, _turn(
-        "wardrobe:shiwa", "rash_guard, poolside, blue_tile_coping, drain_grate",
-        costume=_costume(garments="top=rash_guard / bottom=swim_briefs"),
-    ))
-    service._apply_turn(s, _turn(
-        "wardrobe:shiwa", "poolside, blue_tile_coping, drain_grate",
-        costume=_costume(),
-    ))
-    tags = [t.strip() for t in s["craft"]["tags"].split(",")]
-    assert "rash_guard" not in tags and "swim_briefs" not in tags
-    assert "blue_tile_coping" in tags and "drain_grate" in tags
-    assert "school_swimsuit" in tags
-
-
-def test_a_renamed_garment_is_not_struck():
-    s = _session()
-    s["craft"] = {"tags": "skirt, bench", "scene": "x", "prompt": "",
-                  "pose_intent": ""}
-    s["costume"] = {"tags": ["pleated_skirt"]}
-    struck = service.strike_dropped_costume(s, {"tags": ["skirt"]})
-    assert struck == []                            # skirt → pleated_skirt is a rename
-    assert "skirt" in s["craft"]["tags"]
-
-
-# ── hold the clothes, move the scene ────────────────────────────────────────
-def test_moving_the_scene_does_not_undress_her():
-    s = _session()
-    s["craft"] = {"tags": "school_swimsuit, poolside, lane_rope", "scene": "x",
-                  "prompt": "", "pose_intent": ""}
-    s["costume"] = {"garments": GARMENTS, "tags": ["school_swimsuit"]}
-    # The planner slipped a garment into MUST APPEAR and then moved the shoot.
-    s["plan"] = {"must_appear": ["rooftop railing"]}
-    struck = service.strike_dropped_props(
-        s, {"must_appear": ["poolside", "lane_rope", "school_swimsuit"]},
-    )
-    assert "school_swimsuit" not in struck
-    assert "school_swimsuit" in s["craft"]["tags"]
-    assert "poolside" in struck and "lane_rope" in struck
-
-
-# ── the seat that owns clothes has to be reachable ──────────────────────────
-def test_wardrobe_answers_every_note_and_dresses_her_first():
-    cast = crew.resolve_crew(preset="standard")
-    responders = service._pick_responders("水着にして", cast)
-    dresser = service._cast_in_role(cast, "wardrobe")
-    assert dresser and responders[0] == dresser    # dress her, then frame her
-    assert len(responders) == len(set(responders))
-    # A cast with no wardrobe seat still answers. Every shipped crew has one
-    # now, so the cast without it is built by hand rather than named.
-    bare = crew.resolve_crew(crew_ids=["plan:madori", "beat:ichibyou"])
-    assert not service._cast_in_role(bare, "wardrobe")
-    assert service._pick_responders("x", bare)
-
-
-# ── the default outfit reaches Wardrobe alone, with its discard rule ────────
-def test_the_default_outfit_is_not_in_anybody_else_brief():
-    s = _session()
-    service._rebuild_brief(s)
-    for text in (s["brief"], s["brief_lite"]):
-        assert "collared_shirt" not in text
-        assert "Outfit:" not in text
-
-
-def test_the_rail_is_wardrobe_only_and_only_until_the_outfit_is_set():
-    s = _session()
-    rail = service._wardrobe_rail(s, "wardrobe:shiwa")
-    assert "DEFAULT RAIL" in rail and "collared_shirt" in rail
-    # The discard rule is read before the garments it discards.
-    assert rail.index("If it names a garment") < rail.index("DEFAULT RAIL")
-    assert service._wardrobe_rail(s, "lens:pinto") == ""
-    s["costume"] = {"garments": GARMENTS, "tags": ["school_swimsuit"]}
-    assert service._wardrobe_rail(s, "wardrobe:shiwa") == ""
 
 
 # ── one garment, one name ──────────────────────────────────────────────────

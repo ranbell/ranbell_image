@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
-from app.ai.comfy import ComfyUIClient
+from app.ai.comfy import ComfyUIClient, _preview_image
 
 CLIENT = ComfyUIClient()
 
@@ -84,3 +84,11 @@ def test_patchable_fields_reports_zero_for_an_unpatchable_workflow():
     counts = ComfyUIClient.patchable_fields(wf)
     assert counts["steps"] == 0
     assert counts["cfg"] == 0
+
+
+# classic の `tests/muse/test_schema.py` から引き取った（退役・2026-09-12）。
+# ComfyUI のプレビュー枠の復号で、Muse の器とは関係がない。
+def test_preview_frames_are_found_behind_whatever_header_comfy_sends():
+    jpeg = b"\xff\xd8\xff\xe0rest-of-image"
+    assert _preview_image(b"\x00\x00\x00\x01\x00\x00\x00\x01" + jpeg) == jpeg
+    assert _preview_image(b"\x00\x00\x00\x01\x00\x00\x00\x02xxxx" + jpeg) == jpeg

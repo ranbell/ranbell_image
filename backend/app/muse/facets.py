@@ -318,7 +318,7 @@ def write(
         kept = _resolve_self_pitch_gaze_conflicts(kept)
         # The Showrunner's refusals outrank whoever just wrote this, and the
         # locked body outranks everyone.
-        from .service import drop_banned  # circular at import time, not at call
+        from .shared import drop_banned  # circular at import time, not at call
         kept = parse_tags(drop_banned(session, ", ".join(kept)))
         kept = parse_tags(identity.drop_conflicting_tags(
             ", ".join(kept), _identity_tags_for(session, facet),

@@ -17,7 +17,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from app.muse import service as muse_service
+from app.muse import shared as muse_service
 from app.muse_refine.ctx import refine_num_ctx
 
 PKG = Path(__file__).resolve().parents[2] / "backend" / "app" / "muse_refine"

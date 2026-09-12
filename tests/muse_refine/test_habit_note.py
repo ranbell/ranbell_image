@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import inspect
 
-from app.muse import lounge as lounge_mod, service as muse_service
+from app.muse import lounge as lounge_mod, shared as muse_service
 from app.muse_refine import service
 
 

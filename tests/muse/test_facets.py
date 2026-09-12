@@ -19,12 +19,13 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
+from tests.muse import _shape
 from app.muse import brief as brief_mod
-from app.muse import facets, identity, schema, service
+from app.muse import facets, identity
 
 
 def _session() -> dict:
-    s = schema.new_session({
+    s = _shape.new_session({
         "theme": "お題", "character_id": "c1", "workflow": "w.json", "model": "m",
     })
     s["character"] = {"identity_tags": ["1girl", "blue_hair"],
@@ -352,47 +353,6 @@ def test_a_tag_that_fights_the_locked_body_never_enters_a_facet():
 
 # ── locking ─────────────────────────────────────────────────────────────────
 
-def test_a_refusal_reaches_the_state_and_not_just_the_view_of_it():
-    """`craft` is derived here, so striking it would last exactly until the next
-    reassemble put the tag back from the table."""
-    s = _session()
-    s["mode"] = "duet"
-    facets.write(s, "props", tags="desk, glasses", nl="A desk, and her glasses.")
-    facets.write(s, "place", tags="classroom", nl="A classroom.")
-    service.apply_removals(s, ["glasses"], [])
-    service._reassemble(s)
-
-    assert "glasses" not in facets.table_of(s)["props"]["tags"]
-    assert "glasses" not in s["craft"]["tags"]
-    assert "glasses" not in s["craft"]["prompt"]
-    # The sentence named it too, and a sentence is half the prompt.
-    assert "glasses" not in s["craft"]["scene"]
-    # Parts that lost nothing keep their prose.
-    assert facets.table_of(s)["place"]["nl"] == "A classroom."
-
-
-def test_a_refusal_queues_the_part_it_emptied_for_rewrite():
-    s = _session()
-    s["mode"] = "duet"
-    facets.write(s, "costume", tags="jacket, skirt", nl="A jacket over a skirt.",
-                 fields={"hero": "the jacket"})
-    service.apply_removals(s, ["jacket"], [])
-
-    assert facets.table_of(s)["costume"]["nl"] == ""
-    assert facets.table_of(s)["costume"]["fields"] == {}
-    assert "costume" in s["routed"]
-
-
-def test_a_refusal_outranks_a_lock():
-    """A pin says "do not rewrite this". It does not say "keep something the
-    Showrunner has taken out of the picture"."""
-    s = _session()
-    s["mode"] = "duet"
-    facets.write(s, "props", tags="desk, glasses")
-    facets.set_lock(s, "props", True)
-    service.apply_removals(s, ["glasses"], [])
-    assert "glasses" not in facets.table_of(s)["props"]["tags"]
-
 
 def test_a_locked_facet_is_never_written():
     s = _session()
@@ -532,7 +492,8 @@ def _legacy_session() -> dict:
                  "cardigan, warm_sunlight, potted_plant"),
         "scene": "A long paragraph that was already rendering.",
     }
-    service._reassemble(s)
+    # classic の `_reassemble` を呼んでいた一行は落とした（退役・2026-09-12）。
+    # ここで欲しいのは「facets 表を持たない古い行」で、craft は上で据えてある。
     return s
 
 
@@ -602,78 +563,6 @@ def test_migration_starts_the_digest_empty():
 
 
 # ── the derived craft ───────────────────────────────────────────────────────
-
-def test_a_migrated_duet_session_keeps_its_whole_shot():
-    """What migration guarantees, exactly.
-
-    The prose is kept and every tag is kept. What is NOT kept is the order they
-    were written in: `TAG_ORDER` regroups them by part, deliberately, so
-    composition and the acting lead. A render already in flight is unaffected
-    either way — `runner.py` reads the frozen `board["prompt"]` snapshot, not
-    the craft — so the reordering lands on the next board and nowhere else.
-    """
-    s = _legacy_session()
-    s["mode"] = "duet"
-    was = s["craft"]["prompt"]
-    facets.migrate(s)
-    service._reassemble(s)
-
-    assert s["craft"]["scene"] == "A long paragraph that was already rendering."
-    assert s["craft"]["scene"] in s["craft"]["prompt"]
-    assert set(identity.tag_names(was)) <= set(identity.tag_names(s["craft"]["prompt"]))
-
-
-def test_the_derived_craft_falls_back_to_the_joined_sentences():
-    """`craft["scene"]` is never blocked on a model call — the moment a facet
-    lands, the shot is a valid prompt."""
-    s = _session()
-    s["mode"] = "duet"
-    facets.write(s, "place", tags="classroom", nl="An empty classroom.")
-    facets.write(s, "camera", tags="from_below", nl="Shot from below her.")
-    service._reassemble(s)
-
-    assert s["composed"]["scene"] == ""      # nothing has been composed
-    assert s["craft"]["scene"] == "An empty classroom. Shot from below her."
-    assert s["craft"]["tags"] == "from_below, classroom"
-    assert "from_below" in s["craft"]["prompt"]
-
-
-def test_a_stale_composition_is_not_used():
-    s = _session()
-    s["mode"] = "duet"
-    facets.write(s, "place", nl="An empty classroom.")
-    s["composed"] = {"scene": "Composed prose.", "rev":
-                     facets.table_rev(facets.table_of(s)), "at": 0.0}
-    service._reassemble(s)
-    assert s["craft"]["scene"] == "Composed prose."
-
-    facets.write(s, "camera", nl="Shot from below her.")
-    service._reassemble(s)
-    assert s["craft"]["scene"] == "An empty classroom. Shot from below her."
-
-
-def test_the_brief_blocks_follow_the_table():
-    s = _session()
-    s["mode"] = "duet"
-    facets.write(s, "place", nl="An empty classroom.")
-    facets.write(s, "costume", tags="cardigan", fields={"hero": "the cardigan"})
-    service._reassemble(s)
-    assert s["plan"]["place"] == "An empty classroom."
-    assert s["costume"]["tags"] == ["cardigan"]
-
-
-def test_the_crewed_studio_is_not_on_the_facet_path():
-    """Every facet code path is gated, and this is the gate. The crewed studio
-    keeps its own machinery until each seat declares the parts it owns."""
-    s = _session()
-    assert service.on_facets(s) is False
-    s["mode"] = "duet"
-    assert service.on_facets(s) is True
-    # W-Muse is on the facet path too — costume_b/pose_b/expression_b give
-    # the second Muse her own slots instead of contending for the first
-    # Muse's one costume/pose/expression facet.
-    s["inputs"]["partner_preset"] = "someone"
-    assert service.on_facets(s) is True
 
 
 def test_a_new_session_already_has_the_table():
