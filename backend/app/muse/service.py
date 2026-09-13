@@ -53,6 +53,13 @@ def public_view(session: dict[str, Any]) -> dict[str, Any]:
             "theme": inputs.get("theme", ""),
             "character_id": inputs.get("character_id", ""),
             "partner_preset": inputs.get("partner_preset", ""),
+            # **画面が読む値は返す（2026-09-13）。** 昨日 `InputsPatch` に欄を
+            # 足して「送れる」ようにしたが、**返していなかった** —— 画面は
+            # `inputs.crew_preset || 'standard'` を読むので、選んで保存されても
+            # 開き直すと `standard` に見える。**操作は効くのに表示が嘘をつく**、
+            # いちばん気づきにくい壊れ方。往復で見ないと分からない。
+            "crew_preset": inputs.get("crew_preset", ""),
+            "banter_mode": inputs.get("banter_mode", ""),
             "workflow": inputs.get("workflow", ""),
             "model": inputs.get("model", ""),
             "locale": inputs.get("locale", "ja"),

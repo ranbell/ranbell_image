@@ -137,3 +137,46 @@ def test_every_input_the_screen_patches_is_accepted():
     known = set(InputsPatch.model_fields)
     lost = sorted(sent - known)
     assert not lost, f"画面が送っているのに裏が受け取らない欄: {lost}"
+
+
+def test_every_input_the_screen_reads_is_returned():
+    """**送れても、返らなければ嘘をつく。**（2026-09-13）
+
+    昨日 `InputsPatch` に `crew_preset` / `banter_mode` を足して「送れる」ように
+    したが、`service.public_view` は返していなかった。画面は
+    `inputs.crew_preset || 'standard'` を読むので、**選んで保存されても開き直すと
+    `standard` に見える** —— 実機で席数は 18→14→13 と切り替わっていたのに、
+    画面の表示だけが嘘をついていた。
+
+    片道（送る）と往復（返る）は別の試験が要る。
+    """
+    from app.muse.service import new_session, public_view
+
+    panel = (ROOT / "frontend/src/components/MusePanel.vue").read_text(encoding="utf-8")
+    read = set(re.findall(r"inputs\.([A-Za-z_]\w*)", panel))
+    read -= {"value"}          # `$event.target.value` の誤検出
+
+    session = new_session({})
+    session["inputs"] = {**session["inputs"],
+                         **{k: "x" for k in read if k not in session["inputs"]}}
+    got = public_view(session)["inputs"]
+
+    missing = sorted(k for k in read if k not in got)
+    assert not missing, f"画面が読むのに返っていない欄: {missing}"
+
+
+def test_the_crew_preset_survives_the_round_trip():
+    """選んだ班が、保存されて、返ってくること（席の数も変わること）。"""
+    from app.muse import crew, crew_room
+    from app.muse.api import InputsPatch
+    from app.muse.service import new_session, public_view
+
+    sent = InputsPatch(crew_preset="flat").model_dump(exclude_none=True)
+    assert sent == {"crew_preset": "flat"}, sent
+
+    session = new_session({})
+    session["inputs"] = {**session["inputs"], **sent,
+                         "crew_ids": list(crew.resolve_crew(preset="flat"))}
+    assert public_view(session)["inputs"]["crew_preset"] == "flat"
+    session[crew_room.TABLE_OPEN] = True
+    assert len(crew_room.cast_of(session)) == 12, "flat は12席"
