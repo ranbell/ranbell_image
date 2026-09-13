@@ -759,7 +759,9 @@
       "museModel": "Muse default LLM",
       "museWorkflow": "Muse default image model",
       "museModelEmpty": "(unset — pick per shoot)",
-      "museWorkflowHint": "API_xxx.json"
+      "museWorkflowHint": "API_xxx.json",
+      "museWorkflowGone": "missing now",
+      "museDefaultHint": "Set here, it is pre-filled when Muse opens. Leave empty to pick per shoot."
     },
     "system": {
       "title": "System",
@@ -1604,7 +1606,10 @@
     },
     "needModel": "Pick the LLM to use",
     "needWorkflow": "Pick the image model (workflow)",
-    "pickBeforeStart": "Pick the LLM and the image model before starting."
+    "pickBeforeStart": "Pick the LLM and the image model before starting.",
+    "whereToSetThisShoot": "What you pick here applies **to this shoot only**.",
+    "whereToSetAlways": "To make it the standing default, use the main screen's admin settings → “Muse default LLM / image model”.",
+    "whereToPick": "pick them under ⚙ settings, top right"
   },
   "characters": {
     "title": "Characters",

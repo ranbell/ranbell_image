@@ -1081,6 +1081,7 @@ function isStruckRow(row) {
               </div>
               <p v-if="!startReady" class="mt-1 text-[10px] text-rose-300/80">
                 {{ missingBeforeStart }}
+                <span class="text-gray-500">—— {{ t('muse.whereToPick') }}</span>
               </p>
               <p class="mt-1 text-[11px] leading-snug text-pink-100/80">
                 {{ craft.now || t('muse.nowEmpty') }}
@@ -1547,6 +1548,15 @@ function isStruckRow(row) {
             </div>
 
             <div v-if="showSettings" class="space-y-2 rounded-xl border border-gray-800 bg-gray-950 p-3 text-xs">
+              <!--
+                **どこで決めるかを書く（総監督・2026-09-13）。**「llm, 画像モデルを
+                どこから呼べばいいのか分からない」。二段あることが分からないと、
+                毎回ここで選び直すことになる。
+              -->
+              <p class="rounded-lg border border-pink-500/20 bg-pink-950/20 p-2 leading-snug text-[10px] text-pink-100/80">
+                {{ t('muse.whereToSetThisShoot') }}<br>
+                {{ t('muse.whereToSetAlways') }}
+              </p>
               <label class="block">
                 <span class="mb-1 block text-gray-500">{{ t('muse.workflow') }}</span>
                 <select

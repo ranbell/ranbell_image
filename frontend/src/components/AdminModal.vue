@@ -33,6 +33,9 @@ const emit = defineEmits([
 // ── Admin internal state ──────────────────────────────────────────────────────
 const adminTab = ref('diag')
 const ollamaModels = ref([])
+//: ComfyUI のワークフロー一覧。**診断枠を開かなくても要る** —— Muse の既定を
+//: 選ぶ欄がここにあるので、健康診断の応答待ちにしない（2026-09-13）。
+const comfyWorkflows = ref([])
 const ollamaVisionModels = ref([])
 // Only warn once we actually know which models have vision; an empty list means
 // the capability probe failed, not that every model is text-only.
@@ -161,6 +164,13 @@ async function fetchAdminConfig() {
       adminConfig.value = cfg
     }
   } catch {}
+}
+
+async function fetchComfyWorkflows() {
+  try {
+    const r = await fetch('/api/comfy/workflows')
+    if (r.ok) comfyWorkflows.value = await r.json()
+  } catch { comfyWorkflows.value = [] }
 }
 
 async function saveAdminConfig() {
@@ -665,7 +675,7 @@ watch(() => props.show, async (val) => {
     await Promise.all([
       fetchDiagData(), fetchAdminStats(), fetchAdminConfig(), fetchMrlStatus(),
       fetchColorStatus(), fetchOllamaModels(), fetchVocabStatus(),
-      fetchSchemaStatus(), fetchBackupStatus(),
+      fetchSchemaStatus(), fetchBackupStatus(), fetchComfyWorkflows(),
     ])
   }
 })
@@ -1492,15 +1502,15 @@ watch(() => props.jobs?.find(j => j.title === 'backup')?.state, (state) => {
                   <label class="text-xs text-gray-500 flex items-center gap-1.5 mb-1">
                     {{ $t('admin.config.museWorkflow') }}
                   </label>
-                  <select v-if="(healthData?.comfyui?.workflows || []).length"
-                    v-model="adminConfig.muse_workflow"
+                  <select v-model="adminConfig.muse_workflow"
                     class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500">
                     <option value="">{{ $t('admin.config.museModelEmpty') }}</option>
-                    <option v-for="w in healthData.comfyui.workflows" :key="w" :value="w">{{ w }}</option>
+                    <option v-for="w in comfyWorkflows" :key="w" :value="w">{{ w }}</option>
+                    <!-- 消えたワークフローが既定のままでも、選択が空に化けないように -->
+                    <option v-if="adminConfig.muse_workflow && !comfyWorkflows.includes(adminConfig.muse_workflow)"
+                      :value="adminConfig.muse_workflow">{{ adminConfig.muse_workflow }}（{{ $t('admin.config.museWorkflowGone') }}）</option>
                   </select>
-                  <input v-else v-model="adminConfig.muse_workflow" type="text"
-                    :placeholder="$t('admin.config.museWorkflowHint')"
-                    class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
+                  <p class="mt-1 text-[11px] text-gray-500">{{ $t('admin.config.museDefaultHint') }}</p>
                 </div>
                 <div>
                   <label class="text-xs text-gray-500 flex items-center gap-1.5 mb-1">

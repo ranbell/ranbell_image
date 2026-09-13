@@ -759,7 +759,9 @@
       "museModel": "Muse の既定 LLM",
       "museWorkflow": "Muse の既定 画像モデル",
       "museModelEmpty": "（未設定 — 撮影ごとに選ばせる）",
-      "museWorkflowHint": "API_xxx.json"
+      "museWorkflowHint": "API_xxx.json",
+      "museWorkflowGone": "いま見つからない",
+      "museDefaultHint": "ここで決めた既定は、Muse を開いたときに最初から入ります。空なら撮影ごとに選びます。"
     },
     "system": {
       "title": "システム",
@@ -1604,7 +1606,10 @@
     },
     "needModel": "使う LLM を選んでください",
     "needWorkflow": "画像モデル（ワークフロー）を選んでください",
-    "pickBeforeStart": "開始の前に、使う LLM と画像モデルを選んでください。"
+    "pickBeforeStart": "開始の前に、使う LLM と画像モデルを選んでください。",
+    "whereToSetThisShoot": "ここでの選択は**この撮影のあいだだけ**です。",
+    "whereToSetAlways": "いつもの既定にするなら、メイン画面の管理設定 →「Muse の既定 LLM / 既定 画像モデル」で決めてください。",
+    "whereToPick": "右上の ⚙ 設定から選べます"
   },
   "characters": {
     "title": "キャラクター",
