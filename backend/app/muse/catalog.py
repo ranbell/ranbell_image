@@ -112,8 +112,19 @@ async def build_muse_catalog(
         logger.warning("[muse.catalog] presets count failed: %s", exc)
 
     admin_vlm = (cfg.get("vlm_model") or "").strip()
-    suggested_model = admin_vlm or (vision[0] if vision else (models[0] if models else ""))
-    suggested_workflow = workflows[0] if workflows else ""
+    # **管理画面が決めた既定だけを「既定」と呼ぶ（2026-09-13）。**
+    #
+    # 総監督「使用する llm・画像モデルも空にして、実行前に選択するように。
+    # 管理画面でデフォルト決めていたら、そのデフォルト値を使用して開始できるように」。
+    # `suggested_*` は**一覧の先頭**を当てていたので、画面はそれを既定として使い、
+    # 総監督が選ばないまま撮影が始まっていた。先頭当ては残す（外の呼び元が読む）が、
+    # 画面が見るのは下の `admin_defaults` のほうにする。
+    admin_model = (cfg.get("muse_model") or "").strip() or admin_vlm
+    admin_workflow = (cfg.get("muse_workflow") or "").strip()
+    if admin_workflow and workflows and admin_workflow not in workflows:
+        admin_workflow = ""      # 消えたワークフローを既定にしない
+    suggested_model = admin_model or (vision[0] if vision else (models[0] if models else ""))
+    suggested_workflow = admin_workflow or (workflows[0] if workflows else "")
 
     return {
         "ok": True,
@@ -132,6 +143,9 @@ async def build_muse_catalog(
         "characters": {"count": character_count},
         "locales": ["ja", "en"],
         "admin_defaults": {
+            # 画面はここだけを見る。**空なら選ばせる。**
+            "muse_model": admin_model,
+            "muse_workflow": admin_workflow,
             "vlm_model": admin_vlm,
             "ollama_num_ctx": cfg.get("ollama_num_ctx"),
             "wd14_model_dir": cfg.get("wd14_model_dir"),

@@ -755,7 +755,11 @@
       "numCtxHint": "Ollama へ渡す最大コンテキスト長。プロンプトが溢れる場合は増やしてください（推奨: 16384）",
       "utilityModel": "軽量モデル (utility)",
       "utilityModelFallback": "(VLM モデルを使う)",
-      "utilityModelHint": "お題の分解やシーン説明など、短い構造化された呼び出しに使う。空なら VLM モデルにフォールバック"
+      "utilityModelHint": "お題の分解やシーン説明など、短い構造化された呼び出しに使う。空なら VLM モデルにフォールバック",
+      "museModel": "Muse の既定 LLM",
+      "museWorkflow": "Muse の既定 画像モデル",
+      "museModelEmpty": "（未設定 — 撮影ごとに選ばせる）",
+      "museWorkflowHint": "API_xxx.json"
     },
     "system": {
       "title": "システム",
@@ -1586,7 +1590,21 @@
     "modeSolo": "主演撮り",
     "modeSoloHint": "監督と彼女だけ。話しながら詰める（速い）",
     "modeStudio": "スタジオ撮り",
-    "modeStudioHint": "18役職の撮影班が毎ターン一周する（1ターン 1分強）"
+    "modeStudioHint": "18役職の撮影班が毎ターン一周する（1ターン 1分強）",
+    "crewPresetNote": "スタジオ撮り専用。**一度開くと変えられません**（班は途中から呼べないため）。人数が少ないほど速く撮れます。",
+    "crewPresetNeeded": "撮影班を選んでください",
+    "crewPresetMoved": "選択は上の「スタジオ撮り」の下にあります。",
+    "crewPresetName": {
+      "standard": "標準 18人",
+      "vivid": "鮮やか 14人",
+      "photoreal": "写実 13人",
+      "flat": "平面 12人",
+      "bold": "大胆 13人",
+      "calm": "静か 17人"
+    },
+    "needModel": "使う LLM を選んでください",
+    "needWorkflow": "画像モデル（ワークフロー）を選んでください",
+    "pickBeforeStart": "開始の前に、使う LLM と画像モデルを選んでください。"
   },
   "characters": {
     "title": "キャラクター",

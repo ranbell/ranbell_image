@@ -17,8 +17,17 @@ def style_for(session: dict[str, Any]) -> str:
     is a choice, and the rendering it rules out belongs on the other side of
     the prompt.
     """
+    from . import crew_room
+
     inputs = session.get("inputs") or {}
-    if str(session.get("mode") or "") == "duet":
+    # **門は班の実体で開ける（2026-09-13）。**
+    #
+    # ここは `mode == "duet"` で分けていた。**Refine のセッションは
+    # `service.new_session` が全件 `mode: "duet"` を入れる**ので、班の平均を取る
+    # 枝に永久に入らなかった —— 6プリセットとも `anime illustration` になり、
+    # `photoreal` も `flat` も絵に届いていなかった。
+    # [[project-refine-as-muse]]「`is_duet()` を門にしない」と同じ轍。
+    if not crew_room.has_crew(session):
         # No cast to average: 主演撮り has no room. See `crew.NEUTRAL_LOOK`.
         return (
             crew.look_style(str(inputs.get("look") or ""))

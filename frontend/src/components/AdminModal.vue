@@ -1468,6 +1468,40 @@ watch(() => props.jobs?.find(j => j.title === 'backup')?.state, (state) => {
                     ⚠ {{ $t('admin.config.vlmModelNoVision') }}
                   </p>
                 </div>
+                <!--
+                  **Muse の既定（2026-09-13）。** 総監督「使用する llm・画像モデルも
+                  空にして、実行前に選択するように。管理画面でデフォルト決めていたら、
+                  そのデフォルト値を使用して開始できるように」。空なら Muse の画面が
+                  選ばせる（一覧の先頭を勝手に当てない）。
+                -->
+                <div>
+                  <label class="text-xs text-gray-500 flex items-center gap-1.5 mb-1">
+                    {{ $t('admin.config.museModel') }}
+                  </label>
+                  <select v-if="ollamaModels.length" v-model="adminConfig.muse_model"
+                    class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500">
+                    <option value="">{{ $t('admin.config.museModelEmpty') }}</option>
+                    <option v-for="m in ollamaModels" :key="m" :value="m">{{ m }}</option>
+                    <option v-if="adminConfig.muse_model && !ollamaModels.includes(adminConfig.muse_model)"
+                      :value="adminConfig.muse_model">{{ adminConfig.muse_model }}</option>
+                  </select>
+                  <input v-else v-model="adminConfig.muse_model" type="text"
+                    class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
+                </div>
+                <div>
+                  <label class="text-xs text-gray-500 flex items-center gap-1.5 mb-1">
+                    {{ $t('admin.config.museWorkflow') }}
+                  </label>
+                  <select v-if="(healthData?.comfyui?.workflows || []).length"
+                    v-model="adminConfig.muse_workflow"
+                    class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500">
+                    <option value="">{{ $t('admin.config.museModelEmpty') }}</option>
+                    <option v-for="w in healthData.comfyui.workflows" :key="w" :value="w">{{ w }}</option>
+                  </select>
+                  <input v-else v-model="adminConfig.muse_workflow" type="text"
+                    :placeholder="$t('admin.config.museWorkflowHint')"
+                    class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
+                </div>
                 <div>
                   <label class="text-xs text-gray-500 flex items-center gap-1.5 mb-1">
                     {{ $t('admin.config.utilityModel') }}

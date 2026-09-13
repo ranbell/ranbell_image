@@ -69,7 +69,11 @@ LLM_DEFAULTS: dict[str, object] = {
     # 既定は off —— 今の経路と並べて比べられる状態を残すため。
     "simple": False,
     # Cast preset for the table-read crew (see muse.crew.PRESETS).
-    "crew_preset": "standard",
+    #
+    # **既定は空（2026-09-13）。** 総監督「スタジオ撮りのデフォルトは空にして、
+    # 選択しないとスタジオ撮影できないようにして」。班は顔ぶれで絵も速さも変わる
+    # （`standard` 18席 / `flat` 12席）ので、黙って一つを当てない。
+    "crew_preset": "",
     # Banter between craft passes. light = Ollama-friendly (fewer side calls);
     # full = previous speaker + occasional heckler; off = craft only.
     "banter_mode": "light",

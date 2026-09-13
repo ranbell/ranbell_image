@@ -252,9 +252,13 @@ flowchart TD
 | 試し撮り | 78.5s | ComfyUI（スケジューラ経由） |
 | 本番 | 99.2s | 同上・steps 30 |
 
-**席の前置きは 4,517字**（2026-09-13 に 8,792字から半減）。打ち消されていた
+**席の前置きは約 4,900字**（2026-09-13 に 8,792字から）。打ち消されていた
 `crew.OUTPUT` と、classic の機構に宛てていた `crew.CARRY` を外し、効いていた条文
 （拒否したものを名指ししない／相対指定の禁止／言語と声）だけを残しました。
+
+そのうち 380字は **`crew_room.SEAT_VOICE`** —— 席の口調を保つ段です。外していた
+あいだ、席の発言の 46% が「総監督、」で始まり、42% が同じ4文字で切り出していました
+（戻して 8% / 21%、時間は横ばい）。
 
 ---
 
@@ -272,8 +276,23 @@ flowchart TD
 同じ役職でも人が違えば言うことが違います（`beat` は「一秒」と「長回し」、
 `gaffer` は「逆光」と「行灯」）。
 
-> **注意（2026-09-13 時点）**: プリセットごとの**画風**（`crew.base_style_for`）は
-> `runtime.style_for` の分岐の都合で**絵に届いていません**。顔ぶれは変わりますが、
-> `photoreal` と `flat` で base style は同じ文字列になります。
-> また `flat` は `bg` / `light` / `atmosphere` の、`bold` は `wearing` / `look` の
-> **持ち主が居ません**（その欄は台本係が監督の言葉だけで書きます）。
+画風の土台も班で変わります（`crew.base_style_for` →`runtime.style_for`）:
+
+| プリセット | base style |
+|---|---|
+| `standard` / 一人撮り | `anime illustration` |
+| `vivid` | `vivid anime illustration` |
+| `photoreal` | `semi-realistic rendering` |
+| `flat` | `flat anime cel shading` |
+| `bold` | `anime illustration, experimental composition` |
+| `calm` | `anime illustration, classic composition` |
+
+この値は negative 側（`crew.look_negative`）で「打ち消す描き方」に変換されます。
+positive の画風は台帳の `look` が持ちます。
+
+> **門は班の実体です**（2026-09-13 に直しました）。`mode == "duet"` で分けていた
+> 頃は、Refine の全セッションが `duet` なので**永久に閉じていて**、6プリセットとも
+> `anime illustration` でした。
+>
+> **`flat` は `bg` / `light` / `atmosphere` の、`bold` は `wearing` / `look` の
+> 持ち主が居ません**（その欄は台本係が監督の言葉だけで書きます）。

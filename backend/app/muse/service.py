@@ -1599,9 +1599,19 @@ async def open_table(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
             if str(_inputs(session).get("locale") or "ja").startswith("ja") else
             "Cast the lead before opening the table."
         )
+    # **班を選んでいないと開けない（2026-09-13）。** 総監督のご指示で既定を空に
+    # した。顔ぶれで絵も速さも変わるので、黙って `standard` を当てない。
+    ja = str(_inputs(session).get("locale") or "ja").startswith("ja")
+    if not str(_inputs(session).get("crew_preset") or "").strip():
+        raise RefineError(
+            "撮影班を選んでから開いてください。"
+            if ja else "Pick a crew before opening the table."
+        )
     cast = crew_room.cast_of(session)
     if not cast:
-        raise RefineError("撮影班が組めていません")
+        raise RefineError(
+            "撮影班が組めていません" if ja else "That crew has no seats"
+        )
 
     locale = str(_inputs(session).get("locale") or "ja")
     session[crew_room.TABLE_OPEN] = True

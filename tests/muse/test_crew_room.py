@@ -6,8 +6,12 @@
 classic では席は talk-only で、書くのは Scripter 一人だった。Refine ではその席に
 `writer.write_patch` が座る —— だから手帖は要らない。
 
-**そして一人撮りを壊さないこと。** `inputs.crew_preset` は `ALL_DEFAULTS` から
-`"standard"` が入るので、**席の有無を門にすると一人撮りでも16席が回る**。
+**そして一人撮りを壊さないこと。** 門は「総監督が班を開けたか」の一つの印だけ。
+
+**既定は空になった（2026-09-13）** —— 総監督「スタジオ撮りのデフォルトは空にして、
+選択しないとスタジオ撮影できないようにして」。以前は `ALL_DEFAULTS` から
+`"standard"` が入っていて、席の有無を門にすると一人撮りでも16席が回った。
+いまは二重の守り（既定が空、かつ印が要る）。
 """
 from __future__ import annotations
 
@@ -16,20 +20,30 @@ from app.muse import crew_room as C
 from app.muse import ledger as L, service
 
 
-def _session(**kw):
+def _session(*, crew_preset: str = "standard", **kw):
+    """班を使う試験は**明示的に選ぶ**。既定は空なので、選ばないと席が組めない。"""
     s = service.new_session({"locale": "ja", "model": "m"})
     s["character"] = {"character_id": "c1", "name_ja": "各務 みお", "name": "Mio"}
+    if crew_preset:
+        s["inputs"] = {**s["inputs"], "crew_preset": crew_preset}
     s.update(kw)
     return s
 
 
 # ── 門 ──────────────────────────────────────────────────────────────────
 def test_a_plain_session_has_no_crew():
-    """**既定値を門にしない。** `crew_preset` は既定で `standard` が入っている。"""
-    s = _session()
-    assert s["inputs"].get("crew_preset") == "standard"   # 既定は入っている
-    assert C.cast_of(s)                                    # 席は組める
-    assert C.has_crew(s) is False                          # それでも班は開いていない
+    """**選んでいないセッションには、そもそも席が無い。**（2026-09-13）
+
+    既定が空になったので、班は「選ぶ」と「開く」の二段を越えないと回らない。
+    """
+    bare = service.new_session({"locale": "ja", "model": "m"})
+    assert bare["inputs"].get("crew_preset") == ""          # 既定は空
+    assert C.cast_of(bare) == []                            # 席が組めない
+    assert C.has_crew(bare) is False
+
+    chosen = _session()                                     # 班を選んだだけ
+    assert C.cast_of(chosen)                                # 席は組める
+    assert C.has_crew(chosen) is False                      # 開くまでは回らない
 
 
 def test_the_table_opens_only_when_it_is_opened():
@@ -318,3 +332,49 @@ def test_the_seats_stream_too():
     import inspect
     assert "on_token=_stream_to(session, muse_id)" in inspect.getsource(C._seat_turn)
     assert "on_token=_stream_to(session, muse_id)" in inspect.getsource(C._banter_turn)
+
+
+# ── 班の画風が絵に届くこと（2026-09-13） ──────────────────────────────────
+
+def test_the_crew_look_reaches_the_picture_only_when_the_table_is_open():
+    """**門は班の実体。**（2026-09-13）
+
+    `runtime.style_for` は `mode == "duet"` で分けていた。Refine のセッションは
+    `new_session` が全件 `duet` を入れるので、**班の平均を取る枝に永久に入らず**、
+    6プリセットとも `anime illustration` になっていた —— `photoreal` を選んでも
+    `flat` を選んでも同じ絵。[[project-refine-as-muse]]「`is_duet()` を門に
+    しない」と同じ轍を、別の場所で踏んでいた。
+    """
+    from app.muse import runtime
+
+    solo = _session(crew_preset="")
+    assert runtime.style_for(solo) == crew.NEUTRAL_LOOK
+
+    looks = {}
+    for preset in crew.PRESETS:
+        s = _session(crew_preset=preset)
+        s[C.TABLE_OPEN] = True
+        looks[preset] = runtime.style_for(s)
+    assert len(set(looks.values())) >= 4, f"班ごとに分かれていない: {looks}"
+    assert "semi-realistic" in looks["photoreal"], looks["photoreal"]
+    assert "flat" in looks["flat"], looks["flat"]
+
+    # 一人撮りは据え置き —— 班が居ないセッションは中立のまま
+    assert runtime.style_for(_session(crew_preset="photoreal")) == crew.NEUTRAL_LOOK
+
+
+def test_the_seat_keeps_its_own_way_of_opening():
+    """席の口調を保つ段が、席の前置きに載っていること。（2026-09-13）
+
+    実測で席の **46% が「総監督、」で始まり、42% が同じ4文字**で切り出していた。
+    前日 `crew.OUTPUT` を外したとき、その中の SAY の段が一緒に落ちたのが原因。
+    戻したのは 380字（魅せる指示＋開きの重複禁止）で、**時間は変わらない**。
+    """
+    import inspect
+
+    assert "Do NOT begin the way the last speaker began" in C.SEAT_VOICE
+    assert "ENTERTAINMENT" in C.SEAT_VOICE
+    src = inspect.getsource(C._seat_turn)
+    assert "SEAT_VOICE" in src and "SEAT_OUTPUT" in src, "席に届いていない"
+    # 女優の前置き（一人撮りの正本）には足さない
+    assert C.SEAT_VOICE not in crew.actress_system_prompt({"name": "Mio"})

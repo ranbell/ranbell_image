@@ -94,15 +94,24 @@ def test_the_chosen_look_rules_its_opposite_out():
     これは総監督がいま断ったレンダリングを名指しする。
     """
     from app.muse import crew
+    # **班が開いているセッションでだけ、班の画風を取る（2026-09-13）。**
+    # 門は `mode` ではなく `crew_room.has_crew` —— `mode == "duet"` で分けていた
+    # ときは、Refine の全セッションが `duet` なので**永久に閉じていた**
+    # （6プリセットとも `anime illustration` になっていた）。
     flat = {
-        "mode": "", "inputs": {"crew_preset": "flat", "negative_prompt": "bad quality"},
+        "mode": "duet", "crew_open": True,
+        "inputs": {"crew_preset": "flat", "negative_prompt": "bad quality",
+                   "crew_ids": list(crew.resolve_crew(preset="flat"))},
         "banned": [],
     }
     neg = {t.strip() for t in runtime.negative_for(flat).split(",") if t.strip()}
     assert "soft_shading" in neg and "realistic" in neg
     assert "cel_shading" not in neg          # 頼んだほうは打ち消さない
 
-    real = {"mode": "", "inputs": {"crew_preset": "photoreal"}, "banned": []}
+    real = {"mode": "duet", "crew_open": True,
+            "inputs": {"crew_preset": "photoreal",
+                       "crew_ids": list(crew.resolve_crew(preset="photoreal"))},
+            "banned": []}
     neg2 = {t.strip() for t in runtime.negative_for(real).split(",") if t.strip()}
     assert "cel_shading" in neg2 and "flat_color" in neg2
     assert "realistic" not in neg2

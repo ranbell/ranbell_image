@@ -755,7 +755,11 @@
       "numCtxHint": "Maximum context length passed to Ollama. Increase if prompts overflow (recommended: 16384)",
       "utilityModel": "Utility model",
       "utilityModelFallback": "(fall back to the VLM model)",
-      "utilityModelHint": "Used for short structured calls such as splitting a theme or writing a scene description. Empty falls back to the VLM model"
+      "utilityModelHint": "Used for short structured calls such as splitting a theme or writing a scene description. Empty falls back to the VLM model",
+      "museModel": "Muse default LLM",
+      "museWorkflow": "Muse default image model",
+      "museModelEmpty": "(unset — pick per shoot)",
+      "museWorkflowHint": "API_xxx.json"
     },
     "system": {
       "title": "System",
@@ -1586,7 +1590,21 @@
     "modeSolo": "Just her",
     "modeSoloHint": "You and the Muse, talking it through (fast)",
     "modeStudio": "Studio",
-    "modeStudioHint": "An 18-role crew works the shot each turn (a minute a turn)"
+    "modeStudioHint": "An 18-role crew works the shot each turn (a minute a turn)",
+    "crewPresetNote": "Studio shoot only. **Locked once the table opens** — a crew cannot be called in mid-shoot. Fewer seats shoot faster.",
+    "crewPresetNeeded": "Pick a crew",
+    "crewPresetMoved": "The picker moved up, under “Studio shoot”.",
+    "crewPresetName": {
+      "standard": "Standard 18",
+      "vivid": "Vivid 14",
+      "photoreal": "Photoreal 13",
+      "flat": "Flat 12",
+      "bold": "Bold 13",
+      "calm": "Calm 17"
+    },
+    "needModel": "Pick the LLM to use",
+    "needWorkflow": "Pick the image model (workflow)",
+    "pickBeforeStart": "Pick the LLM and the image model before starting."
   },
   "characters": {
     "title": "Characters",

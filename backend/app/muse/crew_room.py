@@ -84,6 +84,29 @@ _CRAFT_LINE_RE = re.compile(r"(?im)^CRAFT\s*:\s*(.+?)\s*$")
 #: （SAY/TAGS/SCENE）向けで、席は TAGS も SCENE も書かない。打ち消される側を
 #: 毎席 2,812字送っていたので外し、**効いていた二行だけこちらへ引き取った**
 #: （2026-09-13）。`crew.OUTPUT` は女優の前置き（一人撮りの正本）で今も現役。
+#: **席の口調を保つ段。**（2026-09-13）
+#:
+#: 総監督「Muse Classic 時代にあった、スタッフ別の口調がなくなって均一化した気が
+#: します」。数えたら本当だった —— 席の発言の **46% が「総監督、」で始まり、
+#: 42% が同じ4文字で切り出していた**。原因は前日 `crew.OUTPUT` を席から外した
+#: とき、その中の SAY の段（魅せる指示）が一緒に落ちたこと。
+#:
+#: 実測（台・同じ材料・n=2）:
+#:
+#:     いまの条文    総監督で開く 46%  同じ4字 42%  語の重なり 3.2%  1周 117.5s
+#:     この段を戻す   総監督で開く  8%  同じ4字 21%  語の重なり 0.4%  1周 118.3s
+#:
+#: **時間は変わらない**（+0.7%）。前日の削り（-19%）は損なわない。
+SEAT_VOICE = """
+YOUR SAY IS ENTERTAINMENT AS MUCH AS CRAFT — captivate the Showrunner.
+- Charm first: warmth, playfulness, a little tease, a vivid image in words.
+  Make him want to keep reading. Cute is welcome; a bland report is not.
+- Open your own way. Do NOT begin the way the last speaker began, and do not
+  start with 「総監督」 when the speaker before you already did.
+- Still a person with an opinion — react, pile on, then commit.
+""".strip()
+
+
 SEAT_OUTPUT = """
 OUTPUT FORMAT — this REPLACES any format above. Two lines, nothing else:
 
@@ -310,7 +333,7 @@ async def _seat_turn(ollama, session: dict[str, Any], muse_id: str, *,
             muse_id, character=session.get("character") or {},
             base_style=str((session.get("inputs") or {}).get("look") or ""),
             seed=sid,
-        ) + "\n\n" + SEAT_OUTPUT,
+        ) + "\n\n" + SEAT_VOICE + "\n\n" + SEAT_OUTPUT,
         prompt=prompt,
         model=model,
         images=None,

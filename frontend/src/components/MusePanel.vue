@@ -134,6 +134,19 @@ function mergeRewriteLog(keep, next) {
   return [...byAt.values()].sort((a, b) => Number(a?.at || 0) - Number(b?.at || 0)).slice(-24)
 }
 const characters = computed(() => characterList.value)
+//: 開始の前に埋まっていなければならないもの。**足りない物を名前で言う。**
+const missingBeforeStart = computed(() => {
+  const want = []
+  if (!inputs.value.character_id) want.push(t('muse.pickCharacter'))
+  if (!inputs.value.model) want.push(t('muse.needModel'))
+  if (!inputs.value.workflow) want.push(t('muse.needWorkflow'))
+  if (shootMode.value === 'studio' && !tableOpen.value && !inputs.value.crew_preset) {
+    want.push(t('muse.crewPresetNeeded'))
+  }
+  return want.join(' / ')
+})
+const startReady = computed(() => !missingBeforeStart.value)
+
 const workflows = computed(() => {
   const list = catalog.value?.comfyui?.workflows || catalog.value?.workflows || []
   return Array.isArray(list) ? list : []
@@ -286,10 +299,15 @@ async function startFresh(characterId = '') {
   speaking.value = false
   try {
     await ensureCatalog()
+    // **一覧の先頭を当てない（総監督・2026-09-13）。**
+    // 「使用する llm・画像モデルも空にして、実行前に選択するように。管理画面で
+    // デフォルト決めていたら、そのデフォルト値を使用して開始できるように」。
+    // 既定は**管理画面が決めたものだけ** —— 無ければ空にして、開始の前に選ばせる。
+    const admin = catalog.value?.admin_defaults || {}
     const body = {
       locale: isJa.value ? 'ja' : 'en',
-      model: models.value[0] || '',
-      workflow: workflows.value[0] || '',
+      model: admin.muse_model || '',
+      workflow: admin.muse_workflow || '',
       enhance_quality: false,
     }
     if (characterId) body.character_id = characterId
@@ -362,6 +380,13 @@ async function openSession() {
   if (!session.value?.session_id || busy.value) return
   if (!inputs.value.character_id) {
     fail(new Error(t('muse.needCharacter')))
+    return
+  }
+  // 選び忘れたまま撮り始めない。どれも**開いたあとでは替えにくい**もの。
+  if (!inputs.value.model) { fail(new Error(t('muse.needModel'))); return }
+  if (!inputs.value.workflow) { fail(new Error(t('muse.needWorkflow'))); return }
+  if (shootMode.value === 'studio' && !tableOpen.value && !inputs.value.crew_preset) {
+    fail(new Error(t('muse.crewPresetNeeded')))
     return
   }
   busy.value = true
@@ -1007,6 +1032,33 @@ function isStruckRow(row) {
                   </span>
                 </button>
               </div>
+              <!--
+                **撮影班は主画面で選ぶ（総監督・2026-09-13）。**「プリセットの
+                呼び出しは設定ではなく画面で簡単に変えられるように」。設定枠の
+                奥にあると、撮影版を選んだ流れのまま班を決められない。
+                **既定は空** —— 選ばないとスタジオ撮りは開けない。
+              -->
+              <div v-if="shootMode === 'studio'" class="mt-2">
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <button
+                    v-for="p in crewPresets"
+                    :key="p"
+                    type="button"
+                    class="rounded-full border px-2.5 py-1 text-[11px] transition-colors disabled:opacity-40"
+                    :class="(inputs.crew_preset || '') === p
+                      ? 'border-amber-500/60 bg-amber-950/40 text-amber-100'
+                      : 'border-white/10 text-gray-300 hover:border-white/30'"
+                    :disabled="chatLocked || tableOpen"
+                    @click="patchInputs({ crew_preset: p })"
+                  >{{ t(`muse.crewPresetName.${p}`) }}</button>
+                </div>
+                <p class="mt-1 text-[10px] leading-snug text-amber-200/60">
+                  {{ t('muse.crewPresetNote') }}
+                </p>
+                <p v-if="!inputs.crew_preset" class="mt-0.5 text-[10px] text-rose-300/80">
+                  {{ t('muse.crewPresetNeeded') }}
+                </p>
+              </div>
               <p v-if="tableOpen" class="mt-1 text-[10px] text-amber-200/70">
                 🎬 {{ t('muse.tableOn', { n: crewSeats }) }}
               </p>
@@ -1022,10 +1074,14 @@ function isStruckRow(row) {
                 <button
                   type="button"
                   class="rounded-lg bg-rose-800/80 px-2.5 py-1 text-[11px] font-medium text-rose-50 hover:bg-rose-700 disabled:opacity-40"
-                  :disabled="chatLocked || !inputs.character_id"
+                  :disabled="chatLocked || !startReady"
+                  :title="startReady ? '' : t('muse.pickBeforeStart')"
                   @click="openSession"
                 >{{ opened ? t('muse.reopen') : t('muse.open') }}</button>
               </div>
+              <p v-if="!startReady" class="mt-1 text-[10px] text-rose-300/80">
+                {{ missingBeforeStart }}
+              </p>
               <p class="mt-1 text-[11px] leading-snug text-pink-100/80">
                 {{ craft.now || t('muse.nowEmpty') }}
               </p>
@@ -1498,6 +1554,8 @@ function isStruckRow(row) {
                   :value="inputs.workflow || ''"
                   @change="patchInputs({ workflow: $event.target.value })"
                 >
+                  <!-- **未選択を出す。** 既定を当てないので、空が正当な状態。 -->
+                  <option value="">{{ t('muse.needWorkflow') }}</option>
                   <option v-for="w in workflows" :key="w" :value="w">{{ w }}</option>
                 </select>
               </label>
@@ -1508,22 +1566,19 @@ function isStruckRow(row) {
                   :value="inputs.model || ''"
                   @change="patchInputs({ model: $event.target.value })"
                 >
+                  <option value="">{{ t('muse.needModel') }}</option>
                   <option v-for="m in models" :key="m" :value="m">{{ m }}</option>
                 </select>
               </label>
-              <!-- スタジオ撮り（班）の設定。開く前に決めておくもの。 -->
-              <label class="block">
-                <span class="mb-1 block text-gray-500">{{ t('muse.crewPreset') }}</span>
-                <select
-                  class="w-full rounded border border-gray-700 bg-gray-900 px-2 py-1.5 disabled:opacity-40"
-                  :value="inputs.crew_preset || 'standard'"
-                  :disabled="tableOpen"
-                  @change="patchInputs({ crew_preset: $event.target.value })"
-                >
-                  <option v-for="p in crewPresets" :key="p" :value="p">{{ p }}</option>
-                </select>
-                <span class="mt-1 block text-[10px] text-gray-500">{{ t('muse.crewPresetHint') }}</span>
-              </label>
+              <!--
+                撮影班の選択は**主画面へ移した**（2026-09-13）。ここには案内だけ
+                残す —— 設定を開いて探す動線をもう一度作らないため。
+              -->
+              <p class="text-[10px] leading-snug text-gray-500">
+                {{ t('muse.crewPreset') }}:
+                <span class="text-gray-300">{{ inputs.crew_preset || t('muse.crewPresetNeeded') }}</span>
+                <br>{{ t('muse.crewPresetMoved') }}
+              </p>
               <label class="block">
                 <span class="mb-1 block text-gray-500">{{ t('muse.banter') }}</span>
                 <select
