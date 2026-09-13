@@ -925,6 +925,36 @@ async def chat(
         )
         debug_mod.note(session, "writer_missed", detail=text[:240])
 
+    # **席の言葉を、監督が触らなかった欄へ落とす（2026-09-14）。**
+    #
+    # 総監督「美術や色彩などでいい提案しているのに、それらがプロンプトに乗って
+    # こないのはやっぱりもったいない」。席は台帳に触れず材料を渡すだけで、台本係は
+    # 監督の一行にある欄しか直さない —— だから**名指しされなかった欄の craft は
+    # どこにも着地しなかった**（実測で `look` は 88%、`atmosphere` は 76% の
+    # セッションで空のまま）。
+    #
+    # **監督が書いた欄は素通し。** 席が口を出すのは、監督が黙っていた欄だけ。
+    # 模型は呼ばないので1ターンの時間は変わらない。
+    if floor:
+        fill, landed = crew_room.seat_fill(
+            session, floor, ledger=led,
+            taken=set(patch.keys()) | director_sticky,
+        )
+        fill = ledger_mod.scrub_patch(fill, led, allow_clear=set())
+        if fill:
+            before_fill = dict(led)
+            led = ledger_mod.apply_patch(led, fill)
+            session["refine_ledger"] = led
+            _change_event(
+                session, source="crew", patch=fill,
+                before=before_fill, after=led, locale=locale,
+            )
+            debug_mod.note(
+                session, "seat_fill",
+                detail="; ".join(f"{k}: {', '.join(v)}" for k, v in landed.items()),
+                patch=fill,
+            )
+
     # **会話の途中で絵を組み直さない（2026-09-10）。** 総監督「撮影に入らない
     # ときの会話のみの回答はもっと早くしてほしい」。ここで組んだ散文とタグを
     # 使うのは試し撮りと本番だけで、そちらは自前で `rebuild_craft` を呼ぶ。

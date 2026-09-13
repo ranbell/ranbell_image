@@ -477,6 +477,92 @@ def craft_tags(craft: str) -> str:
     return " ".join(left.split()).strip(" ,")
 
 
+#: **席の言葉が着地できる欄。**（2026-09-14）
+#:
+#: 総監督「美術や色彩などでいい提案しているのに、それらがプロンプトに乗ってこない
+#: のはやっぱりもったいない」。実機（`1b78ac2b`「公園でランニング」）で:
+#:
+#:     美術「芝生に転がったままの砂混じりのサンダル」   → `bg` に無い
+#:     特殊効果「この公園に漂う陽炎を混ぜ込んで」        → `atmosphere` は空
+#:     色彩設計「この画面に色の芯を置いておかないと」    → `look` は空
+#:
+#: 席は台帳に触れず、材料を台本係へ渡す。その台本係の条文が「据え置きの欄は総監督が
+#: 頼んだときだけ」「監督の一行にある欄だけ直す」と言っているので、**名指しされ
+#: なかった欄の craft は構造的にどこにも着地しない**。台帳25本の実測では
+#: `look` が 88%、`atmosphere` が 76% のセッションで空のままだった。
+#:
+#: **姿勢・表情・服は入れない。** あちらは一つの体の掃除（`ledger.one_body`）が
+#: 効いている場所で、席の語を足すと先日直した矛盾がまた積もる。
+SEAT_FILL_FIELDS: tuple[str, ...] = ("bg", "light", "frame", "atmosphere", "look")
+
+#: 1ターンに一つの欄へ足せる語数と、欄の打ち切り。
+#: **上限は「増やさない」約束であって、「削る」約束ではない** —— 既にある語は
+#: 触らないので、監督の言葉が押し出されることはない。
+SEAT_FILL_PER_TURN = 2
+SEAT_FILL_CAP = 12
+
+
+def seat_fill(
+    session: dict[str, Any],
+    floor: list[dict[str, Any]],
+    *,
+    ledger: dict[str, str],
+    taken: set[str] | frozenset[str] | None = None,
+) -> tuple[dict[str, str], dict[str, list[str]]]:
+    """席の CRAFT を、着地できる欄へ落とす。**模型は呼ばない。**
+
+    返すのは `(patch, 乗った語)`。`patch` は欄ごとの**絶対値**（既存＋足したぶん）で、
+    呼び元が台帳の入口（`ledger.scrub_patch`）へ通す。
+
+    規則:
+
+        監督が書いた欄     素通し —— 監督の言葉が勝つ
+        空の欄            席の語で埋める
+        埋まっている欄     **まだ無い語を2語まで**足す
+        いずれも          12語で打ち切り／禁止語は落とす／同じ語は二度足さない
+
+    同じ欄を複数の席が持つとき（`look` は色彩・線画・調整）は**席順で先着**。
+    `craft_block` が writer に渡すときと同じ畳み方。
+    """
+    from . import talk
+
+    skip = set(taken or ())
+    cur = {**ledger_mod.blank(), **(ledger or {})}
+    want: dict[str, list[str]] = {}
+    for row in floor:
+        field = str(row.get("field") or "")
+        if field not in SEAT_FILL_FIELDS or field in skip:
+            continue
+        tags = craft_tags(row.get("craft") or "")
+        for tag in (t.strip() for t in tags.split(",")):
+            if tag and tag not in want.setdefault(field, []):
+                want[field].append(tag)
+
+    patch: dict[str, str] = {}
+    landed: dict[str, list[str]] = {}
+    for field, tags in want.items():
+        have = [t.strip() for t in str(cur.get(field) or "").split(",") if t.strip()]
+        room = SEAT_FILL_CAP - len(have)
+        if room <= 0:
+            continue
+        # 空の欄は埋める。埋まっている欄は 2語まで。
+        budget = room if not have else min(SEAT_FILL_PER_TURN, room)
+        fresh: list[str] = []
+        for tag in talk.filter_banned_tags(session, tags, ledger=cur):
+            if len(fresh) >= budget:
+                break
+            # **語の境目で見る。** `shirt` が `skirt` に当たらないのと同じ一本。
+            if any(talk.word_hit(tag, t) or talk.word_hit(t, tag)
+                   for t in have + fresh):
+                continue
+            fresh.append(tag)
+        if not fresh:
+            continue
+        patch[field] = ", ".join(have + fresh)
+        landed[field] = fresh
+    return patch, landed
+
+
 def craft_block(floor: list[dict[str, Any]]) -> str:
     """席が出した CRAFT を、writer に渡せる形にまとめる。
 
