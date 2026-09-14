@@ -416,3 +416,27 @@ def test_one_call_per_field_instead_of_one_per_seat():
 
     patch, _ = C.field_land(session, floor, ledger=L.blank(), taken=set())
     assert patch["look"] == "agreed_one, agreed_two"
+
+
+def test_the_same_light_under_another_ending_is_not_added_again():
+    """**実機（`e805ffac`・2026-09-15）で残った最後の重複。**
+
+    `light` が `rim_lighting, backlighting, eye_glint, rim_light` になった ——
+    台本係の `rim_lighting` と会議の `rim_light` は、語の境目でも語の重なりでも
+    当たらない。語尾だけ均すと当たる。
+    """
+    led = {**L.blank(), "light": "rim_lighting, backlighting"}
+    patch, landed = C.field_land(
+        _session(), _floor(("light", "rim_light, eye_glint | 逆光を締める")),
+        ledger=led, taken=set(),
+    )
+    assert landed["light"] == ["eye_glint"]
+    assert patch["light"] == "rim_lighting, backlighting, eye_glint"
+
+
+def test_two_different_accents_still_both_get_through():
+    """**落としすぎない。** 語が一つ重なるだけの別物は通す（決めるのは会議）。"""
+    assert C._too_close("amber_accent", "scarlet_accent") is False
+    assert C._too_close("light_particles", "rim_light") is False
+    assert C._too_close("cel_shading", "clean_lineart") is False
+    assert C._too_close("depth_of_field", "shallow_depth_of_field") is True

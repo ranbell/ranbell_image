@@ -835,6 +835,27 @@ FIELD_CONCLUSION_MAX = 6
 FIELD_CAP = 12
 
 
+def _stems(tag: str) -> set[str]:
+    """語に割って、語尾だけ均す。`lighting` と `light` を同じものとして見るため。
+
+    実機（`e805ffac`・2026-09-15）で `light` が
+    `rim_lighting, backlighting, eye_glint, rim_light` になった —— 台本係の
+    `rim_lighting` と会議の `rim_light` は、語の境目でも語の重なりでも当たらない。
+    語尾（`-ing` / `-ed` / `-s`）だけ落とすと当たる。**落としすぎない**ように、
+    残りが4文字以上のときだけ。
+    """
+    out: set[str] = set()
+    for word in re.split(r"[\s_\-]+", str(tag or "").lower()):
+        if not word:
+            continue
+        for tail in ("ing", "ed", "s"):
+            if word.endswith(tail) and len(word) - len(tail) >= 4:
+                word = word[: -len(tail)]
+                break
+        out.add(word)
+    return out
+
+
 def _too_close(tag: str, other: str) -> bool:
     """**同じものを二度言っていないか。**（2026-09-14）
 
@@ -846,16 +867,15 @@ def _too_close(tag: str, other: str) -> bool:
 
     どちらも**二語以上を共有**している。そこで網をもう一目細かくする ——
     語が二つ以上重なるか、片方の語がもう片方に丸ごと含まれるなら、同じものを
-    言い直しているとみなす。`amber_theme` と `magenta_theme`（共有は `theme`
-    だけ）のような**別物**は一語しか重ならないので通る —— あちらは会議が
-    「反対の色を並べない」と言われて決める仕事。
+    言い直しているとみなす（語尾は `_stems` で均す）。`amber_theme` と
+    `magenta_theme`（共有は `theme` だけ）のような**別物**は一語しか重ならない
+    ので通る —— あちらは会議が「反対の色を並べない」と言われて決める仕事。
     """
     from . import talk
 
     if talk.word_hit(tag, other) or talk.word_hit(other, tag):
         return True
-    a = {w for w in re.split(r"[\s_\-]+", str(tag or "").lower()) if w}
-    b = {w for w in re.split(r"[\s_\-]+", str(other or "").lower()) if w}
+    a, b = _stems(tag), _stems(other)
     if not a or not b:
         return False
     return len(a & b) >= 2 or a <= b or b <= a
