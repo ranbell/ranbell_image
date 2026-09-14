@@ -1769,7 +1769,8 @@ def craft_slot(muse_id: str) -> str:
     return CRAFT_SLOTS.get(role_of(resolve_member(muse_id)), "")
 
 
-def _packed_person_card(muse_id: str, index: int, *, locale: str, seed: str) -> str:
+def _packed_person_card(muse_id: str, index: int, *, locale: str, seed: str,
+                        shared_field: str = "") -> str:
     """One speaker's full person card inside the packed table-talk prompt.
 
     A one-line roster (name + techniques) was what the packed turn used to get,
@@ -1777,6 +1778,12 @@ def _packed_person_card(muse_id: str, index: int, *, locale: str, seed: str) -> 
     the catchphrase and the example line are what make「重心」and「逆光」two
     different mouths. They are cheap — three cards is a few hundred tokens —
     and without them the pack is one narrator wearing three name tags.
+
+    `shared_field` is the 欄ごとの会議 (2026-09-14): the speakers in this pack all
+    own the SAME ledger field, so "you are the only seat that writes it" is a lie
+    here — say instead that the slot is shared and the group closes with one
+    value. The specialty rides along, because in a bundled corner the difference
+    between 色彩設計 and 線画 is exactly what has to survive the packing.
     """
     mid = resolve_member(muse_id)
     if mid not in MUSES:
@@ -1786,6 +1793,16 @@ def _packed_person_card(muse_id: str, index: int, *, locale: str, seed: str) -> 
     trait = trait_blurb(mid, locale=locale)
     example = _pick_say_example(mid, seed)
     slot = craft_slot(mid)
+    if slot and shared_field:
+        slot_line = (
+            f"YOUR CRAFT SLOT: {slot} — it lands in the ledger field "
+            f"`{shared_field}`, which you SHARE with the other speakers here. "
+            "Argue for your part of it; the corner closes with ONE value."
+        )
+    elif slot:
+        slot_line = f"YOUR CRAFT SLOT: {slot} — you are the only seat that writes it."
+    else:
+        slot_line = ""
     return "\n".join(b for b in [
         f"=== SPEAKER {index} — id `{mid}` ===",
         f"WHO: {_who(m)}",
@@ -1795,11 +1812,66 @@ def _packed_person_card(muse_id: str, index: int, *, locale: str, seed: str) -> 
         person_card_block(mid, locale=locale),
         f"TASTE: {trait}" if trait else "",
         f"YOUR CORNER OF THE PICTURE: {focus}",
-        (
-            f"YOUR CRAFT SLOT: {slot} — you are the only seat that writes it."
-        ) if slot else "",
+        slot_line,
+        str(m.get("specialty") or "").strip() if shared_field else "",
         ("EXAMPLE SAY (match this energy, do not copy verbatim):\n" + example)
         if example else "",
+    ] if b)
+
+
+def field_table_prompt(
+    speakers: list[str],
+    *,
+    field: str,
+    base_style: str = "",
+    locale: str = "ja",
+    preset_id: str = "",
+    seed: str = "",
+) -> str:
+    """欄ごとの会議の前置き —— 同じ台帳の欄を持つ席が、一度に喋る。（2026-09-14）
+
+    総監督「同じ台帳のメンバーを束ねて1つのセッションにして、結論として一つの
+    台帳をだしたらいい。そうすると衝突は回避できる」。
+
+    実機（`6dc11d0e`）で `look` は色彩設計と線画が別々に足して12語になり、
+    `amber_theme` と `magenta_theme` が同居していた。二人を**同じ部屋で喋らせて
+    一つの値を出させる**ので、矛盾はその場で潰れる。呼び出しも席数から欄数へ減る
+    （standard は 12 → 9）。
+
+    出力の形はここには書かない —— `crew_room.GROUP_OUTPUT` が最後に言う
+    （一席の `SEAT_OUTPUT` と同じ約束: **最後に読んだ形式が勝つ**）。
+    """
+    ids = [resolve_member(s) for s in speakers]
+    cards = [
+        card for i, mid in enumerate(ids, start=1)
+        if (card := _packed_person_card(
+            mid, i, locale=locale, seed=seed, shared_field=field))
+    ]
+    formation = preset_vibe_blurb(preset_id, locale=locale)
+    style_line = str(base_style or "").strip()
+    return "\n\n".join(b for b in [
+        f"You are running ONE CORNER of a live photo shoot: the seats that own "
+        f"the ledger field `{field}` are in the room together, and in ONE reply "
+        f"you voice EACH of them — different people, different mouths, talking "
+        f"to each other.",
+        f"FORMATION ROOM: {formation}" if formation else "",
+        f"BASE LOOK (the whole crew agreed on this — do not fight it): {style_line}"
+        if style_line else "",
+        "THE PEOPLE AT THIS CORNER (they speak in this order):\n\n"
+        + ("\n\n".join(cards) if cards else "(empty)"),
+        "HOW THEY TALK — this is a conversation, not two reports:\n"
+        "- Speaker 1 answers the Showrunner's note about this field.\n"
+        "- Every speaker after that NAMES the person before them and reacts: "
+        "agree and add, tease, or push back — then contributes the one thing "
+        "from their own craft that nobody has named yet.\n"
+        "- Do NOT repeat the previous speaker's nouns, metaphors or turn of "
+        "phrase. An echo is not a reaction.\n"
+        "- No dry「了解」/「承知しました」. No empty praise. Have an opinion, "
+        "then commit.\n"
+        f"- Then the corner AGREES. ONE value for `{field}` — not a list of "
+        "everyone's wishes. If two of you want opposite things, settle it out "
+        "loud and write the one that wins.",
+        SEAT_CARRY,
     ] if b)
 
 

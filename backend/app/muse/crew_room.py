@@ -23,6 +23,28 @@ classic では席は talk-only で、書くのは Scripter 一人だった
 だから手帖（notebook）は持ち込まない。席が出す `CRAFT:` 行は台帳に直接は
 書かず、**writer への材料**として渡す。どの席がどの欄の持ち主かは
 `crew.CRAFT_SLOTS` がもう決めてあるので、それを台帳の欄名に読み替えるだけ。
+
+## 席順ではなく、欄ごとに回る（2026-09-14）
+
+総監督「同じ台帳のメンバーを束ねて1つのセッションにして、結論として一つの台帳を
+だしたらいい。そうすると衝突は回避できる。あとその時に今の台帳が何かを告知して
+から、今はこうなっててどう変えるのかという話をしたら」。
+
+    これまで   席順に12回呼ぶ。各席が自分の欄に「足す」
+    いま       欄ごとに9回呼ぶ（`field_groups`）。同じ欄の席は**一度に喋り**、
+               告知（`field_header`）を読んでから**欄ぜんぶの値を一つ**決める
+
+実機で `look` が12語になり `amber_theme` と `magenta_theme` が同居した
+（`6dc11d0e`）。席が二人いる欄では取り合いが、一人の欄でも言い換えの堆積が
+起きていた —— **毎ターン足すことしかできず、全体を言い直す機会が無かった**から。
+
+台の実測（同じ材料・やじ off・n=3・`private/muse/crew_lab/corner_check.py`）:
+
+    席ごと   12回  一周 111.4s   総監督で開く 14%   look 4.3語  SAY 96字
+    欄ごと    9回  一周  72.5s   総監督で開く  5%   look 2.3語  SAY 77字
+
+**告知は両方の腕に入れて測った**ので、差は束ねたぶんだけ。払ったものは
+SAY が 96 → 77字（一回の返事に何人ぶんも書くため）。
 """
 from __future__ import annotations
 
@@ -123,6 +145,32 @@ Your slot only. Absolute values — never "darker" / "softer" / "more".
 **No field label inside CRAFT.** Not `BEAT:`, not `WEARING:`, not
 `ATMOSPHERE:` — the tags alone. The Scripter knows which field is yours.
 Omit the whole CRAFT line when your slot should not move this turn.
+""".strip()
+
+
+#: 束ねた回（欄ごとの会議）の出力の形。**一席の `SEAT_OUTPUT` と同じ約束** ——
+#: 最後に読んだ形式が勝つので、前置きの末尾に置く。
+#:
+#: 違いは二つだけ: 席の数だけ `SPEAKER:` + `SAY:` の組を出すことと、
+#: **CRAFT は最後に一行だけ**（欄の結論）であること。
+GROUP_OUTPUT = """
+OUTPUT FORMAT — this REPLACES any format above. Nothing else in the reply:
+
+SPEAKER: <the exact id of speaker 1>
+SAY: 1–3 sentences of live table talk in THAT person's voice.
+SPEAKER: <the exact id of speaker 2>
+SAY: 1–3 sentences — react to speaker 1 by name, then your own craft.
+(...one SPEAKER/SAY pair per person at this corner, in the given order)
+
+CRAFT: <danbooru tags> | <short prose>
+- LANGUAGE: these instructions are in English. The SAY lines speak the session
+  locale — by default natural Japanese, each in that person's 口調. 「総監督」OK.
+- **ONE CRAFT line for the whole corner, at the very end.** It is the field's
+  WHOLE value as the corner agreed it — not an addition to it, not one line
+  per speaker. Absolute values — never "darker" / "softer" / "more".
+- **No field label inside CRAFT.** The tags alone.
+- Omit the CRAFT line entirely when the field should stay exactly as it reads now.
+- Never write a TAGS: or SCENE: block — the Scripter owns the shot document.
 """.strip()
 
 
@@ -260,17 +308,93 @@ def seat_name(session: dict[str, Any], muse_id: str) -> str:
     return str(m.get("name_ja") or m.get("name") or muse_id)
 
 
-def seat_prompt(session: dict[str, Any], muse_id: str, *,
-                director_line: str, floor: list[dict[str, Any]]) -> str:
-    """一席に渡す本文。**台帳が正本**で、席は自分の欄だけを磨く。"""
+#: 班が置いた語の控え（`session[CREW_WORDS][欄] = [語, …]`）。（2026-09-14）
+#:
+#: **誰の語かを覚えておくためだけの帳面。** 欄の会議は「今はこうなっている、
+#: どう変えるか」を決めるので、結論は欄の**全体**になる。そのとき総監督の言葉まで
+#: 書き換えてしまっては困るので、班は**自分が置いた語だけ**言い直せる、とする。
+#: 印の無い古いセッションは全語を総監督のものとして扱う（消えない側に倒す）。
+CREW_WORDS = "crew_words"
+
+
+def crew_words_of(session: dict[str, Any]) -> dict[str, list[str]]:
+    """その欄に、班が置いた語。"""
+    raw = session.get(CREW_WORDS) or {}
+    if not isinstance(raw, dict):
+        return {}
+    return {str(k): [str(t) for t in (v or [])] for k, v in raw.items()}
+
+
+def field_groups(seats: list[str]) -> list[tuple[str, list[str]]]:
+    """席を**欄ごとに束ねる**。並びは、その欄に最初に座る席の席順。（2026-09-14）
+
+    総監督「同じ台帳のメンバーを束ねて1つのセッションにして、結論として一つの
+    台帳をだしたらいい。そうすると衝突は回避できる」。
+
+        standard   beat（演出・振付）／ frame（レイアウト・撮影）／ look（色彩・線画）
+                   ＋ bg・wearing・light・expression・atmosphere の各1席
+                   → 12席が **9つの会議**になる
+
+    欄を持たない席（主演）は束ねない —— **一人ずつ別の会議**として返す
+    （`("", [id])`）。同じ「欄なし」で一緒にすると、話の相手が居ない席同士が
+    同じ部屋に入る。
+    """
+    groups: list[tuple[str, list[str]]] = []
+    index: dict[str, int] = {}
+    for mid in seats:
+        field = field_of(mid)
+        if not field:
+            groups.append(("", [mid]))
+            continue
+        if field in index:
+            groups[index[field]][1].append(mid)
+            continue
+        index[field] = len(groups)
+        groups.append((field, [mid]))
+    return groups
+
+
+def field_header(field: str, *, ledger: dict[str, str],
+                 mine: list[str] | None = None) -> str:
+    """**いまの台帳を告知してから、どう変えるかを訊く。**（2026-09-14）
+
+    総監督「今の台帳が何かを告知してから、今はこうなっててどう変えるのかという
+    話をしたらいいのでは」。
+
+    実機で `light` は席が一つしかないのに `backlighting` `rim_light` `hard_rim`
+    `edge_lighting` と逆光の言い換えが四つ積もっていた。毎ターン「足す」ことしか
+    できず、**欄の全体を見て言い直す機会が無かった**から。ここで見せて、
+    結論を欄ぜんぶの値として書かせる。
+    """
+    have = [t.strip() for t in str((ledger or {}).get(field) or "").split(",") if t.strip()]
+    crew_said = {t.lower() for t in (mine or [])}
+    theirs = [t for t in have if t.lower() not in crew_said]
+    lines = [
+        f"FIELD `{field}` — THE LEDGER AS IT STANDS",
+        f"  now: {', '.join(have) if have else '(empty)'}",
+    ]
+    if theirs:
+        lines.append(
+            "  the Showrunner's own words in it: " + ", ".join(theirs)
+            + "  ← these stay, whatever you decide"
+        )
+    lines.append(
+        f"Decide what `{field}` READS after this turn — keep it, drop what is "
+        "stale, or replace it. Say out loud what you are changing and why, then "
+        "write ONE CRAFT line holding the WHOLE field: the absolute value, at "
+        f"most {FIELD_CONCLUSION_MAX} tags, no duplicates, no two tags that "
+        "fight each other. Omit CRAFT when it should stay exactly as it reads."
+    )
+    return "\n".join(lines)
+
+
+def _shot_bits(session: dict[str, Any]) -> list[str]:
+    """誰が写っていて、台帳がいまどうなっているか。席にも会議にも同じものを渡す。"""
     led = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
     partner = session.get("partner_character") or {}
     has_partner = bool(str(partner.get("character_id") or "").strip())
     char = session.get("character") or {}
-    field = field_of(muse_id)
-    slot = (getattr(crew, "CRAFT_SLOTS", None) or {}).get(crew.role_of(muse_id) or "")
-
-    bits = [
+    return [
         ledger_mod.cast_line(
             partner=has_partner,
             name_a=str(char.get("name_ja") or char.get("name") or ""),
@@ -280,25 +404,55 @@ def seat_prompt(session: dict[str, Any], muse_id: str, *,
         + "\n".join(f"  {k}: {v}" for k, v in
                     ledger_mod.for_model(led, partner=has_partner).items() if v),
     ]
+
+
+def _floor_bit(floor: list[dict[str, Any]]) -> str:
+    """直前の発言。**言葉を借りない**という注意付きで。
+
+    実機の開幕で、撮影の席が衣装の席の一文目をそのまま写した（「西日が差し込む
+    なら、光を吸い込むベルベットか…」）。条文にも「Do not restate another Muse's
+    phrase」とあるが、直前の発言を見せる以上、ここでもう一度言う。
+    """
+    if not floor:
+        return ""
+    return (
+        "THE FLOOR SO FAR — react to it, then add the one thing nobody has "
+        "named yet. **Do not reuse their words, images or metaphors.** If "
+        "the last speakers already reached for your idea, that idea is "
+        "finished; say the part of the picture still missing.\n"
+        + "\n".join(f"  {f['name']}: {str(f['say'])[:160]}" for f in floor[-3:])
+    )
+
+
+def group_prompt(session: dict[str, Any], seats: list[str], *, field: str,
+                 director_line: str, floor: list[dict[str, Any]]) -> str:
+    """欄の会議に渡す本文。**告知が先、結論は一つ。**（2026-09-14）"""
+    led = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
+    bits = _shot_bits(session)
+    if field:
+        bits.append(field_header(
+            field, ledger=led, mine=crew_words_of(session).get(field)))
+    if (bit := _floor_bit(floor)):
+        bits.append(bit)
+    bits.append(f"SHOWRUNNER:\n{director_line.strip()}")
+    return "\n\n".join(bits)
+
+
+def seat_prompt(session: dict[str, Any], muse_id: str, *,
+                director_line: str, floor: list[dict[str, Any]]) -> str:
+    """一席に渡す本文。**台帳が正本**で、席は自分の欄だけを磨く。"""
+    led = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
+    field = field_of(muse_id)
+    slot = (getattr(crew, "CRAFT_SLOTS", None) or {}).get(crew.role_of(muse_id) or "")
+
+    bits = _shot_bits(session)
     if slot and field:
         bits.append(
             f"YOUR SLOT: {slot} — it lands in the ledger field `{field}`.\n"
-            f"`{field}` currently reads: {led.get(field) or '(empty)'}\n"
-            "Write CRAFT only when YOUR slot should move this turn. State the "
-            "absolute value — never a direction of change."
+            + field_header(field, ledger=led, mine=crew_words_of(session).get(field))
         )
-    if floor:
-        # **言葉を借りない。** 実機の開幕で、撮影の席が衣装の席の一文目を
-        # そのまま写した（「西日が差し込むなら、光を吸い込むベルベットか…」）。
-        # 条文にも「Do not restate another Muse's phrase」とあるが、直前の発言を
-        # 見せる以上、ここでもう一度言う。
-        bits.append(
-            "THE FLOOR SO FAR — react to it, then add the one thing nobody has "
-            "named yet. **Do not reuse their words, images or metaphors.** If "
-            "the last speakers already reached for your idea, that idea is "
-            "finished; say the part of the picture still missing.\n"
-            + "\n".join(f"  {f['name']}: {str(f['say'])[:160]}" for f in floor[-3:])
-        )
+    if (bit := _floor_bit(floor)):
+        bits.append(bit)
     bits.append(f"SHOWRUNNER:\n{director_line.strip()}")
     return "\n\n".join(bits)
 
@@ -340,6 +494,155 @@ async def _seat_turn(ollama, session: dict[str, Any], muse_id: str, *,
         num_ctx=refine_num_ctx(session),
         think=False,
         on_token=_stream_to(session, muse_id),
+    )
+
+
+_SPEAKER_RE = re.compile(r"(?im)^[ \t>*_-]*SPEAKER\s*:\s*(.+?)\s*$")
+
+
+def _match_speaker(token: str, seats: list[str], used: list[str]) -> str:
+    """`SPEAKER: …` の右側を、この会議の席に当てる。
+
+    模型は id をそのまま書くこともあれば、番号（`SPEAKER: 2`）や役名で書くことも
+    ある。**当たらなければ、まだ喋っていない席の先頭**に落とす —— 会議は席順に
+    喋る約束なので、それでほぼ合う。
+    """
+    raw = str(token or "").strip().strip("`*_ 「」【】")
+    low = raw.lower()
+    for mid in seats:
+        if mid.lower() == low or mid.lower().split(":")[0] == low:
+            return mid
+    if (digits := re.findall(r"\d+", low)):
+        i = int(digits[0]) - 1
+        if 0 <= i < len(seats):
+            return seats[i]
+    for mid in seats:
+        role = (crew.role_of(mid) or "").lower()
+        if role and role in low:
+            return mid
+    for mid in seats:
+        if mid not in used:
+            return mid
+    return seats[0] if seats else ""
+
+
+def split_packed(raw: str, seats: list[str]) -> tuple[list[tuple[str, str]], str]:
+    """束ねた回の返事を、**席ごとの台詞**と**欄の結論一つ**に分ける。（2026-09-14）
+
+    `CRAFT` は最後の一行を採る —— 条文では一行だけだが、席ごとに書いてきたときは
+    **閉めの一行が会議の結論**なので、そこを信じる。
+    """
+    text = str(raw or "")
+    crafts = list(_CRAFT_LINE_RE.finditer(text))
+    craft = str(crafts[-1].group(1) or "").strip() if crafts else ""
+    body = _CRAFT_LINE_RE.sub("", text)
+
+    parts = _SPEAKER_RE.split(body)
+    rows: list[tuple[str, str]] = []
+    if len(parts) >= 3:
+        used: list[str] = []
+        for i in range(1, len(parts) - 1, 2):
+            mid = _match_speaker(parts[i], seats, used)
+            say = identity.sanitize_muse_say(parts[i + 1], locale="ja")
+            if not say.strip():
+                continue
+            used.append(mid)
+            rows.append((mid, say))
+    else:
+        # **形式を守らなかった回も落とさない。** 丸ごと先頭の席の発言にする。
+        say = identity.sanitize_muse_say(body, locale="ja")
+        if say.strip() and seats:
+            rows = [(seats[0], say)]
+    return rows, craft
+
+
+def _packed_stream(session: dict[str, Any], seats: list[str]):
+    """束ねた回を、**喋っている席の吹き出しへ振り分けながら**流す。（2026-09-14）
+
+    一席ずつ呼んでいたときは `_stream_to` が宛先を一つ持てばよかった。会議は
+    一度の返事に何人ぶんも入っているので、`SPEAKER:` の行で宛先を切り替える。
+    **ここが無いと、束ねた回だけ画面が無言になる**（総監督「待たされる感覚が
+    かなり大きい」）。
+
+    行頭の数文字だけ溜める —— `shared._say_only` が欄名を伏せるのと同じ手で、
+    行の途中では溜めない（溜めると一文が書き上がるまで画面が止まる）。
+    """
+    sid = str(session.get("session_id") or "")
+    pubs = {mid: _stream_to(session, mid) for mid in seats}
+    word = "speaker:"
+    st: dict[str, Any] = {"gate": None, "bol": True, "hold": "", "id": None}
+
+    def _emit(text: str) -> None:
+        gate = st["gate"]
+        if gate is None or not text:
+            return
+        try:
+            gate(text)
+        except Exception:
+            logger.debug("[muse] packed stream emit failed", exc_info=True)
+
+    def _switch(token: str) -> None:
+        mid = _match_speaker(token, seats, [])
+        st["gate"] = pubs.get(mid)
+        if mid:
+            events.publish(sid, {
+                "type": "muse_speaking", "muse_id": mid,
+                "name": seat_name(session, mid),
+            })
+
+    def _feed(text: str) -> None:
+        for ch in str(text or ""):
+            if st["id"] is not None:          # `SPEAKER: …` の行を読んでいる
+                if ch == "\n":
+                    _switch(st["id"])
+                    st["id"] = None
+                    st["bol"] = True
+                else:
+                    st["id"] += ch
+                continue
+            if st["bol"]:
+                cand = st["hold"] + ch
+                if cand.strip() and word.startswith(cand.strip().lower()):
+                    st["hold"] = cand
+                    if cand.strip().lower() == word:
+                        st["hold"], st["id"] = "", ""
+                    continue
+                _emit(st["hold"])
+                st["hold"] = ""
+                st["bol"] = False
+            _emit(ch)
+            if ch == "\n":
+                st["bol"] = True
+                st["hold"] = ""
+
+    return _feed
+
+
+async def _group_turn(ollama, session: dict[str, Any], seats: list[str], *,
+                      field: str, model: str, prompt: str) -> str:
+    """欄の会議を一度で呼ぶ。**絵は渡さない**（板を見せるのは女優の段の仕事）。"""
+    sid = str(session.get("session_id") or "")
+    if seats:
+        events.publish(sid, {
+            "type": "muse_speaking", "muse_id": seats[0],
+            "name": seat_name(session, seats[0]),
+        })
+    inputs = session.get("inputs") or {}
+    return await chain._call(
+        ollama,
+        system=crew.field_table_prompt(
+            seats, field=field,
+            base_style=str(inputs.get("look") or ""),
+            locale=str(inputs.get("locale") or "ja"),
+            preset_id=str(inputs.get("crew_preset") or ""),
+            seed=sid,
+        ) + "\n\n" + SEAT_VOICE + "\n\n" + GROUP_OUTPUT,
+        prompt=prompt,
+        model=model,
+        images=None,
+        num_ctx=refine_num_ctx(session),
+        think=False,
+        on_token=_packed_stream(session, seats),
     )
 
 
@@ -385,52 +688,91 @@ async def run_table(db, ollama, session: dict[str, Any], *,
     floor: list[dict[str, Any]] = []
     previous: str | None = None
 
-    for index, muse_id in enumerate(seats):
+    for index, (field, group) in enumerate(field_groups(seats)):
         t0 = time.monotonic()
-        try:
-            raw = await _seat_turn(
-                ollama, session, muse_id, model=model,
-                prompt=seat_prompt(
-                    session, muse_id, director_line=director_line, floor=floor,
-                ),
-            )
-        except Exception:
-            # **一席が黙っても撮影は続く。** 班は18人居るので、一人の失敗で
-            # ターンごと落とす理由がない。記録だけ残して次の席へ。
-            logger.warning("[muse] seat %s said nothing", muse_id, exc_info=True)
-            debug_mod.note(session, "seat_failed", detail=muse_id)
-            continue
-        debug_mod.stage(session, f"seat_{crew.role_of(muse_id) or muse_id}", t0)
-        say, craft = split_craft(raw)
-        name = seat_name(session, muse_id)
-        if not say.strip() and not craft.strip():
-            continue
-        floor.append({
-            "muse_id": muse_id,
-            "role": crew.role_of(muse_id) or "",
-            "name": name,
-            "field": field_of(muse_id),
-            "say": say,
-            "craft": craft,
-            "kind": "seat",
-        })
+        rows: list[tuple[str, str]] = []
+        craft = ""
+        if len(group) == 1:
+            muse_id = group[0]
+            try:
+                raw = await _seat_turn(
+                    ollama, session, muse_id, model=model,
+                    prompt=seat_prompt(
+                        session, muse_id, director_line=director_line, floor=floor,
+                    ),
+                )
+            except Exception:
+                # **一席が黙っても撮影は続く。** 班は18人居るので、一人の失敗で
+                # ターンごと落とす理由がない。記録だけ残して次の席へ。
+                logger.warning("[muse] seat %s said nothing", muse_id, exc_info=True)
+                debug_mod.note(session, "seat_failed", detail=muse_id)
+                continue
+            debug_mod.stage(session, f"seat_{crew.role_of(muse_id) or muse_id}", t0)
+            say, craft = split_craft(raw)
+            rows = [(muse_id, say)]
+        else:
+            try:
+                raw = await _group_turn(
+                    ollama, session, group, field=field, model=model,
+                    prompt=group_prompt(
+                        session, group, field=field,
+                        director_line=director_line, floor=floor,
+                    ),
+                )
+            except Exception:
+                logger.warning("[muse] the `%s` corner said nothing", field,
+                               exc_info=True)
+                debug_mod.note(session, "seat_failed", detail=f"{field}: {group}")
+                continue
+            debug_mod.stage(session, f"corner_{field}", t0)
+            rows, craft = split_packed(raw, group)
+            if len(rows) < len(group):
+                # **黙って人数が減ったことにしない。** 形式を守らなかった回は
+                # 台詞が畳まれるので、記録に残して後から数えられるようにする。
+                debug_mod.note(
+                    session, "corner_thin",
+                    detail=f"{field}: {len(rows)}/{len(group)}席",
+                )
 
-        if not say.strip():
-            previous = muse_id
+        # 発言を積む。**欄の結論は一つ**なので、craft は閉めの一人に付ける。
+        spoke: list[tuple[str, str]] = []
+        for i, (muse_id, say) in enumerate(rows):
+            last = i == len(rows) - 1
+            mine = craft if last else ""
+            if not str(say).strip() and not mine.strip():
+                continue
+            floor.append({
+                "muse_id": muse_id,
+                "role": crew.role_of(muse_id) or "",
+                "name": seat_name(session, muse_id),
+                "field": field,
+                "say": say,
+                "craft": mine,
+                "kind": "seat",
+            })
+            spoke.append((muse_id, say))
+        if not spoke:
             continue
+
+        # やじは**会議ごとに一度**（束ねた中では席どうしが既に react している）。
+        closer, closing_say = spoke[-1]
+        before, previous = previous, closer
+        if not str(closing_say).strip():
+            continue
+        name = seat_name(session, closer)
         reactor = pick_reactor(
-            session, cast, current=muse_id, previous=previous, index=index,
+            session, cast, current=closer, previous=before, index=index,
         )
         heckler = pick_heckler(
-            session, cast, current=muse_id, reactor=reactor, index=index,
+            session, cast, current=closer, reactor=reactor, index=index,
         )
         for who in (reactor, heckler):
-            if not who:
+            if not who or who in {m for m, _ in spoke}:
                 continue
             try:
                 heckle = await _banter_turn(
                     ollama, session, who, model=model,
-                    about_name=name, about_text=say,
+                    about_name=name, about_text=closing_say,
                 )
             except Exception:
                 logger.debug("[muse] banter skipped for %s", who, exc_info=True)
@@ -445,7 +787,6 @@ async def run_table(db, ollama, session: dict[str, Any], *,
                     "craft": "",
                     "kind": "heckle",
                 })
-        previous = muse_id
 
     return floor
 
@@ -477,88 +818,107 @@ def craft_tags(craft: str) -> str:
     return " ".join(left.split()).strip(" ,")
 
 
-#: **席の言葉が着地できる欄。**（2026-09-14）
+#: **班が作り直してよい欄。**（2026-09-14）
 #:
 #: 総監督「美術や色彩などでいい提案しているのに、それらがプロンプトに乗ってこない
-#: のはやっぱりもったいない」。実機（`1b78ac2b`「公園でランニング」）で:
-#:
-#:     美術「芝生に転がったままの砂混じりのサンダル」   → `bg` に無い
-#:     特殊効果「この公園に漂う陽炎を混ぜ込んで」        → `atmosphere` は空
-#:     色彩設計「この画面に色の芯を置いておかないと」    → `look` は空
-#:
-#: 席は台帳に触れず、材料を台本係へ渡す。その台本係の条文が「据え置きの欄は総監督が
-#: 頼んだときだけ」「監督の一行にある欄だけ直す」と言っているので、**名指しされ
-#: なかった欄の craft は構造的にどこにも着地しない**。台帳25本の実測では
-#: `look` が 88%、`atmosphere` が 76% のセッションで空のままだった。
+#: のはやっぱりもったいない」。席は台帳に触れず、材料を台本係へ渡す。その台本係は
+#: 監督の一行にある欄しか直さないので、**名指しされなかった欄の craft は構造的に
+#: どこにも着地しない**（台帳25本で `look` 88%・`atmosphere` 76% が空のまま）。
 #:
 #: **姿勢・表情・服は入れない。** あちらは一つの体の掃除（`ledger.one_body`）が
-#: 効いている場所で、席の語を足すと先日直した矛盾がまた積もる。
-SEAT_FILL_FIELDS: tuple[str, ...] = ("bg", "light", "frame", "atmosphere", "look")
+#: 効いている場所で、班の言葉は `craft_block` 経由で台本係に渡る。
+CREW_FIELDS: tuple[str, ...] = ("bg", "light", "frame", "atmosphere", "look")
 
-#: 1ターンに一つの欄へ足せる語数と、欄の打ち切り。
-#: **上限は「増やさない」約束であって、「削る」約束ではない** —— 既にある語は
-#: 触らないので、監督の言葉が押し出されることはない。
-SEAT_FILL_PER_TURN = 2
-SEAT_FILL_CAP = 12
+#: 会議が出せる結論の語数と、欄ぜんぶの上限。
+#: **結論は欄の全体**なので、班の語は毎ターン置き換わる（増え続けない）。
+FIELD_CONCLUSION_MAX = 6
+FIELD_CAP = 12
 
 
-def seat_fill(
+def _too_close(tag: str, other: str) -> bool:
+    """**同じものを二度言っていないか。**（2026-09-14）
+
+    `talk.word_hit` は語の境目で見る一本で、`shirt` が `skirt` に当たらないのは
+    これのおかげ。ただし実機ではその網をすり抜けた重複が残った:
+
+        silver_spoon / silver_sugar_spoon      bg
+        air_between_limbs / air_between_elbows frame
+
+    どちらも**二語以上を共有**している。そこで網をもう一目細かくする ——
+    語が二つ以上重なるか、片方の語がもう片方に丸ごと含まれるなら、同じものを
+    言い直しているとみなす。`amber_theme` と `magenta_theme`（共有は `theme`
+    だけ）のような**別物**は一語しか重ならないので通る —— あちらは会議が
+    「反対の色を並べない」と言われて決める仕事。
+    """
+    from . import talk
+
+    if talk.word_hit(tag, other) or talk.word_hit(other, tag):
+        return True
+    a = {w for w in re.split(r"[\s_\-]+", str(tag or "").lower()) if w}
+    b = {w for w in re.split(r"[\s_\-]+", str(other or "").lower()) if w}
+    if not a or not b:
+        return False
+    return len(a & b) >= 2 or a <= b or b <= a
+
+
+def field_land(
     session: dict[str, Any],
     floor: list[dict[str, Any]],
     *,
     ledger: dict[str, str],
     taken: set[str] | frozenset[str] | None = None,
 ) -> tuple[dict[str, str], dict[str, list[str]]]:
-    """席の CRAFT を、着地できる欄へ落とす。**模型は呼ばない。**
+    """欄の会議が出した結論を、台帳に着地させる。**模型は呼ばない。**（2026-09-14）
 
-    返すのは `(patch, 乗った語)`。`patch` は欄ごとの**絶対値**（既存＋足したぶん）で、
-    呼び元が台帳の入口（`ledger.scrub_patch`）へ通す。
+    返すのは `(patch, 班の語)`。`patch` は欄ごとの**絶対値**で、呼び元が台帳の
+    入口（`ledger.scrub_patch`）へ通す。`班の語` はそのまま `crew_words` に入り、
+    **次のターンに「ここまでが君たちの言葉だ」と告知する材料**になる。
 
     規則:
 
         監督が書いた欄     素通し —— 監督の言葉が勝つ
-        空の欄            席の語で埋める
-        埋まっている欄     **まだ無い語を2語まで**足す
-        いずれも          12語で打ち切り／禁止語は落とす／同じ語は二度足さない
+        総監督の語        必ず残す（既存語から班の語を引いたぶん）
+        班の語            今回の結論で**置き換える**（6語まで）
+        いずれも          欄は12語で打ち切り／禁止語は落とす／同じ語は二度入れない
 
-    同じ欄を複数の席が持つとき（`look` は色彩・線画・調整）は**席順で先着**。
-    `craft_block` が writer に渡すときと同じ畳み方。
+    **消すのは班が置いた語だけ。** 総監督が書いた語に班は手を出せないので、
+    言い直しで監督の言葉が押し出されることはない。
     """
     from . import talk
 
     skip = set(taken or ())
     cur = {**ledger_mod.blank(), **(ledger or {})}
-    want: dict[str, list[str]] = {}
+    said = crew_words_of(session)
+
+    # 欄ごとの結論を集める。**一欄一つ**だが、形式が崩れた回のために席順で畳む。
+    agreed: dict[str, list[str]] = {}
     for row in floor:
         field = str(row.get("field") or "")
-        if field not in SEAT_FILL_FIELDS or field in skip:
+        if field not in CREW_FIELDS or field in skip:
             continue
-        tags = craft_tags(row.get("craft") or "")
-        for tag in (t.strip() for t in tags.split(",")):
-            if tag and tag not in want.setdefault(field, []):
-                want[field].append(tag)
+        for tag in (t.strip() for t in craft_tags(row.get("craft") or "").split(",")):
+            if tag and tag not in agreed.setdefault(field, []):
+                agreed[field].append(tag)
 
     patch: dict[str, str] = {}
     landed: dict[str, list[str]] = {}
-    for field, tags in want.items():
+    for field, tags in agreed.items():
         have = [t.strip() for t in str(cur.get(field) or "").split(",") if t.strip()]
-        room = SEAT_FILL_CAP - len(have)
-        if room <= 0:
-            continue
-        # 空の欄は埋める。埋まっている欄は 2語まで。
-        budget = room if not have else min(SEAT_FILL_PER_TURN, room)
+        mine = {t.lower() for t in said.get(field, [])}
+        keep = [t for t in have if t.lower() not in mine]      # 総監督の言葉
         fresh: list[str] = []
         for tag in talk.filter_banned_tags(session, tags, ledger=cur):
-            if len(fresh) >= budget:
+            if len(fresh) >= FIELD_CONCLUSION_MAX or len(keep) + len(fresh) >= FIELD_CAP:
                 break
-            # **語の境目で見る。** `shirt` が `skirt` に当たらないのと同じ一本。
-            if any(talk.word_hit(tag, t) or talk.word_hit(t, tag)
-                   for t in have + fresh):
+            # **同じものを二度言わない**（語の境目＋語の重なりで見る）。
+            if any(_too_close(tag, t) for t in keep + fresh):
                 continue
             fresh.append(tag)
-        if not fresh:
+        value = ", ".join(keep + fresh)
+        # 空にはしない（欄を消すのは班の仕事ではない）。変わらないなら黙っている。
+        if not value or value == ", ".join(have):
             continue
-        patch[field] = ", ".join(have + fresh)
+        patch[field] = value
         landed[field] = fresh
     return patch, landed
 

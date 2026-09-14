@@ -925,7 +925,7 @@ async def chat(
         )
         debug_mod.note(session, "writer_missed", detail=text[:240])
 
-    # **席の言葉を、監督が触らなかった欄へ落とす（2026-09-14）。**
+    # **欄の会議が出した結論を、監督が触らなかった欄へ着地させる（2026-09-14）。**
     #
     # 総監督「美術や色彩などでいい提案しているのに、それらがプロンプトに乗って
     # こないのはやっぱりもったいない」。席は台帳に触れず材料を渡すだけで、台本係は
@@ -933,10 +933,17 @@ async def chat(
     # どこにも着地しなかった**（実測で `look` は 88%、`atmosphere` は 76% の
     # セッションで空のまま）。
     #
-    # **監督が書いた欄は素通し。** 席が口を出すのは、監督が黙っていた欄だけ。
+    # **監督が書いた欄は素通し。** 班が口を出すのは、監督が黙っていた欄だけ。
     # 模型は呼ばないので1ターンの時間は変わらない。
+    #
+    # **監督が書いた欄の「班の語」は忘れる（2026-09-14）。** 台本係がその欄を
+    # 書き直した時点で、中身はぜんぶ監督の言葉になる。控えを残したままだと、
+    # 次の会議が監督の言葉を自分のものとして消せてしまう。
+    words = dict(crew_room.crew_words_of(session))
+    for key in patch:
+        words.pop(key, None)
     if floor:
-        fill, landed = crew_room.seat_fill(
+        fill, landed = crew_room.field_land(
             session, floor, ledger=led,
             taken=set(patch.keys()) | director_sticky,
         )
@@ -945,15 +952,19 @@ async def chat(
             before_fill = dict(led)
             led = ledger_mod.apply_patch(led, fill)
             session["refine_ledger"] = led
+            words.update({k: v for k, v in landed.items() if k in fill})
             _change_event(
                 session, source="crew", patch=fill,
                 before=before_fill, after=led, locale=locale,
             )
             debug_mod.note(
-                session, "seat_fill",
+                session, "field_land",
                 detail="; ".join(f"{k}: {', '.join(v)}" for k, v in landed.items()),
                 patch=fill,
             )
+    if words or session.get(crew_room.CREW_WORDS):
+        # 班の居ないセッションには印を付けない（一人撮り・W撮りは素通り）。
+        session[crew_room.CREW_WORDS] = words
 
     # **会話の途中で絵を組み直さない（2026-09-10）。** 総監督「撮影に入らない
     # ときの会話のみの回答はもっと早くしてほしい」。ここで組んだ散文とタグを
