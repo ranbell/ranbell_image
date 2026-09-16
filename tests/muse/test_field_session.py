@@ -373,9 +373,9 @@ def test_the_field_the_writer_rewrote_belongs_to_the_showrunner_again():
 
 
 def test_one_call_per_field_instead_of_one_per_seat():
-    """**12席が9回になる。** standard の取り合う欄が三つ束ねられるぶん。
+    """**12席が8回になる。** 取り合う欄が三つ束ねられ、主演の席が抜けるぶん。
 
-    実測で席1本は約9〜10秒（`stage_ms`・`6dc11d0e`）なので、減る3本で約30秒。
+    実測で席1本は約9〜10秒（`stage_ms`・`6dc11d0e`）、主演の席は24〜28秒。
     """
     import asyncio
 
@@ -406,8 +406,11 @@ def test_one_call_per_field_instead_of_one_per_seat():
     finally:
         C._seat_turn, C._group_turn = keep
 
-    assert len(calls) == 9, calls
+    assert len(calls) == 8, calls
     assert sum(1 for kind, _ in calls if kind == "corner") == 3
+    # **主演は一周に居ない（2026-09-16）** —— 彼女の言葉はターンの最後に届く。
+    spoke = {m for _, ids in calls for m in ids}
+    assert not any(crew.role_of(m) == "actress" for m in spoke), spoke
 
     # 会議の結論は**閉めの一人**に付く（欄に二つ着地しない）
     look = [r for r in floor if r["field"] == "look"]
@@ -440,3 +443,125 @@ def test_two_different_accents_still_both_get_through():
     assert C._too_close("light_particles", "rim_light") is False
     assert C._too_close("cel_shading", "clean_lineart") is False
     assert C._too_close("depth_of_field", "shallow_depth_of_field") is True
+
+
+# ── 綻び五件（2026-09-16）──────────────────────────────────────────────
+
+def test_the_lead_is_dressed_at_the_studio_door_too():
+    """**班の扉でも服を着せる。**（2026-09-16）
+
+    総監督「初回の会話スタート時にデフォルト衣装の読み込みができていない場合あり」。
+
+    画面の「開始」はスタジオ撮りのとき `/open` ではなく `/table` を叩く。
+    着せるのは `open_session` の側だけだったので、**班で始めたセッションは
+    服が空のまま**だった（実機 `f8961eaa`：1ターン目の台帳は `wearing` も空）。
+    """
+    import inspect
+
+    from app.muse import service
+
+    src = inspect.getsource(service.open_table)
+    assert "talk.dress_from_signature(session)" in src, "班の扉で服を着せていない"
+    i_dress = src.index("dress_from_signature")
+    i_table = src.index("crew_room.run_table(")
+    assert i_dress < i_table, "開幕の三席より前に着せる（衣装の席がその値を見る）"
+
+
+def test_the_seat_wears_its_nickname_on_the_name_tag():
+    """**画面の名札と、席同士の呼びかけを同じ言葉にする。**（2026-09-16）
+
+    席は「一点さん」「すきま」と呼び合うのに、吹き出しは役職（色彩設計）だった。
+    同じ役職に二人いる（`palette:itten` と `palette:aku`）ので見分けも付かない。
+    """
+    s = _session(character={"name_ja": "各務 みお"})
+    assert C.seat_name(s, "palette:itten") == "一点（色彩設計）"
+    assert C.seat_name(s, "beat:ichibyou") == "一秒（演出）"
+    # 主演はキャストした本人の名前のまま
+    cast = [m for m in crew.resolve_crew(preset="standard")
+            if crew.role_of(m) == "actress"][0]
+    assert C.seat_name(s, cast) == "各務 みお"
+
+
+def test_the_lead_keeps_her_seat_at_the_opening():
+    """一周からは外すが、**開幕の当たり付けには残る**（衣装 → 撮影 → 主演）。"""
+    cast = crew.resolve_crew(preset="standard")
+    opening = [crew.role_of(m) for m in C.opening_seats(cast)]
+    assert opening == ["wardrobe", "lens", "actress"]
+    walk = [crew.role_of(m) for m in C.writing_seats(cast, without=("actress",))]
+    assert "actress" not in walk
+
+
+def test_a_decorated_speaker_line_still_switches_the_bubble():
+    """**飾られた名札でも宛先が変わる。**（2026-09-16）
+
+    `**SPEAKER: …**` と書かれると行頭が `*` なので欄名に育たず、ラベルごと
+    前の席の吹き出しへ流れていた（総監督「SAY などの Tag が漏れる」
+    「Muse同士の会話が混ざる」）。
+    """
+    seen: dict[str, list[str]] = {}
+
+    def _fake_stream_to(session, muse_id):
+        return lambda text: seen.setdefault(muse_id, []).append(text)
+
+    original, C._stream_to = C._stream_to, _fake_stream_to
+    try:
+        feed = C._packed_stream(_session(session_id="s"),
+                                ["palette:itten", "ink:ipponsen"])
+        for ch in ("**SPEAKER: palette:itten**\nSAY: 琥珀です。\n"
+                   "  - SPEAKER: ink:ipponsen\nSAY: 線を締めます。\n"):
+            feed(ch)
+    finally:
+        C._stream_to = original
+
+    got = {k: "".join(v) for k, v in seen.items()}
+    assert "琥珀です。" in got["palette:itten"]
+    assert "線を締めます。" in got["ink:ipponsen"]
+    assert "琥珀" not in got.get("ink:ipponsen", "")
+    for text in got.values():
+        assert "SPEAKER" not in text
+
+
+def test_an_unknown_name_walks_the_seats_instead_of_piling_on_the_first():
+    """**当たらない名札でも席順に進む。**（2026-09-16）
+
+    `used` を空で渡していたので、名前が当たらないと毎回 `seats[0]` に落ち、
+    **二人目の言葉が一人目の吹き出しに積まれていた**。
+    """
+    seen: dict[str, list[str]] = {}
+    session = _session(session_id="s")
+
+    def _fake_stream_to(_s, muse_id):
+        return lambda text: seen.setdefault(muse_id, []).append(text)
+
+    original, C._stream_to = C._stream_to, _fake_stream_to
+    try:
+        feed = C._packed_stream(session, ["palette:itten", "ink:ipponsen"])
+        for ch in ("SPEAKER: ???\nSAY: 一人目。\nSPEAKER: ???\nSAY: 二人目。\n"):
+            feed(ch)
+    finally:
+        C._stream_to = original
+
+    got = {k: "".join(v) for k, v in seen.items()}
+    assert "一人目。" in got["palette:itten"]
+    assert "二人目。" in got["ink:ipponsen"], "二人目が一人目に積まれている"
+    # 黙って間違えない
+    notes = [n for n in (session.get("refine_log") or [])
+             if n.get("kind") == "corner_speaker_miss"]
+    assert len(notes) == 2, notes
+
+
+def test_the_speaker_label_also_shuts_the_say_gate():
+    """取りこぼしたときの止め —— `SPEAKER:` でも吹き出しは閉じる。"""
+    from app.muse import shared
+
+    assert shared._SAY_SHUT_RE.match("SPEAKER: palette:itten")
+    assert shared._SAY_SHUT_RE.match("**SPEAKER: palette:itten")
+
+
+def test_the_nickname_is_what_the_seats_call_each_other():
+    """あだ名で呼ばれた名札も宛先に当たる（模型は日本語で書いてくる）。"""
+    seats = ["palette:itten", "ink:ipponsen"]
+    assert C._match_speaker("一点", seats, []) == ("palette:itten", True)
+    assert C._match_speaker("色彩設計", seats, []) == ("palette:itten", True)
+    assert C._match_speaker("2", seats, []) == ("ink:ipponsen", True)
+    assert C._match_speaker("だれか", seats, ["palette:itten"]) == ("ink:ipponsen", False)

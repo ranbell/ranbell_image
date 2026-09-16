@@ -351,8 +351,12 @@ _SAY_SHUT_RE = re.compile(
     # `CRAFT` は 2026-09-12 に足した —— スタジオ撮りの席は `SAY:` のあとに
     # `CRAFT: rim_light | low sun` を書く。止めないと、流れている間だけ
     # danbooru 語が吹き出しに出る（総監督「SAY: が露出する」と同じ穴の隣）。
-    r"(?i)^[ \t>*_-]*(ASIDE|CARD|CRAFT|PITCH|MY_FEEL|ROLE_FEEL|TAGS|SCENE|"
-    r"WEARING|BEAT|FRAME|PLACE|HOUR|LIGHT|ACTION)\s*[:：]"
+    # `SPEAKER` は 2026-09-16 に足した —— 欄ごとの会議は一度の返事に何人ぶんも
+    # 入っていて、宛先の切り替えは `crew_room._packed_stream` がやる。取りこぼした
+    # ときにここで止まらないと、**次の席の言葉が前の席の吹き出しに流れ込む**
+    # （総監督「Muse同士の会話が混ざる」）。
+    r"(?i)^[ \t>*_#-]*(ASIDE|CARD|CRAFT|PITCH|MY_FEEL|ROLE_FEEL|TAGS|SCENE|"
+    r"SPEAKER|WEARING|BEAT|FRAME|PLACE|HOUR|LIGHT|ACTION)\s*[:：]"
 )
 #: 行頭がこの形なら、まだ欄名に育ちうる（`AS` → `ASIDE:`）。ここから外れた
 #: 時点で欄名ではないので、待たずに出す。W撮りの `A:` `B:` もここで抜ける。

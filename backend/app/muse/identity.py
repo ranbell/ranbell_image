@@ -494,6 +494,50 @@ def _is_leaked_heading_line(line: str) -> bool:
     return False
 
 
+#: 行の**途中**から始まる欄名。行頭だけを見ていると、`ASIDE: … CARD: …` のように
+#: 一行に二つ積まれたとき、後ろが内心の一部になってしまう。
+#: 二つ目の形（コロン無し・行末）は**大文字のときだけ**見る —— `(?i)` で拾うと
+#: 「a birthday card」で終わる行まで欄名になってしまう。実機で漏れたのは
+#: `… 気持ちいい……。 CARD` という**大文字の裸の欄名**だった。
+_INLINE_LABEL_RE = re.compile(
+    r"(?<![A-Za-z0-9_])(?:"
+    r"(?i:(SAY|ASIDE|CARD|PITCH|MY_FEEL))(?:\s*\([^)]*\))?\s*[:：]\s*"
+    r"|(SAY|ASIDE|CARD|PITCH|MY_FEEL)\s*$"
+    r")"
+)
+#: 中身のない欄名だけが尻尾に残った形（`…気持ちいい……。 CARD`）。
+_BARE_LABEL_TAIL_RE = re.compile(
+    r"(?i)(?<![A-Za-z0-9_])(SAY|ASIDE|CARD|PITCH|MY_FEEL)\s*[:：]?\s*$"
+)
+
+
+def _split_labels(line: str) -> list[tuple[str, str | None, str]]:
+    """一行を「欄名の手前」「欄名」「その後ろ」に割る。欄名が無ければ一片だけ。"""
+    marks = list(_INLINE_LABEL_RE.finditer(line))
+    if not marks:
+        return [(line, None, "")]
+    out: list[tuple[str, str | None, str]] = []
+    head = line[:marks[0].start()]
+    if head.strip():
+        out.append((head, None, ""))
+    for i, m in enumerate(marks):
+        end = marks[i + 1].start() if i + 1 < len(marks) else len(line)
+        label = str(m.group(1) or m.group(2) or "").lower()
+        out.append(("", label, line[m.end():end]))
+    return out
+
+
+def _drop_bare_label_tail(text: str) -> str:
+    """末尾に残った裸の欄名を落とす（`… CARD` / `… PITCH:`）。"""
+    out = str(text or "")
+    for _ in range(3):
+        stripped = _BARE_LABEL_TAIL_RE.sub("", out).rstrip()
+        if stripped == out:
+            break
+        out = stripped
+    return out
+
+
 def parse_talk_blocks(raw: str) -> dict[str, str]:
     """Split SAY / ASIDE / CARD / PITCH before SAY sanitize.
 
@@ -511,17 +555,21 @@ def parse_talk_blocks(raw: str) -> dict[str, str]:
     buf: dict[str, list[str]] = {k: [] for k in blocks}
     current: str | None = None
     for line in text.splitlines():
-        m = _TALK_LABEL_RE.match(line)
-        if m:
-            current = m.group(1).lower()
-            rest = m.group(2)
-            if rest.strip():
-                buf[current].append(rest)
-            continue
-        if current:
-            buf[current].append(line)
+        # **行の途中で始まる次の欄も、欄の切れ目として読む（2026-09-16）。**
+        #
+        # 行頭しか見ていなかったので、実機（`f8961eaa`）で
+        # `ASIDE: 恥ずかしいけど…気持ちいい……。 CARD` がそのまま内心になり、
+        # 画面に `CARD` が漏れた（CARD の中身は行の続きごと捨てられた）。
+        # 総監督「SAY などの Tag が漏れる」。
+        for piece, label, rest in _split_labels(line):
+            if label:
+                current = label
+                if rest.strip():
+                    buf[current].append(rest)
+            elif current:
+                buf[current].append(piece)
     for key in blocks:
-        blocks[key] = "\n".join(buf[key]).strip()
+        blocks[key] = _drop_bare_label_tail("\n".join(buf[key]).strip())
     # **語の一覧で撮影を止めるのはやめた（2026-08-25）。**
     #
     # ここは `my_feel` に「つら／こわい／理不尽」などが出たら、SAY も ASIDE も

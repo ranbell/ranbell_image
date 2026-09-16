@@ -75,9 +75,27 @@ def test_a_finished_seat_is_kept_on_screen():
     """
     handler = SRC[SRC.index("if (data.type === 'muse_speaking')"):]
     handler = handler[: handler.index("return\n    }")]
-    # 空にする前に畳む
-    assert handler.index("liveDone.value = [") < handler.index("liveSay.value = ''")
-    assert "if (liveSay.value.trim())" in handler
+    # 名前を替える前に畳む（畳む中身は `foldLive`）
+    assert handler.index("foldLive()") < handler.index("liveName.value =")
+
+    fold = SRC[SRC.index("function foldLive()"):]
+    fold = fold[: fold.index("\n}\n") + 2]
+    # 空にする前に積む
+    assert fold.index("liveDone.value = [") < fold.index("liveSay.value = ''")
+    assert "if (liveSay.value.trim())" in fold
+
+
+def test_the_bubble_folds_when_the_speaker_changes_mid_stream():
+    """**言葉の主が替わったら、そこで畳む。**（2026-09-16）
+
+    総監督「Muse同士の会話が混ざる」。欄ごとの会議は一度の返事に何人ぶんも
+    入っているので、`muse_speaking` を一つ取りこぼすと、前の席の吹き出しに
+    次の席の言葉が続いてしまう。`chat_delta` にも `muse_id` は乗っている。
+    """
+    handler = SRC[SRC.index("if (data.type === 'chat_delta')"):]
+    handler = handler[: handler.index("return\n    }")]
+    assert "data.muse_id" in handler, "流れてくる本文の主を見ていない"
+    assert handler.index("foldLive()") < handler.index("liveSay.value +=")
 
 
 def test_the_kept_lines_go_away_when_the_real_ones_arrive():

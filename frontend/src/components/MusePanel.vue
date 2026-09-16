@@ -52,6 +52,10 @@ const liveSay = ref('')
 // 流れている台詞の主。班だと席が次々に替わる。
 const liveName = ref('')
 const liveIsLead = ref(true)
+// **誰の言葉が流れているか（2026-09-16）。** `muse_speaking` を一つ取りこぼすと、
+// 二人の言葉が一つの吹き出しに積まれていた（総監督「Muse同士の会話が混ざる」）。
+// `chat_delta` にも `muse_id` が乗っているので、変わったらそこで畳む。
+const liveId = ref('')
 // このターンで流し終えた席。確定した行が届くまでの間だけ画面に残す。
 const liveDone = ref([])
 
@@ -72,8 +76,27 @@ function stopSpeaking() {
   speaking.value = false
   liveSay.value = ''
   liveName.value = ''
+  liveId.value = ''
   // 確定した行が `session.chat` で届くので、流していたぶんは役目を終える。
   liveDone.value = []
+}
+
+/**
+ * 流し終えた台詞を畳んで、次の人のために枠を空ける。
+ *
+ * **前の席の言葉を消さない（2026-09-12）。** 総監督「役が話す毎にリセット処理が
+ * 入るのか、毎回巻き戻されてしまいます」。確定した行が出るのは POST が返ってから
+ * なので、ここで畳んでおかないと次の席が始まった瞬間に前の言葉が消える。
+ */
+function foldLive() {
+  if (liveSay.value.trim()) {
+    liveDone.value = [...liveDone.value, {
+      name: liveName.value,
+      text: liveText.value,
+      lead: liveIsLead.value,
+    }].slice(-24)
+  }
+  liveSay.value = ''
 }
 // W撮りでは `A:` / `B:` が行頭に付いてくる（誰の台詞かの目印）。**確定した行は
 // 名前で分かれて出る**ので、流れている間だけの目印は画面に出さない。
@@ -607,24 +630,11 @@ function openStream(id) {
     }
     if (data.type === 'muse_speaking') {
       speaking.value = true
-      // **前の席の言葉を消さない（2026-09-12）。** 総監督「役が話す毎に
-      // リセット処理が入るのか、毎回巻き戻されてしまいます」。
-      //
-      // 確定した行が画面に出るのは POST が返ってから（ターンの途中では
-      // `refresh` が `busy` で止まる）。だから流し終えた席をここで畳んで
-      // おかないと、次の席が始まった瞬間に前の席の言葉が消える —— 18席ぶん
-      // それが起きるので、ずっと巻き戻って見える。
-      if (liveSay.value.trim()) {
-        liveDone.value = [...liveDone.value, {
-          name: liveName.value,
-          text: liveText.value,
-          lead: liveIsLead.value,
-        }].slice(-24)
-      }
-      liveSay.value = ''
+      foldLive()
       // **誰が喋っているか。** スタジオ撮りでは18人が順に喋るので、流れている
       // 吹き出しに主演の名前を出しっぱなしにすると、誰の言葉か分からない。
       liveName.value = String(data.name || '')
+      liveId.value = String(data.muse_id || '')
       liveIsLead.value = !data.muse_id
         || String(data.muse_id) === String(session.value?.character?.character_id || '')
       if (!startedAt) startedAt = Date.now()
@@ -635,6 +645,16 @@ function openStream(id) {
     // 裏が `_say_only` を通しているので、ここに来るのは SAY の中身だけ。
     if (data.type === 'chat_delta') {
       speaking.value = true
+      // **言葉の主が替わったら、そこで畳む。** 欄ごとの会議は一度の返事に
+      // 何人ぶんも入っているので、`muse_speaking` を取りこぼすと前の席の
+      // 吹き出しに次の席の言葉が続いてしまう。
+      const who = String(data.muse_id || '')
+      if (who && liveId.value && who !== liveId.value) {
+        foldLive()
+        liveId.value = who
+        liveIsLead.value = who === String(session.value?.character?.character_id || '')
+        liveName.value = ''
+      }
       liveSay.value += data.text || ''
       scrollChat()
       return

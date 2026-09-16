@@ -140,8 +140,8 @@ sequenceDiagram
 ```mermaid
 flowchart LR
     subgraph SEATS["役職"]
-        beat["振付 beat"]
-        spine["演出 spine"]
+        beat["演出 beat（一秒）"]
+        spine["振付 spine（バネ）"]
         cutout["構成 cutout"]
         lens["撮影 lens"]
         propshop["美術 propshop"]
@@ -195,8 +195,8 @@ flowchart LR
 |---|---|---|---|
 | 主演 actress | —— | 演じる本人。班でも喋り、台本係のあとに本人の段がある | ○ |
 | 間取り plan | —— | 場所・時刻・光・物の見取りを決める（別経路） | × |
-| 振付 beat | `beat` | 一秒を切り取る姿勢。信じられる体重の乗り方 | ○ |
-| 演出 spine | `beat` | 芝居の背骨。重心と意志 | ○ |
+| 演出 beat | `beat` | 一秒を切り取る姿勢。信じられる体重の乗り方 | ○ |
+| 振付 spine | `beat` | 芝居の背骨。重心と意志 | ○ |
 | 構成 cutout | `frame` | 画面の隙間・余白・非対称 | ○ |
 | 撮影 lens | `frame` | 寄り・角度・ピント。**一つの絶対的なサイズ**を言う | ○ |
 | 美術 propshop | `bg` | その場にある物。生活感 | ○ |

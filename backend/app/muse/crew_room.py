@@ -298,14 +298,31 @@ def pick_heckler(session: dict[str, Any], cast: list[str], *,
 
 
 def seat_name(session: dict[str, Any], muse_id: str) -> str:
-    """画面に出す名前。主演だけはキャストした本人の名前。"""
+    """画面に出す名前。**あだ名（役職）**の形。主演だけは本人の名前。（2026-09-16）
+
+    総監督「Muse同士の会話が混ざる。口調が Muse のものでない」。名札が
+    **役職**（`色彩設計`・`撮影`）だけだったのが半分の理由だった ——
+
+        画面      色彩設計 / 撮影 / 演出
+        席の口    「一点さん」「すきま」「一秒くん」
+
+    **呼び合う名前が画面に出ていない。** しかも同じ役職に二人いる
+    （`palette:itten` と `palette:aku`）ので、顔ぶれを替えても見分けが付かない。
+    あだ名を前に出すと、席同士の呼びかけと画面の名札が同じ言葉になる。
+
+    ここは席・やじ・`muse_speaking`・保存行がすべて通る一本なので、直すのはここだけ。
+    """
     if crew.role_of(muse_id) == "actress":
         char = session.get("character") or {}
         name = str(char.get("name_ja") or char.get("name") or "").strip()
         if name:
             return name
-    m = (getattr(crew, "MUSES", None) or {}).get(muse_id) or {}
-    return str(m.get("name_ja") or m.get("name") or muse_id)
+    m = (getattr(crew, "MUSES", None) or {}).get(crew.resolve_member(muse_id)) or {}
+    role = str(m.get("name_ja") or m.get("name") or muse_id).strip()
+    nick = str(m.get("nick_ja") or m.get("nick") or "").strip()
+    if nick and nick != role:
+        return f"{nick}（{role}）"
+    return role
 
 
 #: 班が置いた語の控え（`session[CREW_WORDS][欄] = [語, …]`）。（2026-09-14）
@@ -497,33 +514,46 @@ async def _seat_turn(ollama, session: dict[str, Any], muse_id: str, *,
     )
 
 
-_SPEAKER_RE = re.compile(r"(?im)^[ \t>*_-]*SPEAKER\s*:\s*(.+?)\s*$")
+_SPEAKER_RE = re.compile(r"(?im)^[ \t>*_#-]*SPEAKER\s*:\s*(.+?)\s*$")
+
+#: 行頭に付く飾り。模型は `**SPEAKER: …**` や `- SPEAKER:` と書くことがある。
+_DECOR = " \t*_#>-"
 
 
-def _match_speaker(token: str, seats: list[str], used: list[str]) -> str:
-    """`SPEAKER: …` の右側を、この会議の席に当てる。
+def _match_speaker(token: str, seats: list[str],
+                   used: list[str]) -> tuple[str, bool]:
+    """`SPEAKER: …` の右側を、この会議の席に当てる。`(席, 当たったか)`。
 
-    模型は id をそのまま書くこともあれば、番号（`SPEAKER: 2`）や役名で書くことも
-    ある。**当たらなければ、まだ喋っていない席の先頭**に落とす —— 会議は席順に
-    喋る約束なので、それでほぼ合う。
+    模型は id をそのまま書くこともあれば、番号（`SPEAKER: 2`）でも、あだ名でも
+    役職名でも書く（`SPEAKER: 一点` / `SPEAKER: 色彩設計`）。だから**日本語の
+    名札も見る**。
+
+    **当たらなければ、まだ喋っていない席の先頭**に落とす —— 会議は席順に喋る
+    約束なので、それでほぼ合う。`used` を渡し忘れると全員が一人目に積まれるので、
+    当たったかどうかを返して呼び元が記録できるようにしてある（2026-09-16 の
+    流し込みの取り違えは、まさにここを空で呼んでいたのが原因）。
     """
     raw = str(token or "").strip().strip("`*_ 「」【】")
     low = raw.lower()
     for mid in seats:
         if mid.lower() == low or mid.lower().split(":")[0] == low:
-            return mid
+            return mid, True
     if (digits := re.findall(r"\d+", low)):
         i = int(digits[0]) - 1
         if 0 <= i < len(seats):
-            return seats[i]
+            return seats[i], True
     for mid in seats:
-        role = (crew.role_of(mid) or "").lower()
-        if role and role in low:
-            return mid
+        member = (getattr(crew, "MUSES", None) or {}).get(crew.resolve_member(mid)) or {}
+        labels = [crew.role_of(mid), member.get("nick"), member.get("nick_ja"),
+                  member.get("name_ja"), member.get("name")]
+        for label in labels:
+            text = str(label or "").strip().lower()
+            if text and text in low:
+                return mid, True
     for mid in seats:
         if mid not in used:
-            return mid
-    return seats[0] if seats else ""
+            return mid, False
+    return (seats[0] if seats else ""), False
 
 
 def split_packed(raw: str, seats: list[str]) -> tuple[list[tuple[str, str]], str]:
@@ -542,7 +572,7 @@ def split_packed(raw: str, seats: list[str]) -> tuple[list[tuple[str, str]], str
     if len(parts) >= 3:
         used: list[str] = []
         for i in range(1, len(parts) - 1, 2):
-            mid = _match_speaker(parts[i], seats, used)
+            mid, _hit = _match_speaker(parts[i], seats, used)
             say = identity.sanitize_muse_say(parts[i + 1], locale="ja")
             if not say.strip():
                 continue
@@ -570,7 +600,8 @@ def _packed_stream(session: dict[str, Any], seats: list[str]):
     sid = str(session.get("session_id") or "")
     pubs = {mid: _stream_to(session, mid) for mid in seats}
     word = "speaker:"
-    st: dict[str, Any] = {"gate": None, "bol": True, "hold": "", "id": None}
+    st: dict[str, Any] = {"gate": None, "bol": True, "hold": "", "id": None,
+                          "used": []}
 
     def _emit(text: str) -> None:
         gate = st["gate"]
@@ -582,13 +613,21 @@ def _packed_stream(session: dict[str, Any], seats: list[str]):
             logger.debug("[muse] packed stream emit failed", exc_info=True)
 
     def _switch(token: str) -> None:
-        mid = _match_speaker(token, seats, [])
-        st["gate"] = pubs.get(mid)
+        # **`used` を持って渡す（2026-09-16）。** 空で呼んでいたので、名前が
+        # 当たらないと毎回 `seats[0]` に落ち、**二人目の言葉が一人目の吹き出しに
+        # 積まれていた**（総監督「Muse同士の会話が混ざる」）。
+        mid, hit = _match_speaker(token, seats, st["used"])
         if mid:
+            st["used"].append(mid)
+            st["gate"] = pubs.get(mid)
             events.publish(sid, {
                 "type": "muse_speaking", "muse_id": mid,
                 "name": seat_name(session, mid),
             })
+        if not hit:
+            # 黙って間違えない —— 当たらなかった名札は記録に残す。
+            debug_mod.note(session, "corner_speaker_miss",
+                           detail=f"{token.strip()[:40]!r} → {mid}")
 
     def _feed(text: str) -> None:
         for ch in str(text or ""):
@@ -602,9 +641,13 @@ def _packed_stream(session: dict[str, Any], seats: list[str]):
                 continue
             if st["bol"]:
                 cand = st["hold"] + ch
-                if cand.strip() and word.startswith(cand.strip().lower()):
+                # **飾りを許す（2026-09-16）。** `**SPEAKER: …**` と書かれると
+                # 行頭が `*` で始まるので欄名に育たず、ラベルごと前の席の吹き出しへ
+                # 流れていた。`_SAY_OPEN_RE` が昔から許しているのと同じ飾り。
+                bare = cand.strip(_DECOR).lower()
+                if (not bare and len(cand) <= len(_DECOR)) or (bare and word.startswith(bare)):
                     st["hold"] = cand
-                    if cand.strip().lower() == word:
+                    if bare == word:
                         st["hold"], st["id"] = "", ""
                     continue
                 _emit(st["hold"])
@@ -681,7 +724,15 @@ async def run_table(db, ollama, session: dict[str, Any], *,
     cast = cast_of(session)
     if not cast:
         return []
-    seats = opening_seats(cast) if opening else writing_seats(cast)
+    # **会話のターンに主演の席は置かない（2026-09-16）。** 総監督「会話が Muse と
+    # 班で混ざる」。実機の1ターンで彼女は **席 → やじ → 本人の台詞 → 内心 → 確認**
+    # と4〜5回出ていた。席としての彼女は**欄を持たない**ので台帳には何も書かず、
+    # それでいて `seat_actress` は一周でいちばん重い（24〜28秒）。
+    #
+    # **開幕には残す** —— 衣装 → 撮影 → 主演で当たりを付ける段は彼女の仕事。
+    # やじ役・横やり役としての出番もそのまま（`pick_reactor` が取り分を渡す）。
+    seats = (opening_seats(cast) if opening
+             else writing_seats(cast, without=("actress",)))
     if not seats:
         return []
     model = str((session.get("inputs") or {}).get("model") or "")

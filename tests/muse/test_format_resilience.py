@@ -125,3 +125,46 @@ def test_scripter_json_salvages_truncated_object():
     assert out.get("raw") == raw or out.get("valid") in (True, False)
 
 
+
+
+# ── 欄名の尻尾（2026-09-16）─────────────────────────────────────────────
+
+def test_a_label_in_the_middle_of_a_line_still_starts_its_block():
+    """**行の途中から始まる欄も、欄の切れ目として読む。**（2026-09-16）
+
+    総監督「SAY などの Tag が漏れる」。実機（`f8961eaa`）で内心の吹き出しに
+
+        恥ずかしいけど、猫ちゃんはふわふわしてて気持ちいい……。 CARD
+
+    が出ていた。行頭の欄名しか見ていなかったので `CARD` が内心に残り、
+    **CARD の中身（着ているもの）は行の続きごと捨てられていた。**
+    """
+    raw = (
+        "SAY: こんばんは、総監督。\n"
+        "ASIDE: 恥ずかしいけど、猫ちゃんはふわふわしてて気持ちいい……。 CARD\n"
+        "WEARING: negligee\n"
+        "PITCH: 1) もっと寄る"
+    )
+    blocks = identity.parse_talk_blocks(raw)
+    assert blocks["aside"] == "恥ずかしいけど、猫ちゃんはふわふわしてて気持ちいい……。"
+    assert "CARD" not in blocks["aside"]
+    assert blocks["card"] == "WEARING: negligee", "捨てずに CARD へ渡す"
+    assert blocks["pitch"] == "1) もっと寄る"
+
+
+def test_two_blocks_on_one_line_are_split():
+    blocks = identity.parse_talk_blocks("SAY: ふふ。 ASIDE: 心の声。 CARD: WEARING: apron")
+    assert blocks["say"] == "ふふ。"
+    assert blocks["aside"] == "心の声。"
+    assert blocks["card"] == "WEARING: apron"
+
+
+def test_an_ordinary_word_is_not_a_label():
+    """**落としすぎない。** 裸の欄名は大文字のときだけ（英単語を切らない）。"""
+    blocks = identity.parse_talk_blocks("SAY: 誕生日の card を渡すところ。")
+    assert blocks["say"] == "誕生日の card を渡すところ。"
+    assert blocks["card"] == ""
+
+
+def test_an_unlabelled_reply_is_still_her_line():
+    assert identity.parse_talk_blocks("ラベルのない返事です。")["say"] == "ラベルのない返事です。"

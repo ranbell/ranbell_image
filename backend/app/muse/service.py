@@ -1657,6 +1657,22 @@ async def open_table(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
     locale = str(_inputs(session).get("locale") or "ja")
     session[crew_room.TABLE_OPEN] = True
     session.setdefault("opened", True)
+
+    # **班の扉でも服を着せる（2026-09-16）。** 総監督「初回の会話スタート時に
+    # デフォルト衣装の読み込みができていない場合あり」。
+    #
+    # 画面の「開始」は、スタジオ撮りのとき `/open` ではなく**ここ**を叩く
+    # （`MusePanel.vue` の `door`）。着せるのは `open_session` の側だけだったので、
+    # **班で始めたセッションは服が空のまま**だった（実機 `f8961eaa`：1ターン目の
+    # 台帳は `wearing` も空で、服が入ったのは総監督が「ネグリジェ」と言った時）。
+    #
+    # 開幕の三席より**前**に置く —— 衣装の席はその値を見て質感を足す仕事なので、
+    # 空の欄を見せると一から作り始める。`dress_from_signature` は**空のときだけ**
+    # 入れるので、二度通っても着替えない。
+    dress_patch = talk.dress_from_signature(session)
+    if dress_patch:
+        debug_mod.note(session, "opening_dress", detail=str(dress_patch), patch=dress_patch)
+
     _append_chat(
         session, role="system", name="Studio",
         text=(
