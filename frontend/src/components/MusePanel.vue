@@ -94,6 +94,9 @@ function foldLive() {
       name: liveName.value,
       text: liveText.value,
       lead: liveIsLead.value,
+      // **畳んだあとも顔は残す（2026-09-18）。** 流し終えた吹き出しだけ
+      // サムネイルが消えると、同じ人が喋り続けているのに顔が出たり消えたりする。
+      face: liveIsLead.value ? leadFace.value : '',
     }].slice(-24)
   }
   liveSay.value = ''
@@ -489,11 +492,27 @@ async function finishSession() {
   }
 }
 
+/**
+ * その行の顔。**「誰の言葉か」で決める。**（2026-09-18）
+ *
+ * 総監督「Muse が喋ったときのサムネイルが抜けている場合がある」。
+ *
+ * ここは以前「assistant の行なら主演の顔」を返していたので、班の席にまで彼女の
+ * 顔が付いてしまい、**吹き出しの種類の許可リスト**（say / banter / verify…）で
+ * 抑えていた。その許可リストに**やじ（heckle）が入っていなかった** —— 彼女は
+ * 1ターンに2〜3回やじを入れるので、**同じ人なのにその回だけ顔が消えていた。**
+ *
+ * 許可リストではなく、行が持っている `meta.role`（席の役）で決める。班の席は
+ * 顔を持たず、主演の行は種類にかかわらず顔が付く。
+ */
 function faceShaForRow(row) {
   const id = row?.meta?.speaker_id
   if (id && id === partner.value?.character_id) return partnerFaceSha.value
-  if (row?.role === 'assistant' || row?.meta?.kind === 'say' || row?.meta?.kind === 'banter') {
-    if (id && id === leadCharacter.value?.character_id) return leadFaceSha.value
+  if (id && id === leadCharacter.value?.character_id) return leadFaceSha.value
+  // 班の席（演出・照明…）は顔を持たない。主演だけが `actress`。
+  const role = row?.meta?.role
+  if (role && role !== 'actress') return ''
+  if (row?.role === 'assistant') {
     if (row?.meta?.speaker === 'B') return partnerFaceSha.value
     return leadFaceSha.value
   }
@@ -1154,7 +1173,7 @@ function isStruckRow(row) {
                   :class="isBanterRow(row) ? 'text-pink-300/90' : 'text-pink-300/80'"
                 >
                   <img
-                    v-if="faceForRow(row) && (isSayRow(row) || isBanterRow(row) || row.meta?.kind === 'verify_ok' || row.meta?.kind === 'verify_repair' || row.meta?.kind === 'verify_repaired' || row.meta?.kind === 'pitch' || row.meta?.kind === 'standing' || row.meta?.kind === 'contract')"
+                    v-if="faceForRow(row)"
                     :src="faceForRow(row)"
                     alt=""
                     class="h-7 w-7 shrink-0 rounded-full object-cover border border-pink-100 shadow-md ring-2 ring-pink-400/80"
@@ -1299,7 +1318,14 @@ function isStruckRow(row) {
                 <span
                   class="flex items-center gap-1.5 px-0.5 text-[10px] font-medium"
                   :class="done.lead ? 'text-pink-300/80' : 'text-amber-200/80'"
-                >{{ done.lead ? '🌸' : '🎬' }} {{ done.name }}</span>
+                >
+                  <img
+                    v-if="done.face"
+                    :src="done.face"
+                    alt=""
+                    class="h-7 w-7 shrink-0 rounded-full object-cover border border-pink-100 shadow-md ring-2 ring-pink-400/80"
+                  />
+                  {{ done.lead ? '🌸' : '🎬' }} {{ done.name }}</span>
                 <div
                   class="max-w-[90%] whitespace-pre-wrap shadow-sm"
                   :class="done.lead

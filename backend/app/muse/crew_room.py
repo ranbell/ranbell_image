@@ -474,6 +474,26 @@ def seat_prompt(session: dict[str, Any], muse_id: str, *,
     return "\n\n".join(bits)
 
 
+def stream_id(session: dict[str, Any], muse_id: str) -> str:
+    """流し込みの宛先 id。**主演だけはキャストした本人の id で出す。**（2026-09-18）
+
+    総監督「Muse が喋ったときのサムネイルが抜けている場合がある」。
+
+    画面は「その言葉が主演のものか」を **`muse_id` が本人の `character_id` か**で
+    見ている（`MusePanel.vue` の `liveIsLead`）。班の中の彼女は `actress:cast`
+    という席の id で流れていたので、**やじを入れた回だけ顔が消えていた** ——
+    同じ人が喋っているのに、言葉の出どころによって名札が変わる。
+
+    ここで本人の id に揃える。席としての彼女も、やじの彼女も、本人の段も、
+    画面から見れば同じ一人になる。
+    """
+    if crew.role_of(muse_id) == "actress":
+        cid = str((session.get("character") or {}).get("character_id") or "").strip()
+        if cid:
+            return cid
+    return muse_id
+
+
 def _stream_to(session: dict[str, Any], muse_id: str):
     """席の台詞を流す口。**`SAY:` の中だけ**通る（`_say_only`）。
 
@@ -484,7 +504,9 @@ def _stream_to(session: dict[str, Any], muse_id: str):
     try:
         from . import shared as muse_shared
 
-        return muse_shared._token_publisher(str(session.get("session_id") or ""), muse_id)
+        return muse_shared._token_publisher(
+            str(session.get("session_id") or ""), stream_id(session, muse_id),
+        )
     except Exception:
         logger.debug("[muse] seat token publisher unavailable", exc_info=True)
         return None
@@ -495,7 +517,7 @@ async def _seat_turn(ollama, session: dict[str, Any], muse_id: str, *,
     """一席ぶんの呼び出し。**絵は渡さない**（板を見せるのは女優の段の仕事）。"""
     sid = str(session.get("session_id") or "")
     events.publish(sid, {
-        "type": "muse_speaking", "muse_id": muse_id,
+        "type": "muse_speaking", "muse_id": stream_id(session, muse_id),
         "name": seat_name(session, muse_id),
     })
     return await chain._call(
@@ -621,7 +643,7 @@ def _packed_stream(session: dict[str, Any], seats: list[str]):
             st["used"].append(mid)
             st["gate"] = pubs.get(mid)
             events.publish(sid, {
-                "type": "muse_speaking", "muse_id": mid,
+                "type": "muse_speaking", "muse_id": stream_id(session, mid),
                 "name": seat_name(session, mid),
             })
         if not hit:
@@ -667,7 +689,7 @@ async def _group_turn(ollama, session: dict[str, Any], seats: list[str], *,
     sid = str(session.get("session_id") or "")
     if seats:
         events.publish(sid, {
-            "type": "muse_speaking", "muse_id": seats[0],
+            "type": "muse_speaking", "muse_id": stream_id(session, seats[0]),
             "name": seat_name(session, seats[0]),
         })
     inputs = session.get("inputs") or {}
@@ -693,7 +715,7 @@ async def _banter_turn(ollama, session: dict[str, Any], muse_id: str, *,
                        model: str, about_name: str, about_text: str) -> str:
     """やじ一言。短く、craft は書かせない。"""
     events.publish(str(session.get("session_id") or ""), {
-        "type": "muse_speaking", "muse_id": muse_id,
+        "type": "muse_speaking", "muse_id": stream_id(session, muse_id),
         "name": seat_name(session, muse_id),
     })
     return await chain.run_banter(
