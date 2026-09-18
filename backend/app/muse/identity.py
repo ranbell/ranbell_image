@@ -545,6 +545,29 @@ def _drop_bare_label_tail(text: str) -> str:
     return out
 
 
+def trim_to_a_sentence(text: str, cap: int) -> str:
+    """上限を超える文章を、**文の切れ目**で止める。（2026-09-18）
+
+    総監督「prompt のオーバフローで文字が切れる場合がある」。長さの上限そのものは
+    要る（絵に渡す散文も、彼女に渡す記憶も、青天井にはできない）。直すのは
+    **どこで切るか** —— `text[:900]` は単語の真ん中で落とすので、
+    `a heavy knit card` のような尻切れがそのまま下流へ流れる。
+
+    最後の句点までで止め、句点が無ければ語の切れ目で。上限の半分より手前まで
+    戻ってしまうときは、それ以上戻らない（短くしすぎない）。
+    """
+    body = str(text or "").strip()
+    if len(body) <= cap:
+        return body
+    head = body[:cap]
+    for mark in (". ", "。", "! ", "? ", "！", "？"):
+        cut = head.rfind(mark)
+        if cut > cap // 2:
+            return head[: cut + len(mark)].strip()
+    space = head.rfind(" ")
+    return (head[:space] if space > cap // 2 else head).strip()
+
+
 def parse_talk_blocks(raw: str) -> dict[str, str]:
     """Split SAY / ASIDE / CARD / PITCH before SAY sanitize.
 

@@ -608,7 +608,10 @@ async def _recent_diary_bodies(
             or e.get("content") or summary
         ).strip()
         if text:
-            out.append(text[:900])
+            # **語の途中で切らない（2026-09-18）。** ここは彼女の前置きに入る
+            # 日記の抜粋。`[:900]` だと一語の真ん中で終わり、読むほうは
+            # 書きかけの記憶を渡されることになる。
+            out.append(identity.trim_to_a_sentence(text, 900))
     return out[:limit]
 async def _recent_memories(db, session: dict[str, Any], limit: int = 3) -> list[str]:
     """Sticky shoot recaps — Muse prompt only."""

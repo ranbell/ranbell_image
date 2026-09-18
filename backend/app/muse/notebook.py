@@ -1604,14 +1604,19 @@ def migrate(session: dict[str, Any]) -> dict[str, Any]:
     craft = session.get("craft") or {}
     scene = str(craft.get("scene") or "").strip()
     if digest:
-        nb["scene"] = digest[:800]
-        nb["vibe"] = digest[:400]
+        # **語の途中で切らない（2026-09-18）。** 隣（1419行）は既に
+        # `_cap_phrase` で語の切れ目を守っているのに、ここだけ生のスライス
+        # だった —— 実機 `32cc5fab` の `notebook.scene` が
+        # 「…the consoles and the concen」で終わっていた。
+        nb["scene"] = _cap_phrase(digest, max_chars=800)
+        nb["vibe"] = _cap_phrase(digest, max_chars=400)
     if scene and not nb.get("scene"):
-        nb["scene"] = scene[:800]
+        nb["scene"] = _cap_phrase(scene, max_chars=800)
     table = facets_mod.table_of(session)
     if table:
         if not nb.get("wearing"):
-            nb["wearing"] = str((table.get("costume") or {}).get("nl") or "")[:400]
+            nb["wearing"] = _cap_phrase(
+                str((table.get("costume") or {}).get("nl") or ""), max_chars=400)
         if not nb.get("beat"):
             pose = str((table.get("pose") or {}).get("nl") or "")
             expr = str((table.get("expression") or {}).get("nl") or "")
