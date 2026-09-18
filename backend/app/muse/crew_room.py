@@ -600,8 +600,16 @@ def _match_speaker(token: str, seats: list[str],
     """
     raw = str(token or "").strip().strip("`*_ 「」【】")
     low = raw.lower()
+    # **区切りの揺れを均す（2026-09-18）。** 実機で模型が `cut-out:sukima` と
+    # 書き、id（`cutout:sukima`）に当たらず「まだ喋っていない席の先頭」へ
+    # 落ちた —— たまたま正解だったが、席順の運に預けている形だった。
+    flat = re.sub(r"[\s_\-]+", "", low)
     for mid in seats:
-        if mid.lower() == low or mid.lower().split(":")[0] == low:
+        mid_low = mid.lower()
+        mid_flat = re.sub(r"[\s_\-]+", "", mid_low)
+        if low in (mid_low, mid_low.split(":")[0]):
+            return mid, True
+        if flat in (mid_flat, mid_flat.split(":")[0]):
             return mid, True
     if (digits := re.findall(r"\d+", low)):
         i = int(digits[0]) - 1

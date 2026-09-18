@@ -565,3 +565,16 @@ def test_the_nickname_is_what_the_seats_call_each_other():
     assert C._match_speaker("色彩設計", seats, []) == ("palette:itten", True)
     assert C._match_speaker("2", seats, []) == ("ink:ipponsen", True)
     assert C._match_speaker("だれか", seats, ["palette:itten"]) == ("ink:ipponsen", False)
+
+
+def test_a_hyphenated_id_still_finds_its_seat():
+    """**区切りの揺れで席を取り違えない。**（2026-09-18）
+
+    実機（`c62274f6`）で模型が `cut-out:sukima` と書き、id に当たらず
+    「まだ喋っていない席の先頭」へ落ちた。たまたま正解だったが、**席順の運**に
+    預けている形だった。
+    """
+    seats = ["cutout:sukima", "lens:pinto"]
+    assert C._match_speaker("cut-out:sukima", seats, []) == ("cutout:sukima", True)
+    assert C._match_speaker("cut out", seats, []) == ("cutout:sukima", True)
+    assert C._match_speaker("LENS", seats, []) == ("lens:pinto", True)
