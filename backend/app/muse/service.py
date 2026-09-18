@@ -800,6 +800,11 @@ async def chat(
     # classic の「書くのは Scripter 一人」をそのまま持ってきていて、Refine では
     # その Scripter が下の `write_patch`。門は `mode` ではなく席の実体。
     crew_craft = ""
+    # **班が居ない回でも束は空で在る（2026-09-18）。** ここを `if` の中だけで
+    # 作っていたので、一人撮り・W撮りのターンが下の `if floor:` で
+    # `UnboundLocalError` になり、**会話が 500 で落ちていた**（2026-09-14 の
+    # `0019b5b` から）。班の試験しか無かったので、四日間気づけなかった。
+    floor: list[dict[str, Any]] = []
     if crew_room.has_crew(session):
         t0 = time.monotonic()
         floor = await crew_room.run_table(db, ollama, session, director_line=text)
