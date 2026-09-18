@@ -1,23 +1,28 @@
-"""**欄ごとの会議 —— 同じ台帳を持つ席を束ね、結論を一つ出す。**（2026-09-14）
+"""**One corner per field — bundle the seats that share a ledger field and get one
+conclusion.** (2026-09-14)
 
-総監督「同じ台帳のメンバーを束ねて1つのセッションにして、結論として一つの台帳を
-だしたらいいんじゃないかな。そうすると衝突は回避できると思う。あとその時に今の
-台帳が何かを告知してから、今はこうなっててどう変えるのかという話をしたらいいのでは？」
+The Showrunner: "bundle the members who share a ledger field into one session so
+they produce a single ledger as the conclusion — that avoids the collisions. And
+have them announce what the ledger currently is first, then talk about how it
+should change."
 
-実機（`6dc11d0e`・standard 12席）で起きていたこと:
+What was happening live (`6dc11d0e`, standard, 12 seats):
 
-    look    12語  amber_theme … magenta_theme   ← 色彩と線画が別々に足し、**琥珀と
-                                                   マゼンタが同居**
-    light    8語  backlighting, rim_light, hard_rim, edge_lighting
-                  ← **席は一つしかない**のに、逆光の言い換えが四つ
-    bg      12語  … silver_spoon … silver_sugar_spoon
-    frame    7語  … air_between_limbs … air_between_elbows
+    look    12 words  amber_theme … magenta_theme   ← colour and line each added
+                                                      their own, **amber and
+                                                      magenta side by side**
+    light    8 words  backlighting, rim_light, hard_rim, edge_lighting
+                      ← **one seat only**, four restatements of the same backlight
+    bg      12 words  … silver_spoon … silver_sugar_spoon
+    frame    7 words  … air_between_limbs … air_between_elbows
 
-原因は席の数ではなく、**毎ターン「足す」ことしかできず、欄の全体を言い直す機会が
-無かった**こと。だから欄ごとに束ねて、いまの値を告知してから、欄ぜんぶの値を
-一つ決めさせる。呼び出しも席数から欄数へ減る（standard は 12 → 9）。
+The cause was not the number of seats but that **a seat could only add each turn
+and never restate the field as a whole**. So the seats are bundled per field, the
+current value is announced, and they settle on one value for the entire field.
+The calls drop from one per seat to one per field (12 → 9 on standard).
 
-ここで守るのは三つ —— **束ねること・告知すること・総監督の言葉を消さないこと**。
+Three things are protected here — **bundling, announcing, and never erasing the
+Showrunner's words**.
 """
 from __future__ import annotations
 
@@ -33,7 +38,7 @@ def _session(**kw):
 
 
 def _floor(*pairs):
-    """(欄, CRAFT) の並びを、`run_table` が返す形にする。"""
+    """Turn a run of (field, CRAFT) pairs into the shape `run_table` returns."""
     return [{"muse_id": f"seat{i}", "role": "", "name": f"席{i}",
              "field": field, "say": "…", "craft": craft, "kind": "seat"}
             for i, (field, craft) in enumerate(pairs)]
@@ -42,7 +47,8 @@ def _floor(*pairs):
 # ── 束ねること ──────────────────────────────────────────────────────────
 
 def test_the_seats_that_share_a_field_sit_down_together():
-    """standard の12席は **9つの会議**になる。取り合う欄が三つ束ねられる。"""
+    """standard's twelve seats become **nine corners** — the three contested fields are
+    bundled."""
     seats = C.writing_seats(crew.resolve_crew(preset="standard"))
     groups = C.field_groups(seats)
 
@@ -56,7 +62,8 @@ def test_the_seats_that_share_a_field_sit_down_together():
 
 
 def test_a_seat_with_no_field_keeps_its_own_room():
-    """主演は欄を持たない。**欄なし同士を同じ部屋に入れない** —— 話の相手が居ない。"""
+    """The lead owns no field. **Never seat the fieldless together** — they would have
+    nobody to talk to."""
     groups = C.field_groups(["beat:ichibyou", "actress", "spine:bane"])
     assert groups == [
         ("beat", ["beat:ichibyou", "spine:bane"]),
@@ -65,7 +72,7 @@ def test_a_seat_with_no_field_keeps_its_own_room():
 
 
 def test_the_order_follows_the_seat_who_sits_first():
-    """並びは席順のまま —— 会議は「その欄に最初に座る席」の位置に置く。"""
+    """Order stays seat order — a corner sits where that field's first seat sits."""
     groups = C.field_groups(["palette:itten", "propshop:zatsuka", "ink:ipponsen"])
     assert [f for f, _ in groups] == ["look", "bg"]
     assert groups[0][1] == ["palette:itten", "ink:ipponsen"]
@@ -74,7 +81,8 @@ def test_the_order_follows_the_seat_who_sits_first():
 # ── 告知すること ────────────────────────────────────────────────────────
 
 def test_the_meeting_opens_with_what_the_ledger_says_now():
-    """総監督「今の台帳が何かを告知してから、今はこうなっててどう変えるのか」。"""
+    """The Showrunner: "announce what the ledger currently is, then talk about how it
+    should change"."""
     head = C.field_header("look", ledger={"look": "amber_theme, cel_shading"})
     assert "amber_theme, cel_shading" in head
     assert "READS after this turn" in head
@@ -88,7 +96,7 @@ def test_an_empty_field_says_so_out_loud():
 
 
 def test_the_showrunner_words_are_named_and_the_crew_words_are_not():
-    """**誰の言葉かを告げる。** 班は自分が置いた語しか言い直せない。"""
+    """**Say whose words they are.** The crew may restate only the words it placed."""
     head = C.field_header(
         "look", ledger={"look": "amber_theme, cel_shading, clean_lineart"},
         mine=["cel_shading", "clean_lineart"],
@@ -99,7 +107,7 @@ def test_the_showrunner_words_are_named_and_the_crew_words_are_not():
 
 
 def test_the_single_seat_gets_the_same_announcement():
-    """1席の欄も同じ —— `light` は一人なのに言い換えが四つ積もっていた。"""
+    """A single-seat field gets the same — `light` had one seat and four restatements."""
     s = _session(refine_ledger={**L.blank(), "light": "backlighting, rim_light"})
     prompt = C.seat_prompt(
         s, "gaffer:gyakkou", director_line="夕方にして", floor=[],
@@ -121,7 +129,8 @@ def test_the_bundled_prompt_carries_the_field_and_the_floor():
 
 
 def test_the_corner_is_told_the_slot_is_shared():
-    """束ねた前置きでは「君だけが書く」が嘘になる。**一つの値で閉じる**と言う。"""
+    """"You are the only one who writes it" is a lie in a bundled preamble. It says
+    **close on one value** instead."""
     sysmsg = crew.field_table_prompt(
         ["palette:itten", "ink:ipponsen"], field="look", preset_id="standard",
     )
@@ -157,7 +166,8 @@ def test_the_packed_reply_splits_into_voices_and_one_conclusion():
 
 
 def test_when_every_speaker_writes_a_craft_the_closing_one_wins():
-    """条文では一行だが、席ごとに書いてきたら**閉めの一行が会議の結論**。"""
+    """The contract asks for one line; when it writes one per seat, **the closing line
+    is the corner's conclusion**."""
     raw = (
         "SPEAKER: 1\nSAY: 琥珀で。\nCRAFT: amber_theme | 色\n"
         "SPEAKER: 2\nSAY: 線を締めます。\nCRAFT: amber_theme, cel_shading | 結論\n"
@@ -168,7 +178,8 @@ def test_when_every_speaker_writes_a_craft_the_closing_one_wins():
 
 
 def test_a_reply_that_ignores_the_format_is_not_dropped():
-    """形式を守らなかった回も落とさない —— 丸ごと先頭の席の発言にする。"""
+    """A turn that ignored the format is not dropped — the whole thing becomes the
+    first seat's line."""
     rows, craft = C.split_packed(
         "琥珀でいきましょう。\nCRAFT: amber_theme | 色",
         ["palette:itten", "ink:ipponsen"],
@@ -178,7 +189,8 @@ def test_a_reply_that_ignores_the_format_is_not_dropped():
 
 
 def test_the_stream_follows_whoever_is_speaking():
-    """**束ねた回だけ画面が無言、にしない。** `SPEAKER:` で吹き出しを切り替える。"""
+    """**A bundled turn must not be the one where the screen goes silent.** The bubble
+    switches on `SPEAKER:`."""
     seen: dict[str, list[str]] = {}
 
     def _fake_stream_to(session, muse_id):
@@ -205,7 +217,7 @@ def test_the_stream_follows_whoever_is_speaking():
 # ── 着地 ────────────────────────────────────────────────────────────────
 
 def test_the_conclusion_becomes_the_whole_field():
-    """**結論は欄の全体。** 足し算ではないので、山にならない。"""
+    """**The conclusion is the whole field.** It does not add, so nothing piles up."""
     led = {**L.blank(), "look": "amber_theme, sunlight, cel_shading"}
     s = _session(**{C.CREW_WORDS: {"look": ["amber_theme", "sunlight", "cel_shading"]}})
     patch, landed = C.field_land(
@@ -217,7 +229,8 @@ def test_the_conclusion_becomes_the_whole_field():
 
 
 def test_the_showrunner_words_survive_the_rewrite():
-    """**消せるのは班が置いた語だけ。** 監督の言葉は結論の前に必ず残る。"""
+    """**Only the words the crew placed can be removed.** The director's words always
+    stand before the conclusion."""
     led = {**L.blank(), "look": "amber_theme, magenta_theme, magenta_glint"}
     s = _session(**{C.CREW_WORDS: {"look": ["magenta_theme", "magenta_glint"]}})
     patch, _ = C.field_land(
@@ -228,7 +241,8 @@ def test_the_showrunner_words_survive_the_rewrite():
 
 
 def test_an_old_session_without_the_note_loses_nothing():
-    """印の無いセッションは**全語を総監督のもの**として扱う（消えない側に倒す）。"""
+    """A session with no note treats **every word as the Showrunner's** (falling to the
+    side that keeps them)."""
     led = {**L.blank(), "bg": "green grass, plastic_bottle"}
     patch, landed = C.field_land(
         _session(), _floor(("bg", "sandy_sandal | 芝生の忘れ物")),
@@ -239,7 +253,8 @@ def test_an_old_session_without_the_note_loses_nothing():
 
 
 def test_the_empty_sticky_fields_finally_get_filled():
-    """`look` 88% / `atmosphere` 76% が空だった —— 空なら会議の結論で埋める。"""
+    """`look` was empty in 88% of sessions and `atmosphere` in 76% — an empty field is
+    filled by the corner's conclusion."""
     patch, _ = C.field_land(
         _session(),
         _floor(("look", "amber_theme, cel_shading | 色の芯"),
@@ -251,7 +266,7 @@ def test_the_empty_sticky_fields_finally_get_filled():
 
 
 def test_the_field_the_director_named_is_left_alone():
-    """**監督の言葉が勝つ。** その回に書かれた欄に、班は口を出さない。"""
+    """**The director wins.** The crew says nothing about a field written that turn."""
     led = {**L.blank(), "light": "backlighting"}
     patch, landed = C.field_land(
         _session(), _floor(("light", "hard_shadow | 硬く")),
@@ -261,8 +276,8 @@ def test_the_field_the_director_named_is_left_alone():
 
 
 def test_the_body_fields_are_never_touched():
-    """姿勢・表情・服は入れない —— 一つの体の掃除を壊さないため。
-    束ねた結論は `craft_block` 経由で台本係に渡る。"""
+    """Pose, expression and clothes are never written — that would break the one-body
+    cleanup. A bundled conclusion reaches the writer through `craft_block`."""
     patch, _ = C.field_land(
         _session(),
         _floor(("beat", "standing, hand_on_hip | 姿勢"),
@@ -274,7 +289,7 @@ def test_the_body_fields_are_never_touched():
 
 
 def test_what_the_showrunner_refused_does_not_come_back():
-    """総監督が拒否した語は、会議の結論からも落ちる。"""
+    """A word the Showrunner refused is dropped from the corner's conclusion too."""
     s = _session(banned=["towel"])
     patch, _ = C.field_land(
         s, _floor(("bg", "blue_towel, small_stone | 忘れ物")),
@@ -285,9 +300,11 @@ def test_what_the_showrunner_refused_does_not_come_back():
 
 
 def test_the_same_thing_is_not_said_twice():
-    """**実機ですり抜けた重複。** `silver_spoon` と `silver_sugar_spoon` が同居した。
+    """**A duplicate that slipped through live** — `silver_spoon` and
+    `silver_sugar_spoon` sat together.
 
-    語の境目（`talk.word_hit`）では当たらないので、語の重なりでも見る。
+    Word boundaries (`talk.word_hit`) do not catch it, so shared words are checked
+    as well.
     """
     led = {**L.blank(), "bg": "coffee cup, silver_spoon"}
     patch, landed = C.field_land(
@@ -309,7 +326,7 @@ def test_the_conclusion_is_capped_at_six_words():
 
 
 def test_a_field_full_of_the_showrunners_words_stops_growing():
-    """**上限は「増やさない」約束で、「削る」約束ではない。**"""
+    """**The cap promises not to grow the field, not to trim it.**"""
     full = ", ".join(f"thing_{i}" for i in range(C.FIELD_CAP))
     patch, landed = C.field_land(
         _session(), _floor(("bg", "late_arrival | もう入らない")),
@@ -319,7 +336,8 @@ def test_a_field_full_of_the_showrunners_words_stops_growing():
 
 
 def test_a_silent_corner_does_not_clear_the_field():
-    """CRAFT を書かなかった欄（据え置き）は動かさない。空にもしない。"""
+    """A field whose corner wrote no CRAFT (leaving it as it is) does not move, and is
+    never emptied."""
     led = {**L.blank(), "look": "amber_theme"}
     patch, _ = C.field_land(
         _session(), _floor(("look", "")), ledger=led, taken=set(),
@@ -328,7 +346,8 @@ def test_a_silent_corner_does_not_clear_the_field():
 
 
 def test_the_field_label_never_rides_in():
-    """`CRAFT: BG: …` と書かれても、欄名は入口で剥がれる（`craft_tags`）。"""
+    """Even written as `CRAFT: BG: …`, the field name is stripped at the door
+    (`craft_tags`)."""
     patch, _ = C.field_land(
         _session(), _floor(("bg", "BG: paper_menu, worn_edges | 小道具")),
         ledger=L.blank(), taken=set(),
@@ -338,14 +357,16 @@ def test_the_field_label_never_rides_in():
 
 
 def test_no_crew_no_landing():
-    """席が喋っていない回は何も起きない（一人撮り・W撮りはここを通らない）。"""
+    """Nothing happens on a turn where no seat spoke (a solo shoot and a duet never
+    come through here)."""
     assert C.field_land(_session(), [], ledger=L.blank(), taken=set()) == ({}, {})
 
 
 # ── 一周の組み立て ──────────────────────────────────────────────────────
 
 def test_the_turn_asks_the_crew_after_the_director():
-    """**順番が要。** 監督の patch を入れてから着地させる（素通しの判定に要る）。"""
+    """**Order matters.** The director's patch is applied first, then the landing (the
+    pass-through check depends on it)."""
     import inspect
 
     from app.muse import service
@@ -359,9 +380,10 @@ def test_the_turn_asks_the_crew_after_the_director():
 
 
 def test_the_field_the_writer_rewrote_belongs_to_the_showrunner_again():
-    """**台本係が書いた欄の控えは捨てる。**（2026-09-14）
+    """**The note for a field the writer rewrote is discarded.** (2026-09-14)
 
-    残したままだと、次の会議が「これは自分の語」として監督の言葉を消せてしまう。
+    Left in place, the next corner could treat the director's words as its own and
+    erase them.
     """
     import inspect
 
@@ -373,9 +395,11 @@ def test_the_field_the_writer_rewrote_belongs_to_the_showrunner_again():
 
 
 def test_one_call_per_field_instead_of_one_per_seat():
-    """**12席が8回になる。** 取り合う欄が三つ束ねられ、主演の席が抜けるぶん。
+    """**Twelve seats become eight calls** — three contested fields bundled, and
+    the lead's seat gone.
 
-    実測で席1本は約9〜10秒（`stage_ms`・`6dc11d0e`）、主演の席は24〜28秒。
+    Measured, one seat takes about 9-10s (`stage_ms`, `6dc11d0e`) and the lead's
+    seat 24-28s.
     """
     import asyncio
 
@@ -422,11 +446,11 @@ def test_one_call_per_field_instead_of_one_per_seat():
 
 
 def test_the_same_light_under_another_ending_is_not_added_again():
-    """**実機（`e805ffac`・2026-09-15）で残った最後の重複。**
+    """**The last duplicate left live (`e805ffac`, 2026-09-15).**
 
-    `light` が `rim_lighting, backlighting, eye_glint, rim_light` になった ——
-    台本係の `rim_lighting` と会議の `rim_light` は、語の境目でも語の重なりでも
-    当たらない。語尾だけ均すと当たる。
+    `light` came out as `rim_lighting, backlighting, eye_glint, rim_light` — the
+    writer's `rim_lighting` and the corner's `rim_light` match neither on word
+    boundaries nor on shared words. Levelling the endings makes them meet.
     """
     led = {**L.blank(), "light": "rim_lighting, backlighting"}
     patch, landed = C.field_land(
@@ -438,7 +462,8 @@ def test_the_same_light_under_another_ending_is_not_added_again():
 
 
 def test_two_different_accents_still_both_get_through():
-    """**落としすぎない。** 語が一つ重なるだけの別物は通す（決めるのは会議）。"""
+    """**Do not over-trim.** Different things that share a single word pass (settling
+    them is the corner’s job)."""
     assert C._too_close("amber_accent", "scarlet_accent") is False
     assert C._too_close("light_particles", "rim_light") is False
     assert C._too_close("cel_shading", "clean_lineart") is False
@@ -448,13 +473,15 @@ def test_two_different_accents_still_both_get_through():
 # ── 綻び五件（2026-09-16）──────────────────────────────────────────────
 
 def test_the_lead_is_dressed_at_the_studio_door_too():
-    """**班の扉でも服を着せる。**（2026-09-16）
+    """**The lead is dressed at the studio door too.** (2026-09-16)
 
-    総監督「初回の会話スタート時にデフォルト衣装の読み込みができていない場合あり」。
+    The Showrunner: "sometimes the default outfit is not loaded when the first
+    conversation starts".
 
-    画面の「開始」はスタジオ撮りのとき `/open` ではなく `/table` を叩く。
-    着せるのは `open_session` の側だけだったので、**班で始めたセッションは
-    服が空のまま**だった（実機 `f8961eaa`：1ターン目の台帳は `wearing` も空）。
+    In studio mode the panel's start button calls `/table`, not `/open`. Dressing
+    lived only on the `open_session` side, so **a session started with a crew had
+    an empty `wearing`** (live, `f8961eaa`: the ledger on turn one had no clothes
+    either).
     """
     import inspect
 
@@ -468,10 +495,13 @@ def test_the_lead_is_dressed_at_the_studio_door_too():
 
 
 def test_the_seat_wears_its_nickname_on_the_name_tag():
-    """**画面の名札と、席同士の呼びかけを同じ言葉にする。**（2026-09-16）
+    """**Make the name tag and the way the seats address each other the same
+    word.** (2026-09-16)
 
-    席は「一点さん」「すきま」と呼び合うのに、吹き出しは役職（色彩設計）だった。
-    同じ役職に二人いる（`palette:itten` と `palette:aku`）ので見分けも付かない。
+    They call each other 「一点さん」 and 「すきま」 (Itten, Sukima — nicknames)
+    while the bubble carried the role (色彩設計, colour design). Two people share a
+    role (`palette:itten` and `palette:aku`), so there was nothing to tell them
+    apart by either.
     """
     s = _session(character={"name_ja": "各務 みお"})
     assert C.seat_name(s, "palette:itten") == "一点（色彩設計）"
@@ -483,7 +513,8 @@ def test_the_seat_wears_its_nickname_on_the_name_tag():
 
 
 def test_the_lead_keeps_her_seat_at_the_opening():
-    """一周からは外すが、**開幕の当たり付けには残る**（衣装 → 撮影 → 主演）。"""
+    """Out of the walk, but **still in the opening rough-in** (wardrobe → camera →
+    lead)."""
     cast = crew.resolve_crew(preset="standard")
     opening = [crew.role_of(m) for m in C.opening_seats(cast)]
     assert opening == ["wardrobe", "lens", "actress"]
@@ -492,11 +523,12 @@ def test_the_lead_keeps_her_seat_at_the_opening():
 
 
 def test_a_decorated_speaker_line_still_switches_the_bubble():
-    """**飾られた名札でも宛先が変わる。**（2026-09-16）
+    """**A decorated name tag still switches the address.** (2026-09-16)
 
-    `**SPEAKER: …**` と書かれると行頭が `*` なので欄名に育たず、ラベルごと
-    前の席の吹き出しへ流れていた（総監督「SAY などの Tag が漏れる」
-    「Muse同士の会話が混ざる」）。
+    Written as `**SPEAKER: …**` the line starts with `*`, so it never grew into a
+    field name and the label flowed, label and all, into the previous seat's
+    bubble (the Showrunner: "tags like SAY leak", "the Muses' conversations get
+    mixed up").
     """
     seen: dict[str, list[str]] = {}
 
@@ -522,10 +554,10 @@ def test_a_decorated_speaker_line_still_switches_the_bubble():
 
 
 def test_an_unknown_name_walks_the_seats_instead_of_piling_on_the_first():
-    """**当たらない名札でも席順に進む。**（2026-09-16）
+    """**An unmatched name tag still walks the seats in order.** (2026-09-16)
 
-    `used` を空で渡していたので、名前が当たらないと毎回 `seats[0]` に落ち、
-    **二人目の言葉が一人目の吹き出しに積まれていた**。
+    `used` was passed empty, so an unmatched name fell to `seats[0]` every time
+    and **the second speaker's words piled into the first speaker's bubble**.
     """
     seen: dict[str, list[str]] = {}
     session = _session(session_id="s")
@@ -551,7 +583,7 @@ def test_an_unknown_name_walks_the_seats_instead_of_piling_on_the_first():
 
 
 def test_the_speaker_label_also_shuts_the_say_gate():
-    """取りこぼしたときの止め —— `SPEAKER:` でも吹き出しは閉じる。"""
+    """The backstop when it is missed — a `SPEAKER:` line closes the bubble too."""
     from app.muse import shared
 
     assert shared._SAY_SHUT_RE.match("SPEAKER: palette:itten")
@@ -559,7 +591,7 @@ def test_the_speaker_label_also_shuts_the_say_gate():
 
 
 def test_the_nickname_is_what_the_seats_call_each_other():
-    """あだ名で呼ばれた名札も宛先に当たる（模型は日本語で書いてくる）。"""
+    """A name tag written as a nickname still matches (the model writes in Japanese)."""
     seats = ["palette:itten", "ink:ipponsen"]
     assert C._match_speaker("一点", seats, []) == ("palette:itten", True)
     assert C._match_speaker("色彩設計", seats, []) == ("palette:itten", True)
@@ -568,11 +600,11 @@ def test_the_nickname_is_what_the_seats_call_each_other():
 
 
 def test_a_hyphenated_id_still_finds_its_seat():
-    """**区切りの揺れで席を取り違えない。**（2026-09-18）
+    """**A wobble in the separator must not mis-seat anyone.** (2026-09-18)
 
-    実機（`c62274f6`）で模型が `cut-out:sukima` と書き、id に当たらず
-    「まだ喋っていない席の先頭」へ落ちた。たまたま正解だったが、**席順の運**に
-    預けている形だった。
+    Live (`c62274f6`) the model wrote `cut-out:sukima`, which matched no id and
+    fell through to "the first seat that has not spoken". It happened to be right,
+    but that left it **to the luck of seat order**.
     """
     seats = ["cutout:sukima", "lens:pinto"]
     assert C._match_speaker("cut-out:sukima", seats, []) == ("cutout:sukima", True)
