@@ -1,8 +1,9 @@
 """Shot notebook — plain-language source of truth (not facets).
 
-Used by 主演撮り and 制作スタッフ. Conversation revises this notebook; craft
-TAGS/SCENE are woven from it (and replaced whole) just before a take. Muse talk
-may read it; Script writes it. Crew also mirrors PLAN/COSTUME into the notebook.
+Used by the lead shoot (主演撮り) and the studio crew (制作スタッフ). Conversation
+revises this notebook; craft TAGS/SCENE are woven from it (and replaced whole)
+just before a take. Muse talk may read it; Script writes it. Crew also mirrors
+PLAN/COSTUME into the notebook.
 """
 from __future__ import annotations
 
@@ -255,11 +256,12 @@ def contracts_block(
 def render(nb: dict[str, Any], *, name_a: str = "", name_b: str = "") -> str:
     """Human / model facing dump.
 
-    **名前に文字を添える。** 相方がいるとき、見出しは名前で書くのに欄の名前は
-    `WEARING` / `WEARING_B` という文字なので、モデルは相手を「A」と呼んだ ——
-    実測（`61db2bd6`）で折り込みが `beat_b: standing behind A` と書いた。
-    `A` はタグにならないので画には出ないが、指示としては汚れ。
-    総監督「最初に `Mio (Actress A)` と書けばいいだけでしょう」。
+    **Put the letter next to the name.** With a partner in frame the headings are
+    written by name while the field names are the letters `WEARING` /
+    `WEARING_B`, so the model called the other person "A" — live (`61db2bd6`) a
+    fold-in wrote `beat_b: standing behind A`. `A` is not a tag so it never
+    reaches the picture, but as an instruction it is dirt.
+    The Showrunner: "you just have to write `Mio (Actress A)` up front."
     """
     two = bool(name_b or str(nb.get("wearing_b") or "").strip()
                or str(nb.get("beat_b") or "").strip())
@@ -587,9 +589,9 @@ def struck_tokens(session: dict[str, Any]) -> set[str]:
     `struck` is append-only, and it is read as "never restore this". That is
     right for a garment the showrunner took off and wrong for everything that
     legitimately comes and goes: stand up and `sitting` is struck, so the next
-    「座って」 is fighting a filter, and `filter_weave_tags` strips the very
-    tag the notebook just asked for. The notebook is the shot — anything it
-    currently names is by definition not struck.
+    「座って」 ("sit down") is fighting a filter, and `filter_weave_tags` strips
+    the very tag the notebook just asked for. The notebook is the shot — anything
+    it currently names is by definition not struck.
     """
     live = shot_tokens(of(session)) if isinstance(session, dict) else set()
     out: set[str] = set()
@@ -759,29 +761,31 @@ def stale_wearing_tags(
 def drop_crops_not_in_frame(tags: str, *, frame: str) -> str:
     """One crop per picture, and FRAME owns which one.
 
-    **手書きの家族を二つ外した。** ここには `_WIDE_CROP_TAGS`（5語）と
-    `_CLOSE_CROP_TAGS`（5語）があり、「どちらの家族か」を知らないと働けな
-    かった。総監督（2026-08-30）「見つけた語の一覧を全部外す」。
+    **Two hand-written families were removed.** This used to hold
+    `_WIDE_CROP_TAGS` (5 words) and `_CLOSE_CROP_TAGS` (5 words) and could not
+    work without knowing which family a tag belonged to. The Showrunner
+    (2026-08-30): "drop the whole list of words you found".
 
-    「これは画角のタグか」は `framing_from_phrase` 自身が答える —— 手書きの
-    10語すべてを覆い、アングル（`from_above` `dutch_angle` `pov` `profile`）
-    には `auto` を返す。画角の別名の出どころは一箇所だけになった。
+    "Is this a crop tag?" is answered by `framing_from_phrase` itself — it covers
+    all ten hand-written words and answers `auto` for angles (`from_above`,
+    `dutch_angle`, `pov`, `profile`). There is now one source for crop synonyms.
 
-    保存済みの weave 出力 30本で**旧と 30/30 一致**。食い違う袋を作って比べ
-    ると、変わるのは三箇所で、うち二つは旧のほうが取りこぼしていた:
+    Checked against 30 stored weave outputs: **30/30 identical to the old code**.
+    Feeding deliberately conflicting bags apart, three cases change, and in two of
+    them the old code was the one dropping things:
 
-        FRAME `close, upper body` / 袋 `close_up, wide_shot, full_body`
-            旧 `close_up` を残す —— FRAME は上半身なのに顔寄りが生き残る
-            新 三つとも落とし、`assemble_positive` が FRAME から鋳造し直す
+        FRAME `close, upper body` / bag `close_up, wide_shot, full_body`
+            old  keeps `close_up` — FRAME says upper body yet a face crop survives
+            new  drops all three; `assemble_positive` mints it again from FRAME
 
-        FRAME 空 / 袋 `wide_shot, close_up`
-            旧 両方落とす —— **画角がひとつも無い絵**になる
-            新 先に来たほうを残す（矛盾は出さず、情報も捨てない）
+        FRAME empty / bag `wide_shot, close_up`
+            old  drops both — **a picture with no crop at all**
+            new  keeps whichever came first (no contradiction, nothing thrown away)
 
-        FRAME `close, upper body` / 袋 `establishing_shot, upper_body`
-            旧 落とす／新は素通り —— だったので `establishing` を
-            `framing_from_phrase` に教えた。FRAME に「establishing shot」と
-            書いたときにも読めるようになる（以前は読めなかった）
+        FRAME `close, upper body` / bag `establishing_shot, upper_body`
+            old dropped it, new let it through — so `establishing` was taught to
+            `framing_from_phrase`. Writing "establishing shot" into FRAME now
+            reads (it did not before)
     """
     from .identity import bare_tag, framing_from_phrase
 
@@ -913,14 +917,14 @@ def reconcile_wardrobe_tags(
     # ドレス」と言った次のテイクで、すみれの行が
     # `Sumire is blonde_hair, braid, long_hair, green_eyes, medium_breasts, slim,`
     # ——**服がひとつも無い**まま出た。これは一度直してあった不具合で、旧
-    # `_missing_wearing_tags` の docstring が「相方だけ忘れた服が戻らない」と
-    # 記録している。ここへ移すときに、その教訓が落ちた。
+    # `_missing_wearing_tags`'s docstring records that "clothes forgotten for the
+    # partner alone never come back". Moving it here dropped that lesson.
     if partner and (side_a.strip() or side_b.strip()):
         def _fresh(side: str, items: list[str]) -> list[str]:
-            """既にその人が着ている部位は足さない —— 一着一名。
+            """Never add a slot that person already wears — one garment per name.
 
-            `black_dress` が居るところへ `black_cocktail_dress` を足すと、
-            サンプラーには黒い服が二着に見える。
+            Adding `black_cocktail_dress` where `black_dress` already sits shows
+            the sampler two black garments.
             """
             from .identity import tag_names
 
@@ -1017,25 +1021,25 @@ _ONE_ONLY_SLOTS = (
 def drop_tags_that_fight_the_notebook(
     tags: str, *, frame: str, beat: str, beat_b: str = "",
 ) -> str:
-    """織ったタグのうち、正本と正面から食い違うものを落とす。
+    """Drop woven tags that contradict the document of record head-on.
 
-    **突き合わせる所がどこにも無かった。** `scrub_craft_tags` は手帖の欄を
-    六つ受け取っているのに、実際に見ていたのは struck と wearing と切り取り
-    だけで、`scene` `beat` `beat_b` は未使用だった。結果（実測 `42b55492`）:
+    **There was nowhere the two were compared.** `scrub_craft_tags` takes six
+    notebook fields yet only ever looked at struck, wearing and the crop;
+    `scene`, `beat` and `beat_b` went unused. The result, live (`42b55492`):
 
-        手帖 frame  close-up, looking straight into the lens
-        タグ        closed_eyes, eyes_closed
-        地の文      Her gaze remains fixed forward, eyes wide and glassy
+        notebook frame  close-up, looking straight into the lens
+        tags            closed_eyes, eyes_closed
+        prose           Her gaze remains fixed forward, eyes wide and glassy
 
-    **同じプロンプトの中で、タグと地の文が逆を向いていた。** 切り取りも
-    `close-up` / `close_up` / `face_focus` の三つが並んでいた。
+    **Inside one prompt, the tags and the prose faced opposite ways.** The crop
+    was tripled too: `close-up` / `close_up` / `face_focus`.
 
-    二つだけやる:
+    Two things only:
 
-    1. **視線は frame のもの。** レンズを見ていると書いてあるなら、目を
-       閉じた語は残さない
-    2. **一つの枠に一語だけ。** `tags.conflict` の slot をそのまま使い、
-       **手帖が名指ししているほうを残す**（どちらも名指しが無ければ先頭）
+    1. **The gaze belongs to frame.** If it says she is looking into the lens,
+       no closed-eye word survives
+    2. **One word per slot.** Reuse `tags.conflict`'s slots and **keep whichever
+       the notebook names** (the first one when it names neither)
     """
     from ..tags import conflict
     from .identity import bare_tag
@@ -1074,15 +1078,18 @@ PERSON_BOX_FIELDS = ("wearing", "beat", "face")
 
 
 def _phrases(text: str, *, gone: set[str] | None = None) -> list[str]:
-    """読点で割って、掃除するだけ。**一語に潰さない。**
+    """Split on commas and clean, nothing more. **Never crush a phrase into one
+    word.**
 
-    手帖は既に読点区切りの句を持っている（`turquoise one-piece dress,
-    small_earrings`）。これを一語に潰すと `turquoise_one-piece_dress` という
-    **誰も知らない語**になる。実測（`8c48e8cb`）で weave が同じことをして、
-    句の末尾の名詞が絵から落ちた —— 総監督「衣装がコロコロ変わる。
-    プロンプト側の緻密さの欠如」。
+    The notebook already holds comma-separated phrases (`turquoise one-piece
+    dress, small_earrings`). Crushing that into a single token makes
+    `turquoise_one-piece_dress` — **a word nobody knows**. Live (`8c48e8cb`) weave
+    did exactly that and the noun at the end of the phrase fell out of the
+    picture; the Showrunner: "the outfit keeps changing — the prompt side lacks
+    precision".
 
-    この現場の実測は「自然文のほうが画質が圧倒的に高い」。句は句のまま出す。
+    What this studio measured is that natural phrasing renders far better. Phrases
+    stay phrases.
     """
     out: list[str] = []
     seen: set[str] = set()
@@ -1104,28 +1111,28 @@ def mint_person_box(
     nb: dict[str, Any], *, partner: bool = False,
     struck: set[str] | None = None, banned: set[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """手帖から、人ごとの箱を鋳造する。**LLM を通さない。**
+    """Mint a box per person from the notebook. **No LLM involved.**
 
-    総監督（2026-08-31）「それぞれに専属ワードローブ・専属ポーズを付けたほうが
-    いいのでは」「A/B の動作は最後まで保持しないといけない。**weave に解釈
-    させると壊れる**」。
+    The Showrunner (2026-08-31): "each of them should have her own wardrobe and
+    her own pose", "A and B's actions have to survive to the end —
+    **letting weave interpret them breaks it**".
 
-    手帖は最初から人ごと（`wearing`/`wearing_b`、`beat`/`beat_b`、
-    `expression`/`expression_b`）なのに、craft で平らな一つの袋に混ぜ、最後に
-    持ち主を推測し直していた。十段の記録（`db6a1f7`）で出た五つの壊れは、
-    すべてその帰結:
+    The notebook has been per-person from the start (`wearing`/`wearing_b`,
+    `beat`/`beat_b`, `expression`/`expression_b`), yet craft stirred them into one
+    flat bag and guessed the owner back at the end. All five breakages in the
+    ten-stage record (`db6a1f7`) follow from that:
 
-        2c  一枠一語の規則が、二人ぶんの姿勢の片方を捨てる
-        10  `placed` が全体で一つなので、**同じ語は一人しか持てない**
-        3   彼女の見直しが、平らな袋を見て相方の動作を落とす
-        8   無名詞の断片を散文の頭に貼る
-        1   weave が手帖の句から語を落として書く
+        2c  the one-word-per-slot rule throws away one of the two poses
+        10  `placed` is global, so **only one person may hold a given word**
+        3   her own review reads the flat bag and drops the partner's action
+        8   a nounless fragment gets pasted to the head of the prose
+        1   weave writes the notebook's phrase with a word missing
 
-    **混ぜなければ、どれも起きない。**
+    **Do not stir them together and none of it happens.**
 
-    表情は空でも一語入れる —— 総監督「二人いるときは感情も管理しないと
-    無表情になりがち。**箱がないと書いてくれない**ので」。手帖の
-    `atmosphere` を引き当てにする。
+    Expression gets a word even when empty — the Showrunner: "with two of them you
+    have to manage the feelings too or they go blank. **They will not write it
+    without a box.**" The notebook's `atmosphere` is the fallback.
     """
     gone = {str(t).strip().lower().replace(" ", "_") for t in (struck or ())}
     gone |= {str(t).strip().lower().replace(" ", "_") for t in (banned or ())}
@@ -1140,27 +1147,29 @@ def mint_person_box(
         people.append({
             "wearing": _phrases(str((nb or {}).get(wear_k) or ""), gone=gone),
             "beat": _phrases(str((nb or {}).get(beat_k) or "")),
-            # **空でも一語。箱があれば書かれる。**
+            # **One word even when empty. Give them a box and they fill it.**
             "face": face or mood,
         })
     return people
 
 
 def frame_wide_phrases(nb: dict[str, Any]) -> list[str]:
-    """人に属さないもの —— カメラ・場所・背景・光・雰囲気。
+    """What belongs to nobody — camera, place, background, light, atmosphere.
 
-    ``atmosphere`` は手帖にあるのに共有面へ載せていなかった。表情の空欄
-    フォールバックにしか使われず、mood が craft_scene 言い換えに逃げる主因に
-    なっていた（総監督「なんか違う」）。
+    ``atmosphere`` was in the notebook but never reached the shared surface. It
+    was used only as the fallback for an empty expression, which is the main
+    reason mood kept escaping into craft_scene restatements (the Showrunner:
+    "something is off").
 
-    **``frame`` も届いていなかった。** 出ていたのは `framing_tags` が正規化
-    した一語（`full_body` など）だけで、手帖に書いた文面そのものは絵に載って
-    いない。総監督（2026-09-01）「焦点はカメラワークがいいかも。
-    `focus to …` とか `long shot` とかはこの箱かと」—— **書ける箱にしても、
-    届かなければ意味がない。**
+    **``frame`` was not arriving either.** All that came through was the single
+    word `framing_tags` normalised to (`full_body` and the like); what was
+    actually written in the notebook never reached the picture. The Showrunner
+    (2026-09-01): "focus might be better as camera work — `focus to …` and
+    `long shot` probably belong in this box" — **a box you can write in is
+    pointless if what you write does not arrive.**
 
-    先頭に置く。総監督「priority はプロンプト内の位置」で、二人のうち
-    どちらに寄るかは場所や光より先に効いてほしい。
+    Put it first. The Showrunner: "priority is position within the prompt", and
+    which of the two she moves closer to should bite before place or light.
     """
     out: list[str] = []
     for key in ("frame", "scene", "bg", "light", "atmosphere"):
@@ -1173,26 +1182,30 @@ def frame_wide_phrases(nb: dict[str, Any]) -> list[str]:
 def fight_craft_scene(
     nb: dict[str, Any], scene: str, *, struck: set[str] | None = None,
 ) -> str:
-    """散文のうち、**手帖と正面から矛盾する文だけ**落とす。
+    """Drop **only the sentences that contradict the notebook head-on** from the
+    prose.
 
-    タグには突き合わせが六段あるのに、散文は検査なしで最終末尾に付いていた。
-    実害は記録されている（`1564313`）—— 総監督が外した帽子が、彼女の言葉から
-    散文へ入り、絵に戻った。
+    Tags get six stages of cross-checking; the prose was appended at the very end
+    with no inspection at all. The damage is on record (`1564313`) — a hat the
+    Showrunner had taken off travelled from her words into the prose and back
+    into the picture.
 
-    **物差しは「未知語の割合」ではない。** 最初の版は内容語の過半数が手帖に
-    無ければ散文ごと捨てたが、実データ13本で測ると **4本（31%）が落ち、
-    しかも良い散文**だった:
+    **The measure is not "share of unknown words".** The first version threw the
+    whole paragraph away when most content words were absent from the notebook;
+    measured over 13 real samples that dropped **4 of them (31%), and they were
+    good prose**:
 
-        「A wide shot shows her sitting on a park bench, her weight settled
-         back against the wood. Her hands rest loosely…」   未知 52% → 落とす
+        "A wide shot shows her sitting on a park bench, her weight settled
+         back against the wood. Her hands rest loosely…"   52% unknown → dropped
 
-    `bench` `weight` `wood` は手帖にあるのに、`shows` `settled` `loosely`
-    `wide` が未知に数えられる。**散文は手帖に無い言葉で書くもの**なので、
-    その物差しは散文そのものを否定する。
+    `bench`, `weight` and `wood` are in the notebook, but `shows`, `settled`,
+    `loosely` and `wide` count as unknown. **Prose is written in words the
+    notebook does not have**, so that measure rejects prose as such.
 
-    見るのは**着ていない服が名指しされている文**だけ。「服らしい語」は
-    カタログ（共有資産）が答える —— 語の一覧を新しく作らない。落とすのも
-    文単位。散文ごと捨てると深みが消える（語数 58 → 50 の一件で学んだ）。
+    What is inspected is only **a sentence naming a garment she is not wearing**.
+    "Does this look like clothing?" is answered by the catalogue (shared asset) —
+    no new word list. Dropping is per sentence too: throwing the paragraph away
+    takes the depth with it (learned on the 58 → 50 word case).
     """
     body = str(scene or "").strip()
     if not body:
@@ -1214,7 +1227,8 @@ def fight_craft_scene(
     gone = {str(t).strip().lower().replace(" ", "_") for t in (struck or ()) if str(t).strip()}
 
     def _owned_axis(word: str) -> bool:
-        """服か場所 —— **手帖が持ち主の二軸**だけ見る。他は散文の自由。"""
+        """Clothes or place — **the two axes the notebook owns**. Everything else
+        is the prose's to choose."""
         key = word.lower()
         if tag_catalog.get_tag_axis(key) in ("clothing", "location"):
             return True
@@ -1241,7 +1255,8 @@ def fight_craft_scene(
 
 
 def tag_delta(before: str, after: str) -> tuple[list[str], list[str]]:
-    """(入った語, 消えた語)。**記録のためだけ。** 判定には使わない。"""
+    """(words that arrived, words that left). **For the record only** — never used
+    to decide anything."""
     from .identity import bare_tag
 
     was = [bare_tag(p) for p in str(before or "").split(",") if p.strip()]
@@ -1263,9 +1278,10 @@ def scrub_craft_tags(
     (``reconcile_wardrobe_tags``). Crop conflict lives only here — assemble
     injects framing tags and does not re-ban the opposite family.
 
-    ``trace`` は**記録のためだけ**の受け皿。渡すと、内部の三段がそれぞれ何を
-    落として何を足したかを積む。渡さなければ何も変わらない —— 総監督
-    （2026-08-31）「どのルートでどう壊したかを明らかにしないといけない」。
+    ``trace`` is a basin **kept for the record only**. Pass one and each of the
+    three inner stages records what it dropped and what it added; leave it out and
+    nothing changes — the Showrunner (2026-08-31): "we have to make it clear which
+    route broke it and how".
     """
     _ = (scene,)  # kept on the signature for callers that pass the whole shot
 
@@ -1331,8 +1347,8 @@ def record_rewrite(
 
     ``why`` carries one line per field explaining why it was written that way.
     It rides along with the diff so the instrument panel shows the decision next
-    to its result — the showrunner can see 「カメラ見て」 landing in FRAME and
-    read the sentence that put it there, instead of inferring it from a value
+    to its result — the showrunner can see 「カメラ見て」 ("look at the camera")
+    landing in FRAME and read the sentence that put it there, instead of inferring it from a value
     that changed.
     """
     changed = shot_diff(before, after)
@@ -1366,7 +1382,7 @@ _NOT_A_VALUE = frozenset({
 
 
 def drop_non_values(text: str) -> str:
-    """句のならびから、値でない語を落とす。空になったら空文字。"""
+    """Drop non-values from a run of phrases. Empty in, empty out."""
     kept = [
         p.strip() for p in str(text or "").split(",")
         if p.strip() and p.strip().lower() not in _NOT_A_VALUE
@@ -1646,10 +1662,11 @@ _INTENT_RE = re.compile(
     r"(?im)^[\s>*_-]*INTENT\s*[:：]\s*(casual|shot|mixed|recall)\s*$"
 )
 def _label_alternation() -> str:
-    """ラベルの選択肢を `SHOT_KEYS` から組む。欄名の出典を一つにするため。
+    """Build the label alternation from `SHOT_KEYS`, so field names have one
+    source.
 
-    長いラベルを先に並べる: `WHY_FRAME` が `FRAME` として、`WEARING_DROP` が
-    `WEARING` として読まれると、値が別の欄に入る。
+    Longer labels come first: read `WHY_FRAME` as `FRAME`, or `WEARING_DROP` as
+    `WEARING`, and the value lands in the wrong field.
     """
     names = [f"WHY_{k.upper()}" for k in SHOT_KEYS]
     names += [k.upper() for k in SHOT_KEYS] + ["WEARING_DROP"]
@@ -1777,11 +1794,12 @@ def scripter_format_schema(partner: bool = False) -> dict[str, Any]:
 
     `guard_partner_patch` already drops `wearing_b` / `beat_b` when nobody is
     standing there — but it drops them **after** they are written, so whatever
-    went in is lost. Measured on 「カーディガン羽織って。」 (10 runs, solo):
+    went in is lost. Measured on 「カーディガン羽織って。」 ("put a cardigan on",
+    10 runs, solo):
 
-        wearing に入った          6
-        wearing_b に入って消えた   2   ← 服が着られないまま次のターンへ
-        出力が崩れた / 空          2
+        landed in wearing              6
+        landed in wearing_b, then lost  2   ← on to the next turn still undressed
+        malformed / empty output        2
 
     Two fields to hand the same garment to is two places to put it. The
     contract already says there is one actress; saying it again did not stop
@@ -1802,7 +1820,7 @@ def scripter_format_schema(partner: bool = False) -> dict[str, Any]:
 def weave_refusal(tags: str, scene: str) -> str:
     """Why this weave cannot be used — `""` when it is usable.
 
-    The weave gate only ever asked **「空でなければ通す」**. Measured live
+    The weave gate only ever asked **"is it non-empty?"**. Measured live
     (2026-08-30, session `71929513`): a board went to the sampler holding
 
         tags        __tags, white_blouse, headphones, hair_down, sitting
@@ -1875,7 +1893,8 @@ def guard_partner_patch(
     """Drop the partner's sections on a solo shoot — nobody is standing there.
 
     This is the whole guard now. Deciding *which* Muse an edit was addressed to
-    used to happen here too, off「だけ|のみ|ばっかり」and「二人|ふたり|一緒」;
+    used to happen here too, off「だけ|のみ|ばっかり」("only / just") and
+    「二人|ふたり|一緒」("both / together");
     it dropped the other card's edits on any line that named one Muse without
     one of those words, which is most lines. The scripter is handed the
     conversation and the speakers, and decides that itself.
@@ -1911,7 +1930,8 @@ def clean_propose(raw: Any) -> str:
     """One line the scripter offers but must not write into the notebook.
 
     Without somewhere to put it, a model that thinks the shot wants something
-    puts it in a field instead — measured on t21「おいしそう？」, where every
+    puts it in a field instead — measured on t21「おいしそう？」("does it look
+    good?"), where every
     run of five gave her a pastry or a cup nobody had asked for. The channel
     costs one line and keeps the decision in the room.
     """

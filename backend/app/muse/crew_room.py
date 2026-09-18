@@ -1,50 +1,60 @@
-"""班（スタジオ撮り）—— classic の行脚を、Refine の台帳の上に載せる。（2026-09-11）
+"""The crew (studio shoot) — classic's table walk, carried onto Refine's ledger. (2026-09-11)
 
-総監督「スタジオ撮り（複数の撮影スタッフのモード）を Muse refine に取り込みたい」
-「classic からそのまま移植したあと、磨きましょう」「18役職を全部残す」。
+The Showrunner: "I want the studio shoot (the mode with several crew members)
+inside Muse refine", "port it straight from classic first, then polish", "keep
+all 18 roles".
 
-## そのまま持ってきたもの
+## Carried over unchanged
 
-- **席の条文**（`crew.system_prompt_for`）—— 18役職・30人・6プリセット。一字も変えない
-- **回し方**（`_craft_pass`）—— 席順に回し、席の間にやじ役と横やり役を挟む
-- **やじの選び方**（`_pick_banter_reactor` / `_pick_extra_heckler`）と
-  `banter_mode`（off / light / full）
-- **開幕は三席**（`OPENING_SEQUENCE` = 衣装 → 撮影 → 主演）。先に一枚撮ってから全班
+- **The seat contracts** (`crew.system_prompt_for`) — 18 roles, 30 people, 6
+  presets. Not one character changed
+- **The walk** (`_craft_pass`) — go round in seat order, with a reactor and a
+  heckler slotted between seats
+- **How banter is picked** (`_pick_banter_reactor` / `_pick_extra_heckler`) and
+  `banter_mode` (off / light / full)
+- **Three seats open the shoot** (`OPENING_SEQUENCE` = wardrobe → camera → lead).
+  Rough it in with those, then bring the whole crew
 
-## 替えたのは書き込み先だけ
+## Only the destination changed
 
-classic では席は talk-only で、書くのは Scripter 一人だった
-（`_apply_turn` の `talk_only = uses_notebook(session)`）。Refine では
-**その Scripter の席に `writer.write_patch` が座る。**
+In classic the seats were talk-only and one Scripter did the writing
+(`_apply_turn`'s `talk_only = uses_notebook(session)`). In Refine
+**`writer.write_patch` sits in that Scripter's chair.**
 
-    classic   席が喋る → Scripter が手帖を書く → weave が絵を組む
-    Refine    席が喋る → writer が台帳を書く   → assemble が絵を組む
+    classic   seats talk → Scripter writes the notebook → weave builds the picture
+    Refine    seats talk → writer writes the ledger    → assemble builds the picture
 
-だから手帖（notebook）は持ち込まない。席が出す `CRAFT:` 行は台帳に直接は
-書かず、**writer への材料**として渡す。どの席がどの欄の持ち主かは
-`crew.CRAFT_SLOTS` がもう決めてあるので、それを台帳の欄名に読み替えるだけ。
+So the notebook does not come along. A seat's `CRAFT:` line never reaches the
+ledger directly — it is **material for the writer**. Which seat owns which field
+is already decided by `crew.CRAFT_SLOTS`; all that is needed here is to read that
+slot as a ledger field name.
 
-## 席順ではなく、欄ごとに回る（2026-09-14）
+## Field by field, not seat by seat (2026-09-14)
 
-総監督「同じ台帳のメンバーを束ねて1つのセッションにして、結論として一つの台帳を
-だしたらいい。そうすると衝突は回避できる。あとその時に今の台帳が何かを告知して
-から、今はこうなっててどう変えるのかという話をしたら」。
+The Showrunner: "bundle the members who share a ledger field into one session so
+they produce a single ledger as the conclusion — that avoids the collisions. And
+have them announce what the ledger currently says first, then talk about how it
+should change."
 
-    これまで   席順に12回呼ぶ。各席が自分の欄に「足す」
-    いま       欄ごとに9回呼ぶ（`field_groups`）。同じ欄の席は**一度に喋り**、
-               告知（`field_header`）を読んでから**欄ぜんぶの値を一つ**決める
+    before   twelve calls in seat order. Each seat only ever "adds" to its field
+    now      nine calls, one per field (`field_groups`). Seats that share a field
+             **speak in one call**, read the announcement (`field_header`) and
+             settle on **one value for the whole field**
 
-実機で `look` が12語になり `amber_theme` と `magenta_theme` が同居した
-（`6dc11d0e`）。席が二人いる欄では取り合いが、一人の欄でも言い換えの堆積が
-起きていた —— **毎ターン足すことしかできず、全体を言い直す機会が無かった**から。
+Live, `look` had grown to twelve words with `amber_theme` and `magenta_theme`
+side by side (`6dc11d0e`). Fields with two seats were fought over; fields with a
+single seat still silted up with restatements — because **a seat could only add,
+never restate the field as a whole.**
 
-台の実測（同じ材料・やじ off・n=3・`private/muse/crew_lab/corner_check.py`）:
+Measured on the bench (same material, banter off, n=3,
+`private/muse/crew_lab/corner_check.py`):
 
-    席ごと   12回  一周 111.4s   総監督で開く 14%   look 4.3語  SAY 96字
-    欄ごと    9回  一周  72.5s   総監督で開く  5%   look 2.3語  SAY 77字
+    seat by seat   12 calls  round 111.4s   opens with "Showrunner," 14%   look 4.3 words  SAY 96 chars
+    field by field  9 calls  round  72.5s   opens with "Showrunner,"  5%   look 2.3 words  SAY 77 chars
 
-**告知は両方の腕に入れて測った**ので、差は束ねたぶんだけ。払ったものは
-SAY が 96 → 77字（一回の返事に何人ぶんも書くため）。
+**The announcement was in both arms**, so the difference is the bundling alone.
+What it costs: SAY drops from 96 to 77 characters (one reply now carries several
+people).
 """
 from __future__ import annotations
 
@@ -179,20 +189,22 @@ TABLE_OPEN = "crew_open"
 
 
 def has_crew(session: dict[str, Any]) -> bool:
-    """班のセッションか。
+    """Is this a crewed session?
 
-    **既定値を門にしない。** `inputs.crew_preset` は `ALL_DEFAULTS` から
-    `"standard"` が入るので、席の有無で切ると**一人撮りでも16席が回る**。
-    `mode` も使えない（実機の117セッションが全部 `duet` で、うち85件は相方すら
-    居ない）。だから「総監督が班を開けたか」という一つの印で切る。
+    **Never gate on a default.** `inputs.crew_preset` is filled with `"standard"`
+    by `ALL_DEFAULTS`, so gating on "are there seats" would run **sixteen seats
+    in a solo shoot**. `mode` is no good either — all 117 live sessions carry
+    `duet`, and 85 of them have no partner at all. So the gate is one mark:
+    did the Showrunner open the table?
 
-    既にある29の Refine セッションには印が無いので、一つも巻き込まれない。
+    The 29 Refine sessions that already exist carry no mark, so none is caught up.
     """
     return bool(session.get(TABLE_OPEN)) and bool(cast_of(session))
 
 
 def cast_of(session: dict[str, Any]) -> list[str]:
-    """この撮影の席順。一職一席、主演と編集は `resolve_crew` が常に足す。"""
+    """Seat order for this shoot. One person per role; `resolve_crew` always adds
+    the lead and the editor."""
     inputs = dict(session.get("inputs") or {})
     ids = [str(i) for i in (inputs.get("crew_ids") or []) if str(i).strip()]
     preset = str(inputs.get("crew_preset") or "").strip()
@@ -206,14 +218,15 @@ def cast_of(session: dict[str, Any]) -> list[str]:
 
 
 def field_of(muse_id: str) -> str:
-    """その席が持っている台帳の欄（持たない席は空）。"""
+    """The ledger field this seat owns (empty for seats that own none)."""
     slot = (getattr(crew, "CRAFT_SLOTS", None) or {}).get(crew.role_of(muse_id) or "")
     return SLOT_FIELD.get(str(slot or ""), "")
 
 
 def writing_seats(cast: list[str], *, only: tuple[str, ...] = (),
                   without: tuple[str, ...] = ()) -> list[str]:
-    """ペンを持つ席を席順で。`plan` は別経路なのでここには出ない。"""
+    """Seats that hold a pen, in seat order. `plan` runs on its own path and
+    never appears here."""
     out: list[str] = []
     for mid in cast:
         role = crew.role_of(mid)
@@ -226,7 +239,7 @@ def writing_seats(cast: list[str], *, only: tuple[str, ...] = (),
 
 
 def opening_seats(cast: list[str]) -> list[str]:
-    """開幕の三席を**着付けの順**で（席順ではなく）。"""
+    """The three opening seats in **dressing order** (not seat order)."""
     rank = {r: i for i, r in enumerate(OPENING_SEQUENCE)}
     seats = writing_seats(cast, only=OPENING_SEQUENCE)
     return sorted(seats, key=lambda m: rank.get(crew.role_of(m) or "", 99))
@@ -237,11 +250,12 @@ CRAFT_MAX = 280
 
 
 def _clip_craft(clause: str) -> str:
-    """長すぎる CRAFT を、**語の切れ目**で止める。
+    """Stop an over-long CRAFT line **on a word boundary**.
 
-    以前は `clause[:280]` だった。左半分は台帳に入るタグなので、真ん中で切ると
-    `silver_sug` のような**半分の語**が欄に着く。実機の欄は最長 167字なので
-    まだ踏んでいないが、踏んだときに気づけない壊れ方なので先に直しておく。
+    This used to be `clause[:280]`. The left half is the tags that reach the
+    ledger, so cutting mid-string lands **half a word** — `silver_sug` — in a
+    field. Live fields top out at 167 characters so nothing has hit it yet, but
+    it is the kind of break nobody would notice once it does, so fix it first.
     """
     text = str(clause or "").strip()
     if len(text) <= CRAFT_MAX:
@@ -255,12 +269,14 @@ def _clip_craft(clause: str) -> str:
 
 
 def split_craft(body: str) -> tuple[str, str]:
-    """一席の返事を、喋りと CRAFT 行に分ける。classic の `_split_craft_line` と同じ。
+    """Split one seat's reply into its talk and its CRAFT line — classic's
+    `_split_craft_line`.
 
-    **`SAY:` の札は画面に出さない（2026-09-12）。** 総監督「スタジオ撮りだと
-    SAY: が露出する」。席の返事は `SAY: …` で始まるので、そのまま積むと
-    吹き出しに札が残る。剥がすのは classic の `identity.sanitize_muse_say`
-    ——「欄の名前が漏れたら切る」という仕事を既にしている一本。
+    **The `SAY:` label never reaches the screen (2026-09-12).** The Showrunner:
+    "in the studio shoot, SAY: shows up". A seat's reply opens with `SAY: …`, so
+    pushing it through as-is leaves the label sitting in the bubble. Stripping it
+    is classic's `identity.sanitize_muse_say` — the one piece that already does
+    the job of "cut it when a field name leaks".
     """
     text = str(body or "")
     m = _CRAFT_LINE_RE.search(text)
@@ -274,7 +290,8 @@ def split_craft(body: str) -> tuple[str, str]:
 
 
 def banter_mode(session: dict[str, Any]) -> str:
-    """off / light / full。既定は light —— 呼び出し回数の半分はやじなので。"""
+    """off / light / full. Default is light — half the calls in a round are
+    banter."""
     mode = str((session.get("inputs") or {}).get("banter_mode") or "light").strip().lower()
     return mode if mode in ("light", "full", "off") else "light"
 
@@ -285,7 +302,7 @@ def _in_role(cast: list[str], role: str) -> str | None:
 
 def pick_reactor(session: dict[str, Any], cast: list[str], *,
                  current: str, previous: str | None, index: int) -> str | None:
-    """一席が喋ったあと、誰がやじを入れるか。classic のままの規則。"""
+    """Who heckles after a seat has spoken. Classic's rule, unchanged."""
     mode = banter_mode(session)
     if mode == "off":
         return None
@@ -307,7 +324,7 @@ def pick_reactor(session: dict[str, Any], cast: list[str], *,
 
 def pick_heckler(session: dict[str, Any], cast: list[str], *,
                  current: str, reactor: str | None, index: int) -> str | None:
-    """二人目のやじ。`full` のときだけ（ローカルの Ollama には高くつく）。"""
+    """A second heckler. Only in `full` — it is expensive on a local Ollama."""
     if banter_mode(session) != "full":
         return None
     if index % 3 != 2:
@@ -320,19 +337,22 @@ def pick_heckler(session: dict[str, Any], cast: list[str], *,
 
 
 def seat_name(session: dict[str, Any], muse_id: str) -> str:
-    """画面に出す名前。**あだ名（役職）**の形。主演だけは本人の名前。（2026-09-16）
+    """The name shown on screen, as **nickname (role)**. The lead keeps her own
+    name. (2026-09-16)
 
-    総監督「Muse同士の会話が混ざる。口調が Muse のものでない」。名札が
-    **役職**（`色彩設計`・`撮影`）だけだったのが半分の理由だった ——
+    The Showrunner: "the Muses' conversations get mixed up; the voice is not that
+    Muse's". Half the reason was that the name tag carried **the role** only —
 
-        画面      色彩設計 / 撮影 / 演出
-        席の口    「一点さん」「すきま」「一秒くん」
+        on screen    色彩設計 / 撮影 / 演出        (colour design / camera / staging)
+        in the room  「一点さん」「すきま」「一秒くん」  (Itten / Sukima / Ichibyou — nicknames)
 
-    **呼び合う名前が画面に出ていない。** しかも同じ役職に二人いる
-    （`palette:itten` と `palette:aku`）ので、顔ぶれを替えても見分けが付かない。
-    あだ名を前に出すと、席同士の呼びかけと画面の名札が同じ言葉になる。
+    **The names they call each other never appeared on screen.** And two people
+    share a role (`palette:itten` and `palette:aku`), so swapping the crew changed
+    nothing you could see. Leading with the nickname makes the tag and the
+    address the same word.
 
-    ここは席・やじ・`muse_speaking`・保存行がすべて通る一本なので、直すのはここだけ。
+    Seats, banter, `muse_speaking` and the stored rows all come through here, so
+    this is the only place to fix.
     """
     if crew.role_of(muse_id) == "actress":
         char = session.get("character") or {}
@@ -357,7 +377,7 @@ CREW_WORDS = "crew_words"
 
 
 def crew_words_of(session: dict[str, Any]) -> dict[str, list[str]]:
-    """その欄に、班が置いた語。"""
+    """The words the crew placed in that field."""
     raw = session.get(CREW_WORDS) or {}
     if not isinstance(raw, dict):
         return {}
@@ -365,18 +385,21 @@ def crew_words_of(session: dict[str, Any]) -> dict[str, list[str]]:
 
 
 def field_groups(seats: list[str]) -> list[tuple[str, list[str]]]:
-    """席を**欄ごとに束ねる**。並びは、その欄に最初に座る席の席順。（2026-09-14）
+    """Bundle the seats **by field**. Order follows whichever seat sits there
+    first. (2026-09-14)
 
-    総監督「同じ台帳のメンバーを束ねて1つのセッションにして、結論として一つの
-    台帳をだしたらいい。そうすると衝突は回避できる」。
+    The Showrunner: "bundle the members who share a ledger field into one session
+    so they produce a single ledger as the conclusion — that avoids the
+    collisions."
 
-        standard   beat（演出・振付）／ frame（レイアウト・撮影）／ look（色彩・線画）
-                   ＋ bg・wearing・light・expression・atmosphere の各1席
-                   → 12席が **9つの会議**になる
+        standard   beat (staging + choreography) / frame (layout + camera) /
+                   look (colour + line) plus one seat each for bg, wearing,
+                   light, expression and atmosphere
+                   → twelve seats become **nine corners**
 
-    欄を持たない席（主演）は束ねない —— **一人ずつ別の会議**として返す
-    （`("", [id])`）。同じ「欄なし」で一緒にすると、話の相手が居ない席同士が
-    同じ部屋に入る。
+    A seat with no field (the lead) is never bundled — it comes back as **its own
+    corner** (`("", [id])`). Putting the fieldless together would seat people in
+    one room who have nothing to say to each other.
     """
     groups: list[tuple[str, list[str]]] = []
     index: dict[str, int] = {}
@@ -395,15 +418,17 @@ def field_groups(seats: list[str]) -> list[tuple[str, list[str]]]:
 
 def field_header(field: str, *, ledger: dict[str, str],
                  mine: list[str] | None = None) -> str:
-    """**いまの台帳を告知してから、どう変えるかを訊く。**（2026-09-14）
+    """**Announce what the ledger says now, then ask how it should change.**
+    (2026-09-14)
 
-    総監督「今の台帳が何かを告知してから、今はこうなっててどう変えるのかという
-    話をしたらいいのでは」。
+    The Showrunner: "announce what the ledger currently is, then talk about how it
+    should change from there."
 
-    実機で `light` は席が一つしかないのに `backlighting` `rim_light` `hard_rim`
-    `edge_lighting` と逆光の言い換えが四つ積もっていた。毎ターン「足す」ことしか
-    できず、**欄の全体を見て言い直す機会が無かった**から。ここで見せて、
-    結論を欄ぜんぶの値として書かせる。
+    Live, `light` had silted up with four restatements of the same backlight —
+    `backlighting`, `rim_light`, `hard_rim`, `edge_lighting` — and it owns a
+    single seat. A seat could only add each turn; **nothing ever let it look at
+    the field as a whole and say it again.** Show it here, and have the
+    conclusion written as the value of the entire field.
     """
     have = [t.strip() for t in str((ledger or {}).get(field) or "").split(",") if t.strip()]
     crew_said = {t.lower() for t in (mine or [])}
@@ -428,7 +453,8 @@ def field_header(field: str, *, ledger: dict[str, str],
 
 
 def _shot_bits(session: dict[str, Any]) -> list[str]:
-    """誰が写っていて、台帳がいまどうなっているか。席にも会議にも同じものを渡す。"""
+    """Who is in frame and where the ledger stands. A seat and a corner get the
+    same thing."""
     led = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
     partner = session.get("partner_character") or {}
     has_partner = bool(str(partner.get("character_id") or "").strip())
@@ -446,11 +472,12 @@ def _shot_bits(session: dict[str, Any]) -> list[str]:
 
 
 def _floor_bit(floor: list[dict[str, Any]]) -> str:
-    """直前の発言。**言葉を借りない**という注意付きで。
+    """What was just said, carried with the warning **not to borrow the words**.
 
-    実機の開幕で、撮影の席が衣装の席の一文目をそのまま写した（「西日が差し込む
-    なら、光を吸い込むベルベットか…」）。条文にも「Do not restate another Muse's
-    phrase」とあるが、直前の発言を見せる以上、ここでもう一度言う。
+    In a live opening the camera seat copied the wardrobe seat's first sentence
+    outright ("if the late sun comes in, velvet that drinks the light…"). The
+    contract already says "Do not restate another Muse's phrase", but since we
+    are showing them the last few lines, say it again right here.
     """
     if not floor:
         return ""
@@ -465,7 +492,8 @@ def _floor_bit(floor: list[dict[str, Any]]) -> str:
 
 def group_prompt(session: dict[str, Any], seats: list[str], *, field: str,
                  director_line: str, floor: list[dict[str, Any]]) -> str:
-    """欄の会議に渡す本文。**告知が先、結論は一つ。**（2026-09-14）"""
+    """The body handed to a field corner. **Announcement first, one conclusion.**
+    (2026-09-14)"""
     led = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
     bits = _shot_bits(session)
     if field:
@@ -479,7 +507,8 @@ def group_prompt(session: dict[str, Any], seats: list[str], *, field: str,
 
 def seat_prompt(session: dict[str, Any], muse_id: str, *,
                 director_line: str, floor: list[dict[str, Any]]) -> str:
-    """一席に渡す本文。**台帳が正本**で、席は自分の欄だけを磨く。"""
+    """The body handed to one seat. **The ledger is the document of record**; the
+    seat only sharpens its own field."""
     led = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
     field = field_of(muse_id)
     slot = (getattr(crew, "CRAFT_SLOTS", None) or {}).get(crew.role_of(muse_id) or "")
@@ -497,17 +526,19 @@ def seat_prompt(session: dict[str, Any], muse_id: str, *,
 
 
 def stream_id(session: dict[str, Any], muse_id: str) -> str:
-    """流し込みの宛先 id。**主演だけはキャストした本人の id で出す。**（2026-09-18）
+    """Where a stream is addressed. **The lead always streams under her own cast
+    id.** (2026-09-18)
 
-    総監督「Muse が喋ったときのサムネイルが抜けている場合がある」。
+    The Showrunner: "sometimes the thumbnail is missing when a Muse speaks".
 
-    画面は「その言葉が主演のものか」を **`muse_id` が本人の `character_id` か**で
-    見ている（`MusePanel.vue` の `liveIsLead`）。班の中の彼女は `actress:cast`
-    という席の id で流れていたので、**やじを入れた回だけ顔が消えていた** ——
-    同じ人が喋っているのに、言葉の出どころによって名札が変わる。
+    The panel decides "are these her words" by asking whether **`muse_id` is her
+    `character_id`** (`liveIsLead` in `MusePanel.vue`). Inside the crew she was
+    streaming under the seat id `actress:cast`, so **her face vanished on exactly
+    the turns where she heckled** — same person speaking, different name tag
+    depending on where the words came from.
 
-    ここで本人の id に揃える。席としての彼女も、やじの彼女も、本人の段も、
-    画面から見れば同じ一人になる。
+    Line them up on her own id here. Her seat, her banter and her own turn all
+    become one person as far as the screen is concerned.
     """
     if crew.role_of(muse_id) == "actress":
         cid = str((session.get("character") or {}).get("character_id") or "").strip()
@@ -517,11 +548,13 @@ def stream_id(session: dict[str, Any], muse_id: str) -> str:
 
 
 def _stream_to(session: dict[str, Any], muse_id: str):
-    """席の台詞を流す口。**`SAY:` の中だけ**通る（`_say_only`）。
+    """The outlet a seat's line streams through. **Only what is inside `SAY:`**
+    gets past (`_say_only`).
 
-    総監督「streaming 表示しないので待たされる感覚がかなり大きい」。18席が
-    順に喋るあいだ無言だと、1分以上なにも起きないように見える。女優の段で
-    やっているのと同じ仕掛けを席にも回す。
+    The Showrunner: "without a streaming display the wait feels very long". With
+    eighteen seats speaking in turn, silence means more than a minute of nothing
+    happening on screen. This is the same device the lead's turn already uses,
+    handed to the seats.
     """
     try:
         from . import shared as muse_shared
@@ -535,12 +568,14 @@ def _stream_to(session: dict[str, Any], muse_id: str):
 
 
 def _watch_the_window(session: dict[str, Any], who: str):
-    """枠で切られた回を記録に残す合図。**黙って短い返事にしない。**（2026-09-18）
+    """A hook that records a turn cut off by the window. **Never let it pass as a
+    short reply.** (2026-09-18)
 
-    総監督「prompt のオーバフローで文字が切れる場合があるようです」。枠
-    （`num_ctx`）は前置きと出力の合計なので、前置きが長い回は書いている途中で
-    打ち切られる。Ollama は `done_reason: "length"` と言っているので、それを
-    `/debug` に残して**あとから数えられる**ようにする。
+    The Showrunner: "it looks like text gets cut off by prompt overflow". The
+    window (`num_ctx`) covers the preamble and the output together, so a turn with
+    a long preamble stops mid-sentence. Ollama says so with
+    `done_reason: "length"` — keep that in `/debug` so it **can be counted
+    afterwards**.
     """
     def _note(done: dict[str, Any]) -> None:
         if str(done.get("reason") or "") != "length":
@@ -556,7 +591,8 @@ def _watch_the_window(session: dict[str, Any], who: str):
 
 async def _seat_turn(ollama, session: dict[str, Any], muse_id: str, *,
                      model: str, prompt: str) -> str:
-    """一席ぶんの呼び出し。**絵は渡さない**（板を見せるのは女優の段の仕事）。"""
+    """One seat's call. **No picture is attached** — showing the board belongs to
+    the lead's turn."""
     sid = str(session.get("session_id") or "")
     events.publish(sid, {
         "type": "muse_speaking", "muse_id": stream_id(session, muse_id),
@@ -587,16 +623,18 @@ _DECOR = " \t*_#>-"
 
 def _match_speaker(token: str, seats: list[str],
                    used: list[str]) -> tuple[str, bool]:
-    """`SPEAKER: …` の右側を、この会議の席に当てる。`(席, 当たったか)`。
+    """Match whatever follows `SPEAKER: …` to a seat at this corner.
+    Returns `(seat, matched)`.
 
-    模型は id をそのまま書くこともあれば、番号（`SPEAKER: 2`）でも、あだ名でも
-    役職名でも書く（`SPEAKER: 一点` / `SPEAKER: 色彩設計`）。だから**日本語の
-    名札も見る**。
+    The model writes the id verbatim, or a number (`SPEAKER: 2`), or a nickname,
+    or a role name — `SPEAKER: 一点` (the nickname Itten) or `SPEAKER: 色彩設計`
+    (the role, colour design). So **the Japanese name tags are matched too**.
 
-    **当たらなければ、まだ喋っていない席の先頭**に落とす —— 会議は席順に喋る
-    約束なので、それでほぼ合う。`used` を渡し忘れると全員が一人目に積まれるので、
-    当たったかどうかを返して呼び元が記録できるようにしてある（2026-09-16 の
-    流し込みの取り違えは、まさにここを空で呼んでいたのが原因）。
+    **When nothing matches, fall through to the first seat that has not spoken** —
+    a corner speaks in seat order, so that lands right nearly always. Forget to
+    pass `used` and everyone piles onto the first speaker, which is why the match
+    result comes back for the caller to record (the 2026-09-16 mis-addressed
+    stream was exactly this being called with an empty list).
     """
     raw = str(token or "").strip().strip("`*_ 「」【】")
     low = raw.lower()
@@ -630,10 +668,12 @@ def _match_speaker(token: str, seats: list[str],
 
 
 def split_packed(raw: str, seats: list[str]) -> tuple[list[tuple[str, str]], str]:
-    """束ねた回の返事を、**席ごとの台詞**と**欄の結論一つ**に分ける。（2026-09-14）
+    """Split a bundled reply into **one line of talk per seat** and **one
+    conclusion for the field**. (2026-09-14)
 
-    `CRAFT` は最後の一行を採る —— 条文では一行だけだが、席ごとに書いてきたときは
-    **閉めの一行が会議の結論**なので、そこを信じる。
+    The last `CRAFT` line wins — the contract asks for one, but when the model
+    writes one per speaker, **the closing line is the corner's conclusion**, so
+    trust that one.
     """
     text = str(raw or "")
     crafts = list(_CRAFT_LINE_RE.finditer(text))
@@ -660,15 +700,18 @@ def split_packed(raw: str, seats: list[str]) -> tuple[list[tuple[str, str]], str
 
 
 def _packed_stream(session: dict[str, Any], seats: list[str]):
-    """束ねた回を、**喋っている席の吹き出しへ振り分けながら**流す。（2026-09-14）
+    """Stream a bundled reply **while routing it to the bubble of whoever is
+    speaking**. (2026-09-14)
 
-    一席ずつ呼んでいたときは `_stream_to` が宛先を一つ持てばよかった。会議は
-    一度の返事に何人ぶんも入っているので、`SPEAKER:` の行で宛先を切り替える。
-    **ここが無いと、束ねた回だけ画面が無言になる**（総監督「待たされる感覚が
-    かなり大きい」）。
+    When seats were called one at a time, `_stream_to` only ever needed one
+    address. A corner carries several people in a single reply, so the address is
+    switched on each `SPEAKER:` line. **Without this, a bundled turn is the one
+    turn where the screen goes silent** (the Showrunner: "the wait feels very
+    long").
 
-    行頭の数文字だけ溜める —— `shared._say_only` が欄名を伏せるのと同じ手で、
-    行の途中では溜めない（溜めると一文が書き上がるまで画面が止まる）。
+    Only the first few characters of a line are held back — the same move
+    `shared._say_only` uses to hide field names. Nothing is held mid-line;
+    holding there freezes the screen until a sentence is finished.
     """
     sid = str(session.get("session_id") or "")
     pubs = {mid: _stream_to(session, mid) for mid in seats}
@@ -736,7 +779,8 @@ def _packed_stream(session: dict[str, Any], seats: list[str]):
 
 async def _group_turn(ollama, session: dict[str, Any], seats: list[str], *,
                       field: str, model: str, prompt: str) -> str:
-    """欄の会議を一度で呼ぶ。**絵は渡さない**（板を見せるのは女優の段の仕事）。"""
+    """Call a whole field corner at once. **No picture is attached** — showing the
+    board belongs to the lead's turn."""
     sid = str(session.get("session_id") or "")
     if seats:
         events.publish(sid, {
@@ -765,7 +809,7 @@ async def _group_turn(ollama, session: dict[str, Any], seats: list[str], *,
 
 async def _banter_turn(ollama, session: dict[str, Any], muse_id: str, *,
                        model: str, about_name: str, about_text: str) -> str:
-    """やじ一言。短く、craft は書かせない。"""
+    """One heckle. Short, and never allowed to write craft."""
     events.publish(str(session.get("session_id") or ""), {
         "type": "muse_speaking", "muse_id": stream_id(session, muse_id),
         "name": seat_name(session, muse_id),
@@ -786,14 +830,17 @@ async def _banter_turn(ollama, session: dict[str, Any], muse_id: str, *,
 
 async def run_table(db, ollama, session: dict[str, Any], *,
                     director_line: str, opening: bool = False) -> list[dict[str, Any]]:
-    """席を順に回す。**台帳は書かない** —— 集めたものを writer に渡す。
+    """Walk the seats in order. **Never writes the ledger** — what it gathers goes
+    to the writer.
 
-    classic の `_craft_pass` と同じ形:
+    Same shape as classic's `_craft_pass`:
 
-        席が喋る → やじ役を選ぶ → 居れば喋る → 横やり役を選ぶ → 居れば喋る
+        a seat speaks → pick a reactor → they speak if there is one →
+        pick a heckler → they speak if there is one
 
-    返すのは席ごとの `{muse_id, role, name, field, say, craft}`。呼び出し側
-    （`service.chat`）が SAY を会話に積み、`craft` を writer への材料にする。
+    Returns `{muse_id, role, name, field, say, craft}` per seat. The caller
+    (`service.chat`) puts SAY into the conversation and hands `craft` to the
+    writer as material.
     """
     cast = cast_of(session)
     if not cast:
@@ -917,15 +964,18 @@ async def run_table(db, ollama, session: dict[str, Any], *,
 
 
 def craft_tags(craft: str) -> str:
-    """`CRAFT: <tags> | <prose>` の**タグ側だけ**。（2026-09-11）
+    """**Only the tag half** of `CRAFT: <tags> | <prose>`. (2026-09-11)
 
-    classic の CRAFT は二部構成 —— 左が danbooru 語、右が散文。台帳は
-    **英語の絶対句一つ**なので、右half をそのまま渡すと欄にパイプと日本語が
-    入り、しかも欄をまたいで混ざった（実機で `light` に
-    `translucent_fabric | 襟が夕陽を透かす` が着いた）。
+    Classic's CRAFT has two halves — danbooru words on the left, prose on the
+    right. A ledger field is **one absolute English phrase**, so passing the right
+    half through put a pipe and Japanese into the field, and the halves bled
+    across fields (live, `light` ended up holding `translucent_fabric | 襟が夕陽を
+    透かす` — "the collar lets the evening sun through", prose that belongs
+    nowhere near a ledger field).
 
-    散文の側は捨てていない —— 席の SAY として会話欄に出ているし、絵の散文は
-    `assemble.scene_prose` が台帳から組み直す。ここは**台帳の材料**だけ。
+    The prose is not thrown away — it shows in the conversation as the seat's SAY,
+    and the picture's prose is rebuilt from the ledger by `assemble.scene_prose`.
+    What is wanted here is **material for the ledger** only.
     """
     left = str(craft or "").split("|", 1)[0]
     # **手帖の欄名が頭に付いてくる（2026-09-11 実測）。** 席の職能文は
@@ -961,13 +1011,14 @@ FIELD_CAP = 12
 
 
 def _stems(tag: str) -> set[str]:
-    """語に割って、語尾だけ均す。`lighting` と `light` を同じものとして見るため。
+    """Split into words and level the endings, so `lighting` and `light` read as
+    the same thing.
 
-    実機（`e805ffac`・2026-09-15）で `light` が
-    `rim_lighting, backlighting, eye_glint, rim_light` になった —— 台本係の
-    `rim_lighting` と会議の `rim_light` は、語の境目でも語の重なりでも当たらない。
-    語尾（`-ing` / `-ed` / `-s`）だけ落とすと当たる。**落としすぎない**ように、
-    残りが4文字以上のときだけ。
+    Live (`e805ffac`, 2026-09-15) `light` came out as
+    `rim_lighting, backlighting, eye_glint, rim_light` — the writer's
+    `rim_lighting` and the corner's `rim_light` match neither on word boundaries
+    nor on shared words. Dropping the ending (`-ing` / `-ed` / `-s`) makes them
+    meet. **Do not over-trim**: only when four or more characters remain.
     """
     out: set[str] = set()
     for word in re.split(r"[\s_\-]+", str(tag or "").lower()):
@@ -982,19 +1033,20 @@ def _stems(tag: str) -> set[str]:
 
 
 def _too_close(tag: str, other: str) -> bool:
-    """**同じものを二度言っていないか。**（2026-09-14）
+    """**Is this the same thing said twice?** (2026-09-14)
 
-    `talk.word_hit` は語の境目で見る一本で、`shirt` が `skirt` に当たらないのは
-    これのおかげ。ただし実機ではその網をすり抜けた重複が残った:
+    `talk.word_hit` looks at word boundaries, which is why `shirt` never matches
+    `skirt`. Live, duplicates still slipped through that net:
 
         silver_spoon / silver_sugar_spoon      bg
         air_between_limbs / air_between_elbows frame
 
-    どちらも**二語以上を共有**している。そこで網をもう一目細かくする ——
-    語が二つ以上重なるか、片方の語がもう片方に丸ごと含まれるなら、同じものを
-    言い直しているとみなす（語尾は `_stems` で均す）。`amber_theme` と
-    `magenta_theme`（共有は `theme` だけ）のような**別物**は一語しか重ならない
-    ので通る —— あちらは会議が「反対の色を並べない」と言われて決める仕事。
+    Both **share two or more words**. So the net gets one notch finer — two or
+    more shared words, or one word set wholly inside the other, counts as saying
+    the same thing again (endings levelled by `_stems`). Genuinely **different**
+    things like `amber_theme` and `magenta_theme` share only `theme`, so they
+    pass — settling those is the corner's job, which is told not to put opposite
+    colours side by side.
     """
     from . import talk
 
@@ -1013,21 +1065,24 @@ def field_land(
     ledger: dict[str, str],
     taken: set[str] | frozenset[str] | None = None,
 ) -> tuple[dict[str, str], dict[str, list[str]]]:
-    """欄の会議が出した結論を、台帳に着地させる。**模型は呼ばない。**（2026-09-14）
+    """Land a corner's conclusion on the ledger. **No model is called.**
+    (2026-09-14)
 
-    返すのは `(patch, 班の語)`。`patch` は欄ごとの**絶対値**で、呼び元が台帳の
-    入口（`ledger.scrub_patch`）へ通す。`班の語` はそのまま `crew_words` に入り、
-    **次のターンに「ここまでが君たちの言葉だ」と告知する材料**になる。
+    Returns `(patch, the crew's words)`. `patch` holds the **absolute value** per
+    field, which the caller pushes through the ledger's door
+    (`ledger.scrub_patch`). The crew's words go straight into `crew_words` and
+    become **the material for next turn's announcement of "this much is yours"**.
 
-    規則:
+    The rules:
 
-        監督が書いた欄     素通し —— 監督の言葉が勝つ
-        総監督の語        必ず残す（既存語から班の語を引いたぶん）
-        班の語            今回の結論で**置き換える**（6語まで）
-        いずれも          欄は12語で打ち切り／禁止語は落とす／同じ語は二度入れない
+        a field the director wrote   left alone — the director's words win
+        the Showrunner's words       always kept (what is there minus the crew's)
+        the crew's words             **replaced** by this turn's conclusion (up to 6)
+        either way                   the field stops at 12 words / refused words are
+                                     dropped / nothing is said twice
 
-    **消すのは班が置いた語だけ。** 総監督が書いた語に班は手を出せないので、
-    言い直しで監督の言葉が押し出されることはない。
+    **Only what the crew placed can be removed.** The crew cannot touch what the
+    Showrunner wrote, so a restatement never pushes his words out.
     """
     from . import talk
 
@@ -1069,11 +1124,12 @@ def field_land(
 
 
 def craft_block(floor: list[dict[str, Any]]) -> str:
-    """席が出した CRAFT を、writer に渡せる形にまとめる。
+    """Gather the seats' CRAFT into something the writer can read.
 
-    **欄ごとにまとめる。** 同じ欄を複数の席が見る（演出と振付はどちらも体）ので、
-    交互に並べると writer がどちらを採るか迷う —— 絵の並べ方で踏んだのと同じ轍
-    （2026-09-10・読み順が立ち位置と喧嘩した件）。
+    **Gathered by field.** Several seats look at one field (staging and
+    choreography are both the body), so interleaving them leaves the writer
+    unsure which to take — the same rut as the picture's ordering (2026-09-10,
+    where reading order fought with who stood where).
     """
     by_field: dict[str, list[str]] = {}
     for row in floor:
