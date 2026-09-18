@@ -47,11 +47,11 @@ async def list_jobs(request: Request):
 
 @router.post("/{job_id}/cancel")
 async def cancel_job(job_id: str, request: Request):
-    """走っているジョブを止める。**終わったものは `dismiss` へ。**
+    """Stop a running job. **Finished ones go to `dismiss`.**
 
-    失敗したジョブは `_registry` に居ない（履歴が source of truth）ので、
-    ここでは 404 になる。止めるものがもう無いのだから、要るのは取り消しでは
-    なく片付け —— それが下の `dismiss`。
+    A failed job is not in `_registry` (the history is the source of truth), so it
+    404s here. There is nothing left to stop, so what is wanted is not a cancel but
+    a tidy-up — that is `dismiss` below.
     """
     spooler = request.app.state.spooler
     ok = await spooler.cancel(job_id)
@@ -64,7 +64,7 @@ async def cancel_job(job_id: str, request: Request):
 
 @router.delete("/{job_id}")
 async def dismiss_job(job_id: str, request: Request):
-    """終わったジョブを履歴から消す（画面の×）。"""
+    """Remove a finished job from the history (the × on screen)."""
     spooler = request.app.state.spooler
     if not spooler.dismiss(job_id):
         raise HTTPException(404, f"Job {job_id!r} not found or still running")

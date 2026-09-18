@@ -89,10 +89,10 @@ def _ollama(request: Request):
 
 @router.get("/catalog")
 async def catalog(request: Request):
-    """カタログ ＋ スタジオ撮り（班）の顔ぶれ。
+    """The catalogue, plus the crews available for a studio shoot.
 
-    班のプリセットは `crew.PRESETS` が正本。画面に直書きすると、席を足した日に
-    黙ってずれる。
+    `crew.PRESETS` is the document of record for the crew presets. Writing them
+    into the panel instead means they drift silently the day a seat is added.
     """
     from . import crew
 
@@ -241,10 +241,10 @@ async def open_session(session_id: str, request: Request):
 
 @router.post("/sessions/{session_id}/table")
 async def open_table(session_id: str, request: Request):
-    """班を開く（スタジオ撮り）。開幕の三席が当たりを付ける。
+    """Open the table (studio shoot). The three opening seats rough the shot in.
 
-    **明示的な開扉**。`inputs.crew_preset` は既定で `"standard"` が入るので、
-    席の有無で判断すると一人撮りでも16席が回ってしまう。
+    **An explicit door.** `inputs.crew_preset` defaults to `"standard"`, so
+    deciding by "are there seats" would run sixteen of them in a solo shoot.
     """
     session = await _session(request, session_id)
     try:

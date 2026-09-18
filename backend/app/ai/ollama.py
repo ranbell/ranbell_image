@@ -468,10 +468,10 @@ class OllamaClient:
     ) -> AsyncGenerator[dict, None]:
         """Stream text generation without vision inputs.
 
-        `with_done` を立てると、最後に `{"type": "done", "reason", …}` を一つ
-        流す（**枠で切られたか**を呼び元が知るため）。既定は流さない ——
-        Inspire と job runner はイベントをそのまま画面へ転送しているので、
-        知らない種類を増やさない。
+        Set `with_done` and one `{"type": "done", "reason", …}` event is emitted
+        at the end, so the caller can tell **whether the window cut it off**. Off
+        by default — Inspire and the job runner forward events straight to the
+        screen, so no unknown event type is added for them.
         """
         model_name = model or settings.vlm_model
         payload = self._with_think(
