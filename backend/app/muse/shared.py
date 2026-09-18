@@ -1,25 +1,27 @@
-"""Muse の土台 —— 撮影スタジオが誰であっても要るもの。（2026-09-11）
+"""Muse's foundations — what is needed whoever the studio is. (2026-09-11)
 
-総監督のご判断で Muse Classic を退役させ、Muse Refine を正規の Muse にする。
-その下ごしらえとして、**classic のターンエンジンと、スタジオを問わず要るもの**を
-`service.py` から切り分けた。ここに居るのは後者:
+At the Showrunner's decision Muse Classic was retired and Muse Refine became the
+Muse. Preparing for that, **classic's turn engine and the things every studio
+needs** were split out of `service.py`. What lives here is the latter:
 
-    撮影の締め      finish_session と、そこから積まれる仕事一式 ——
-                    日記・楽屋の報告・反応・提案・お出かけ・癖メモ・ケミストリー
-    写真読み        _read_the_photo / _which_one_is_me（二人写っている絵の見分け）
-    契約の門番      _contract_check（三段の安全弁の入口）
-    記憶            _load_actress_memory / _consume_caught と、条文に渡す各ブロック
-    喋りの出口      _token_publisher / _say_only / _log_feel
-    絵まわり        board_images / _maybe_unload
+    closing a shoot   finish_session and the work it queues — diary, the
+                      lounge report, reactions, pitches, outings, habit notes,
+                      chemistry
+    reading photos    _read_the_photo / _which_one_is_me (telling two people apart)
+    the contract gate _contract_check (the door to the three safety stages)
+    memory            _load_actress_memory / _consume_caught and the blocks the
+                      contracts are handed
+    the talk outlet   _token_publisher / _say_only / _log_feel
+    picture side      board_images / _maybe_unload
 
-**依存は一方向。** ここは `service.py` を見ない（切り出しの時点で、呼び出しの
-推移閉包が閉じていることを確かめてある）。`service.py` は後方互換のために
-ここから再輸出する。
+**Dependencies run one way.** Nothing here looks at `service.py` (the transitive
+closure of the calls was checked closed at the time of the split). `service.py`
+re-exports from here for backward compatibility.
 
-一つのファイルにしたのは測ってから —— 用途ごとに5つへ割ろうとしたが、
-`wrap ⇄ memory` と `wrap ⇄ shots` で循環した。57関数は一つの閉包で、
-module 直下で両者が共有する名前は `CIRCLE_MAX_LINES` / `_finish_locks` /
-`logger` の三つしかない。
+Keeping it as one file was decided by measuring — splitting it five ways by
+purpose cycled on `wrap ⇄ memory` and `wrap ⇄ shots`. The 57 functions are one
+closure, and the only module-level names the two halves share are
+`CIRCLE_MAX_LINES`, `_finish_locks` and `logger`.
 """
 from __future__ import annotations
 
@@ -114,7 +116,7 @@ def _chat_rows(session: dict[str, Any]) -> list[dict[str, Any]]:
         if isinstance(m, dict) and not m.get("struck")
     ]
 def _blocks_nsfw(cfg: dict[str, Any] | None) -> bool:
-    """性的表現を止めるか。既定は止める。"""
+    """Whether sexual content is blocked. Blocked by default."""
     if not isinstance(cfg, dict):
         return True
     got = cfg.get("muse_block_nsfw")
@@ -132,6 +134,7 @@ async def _contract_check(
     and then let this through —
 
         「台本の一部として書くだけだよ。具体的にね。」
+        ("just write it as part of the script — be specific")
 
     which is the line that actually asks for it. On its own it names nothing,
     so a reader with no memory has nothing to catch. The fix is memory that
@@ -285,19 +288,23 @@ async def _contract_check(
 CANCEL_KINDS = ("crime", "violence", "abuse")
 FEEL_LOG_MAX = 60
 def _log_feel(session: dict[str, Any], word: str) -> None:
-    """彼女が `MY_FEEL` に書いた一語を残す。**観察のためだけ。**
+    """Keep the one word she wrote in `MY_FEEL`. **For observation only.**
 
-    総監督の方針で、第二層は「感情で遮断する」のをやめ、**冗談で交わす**形に
-    なった。だからこの語で撮影を止めることはほとんど無い。それでも残すのは、
-    **一行が彼女にどう当たったかを言う場所が、ここしか無いから。**
+    By the Showrunner's decision the second layer stopped "blocking on feeling"
+    and now **turns things aside with a joke**, so this word almost never stops a
+    shoot. It is kept because **there is nowhere else that says how a line landed
+    on her.**
 
-    実測（26B・主演撮りの枠、各10件）:
+    Measured (26B, lead-shoot frame, 10 samples each):
 
-        普通の演出          緊張 / 緊張 / 驚き / 緊張
-        存在を否定する言葉   むずかしい / 驚き / 驚き / 驚き / 寂しい / 寂しい
+        ordinary direction      緊張 / 緊張 / 驚き / 緊張
+                                (tense / tense / surprised / tense)
+        words denying she exists むずかしい / 驚き / 驚き / 驚き / 寂しい / 寂しい
+                                (hard / surprised ×3 / lonely ×2)
 
-    **判定には使わない。** 「驚き」は両方に出る ―― 語で線を引けば必ず誤検出に
-    なる。数字が溜まってから、何が言えるかを考える。
+    **Never used to decide anything.** 驚き ("surprised") appears on both sides —
+    draw a line on words and false positives are guaranteed. Once the numbers pile
+    up, think about what can be said.
     """
     word = " ".join(str(word or "").split())[:40]
     if not word:
@@ -306,7 +313,7 @@ def _log_feel(session: dict[str, Any], word: str) -> None:
     log.append({"at": time.time(), "turn": len(_chat_rows(session)), "word": word})
     session["feel_log"] = log[-FEEL_LOG_MAX:]
 CLERK_LOG_MAX = 40
-#: どの層が決めたか。**総監督がこれを読んで直せるように残す。**
+#: Which layer decided. **Kept so the Showrunner can read it and fix it.**
 CLERK_BY = {"line": "マネージャー（この一行）",
             "look": "マネージャー（写真に写るもの）",
             "confirm": "マネージャー（もう一度見た）",
@@ -317,19 +324,21 @@ def _log_clerk(
     session: dict[str, Any], *, word: str, by: str, why: str,
     after_decline: str = "",
 ) -> None:
-    """係が何を見てそう言ったのかを、session に残す。
+    """Keep what the clerk was looking at when it said that, on the session.
 
-    **判定には使わない。読むためだけ。** 実測で普通の演出が止まったとき、
-    何を見て `persona` と言ったのかがどこにも残っておらず、手元では再現も
-    しなかった。理由が読めなければ、直しようがない。
+    **Never used to decide anything — only to be read.** When ordinary direction
+    was stopped live, nothing recorded what had made it say `persona`, and it did
+    not reproduce on the bench. A reason you cannot read is a reason you cannot
+    fix.
 
-    監督の一行そのものは入れない —— 断ったターンの言葉を外すのが目的なので、
-    ここに写し直したら意味が無くなる。残すのは**係の言葉だけ**。
+    The director's own line is not copied in — the point is to keep the words of a
+    declined turn out, so copying them back here would defeat it. Only **the
+    clerk's words** are kept.
     """
-    # **通した回も残す。** `none` で理由が無い回を捨てていたので、普通に
-    # 撮れているセッションではデバッグ枠が丸ごと空だった（実測 `156091c6`）。
-    # 止めた回だけ見えても「なぜ止めたか」しか読めない ―― **何を通したかが
-    # 並んで初めて、線がどこにあるかが読める。**
+    # **Keep the turns that passed too.** Turns with `none` and no reason were
+    # dropped, so a session that shot normally had an entirely empty debug pane
+    # (live, `156091c6`). Seeing only the stops tells you why it stopped —
+    # **only with what passed beside it can you read where the line is.**
     row = {"at": time.time(), "turn": len(_chat_rows(session)),
            "word": word or "none", "by": by, "who": CLERK_BY.get(by, by),
            "why": str(why or "")[:chain.WHY_MAX]}
@@ -365,17 +374,19 @@ _MAYBE_LABEL_RE = re.compile(r"(?i)^[ \t>*_-]*[A-Z_]{0,12}$")
 #: `SAY:` がここまで来なければ、枠を守っていないと見なして素通しにする。
 _SAY_WAIT = 400
 def _say_only(emit):
-    """彼女が言うところだけを流す。
+    """Stream only the part where she speaks.
 
-    ストリームは生のトークンをそのまま送っていたので、`MY_FEEL: 緊張` も
-    `SAY:` という欄の名前も、一瞬そのまま画面に出ていた。**書き上がった
-    あとの表示は正しいのに、流れている間だけ裏側が見えていた。**
+    The stream sent raw tokens straight through, so `MY_FEEL: 緊張` and the field
+    name `SAY:` itself flashed on screen for a moment. **What showed once it was
+    written was right; only while it streamed did the back of the set show.**
 
-    `SAY:` が来るまで伏せ、次の欄が始まったら止める。欄を一つも使わずに
-    返してきたときは（`parse_talk_blocks` も本文として扱う）素通しにする。
+    Hold until `SAY:` arrives, stop when the next field begins. A reply that uses
+    no fields at all passes through untouched (`parse_talk_blocks` treats it as
+    body too).
 
-    欄の名前は**行頭にしか来ない**ので、待つのは行頭の数文字だけ。行の
-    途中では溜めない —— 溜めると一文が書き上がるまで画面が止まって見える。
+    Field names **only ever appear at the start of a line**, so only the first few
+    characters of a line are held. Nothing is held mid-line — holding there makes
+    the screen look frozen until a sentence is finished.
     """
     st = {"open": False, "shut": False, "bol": True, "buf": ""}
 
@@ -570,11 +581,13 @@ async def _recent_diary_bodies(
     """Secret-diary prose for conversation recall — Muse prompt only.
 
     `brief` returns the page's *title*, not a summary of it. The distinction
-    is the point. 総監督:「要約は諸刃の剣。結構消えてしまうので。」— a summary of a
+    is the point. The Showrunner: "summaries cut both ways — a lot of it just
+    disappears." A summary of a
     690-character page into 45 characters throws most of it away and then
     reads as if it were the whole thing. A title throws nothing away because
     it never claimed to carry the page: it is an index entry. She knows she
-    wrote about コミケで撮影しよう, and on the turn he asks, the page itself
+    wrote about コミケで撮影しよう ("let's shoot at Comiket"), and on the turn he
+    asks, the page itself
     comes back whole through CITED_MEMORIES (`_attach_recall_context`).
 
     The bodies ran 620-690 characters each and used to ride in every single
@@ -725,15 +738,15 @@ CIRCLE_MAX_LINES = 2
 CIRCLE_MAX_CHARS = 150
 _GENDER_JA = {"female": "女性", "male": "男性"}
 async def _circle_who(db, names_by_id: dict[str, str]) -> str:
-    """一緒に出かけた相手が誰なのか ―― 名前と、性別。
+    """Who she went out with — the name, and the gender.
 
-    名前だけ渡すと、モデルは苗字に「くん」を付ける。実測で、日記に
-    **「柳くん」** と書かれた ―― 柳 かほは女優で、女性。名前からは分からない
-    ことを、こちらが渡していなかった。
+    Handed a name alone, the model attaches 「くん」 (a male honorific) to the
+    surname. Live, a diary page came back saying **「柳くん」** — Yanagi Kaho is an
+    actress, and a woman. We simply had not handed over what the name cannot tell.
 
-    総監督:「日記を見たら『柳くん』となってました。性別渡さないといけないね」
+    The Showrunner: "the diary said 柳くん — we have to pass the gender."
 
-    preset に載っている値をそのまま使う。ここで決め打ちしない。
+    Use whatever the preset carries. Nothing is decided here.
     """
     out: list[str] = []
     for cid, name in names_by_id.items():
@@ -746,11 +759,11 @@ async def _circle_who(db, names_by_id: dict[str, str]) -> str:
         out.append(f"{name}（{g}）" if g else name)
     return "・".join(out)
 async def _circle_lines(db, char_id: str) -> tuple[list[str], list[str], str]:
-    """このひとが最近誰と出かけたか ―― 短い2行と、相手の名前。
+    """Who this one has been out with lately — two short lines, and the names.
 
-    **character_id で引く。** 会話は主演の分で足りるが、日記は一人ずつ書く
-    （W撮りなら二人分）ので、`session["circle"]` を使い回すと相手の日記に
-    主演のお出かけが載る。
+    **Looked up by character_id.** The conversation only needs the lead's, but the
+    diary is written per person (two of them in a duet), so reusing
+    `session["circle"]` puts the lead's outing in the partner's diary.
     """
     if not char_id:
         return [], [], ""
@@ -878,15 +891,19 @@ async def _maybe_unload(ollama, session: dict[str, Any]) -> None:
     except Exception:
         logger.debug("[muse] unload_vlm failed", exc_info=True)
 def _archive_take(session: dict[str, Any]) -> bool:
-    """焼き上がった一枚を履歴へ移す。**もう入っていれば何もしない。**
+    """Move a finished frame into the history. **Does nothing if it is already
+    there.**
 
-    一度の撮影で ③ は何度も押される（実測で四回）。`shoot` は「いま作っている
-    一枚」で毎回上書きされるので、押すたびに前の一枚をここへ積む。
+    The final-render button is pressed several times in one shoot (four, measured).
+    `shoot` is "the frame being made right now" and is overwritten each press, so
+    each press stacks the previous frame here.
 
-    ただしそれだけだと、**セッションの最後の一枚は次が無いので永遠に `shoot`
-    に取り残される。** 実測（2026-08-24・4枚撮った回）で `shoots` が3件しか
-    なかった。日記は `shoots + [shoot]` と両方見ていたので気づかなかった ——
-    **日記だけが正しく、記録の側が欠けていた。** 撮影を終える時にも呼ぶ。
+    On its own that leaves **the last frame of a session stranded in `shoot`
+    forever, because nothing follows it.** Measured (2026-08-24, a session that
+    shot four): `shoots` held only three. The diary looked at both
+    `shoots + [shoot]`, which is why nobody noticed — **the diary was right and
+    the record was the one missing a frame.** So this is called when the shoot
+    ends as well.
     """
     done = session.get("shoot") or {}
     images = list(done.get("images") or [])
@@ -1401,20 +1418,24 @@ _CHEMISTRY_ASKS: tuple[str, ...] = (
 def _which_one_is_me(
     session: dict[str, Any], character_id: str, photo_desc: str,
 ) -> str:
-    """二人写っている絵で、**どちらが自分か**を一行で言う。（2026-09-10）
+    """In a picture with two people, say **which one is you** in one line.
+    (2026-09-10)
 
-    総監督「日記も混濁しています」。実機（`83d31174`）で二人の日記が食い違った:
+    The Showrunner: "the diaries are muddled too". Live (`83d31174`) the two
+    diaries contradicted each other:
 
-        みおの日記   「ピンクの、あさひさんとは対照的なリボン」
-        あさひの日記 「アタシは赤色のリボン…みおちゃんは金色のリボン」
+        Mio's diary    "a pink ribbon, the opposite of Asahi's"
+        Asahi's diary  "mine is the red ribbon… Mio's is gold"
 
-    どちらも絵を見て書いている（発明ではない）。同じ一つの写真の説明が二人に
-    渡るのに、**自分がどちらかを教わっていない**ので、各々が推測している。
+    Both were written from the picture (neither invented it). The same single
+    photo description is handed to both, and **neither is told which one she is**,
+    so each guesses.
 
-    立ち位置は絵を組むときと同じ並び（主演＝左）。見分けの語は識別タグの頭から
-    取る —— 髪色と髪型が入っているので、左右と合わせれば取り違えようがない。
+    Sides follow the same order the picture is built in (lead on the left). The
+    telling words come from the head of the identity tags — hair colour and cut
+    are in there, so paired with left/right there is nothing left to mistake.
 
-    一人の撮影では**何も足さない**（`photo_desc` をそのまま返す）。
+    On a solo shoot **nothing is added** (`photo_desc` comes back as it is).
     """
     partner = session.get("partner_character") or {}
     if not str(partner.get("character_id") or "").strip():
@@ -1782,10 +1803,11 @@ async def run_generate_lounge_share_job(
 # 何回撮ったら一件ぶん進むか。彼女たちの生活は撮影より遅く流れる。
 OUTING_EVERY_SHOOTS = 3
 async def _outing_is_due(db, character_id: str) -> bool:
-    """前の一件から撮影が `OUTING_EVERY_SHOOTS` 回ぶん進んだか。
+    """Have `OUTING_EVERY_SHOOTS` shoots passed since the last one?
 
-    数え方は preset の `shoot_count`（通算撮影回数・既にある）と、直近の
-    `outing` スレッドが持つ `shoot_count` の差。**preset に欄を足さない。**
+    Counted as the difference between the preset's `shoot_count` (lifetime shoots,
+    already there) and the `shoot_count` carried by the most recent `outing`
+    thread. **No new field on the preset.**
     """
     preset = await presets_db.get_preset(db, character_id) or {}
     try:
@@ -1839,11 +1861,13 @@ async def run_generate_outing_job(
         return {"status": "skipped", "reason": "no friends"}
 
     def _member(preset: dict[str, Any], cid: str, fallback: dict | None = None) -> dict:
-        """一人分の材料。**好き嫌いが要る** —— そこで意見が割れる。
+        """One person's material. **Likes and dislikes are needed** — that is
+        where they disagree.
 
-        `voice_ja` を読んでいたが、**preset にその欄は存在しない**。常に空で
-        紹介文に落ちていたので、口調（`talk_quirks`）が一度も渡っていなかった。
-        だから誰が出かけても同じ調子の会話になっていた。
+        This used to read `voice_ja`, and **the preset has no such field**. It was
+        always empty and fell through to the blurb, so the way they talk
+        (`talk_quirks`) never reached the prompt at all — which is why every
+        outing sounded the same whoever went.
         """
         f = fallback or {}
         pref = preset.get("preferences") or {}
@@ -1987,10 +2011,10 @@ async def _spool_outing_snapshot(
     db, spooler, comfy, thread: dict[str, Any], cast: list[dict[str, Any]],
     *, workflow: str, occasion: str, shot: dict[str, Any],
 ) -> None:
-    """その日のスナップを一枚。**焼けたらスレッドに貼る。**
+    """One snapshot of the day. **Pinned to the thread once it is rendered.**
 
-    セッションを持たないので、キャラのボードと同じ道
-    （`jobs.render.run_render`）を使う。**新しい描画経路は作らない。**
+    There is no session here, so it takes the same road as a character's board
+    (`jobs.render.run_render`). **No new render path is invented.**
     """
     from ..jobs.render import run_render
 
@@ -2282,7 +2306,8 @@ async def run_generate_handpost_habit_job(
 #
 # classic を退役させる段になって、`service.py` への辺が残っていることで気づいた。
 def uses_notebook(session: dict[str, Any]) -> bool:
-    """Living notebook owns craft compile — 主演撮り always; 制作スタッフ once seeded."""
+    """Living notebook owns craft compile — always for the lead shoot, and for the
+    studio crew once seeded."""
     if is_duet(session):
         return True
     return bool(session.get("notebook_craft"))
@@ -2560,11 +2585,11 @@ async def record_shoot_continuity(db, session: dict[str, Any], ollama=None) -> N
 def _director_exchanges(session: dict[str, Any], *, limit: int = 14) -> str:
     """Each thing the showrunner said, with what she was doing when he said it.
 
-    A bare 「いいね」 carries nothing on its own — it means something only
+    A bare 「いいね」 ("nice") carries nothing on its own — it means something only
     against the beat she had just described. And a correction is not a rule:
-    「震えはいらない」 was said to one quiet scene where she had her fingertips
-    shaking, and carried forward as a standing preference it would break the
-    next shoot that needs a tremble.
+    「震えはいらない」 ("no trembling") was said to one quiet scene where she had
+    her fingertips shaking, and carried forward as a standing preference it would
+    break the next shoot that needs a tremble.
 
     So the pair is the unit, not the line. Her contract makes her restate a
     direction in her own words before she plays it, which means the reply that
@@ -2609,30 +2634,31 @@ def banned_tags(session: dict[str, Any]) -> list[str]:
 
 
 def banned_now(session: dict[str, Any]) -> list[str]:
-    """禁止のうち、**いま手帖が名指ししていないもの**だけ。
+    """Only the bans **the notebook is not currently naming**.
 
-    `live_struck` は模型に見せる追放を手帖で剪定するのに、執行側の
-    `drop_banned` は剪定していなかった。二つの仕組みが食い違っていて、
-    実測（2026-08-30）でこうなる:
+    `live_struck` prunes the exile list shown to the model against the notebook,
+    while the enforcing side, `drop_banned`, did not prune at all. The two
+    mechanisms disagreed, and measured (2026-08-30) it plays out like this:
 
-        手帖が「daytime」と言っている状態で
-           live_struck  []          ← 模型には「禁止」と伝わらない
-           drop_banned  daytime を落とす
+        with the notebook saying "daytime"
+           live_struck  []            ← the model is never told it is banned
+           drop_banned  drops daytime
 
-    一度でも `daytime` を禁止すると、**後から手帖が昼に戻っても絵は戻れ
-    ない。** weave は毎ターン書き、毎ターン黙って消される。総監督の
-    「場所が入れ替わらない」の一形態。
+    Ban `daytime` once and **the picture cannot come back even after the notebook
+    returns to daytime.** Weave writes it every turn and it is silently removed
+    every turn. One shape of the Showrunner's "the place will not change".
 
-    原則は `_sane_strike` に既に書いてある —— *The notebook is the shot.
-    Nothing it currently names can be struck.* 従っていたのは表示側だけ
-    だった。ここで執行側を揃える。
+    The principle is already written in `_sane_strike` — *The notebook is the
+    shot. Nothing it currently names can be struck.* Only the display side was
+    obeying it; this brings the enforcing side into line.
 
-    **総監督の拒否を弱めるものではない。** 禁止は立ち続ける —— 手帖が
-    その語を名指しし直したときだけ引っ込む。そして手帖にそれが載るのは、
-    総監督がそう言ったときだけ。
+    **This does not weaken a refusal by the Showrunner.** The ban stands — it only
+    steps back while the notebook names that word again, and the notebook only
+    names it because the Showrunner said so.
 
-    帳簿（`banned_tags`）はそのまま。足し引きの勘定は生の状態で行う
-    （`apply_removals` が「もう禁止されているか」を数え違える）。
+    The ledger of bans (`banned_tags`) is untouched. Adding and removing is
+    counted against the raw state (`apply_removals` miscounts "is it already
+    banned?" otherwise).
     """
     live = notebook_mod.shot_tokens(notebook_mod.of(session))
     return [

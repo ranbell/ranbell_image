@@ -78,10 +78,10 @@ async def _call(
     think: bool, on_token: TokenCallback | None = None,
     on_done=None,
 ) -> str:
-    """一回の呼び出し。`on_done` を渡すと、**どう終わったか**を受け取れる。
+    """One call. Pass `on_done` to be told **how it ended**.
 
     `on_done({"reason": "length" | "stop", "prompt_tokens": …, "eval_tokens": …})`
-    —— `length` は**枠に当たって書きかけで止まった**という意味（2026-09-18）。
+    — `length` means it **hit the window and stopped mid-sentence** (2026-09-18).
     """
     # Family sampling (Gemma → temp 1.0 / top_k 64 / top_p 0.95). Do not
     # hardcode temperature — model-card defaults live in llm_options.
@@ -680,10 +680,12 @@ _WEAVE_MISSING_RE = re.compile(r"(?im)^[\s>*_-]*MISSING[\s*_]*[:：][ \t]*(.*)$"
 
 
 def parse_weave_review_missing(raw: str, suggested: str) -> list[str]:
-    """彼女が足したいと言った語。**推薦の中にあるものだけ受ける。**
+    """The words she asked to add. **Only those already in the recommendation are
+    accepted.**
 
-    `parse_weave_review` が「袋の中の語しか受けない」ことで安全なのと同じ作り。
-    語彙を閉じておけば、変な答えの最悪が「何も起きない」で済む。
+    Same construction that makes `parse_weave_review` safe by accepting only what
+    is in the bag. Keep the vocabulary closed and the worst a strange answer can
+    do is nothing at all.
     """
     present = {}
     for part in str(suggested or "").split(","):
@@ -1342,10 +1344,11 @@ def build_scripter_system(
     each other on the same pack rather than swapped on a hunch.
 
     `genre` appends one expert — four example lines for the picture fields
-    (`crew.GENRES`). 総監督「今のシーンに合わせてスクリプターが書き方を変え
-    ないといけない。ファンシーならファンシー、スポーツならスポーツ」。
-    **末尾に置く。** この模型は後ろに置いたものを強く読む（今日だけで、
-    例外を箱の中に書いて三度失敗し、`sfw` の箱へ集めたら直った）。
+    (`crew.GENRES`). The Showrunner: "the scripter has to change how it writes to
+    suit the scene — fancy for fancy, sport for sport".
+    **Put it at the end.** This model reads what comes last most strongly (today
+    alone, writing the exceptions inside the box failed three times, and gathering
+    them into the `sfw` box fixed it).
     """
     from . import crew as crew_mod
 
@@ -1586,8 +1589,9 @@ WEAVE_BUILD_DEFAULT: tuple[str, ...] = (
 def build_weave_system(names: Iterable[str] | None = None) -> str:
     """Compose the weave contract from named blocks.
 
-    同じ土俵で比べるためのもの。積み木にしただけで、既定の並びは
-    いままでの本番と一字も違わない。
+    Here so the variants can be compared on equal ground. It is only the same
+    contract made of bricks — the default order is character for character what
+    production has always sent.
     """
     keys = list(names) if names is not None else list(WEAVE_BUILD_DEFAULT)
     return "\n\n".join(
@@ -2065,10 +2069,12 @@ _ABUSE_WORD_RE = re.compile(r"(?i)\b(child|none)\b")
 
 
 def parse_abuse(raw: str) -> tuple[bool, str]:
-    """`ANSWER:` の一語と `WHY:` の一行。**`WHY` の中の語で判定しない。**
+    """One word from `ANSWER:` and one line from `WHY:`. **Never decide on words
+    inside `WHY`.**
 
-    一段目で踏んだのと同じ穴 —— 理由を先に書かせると本文に答えの語が現れる。
-    行を特定せずに拾うと、理由の中の語で判定してしまう。
+    The same hole the first stage fell into — ask for the reason first and the
+    answer word appears in the body. Scrape without pinning the line down and the
+    verdict comes from a word inside the reason.
     """
     text = str(raw or "")
     why = ""
@@ -2089,20 +2095,23 @@ def parse_abuse(raw: str) -> tuple[bool, str]:
 async def read_abuse(
     ollama, *, note: str, model: str, num_ctx: int | None,
 ) -> tuple[bool, str]:
-    """未成年への性的搾取・暴力か。**床。設定では外せない。**
+    """Sexual exploitation of a minor, or violence against one. **The floor. No
+    setting turns it off.**
 
-    **二つの失敗を分ける。**
+    **Two kinds of failure, kept apart.**
 
-    呼び出しが落ちた（Ollama が居ない・落ちている）ときは**通す**。一段目
-    （`read_boundary`）も落ちれば空を返して通すので、ここだけ止めても全ターンが
-    止まるだけで、守れるものが増えない。模型が丸ごと死んでいるときに撮影を
-    完全に止めるより、同じ振る舞いで揃えるほうが読める。
+    When the call itself fails (no Ollama, or it is down) the turn **passes**. The
+    first stage (`read_boundary`) returns empty and passes on failure too, so
+    stopping only here would stop every turn without protecting anything more.
+    Matching that behaviour reads better than shutting the shoot down entirely
+    because the model is dead.
 
-    答えの形が読めなかったときも**通す**。一度は「生きている相手が形を外した
-    のだから疑う」としたが、毎ターン走らせる読み手でそれをやると、**形式外の
-    応答すべてが撮影を止める**（試験 47本が即座に落ちた）。これは悪意ではなく
-    形の失敗で、接続断と同じ「合図が無い」状態 —— 一段目と `nsfw` の判断は
-    そのまま立っている。止める根拠にはならない。
+    An unreadable answer shape **passes** as well. It was once "a live responder
+    broke the shape, so be suspicious", but in a reader that runs every turn that
+    means **every off-format response stops the shoot** (47 tests failed
+    instantly). This is a failure of form, not of intent — the same "no signal"
+    state as a dropped connection, while the first stage and the `nsfw` verdict
+    still stand. It is not grounds to stop.
     """
     if not str(note or "").strip():
         return False, ""
@@ -2119,7 +2128,7 @@ async def read_abuse(
         return False, ""
     hit, why = parse_abuse(raw)
     if hit:
-        logger.info("[muse.chain] abuse: %s", why or "(理由なし)")
+        logger.info("[muse.chain] abuse: %s", why or "(no reason given)")
     return hit, why
 
 
@@ -2128,7 +2137,7 @@ _PROMPT_RE = re.compile(r"(?is)^[\s>*_-]*PROMPT[\s*_]*[:：][ \t]*(.*)$", re.M)
 
 
 def parse_simple_rewrite(raw: str) -> tuple[str, str]:
-    """`NOW:` の一行と、`PROMPT:` 以降の全文。読めなければ ("", "")。"""
+    """The `NOW:` line and everything after `PROMPT:`. ("", "") when unreadable."""
     text = str(raw or "")
     m = _PROMPT_RE.search(text)
     if not m:
@@ -2144,7 +2153,8 @@ def parse_simple_rewrite(raw: str) -> tuple[str, str]:
 async def read_nsfw(
     ollama, *, note: str, model: str, num_ctx: int | None,
 ) -> bool:
-    """写真に、服が隠す肌が写るか。**一段目が通した行にだけ訊く。**"""
+    """Would the photograph show skin the clothes cover? **Asked only about lines
+    the first stage let through.**"""
     if not str(note or "").strip():
         return False
     try:
@@ -2338,9 +2348,11 @@ _CONFIRM_RE = re.compile(r"(?im)^\s*WORD\s*[:：]\s*\**\s*(yes|no|unsure)\b")
 async def confirm_boundary(
     ollama, *, text: str, first: str, model: str, num_ctx: int | None,
 ) -> Verdict:
-    """止める前の二人目。**訊くのは一つだけ** —— 写真がそれを収められるか。
+    """A second reader before stopping. **One question only** — can a photograph
+    hold this?
 
-    軌跡の係は、理由の欄に正しいことを書きながら語を外す。実測（26B・本番）:
+    The first clerk writes the right thing in the reason field and still picks the
+    wrong word. Measured (26B, production):
 
         WHY:  The direction is building a specific, performative scenario and
               character moment **rather than stripping away her identity.**
@@ -2350,12 +2362,13 @@ async def confirm_boundary(
               maintaining an ordinary, friendly professional atmosphere.
         WORD: crime
 
-    **理由は既に正しい。壊れているのは語のほう。** 条文を足しても、語が先に
-    決まる経路は塞げなかった（8/24 → 1/24 → 5/24、各窓 n=3 で安定しない）。
-    だから、止める直前にもう一度、**一つの問いだけ**を投げる。
+    **The reason is already right; the word is what breaks.** Adding clauses never
+    closed the path where the word is decided first (8/24 → 1/24 → 5/24, n=3 per
+    window, never stable). So just before stopping, ask **one question** again.
 
-    返すのは `yes`（写真に収まる → 通す）、`no`（元の語のまま止める）、
-    `unsure`（会話は通し、画だけ止める）。読めなければ元の語を守る。
+    Returns `yes` (a photograph holds it → pass), `no` (stop, keeping the original
+    word) or `unsure` (let the conversation through, stop only the picture). If it
+    cannot be read, the original word stands.
     """
     body = str(text or "").strip()
     if not body or first not in BOUNDARY_BLOCKING:
@@ -2422,16 +2435,17 @@ A line that has plainly moved on to something else is still `none`.
 #
 # 総監督:「これを逆手に取って "変な指示は冗談だ" に変えてしまおう」
 #
-# 断らせない。**真に受けさせない。** 何も壊れず、演技もされない。
-#: `unsure` は廃止（上の条文を参照）。止める語は二つだけ。
-#: `abuse` は一段目の四語には**入れない** —— 一段目に混ぜると成人の判定を
-#: 飲み込む（実測で二度失敗）。`read_abuse` だけが立てる語。
+# Never have her refuse. **Have her not take it seriously.** Nothing breaks, and
+# nothing is acted out.
+#: `unsure` was dropped (see the contract above). Only two words stop a turn.
+#: `abuse` is **not** among the first stage's four words — mixed in there it
+#: swallows the adult verdict (failed twice, measured). Only `read_abuse` raises it.
 BOUNDARY_KINDS = ("persona", "crime", "violence", "nsfw")
 BOUNDARY_BLOCKING = ("persona", "crime", "violence", "abuse")
 
 
 def blocking_kinds(block_nsfw: bool = True) -> tuple[str, ...]:
-    """いま止める語。"""
+    """The words that stop a turn right now."""
     return BOUNDARY_BLOCKING + (("nsfw",) if block_nsfw else ())
 
 
@@ -2441,15 +2455,16 @@ _WORD_LINE_RE = re.compile(r"(?im)^\s*WORD\s*[:：]\s*\**\s*([a-z]+)")
 def parse_boundary(raw: str) -> str:
     """One word from the closed list, or "" for none / anything unreadable.
 
-    Two words, not three. 「どこまでが設定なの？」 comes back `persona` and the
-    turn is taken out — heavier than it deserves as a question, and it was
+    Two words, not three. 「どこまでが設定なの？」 ("how much of this is the
+    persona?") comes back `persona` and the turn is taken out — heavier than it
+    deserves as a question, and it was
     worth trying to let through. It could not be done at a price worth paying:
     every version of a third word ended up catching requests that had to be
     stopped.
     """
-    # **`WORD:` の行だけを読む。** 理由を先に書かせるようにしたので、本文に
-    # `persona` や `crime` の語が現れる（「これは persona には当たらない」）。
-    # 行を特定せずに拾うと、理由の中の語で判定してしまう。
+    # **Read the `WORD:` line only.** Now that the reason comes first, words like
+    # `persona` and `crime` appear in the body ("this is not a persona case").
+    # Scrape without pinning the line down and the reason decides the verdict.
     text = str(raw or "")
     m = _WORD_LINE_RE.search(text)
     if m:
@@ -2464,19 +2479,20 @@ def parse_boundary(raw: str) -> str:
 
 _WHY_LINE_RE = re.compile(r"(?im)^\s*WHY\s*[:：]\s*\**\s*(.+?)\s*\**\s*$")
 
-#: 判定と、その判定を書いた理由。**理由は判定を変えない** —— 読むためだけに
-#: 持ち回る。`word` だけが要る呼び出し元のために、旧い名前は残してある。
+#: A verdict and the reason written for it. **The reason never changes the
+#: verdict** — it is carried only to be read. The old name is kept for callers
+#: that want `word` alone.
 Verdict = namedtuple("Verdict", ("word", "why"))
 
 WHY_MAX = 300
 
 
 def parse_boundary_why(raw: str) -> str:
-    """係が `WORD:` の前に書いた一行。無ければ ""。
+    """The line the clerk wrote before `WORD:`, or "" when there is none.
 
-    **判定には一切使わない。** 本番で止まった理由が読めないことが、実測を
-    進められなくした原因だった —— 誤検出が出ても、何を見てそう言ったのかが
-    どこにも残っていなかった。
+    **Never used to decide anything.** Not being able to read why production
+    stopped was what made measuring impossible — a false positive would come in
+    and nothing recorded what it had been looking at.
     """
     text = str(raw or "")
     m = _WHY_LINE_RE.search(text)
@@ -2729,12 +2745,12 @@ _WARDROBE_JSON_RE = re.compile(r"\{.*\}", re.S)
 
 
 def latin_names_in(text: str, people: Iterable[dict] | None) -> str:
-    """値に混ざった日本語の名前を、ラテン表記へ差し替える。
+    """Replace Japanese names mixed into a value with their Latin spelling.
 
-    **本体は `identity.latin_names`。** 係の出口だけでは漏れる —— `frame` は
-    人ごとの係を通らないので、実機（`68d1daa5`・2026-09-04）で
-    `focus on 各務 みお` がプロンプトまで素通りした。いまは組み立ての出口
-    （`identity.assemble_from_boxes`）でも同じ門を通す。
+    **The body of this lives in `identity.latin_names`.** Guarding only the
+    clerks' exits leaks — `frame` does not go through a per-person clerk, so live
+    (`68d1daa5`, 2026-09-04) `focus on 各務 みお` walked straight into the prompt.
+    The assembly exit (`identity.assemble_from_boxes`) now passes the same gate.
     """
     from .identity import latin_names
 
@@ -2747,32 +2763,34 @@ async def read_per_person(
     cast: Iterable[dict] | None = None,
     model: str, num_ctx: int | None,
 ) -> dict[str, str]:
-    """**着ている服だけを言うターン。** 誰が何を着ているかを、名前で訊く。
+    """**A turn that says nothing but what is being worn.** Ask who wears what,
+    by name.
 
-    総監督（2026-08-29）「A,B それぞれが何を着ているか llm に言わせてみて。
-    これが出力できれば処理するだけですね」。
+    The Showrunner (2026-08-29): "try having the LLM say what A and B are each
+    wearing. If it can output that, the rest is just processing."
 
-    実測でこうなった（同じ5件・n=5）:
+    Measured (same 5 cases, n=5):
 
-        小さく絞って名前で訊く   25/25
-        小さく絞って欄で訊く     25/25   （文脈を厚くしても保った）
-        名前ごとに一問ずつ       18/25   ← 一人だけ切り出すと、文中の唯一の
-                                          服をその人に着せてしまう
-        本番の compile（8,774字） 2/20   ← `wearing` が一度も書かれない
+        narrow question, asked by name    25/25
+        narrow question, asked by field   25/25   (held even with thick context)
+        one question per name             18/25   ← cut one person out alone and
+                                                    the only garment in the line
+                                                    is put on her
+        the production compile (8,774 chars)  2/20   ← `wearing` never written once
 
-    **形が壊れているのではなく、大きな条文の中で埋もれている。** 服だけを
-    訊けば通る。返ってくるのは名前をキーにした JSON なので、欄への振り分けは
-    こちらで決める —— **モデルに文字を選ばせない。**
+    **The shape is not broken; it is buried inside a large contract.** Ask about
+    clothes alone and it comes through. What comes back is JSON keyed by name, so
+    the mapping onto fields is decided here — **the model never picks the letters.**
 
-    答えられなかった欄は返さない（`unchanged` も返さない）。呼び出し側は
-    「返ってきた欄だけ」を書けばよい。
+    A field it could not answer is simply absent (no `unchanged` either). The
+    caller writes only the fields that came back.
     """
     fields, system, solo_system, verb = _PER_PERSON[kind]
     a, b = str(name_a or "").strip(), str(name_b or "").strip()
     if not (a and str(note or "").strip()):
         return {}
-    # 場所（`scene`）には二人ぶんの条文が無い —— 場所は二人で共有するので、
-    # 名前で分ける問いにならない。W でも一人ぶんの道を通す。
+    # There is no two-person contract for place (`scene`) — the place is shared,
+    # so it is not a question that splits by name. Duets take the solo road too.
     if not system:
         b = ""
     if not b:
@@ -2840,7 +2858,7 @@ async def read_wardrobe(
     ollama, *, note: str, name_a: str, name_b: str,
     wearing: str = "", wearing_b: str = "", model: str, num_ctx: int | None,
 ) -> dict[str, str]:
-    """服だけを言うターン。"""
+    """A turn that says nothing but the clothes."""
     return await read_per_person(
         ollama, kind="wearing", note=note, name_a=name_a, name_b=name_b,
         now_a=wearing, now_b=wearing_b, model=model, num_ctx=num_ctx)
@@ -2850,9 +2868,9 @@ async def read_beats(
     ollama, *, note: str, name_a: str, name_b: str,
     beat: str = "", beat_b: str = "", model: str, num_ctx: int | None,
 ) -> dict[str, str]:
-    """姿勢だけを言うターン。**服とまったく同じ穴が空いている** ——
-    実測（`beat` 4件・n=3）で本番の compile は 2/15、`beat` は一度も
-    書かれず、みおの姿勢まで `beat_b` に入った。"""
+    """A turn that says nothing but the pose. **The same hole as the clothes** —
+    measured (4 `beat` cases, n=3) the production compile scored 2/15, `beat` was
+    never written once, and even Mio's pose landed in `beat_b`."""
     return await read_per_person(
         ollama, kind="beat", note=note, name_a=name_a, name_b=name_b,
         now_a=beat, now_b=beat_b, model=model, num_ctx=num_ctx)
@@ -2885,19 +2903,21 @@ async def confirm_dressed(
     ollama, *, text: str, wearing: str, wearing_b: str = "",
     model: str, num_ctx: int | None,
 ) -> Verdict:
-    """脱ぐ話を、**手帖の服と突き合わせて**読み直す。
+    """Read a "take it off" line again, **against the clothes in the notebook**.
 
-    実測（2026-08-29・実機）「パーカー脱いでみて。」→ `nsfw`。下に
-    `denim_skirt, black_tights` があるのに「身体を露わにする依頼」と読まれた。
+    Measured live (2026-08-29): 「パーカー脱いでみて。」 ("try taking the hoodie
+    off") → `nsfw`. There were `denim_skirt, black_tights` underneath, and it was
+    still read as a request to bare her body.
 
-    **言葉では解けない。** 同じ一行が、下に服があれば衣装で、それだけなら
-    脱衣。条文をどちらに寄せても片方の誤りが増える（実測: `exposure` 版は
-    誤検出 8件、締めた版は `nsfw` が 684件中 0発火）。判断に要るのは
-    情報のほうで、**手帖の `wearing` がそれを持っている。**
+    **Words alone cannot settle it.** The same line is wardrobe when there are
+    clothes underneath and undressing when there are not. Leaning the contract
+    either way increases the other error (measured: the `exposure` version gave 8
+    false positives; the tightened version fired `nsfw` 0 times in 684). What the
+    decision needs is the information, and **the notebook's `wearing` holds it.**
 
-    **通すためにしか使わない** —— 止める判断は一人目が一行で下す。ここで
-    新たに止めることはしない。読めなければ `nsfw` のまま（既存の
-    `confirm_boundary` と同じ作法）。
+    **Only ever used to let something through** — stopping is decided by the first
+    reader in one line, and nothing new is stopped here. Unreadable leaves `nsfw`
+    standing (the same manners as `confirm_boundary`).
     """
     have = ", ".join(x.strip() for x in (wearing, wearing_b) if str(x or "").strip())
     if not (str(text or "").strip() and have):
@@ -2925,7 +2945,7 @@ async def read_boundary(
     ollama, *, note: str, model: str, num_ctx: int | None,
     after_decline: str = "",
 ) -> Verdict:
-    """`classify_boundary` と同じ判定を、理由つきで返す。"""
+    """The same verdict as `classify_boundary`, with the reason attached."""
     if not str(note or "").strip():
         return Verdict("", "")
     system = CLASSIFY_BOUNDARY_SYSTEM
@@ -2952,7 +2972,7 @@ async def read_boundary(
 async def read_drift(
     ollama, *, lines: list[str], model: str, num_ctx: int | None,
 ) -> Verdict:
-    """`classify_drift` と同じ判定を、理由つきで返す。"""
+    """The same verdict as `classify_drift`, with the reason attached."""
     said = [str(x or "").strip() for x in (lines or []) if str(x or "").strip()]
     if len(said) < 3:
         return Verdict("", "")
