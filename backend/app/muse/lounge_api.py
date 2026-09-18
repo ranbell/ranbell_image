@@ -1,15 +1,17 @@
-"""楽屋と手帖の口。（2026-09-12）
+"""The doors to the lounge and the handpost. (2026-09-12)
 
-総監督のご判断で Muse Classic を退役させ、Muse Refine を正規の Muse にした。
-**楽屋だけは classic のルーターに載っていた** —— 撮影室の30本と同じ
-`/api/muse` の下に、`lounge/*` と `handpost` の6本が同居していた。
+At the Showrunner's decision Muse Classic was retired and Muse Refine became the
+Muse. **The lounge was the one thing still sitting on classic's router** — six
+routes, `lounge/*` and `handpost`, living under the same `/api/muse` as the
+studio's thirty.
 
-撮影室のほうは退役するが、楽屋は絶対に削らない（総監督の指示は最初から一貫
-している）。だから6本だけここへ移す。画面の側（`CharacterGallery` と
-`LoungePanel`）は `/api/muse/lounge/...` を叩いているので、**URL は変えない**。
+The studio side retires; the lounge is never removed (the Showrunner has been
+consistent about that from the beginning). So only those six move here. The panel
+side (`CharacterGallery` and `LoungePanel`) calls `/api/muse/lounge/...`, so
+**the URLs do not change**.
 
-書き込む側（お出かけ・報告・提案・癖メモ・ケミストリー）は `muse/shared.py`
-の `finish_session` が積む。ここは読むだけ。
+The writing side — outings, reports, pitches, habit notes, chemistry — is queued
+by `finish_session` in `muse/shared.py`. This module only reads.
 """
 from __future__ import annotations
 
@@ -34,9 +36,10 @@ class LikeBody(BaseModel):
 
 
 async def _faces(request: Request) -> dict[str, str]:
-    """`{character_id: 顔の sha}`。**一覧を一度だけ引く。**
+    """`{character_id: sha of the face}`. **One listing, fetched once.**
 
-    楽屋には何人も出てくるので、一人ずつ preset を引くと件数ぶん往復する。
+    Many people appear in the lounge, so fetching a preset each would mean one
+    round trip per entry.
     """
     from ..characters import presets as presets_db
     out: dict[str, str] = {}

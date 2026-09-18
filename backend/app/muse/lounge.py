@@ -148,12 +148,14 @@ _OUTING_PLACE = {
 
 
 def outing_place_en(occasion: str) -> str:
-    """お題に対応する、画に入れられる場所。無ければ ""。"""
+    """A place matching the occasion that a picture can hold. "" when there is
+    none."""
     return _OUTING_PLACE.get(str(occasion or "").strip(), "")
 
 
 def _assert_ja(rows: tuple[tuple[str, str], ...]) -> None:
-    """候補に日本語以外が紛れていないか。**自分で踏んだので、置いておく。**"""
+    """Has anything non-Japanese slipped into the choices? **Kept because we fell
+    into it ourselves.**"""
     from .diary import stray_script
     for name, hint in rows:
         stray = stray_script(name) or stray_script(hint)
@@ -165,14 +167,16 @@ _assert_ja(_OUTINGS)
 
 
 def pick_outing() -> tuple[str, str]:
-    """お題を一つ。同じ話が続かないよう、毎回引き直す。"""
+    """One occasion. Drawn fresh each time so the same outing does not repeat."""
     return random.choice(_OUTINGS)
 
 
 def outing_choices(n: int = 12, *, avoid: str = "") -> tuple[tuple[str, str], ...]:
-    """相談に見せる候補。**全部は見せない** —— 52件並べると読み流される。
+    """The choices shown when they are deciding. **Not all of them** — list 52 and
+    they are skimmed past.
 
-    `avoid` は前回の行き先。同じ所が続かないよう、候補から外す。
+    `avoid` is where they went last time, dropped from the choices so the same
+    place does not come round twice.
     """
     pool = [o for o in _OUTINGS if not avoid or o[0] != avoid]
     return tuple(random.sample(pool, min(max(1, n), len(pool))))
@@ -186,7 +190,7 @@ OUTING_ERRAND_CHANCE = 0.25
 
 
 def outing_is_an_errand(rng: random.Random | None = None) -> bool:
-    """今日のお出かけは、総監督からの頼まれごとつきか。"""
+    """Does today's outing come with an errand from the Showrunner?"""
     return (rng or random).random() < OUTING_ERRAND_CHANCE
 
 
@@ -197,7 +201,7 @@ _SEASON_JA = (
 
 
 def season_ja(when: float | None = None) -> str:
-    """いまの季節を一語。`outing_prompt` の `when_ja` に入れる。"""
+    """The current season in one word, for `outing_prompt`'s `when_ja`."""
     month = time.localtime(when if when is not None else time.time()).tm_mon
     for lo, hi, name in _SEASON_JA:
         if lo <= hi and lo <= month <= hi:
@@ -213,10 +217,10 @@ def normalize_outing(
     *,
     max_turns: int = 6,
 ) -> list[dict[str, Any]]:
-    """`TURN_N_*` を掛け合いに変える。話者は cast の並びを回る。
+    """Turn `TURN_N_*` into an exchange. Speakers cycle through the cast order.
 
-    `normalize_reactions` が `REACTOR_N_*` を友達に割り当てているのと同じ手口。
-    一度の呼び出しで全員ぶん書かせるので、人数が増えても呼び出しは増えない。
+    The same device `normalize_reactions` uses to assign `REACTOR_N_*` to friends.
+    One call writes everyone's lines, so more people never means more calls.
     """
     out: list[dict[str, Any]] = []
     if not cast:
@@ -299,16 +303,18 @@ def snapshot_prompt(
     occasion: str = "", season: str = "",
     rng: random.Random | None = None,
 ) -> str:
-    """友達同士で撮った一枚。**その日の行き先が背景になる。**
+    """A frame the friends took themselves. **Where they went that day is the
+    background.**
 
-    撮影のプロンプトとは別物 —— スタジオの語彙（衣装指定、決めポーズ、
-    ライティング）は入れない。休みの日にスマホで撮った写真に見えればいい。
+    Nothing like a shoot prompt — no studio vocabulary (wardrobe specs, held
+    poses, lighting). It only has to look like a phone photo on a day off.
 
-    ただし**服は要る**。書かなければサンプラーが埋め、行き先に関わらず同じ
-    既定へ寄っていた。季節の一語だけ置く。
+    **Clothes are still needed**, though. Left unwritten the sampler fills them in
+    and drifts to the same default whatever the destination. One word for the
+    season is enough.
 
-    そして**並ばせない**。`standing together, looking at viewer` は集合写真
-    そのもので、遊んでいる写真にはならなかった。
+    And **do not line them up**. `standing together, looking at viewer` is a class
+    photo; it never came out as people enjoying themselves.
     """
     from . import identity as identity_mod
     parts: list[str] = list(identity_mod.subject_tags(cast))
@@ -332,12 +338,14 @@ def snapshot_prompt(
 
 
 def stamp_faces(rows: list[dict[str, Any]], faces: dict[str, str]) -> None:
-    """スレッドと各発言に、話す人の顔を貼る。**その場で書き換える。**
+    """Attach each speaker's face to the thread and to every line. **Rewrites in
+    place.**
 
-    楽屋は誰の発言かで話者が変わるので、**発言ごと**に要る。画面側は既に
-    `thumb(sha)` を持っているので、sha が届けば出せる。
+    In the lounge the speaker changes from line to line, so this is needed **per
+    line**. The panel already has `thumb(sha)`, so a sha is all it takes.
 
-    顔が無いキャラ（board を引いていない）は空のまま —— 画面側で出し分ける。
+    A character with no face (no board drawn yet) stays empty — the panel decides
+    what to show.
     """
     for row in rows:
         if not isinstance(row, dict):
@@ -352,10 +360,11 @@ def stamp_faces(rows: list[dict[str, Any]], faces: dict[str, str]) -> None:
 
 
 def outing_summary_line(thread: dict[str, Any]) -> str:
-    """楽屋の一件を、彼女の手元に残る一行にする。
+    """Reduce one lounge item to the single line she keeps.
 
-    要約ではなく**指し先**。いつ・誰と・何を、それだけ。中身が読みたければ
-    楽屋にスレッドがある。総監督:「要約は諸刃の剣。結構消えてしまうので。」
+    Not a summary — **a pointer**. When, with whom, what; nothing else. The thread
+    is in the lounge for anyone who wants to read it. The Showrunner: "summaries
+    cut both ways — a lot of it just disappears."
     """
     when = str(thread.get("when_ja") or "").strip()
     occasion = str(thread.get("occasion") or "").strip()
@@ -466,7 +475,8 @@ _TRAILING_EN_RE = re.compile(
 
 
 def split_trailing_english(text: str) -> tuple[str, str]:
-    """`(日本語, こぼれた英語)`。境界が無ければ英語側は ""。"""
+    """`(the Japanese, the English that spilled out)`. The English side is "" when
+    there is no boundary."""
     m = _TRAILING_EN_RE.search(str(text or ""))
     if not m:
         return str(text or "").strip(), ""

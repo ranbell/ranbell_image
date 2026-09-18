@@ -61,14 +61,15 @@ _LIST_FIELDS = ["session_id", "status", "inputs", "created_at", "studio"]
 async def list_recent(
     db, *, limit: int = 20, studio: str | None = None,
 ) -> list[dict[str, Any]]:
-    """最近のセッション。`studio` でスタジオを選ぶ。
+    """Recent sessions. `studio` selects which studio.
 
-    `None` は全部（既定）、`""` は退役した classic が書いた行、`"muse_refine"` は
-    いまの撮影室（`service.STUDIO`。**保存値なので名前が古いまま**）。
+    `None` is all of them (the default), `""` is rows written by the retired
+    classic, and `"muse_refine"` is the current studio (`service.STUDIO` — **a
+    stored value, so the name stays old**).
 
-    classic は退役した（2026-09-12）ので仕切りの意味は変わった —— いまは
-    「開ける行」と「もう開けない古い行」の区別。残しているのは、古い行が
-    一覧に混ざると開けないものを開こうとしてしまうから。
+    Classic retired on 2026-09-12, so the divider now means something else: rows
+    that can be opened versus old rows that cannot. It is kept because old rows
+    mixed into the list invite opening something that will not open.
     """
     rows: list[dict[str, Any]] = []
     offset = None
@@ -113,7 +114,7 @@ async def count_all(db) -> int:
 
 
 async def delete_all(db) -> int:
-    """Hard-delete every Muse session — used by the "記憶の消去" admin action."""
+    """Hard-delete every Muse session — used by the "erase memory" admin action."""
     n = await count_all(db)
     if n:
         await db._qc.delete(

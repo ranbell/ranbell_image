@@ -142,9 +142,11 @@ async def write_patch(
 ) -> dict[str, str]:
     """One LLM call → absolute patch (may be empty).
 
-    **人数を示す（2026-09-09）。** 総監督「一人しかいないときに muse_b の tag
-    を編集してしまう。1人か2人の区別の説明が足りていない」。台帳から二人目の
-    欄を落とし（`ledger.for_model`）、一行で人数を言う（`ledger.cast_line`）。
+    **Say the headcount (2026-09-09).** The Showrunner: "when there is only one
+    person it still edits muse_b's tags. The explanation of one versus two is not
+    enough." The second person's fields are dropped from the ledger
+    (`ledger.for_model`) and the headcount is stated in one line
+    (`ledger.cast_line`).
     """
     head = WRITER_RETRY if retry else WRITER_SYSTEM
     # **班が喋った回は、その材料も読む（2026-09-11）。** 席は台帳に直接書かない
@@ -281,7 +283,8 @@ def parse_verify(raw: str) -> tuple[bool, str, dict[str, str]]:
 
 
 def _watch_the_window(session: dict[str, Any], who: str):
-    """枠で切られた回を `/debug` に残す。**黙って短い返事にしない。**（2026-09-18）"""
+    """Record a turn cut off by the window in `/debug`. **Never let it pass as a
+    short reply.** (2026-09-18)"""
     def _note(done: dict[str, Any]) -> None:
         if str(done.get("reason") or "") != "length":
             return
@@ -410,11 +413,14 @@ async def _say(
     ollama, prompt: str, *, model: str, options: dict | None,
     on_token=None, images: list[bytes] | None = None, on_done=None,
 ) -> str:
-    """一回だけ喋らせる。絵があれば絵つき、流す先があれば流す。
+    """Have her speak once — with the picture if there is one, streamed if there is
+    somewhere to stream to.
 
-    **`think=False` と `options` は四つとも直に書く。** 束ねて `**kw` で渡すと
-    `test_think_is_off` と `test_num_ctx` の走査（AST）が確かめられなくなる ——
-    黙って既定の thinking に戻る道を作らないための試験なので、見える形で渡す。
+    **`think=False` and `options` are written out at all four call sites.**
+    Bundling them into `**kw` would stop `test_think_is_off` and `test_num_ctx`
+    from checking anything (they walk the AST). Those tests exist so no quiet road
+    back to default thinking can open, so the arguments are passed where they can
+    be seen.
     """
     if on_token is None:
         if images:
@@ -472,21 +478,22 @@ async def verify_and_repair(
 ) -> tuple[bool, str, dict[str, str]]:
     """After the turn: confirm intent match, or return a self-repair patch.
 
-    **`before` と `recent` を渡す（2026-09-08）。** 条文には「明示的に言われない
-    限り、前ターンの姿勢・服・背景をそのまま保て」と書いてあるのに、**前ターンが
-    入力に無かった** —— 渡していたのは「監督の一行」と「今の台帳」と「今の台帳の
-    読み下し」で、三つのうち二つが同じもの。比較対象が無いので、この規則は
-    原理的に効かない。
+    **Pass `before` and `recent` (2026-09-08).** The contract says "keep the
+    previous turn's pose, clothes and background unless told otherwise", and yet
+    **the previous turn was not in the input** — what was passed was the
+    director's line, the current ledger and a reading of the current ledger, two
+    of which are the same thing. With nothing to compare against, that rule cannot
+    work in principle.
 
-    実測（26B・通し2回）でその通りになっていた:
+    Measured (26B, two full runs) it played out exactly so:
 
-        writer  beat: sitting on floor, **legs tucked to the side**   ← 正しい
-        verify  OK: no 「指示を読み間違えちゃいました」
-        台帳    beat: sitting on floor, **legs spread to the side**   ← 別の姿勢
+        writer  beat: sitting on floor, **legs tucked to the side**   ← correct
+        verify  OK: no "I misread the direction"
+        ledger  beat: sitting on floor, **legs spread to the side**   ← another pose
 
-    `before` は `chat()` の中に最初からあった。`recent` は writer には渡って
-    いたが、verify には無く、「顔だけこっちに向けて」のような**部分指定**を
-    判断する材料が無かった。
+    `before` had been inside `chat()` all along. `recent` did reach the writer but
+    not verify, which left nothing to judge a **partial** direction like "just turn
+    your face this way" against.
     """
     lang = "Japanese" if locale.startswith("ja") else "English"
     sess = session or {"character": character or {}}

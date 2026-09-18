@@ -164,7 +164,7 @@ async def get_vocab_hints(
     Lunatic: tags semantically distant from the axis, high Danbooru frequency,
              absent from the user's personal library.
 
-    wildness (乱れ度) widens the pools:
+    wildness widens the pools:
       1 — default counts and frequency bands
       2 — lunatic pool widens to min_freq 0.10 and gets 3 wild tags
       3 — level 2 + one rare-band tag (freq 0.005–0.05) + 2 stranger guests
@@ -396,7 +396,8 @@ _PRO_SECTION_ORDER = ("character", "background", "props", "action", "mood", "cam
 
 
 def _section_pairs(pro_sections: dict | None) -> list[tuple[str, str]]:
-    """pro_sections から (section_name, value) ペアを定義済み順で返す。空値はスキップ。"""
+    """(section_name, value) pairs from pro_sections in declaration order. Empty
+    values are skipped."""
     if not pro_sections:
         return []
     return [
@@ -429,9 +430,11 @@ async def get_topic_tags(
     popularity_weight: float = 0.0,
     model: str = "",
 ) -> list[str]:
-    """お題テキスト + sections から WD14 ベクトル検索し、VLM でお題に特徴的なタグを返す。
+    """Vector-search WD14 from the topic text plus the sections, then have the VLM
+    return the tags characteristic of that topic.
 
-    limit=25 で返すことでスピリット別にティア分配できる（上位がコア、下位が発散的）。
+    Returning limit=25 lets the spirits be given tiers (the top is the core, the
+    tail is the divergent end).
     Falls back to raw candidates when VLM call fails.
     Returns [] when WD14 vocab is not imported.
 
@@ -513,9 +516,10 @@ async def synthesize_slogan(
     topic_tags: list[str],
     ollama,
 ) -> str:
-    """お題・sections・filtered WD14 tags から vivid なスローガンを 1-2 文で生成。
+    """Generate a vivid one- or two-sentence slogan from the topic, the sections
+    and the filtered WD14 tags.
 
-    VLM 呼び出しが失敗した場合は topic をそのまま返す。
+    Returns the topic unchanged when the VLM call fails.
     """
     lines: list[str] = [
         "You are a creative director for anime illustrations.",
@@ -548,18 +552,18 @@ async def expand_pro_prompt(
     pro_sections: dict | None,
     ollama,
 ) -> dict:
-    """お題 × ユーザープロンプトからストーリー指令と追加タグを生成する。
+    """Build a story directive and supplementary tags from topic × user prompt.
 
-    ユーザーのタグはそのまま維持し、スピリットがそれを基にストーリーを
-    肉付けするための指針を作成する。
+    The user's own tags are kept as they are; what is produced is guidance the
+    spirits use to flesh a story out around them.
 
-    返り値:
-        slogan: 1-2 文: お題と pro_prompt が融合した視覚的テーマ
-        story_directive: 3-4 文: お題×pro_prompt が生み出すシーン・感情・ドラマ
-        supplement_tags: story を補完する追加 Danbooru タグのリスト (5-15 個)
-        scene_anchor: 50 words 以上・2-3 短文のシーン記述
+    Returns:
+        slogan: 1-2 sentences — the visual theme where topic and pro_prompt meet
+        story_directive: 3-4 sentences — the scene, feeling and drama they produce
+        supplement_tags: 5-15 extra Danbooru tags that complete the story
+        scene_anchor: 2-3 short sentences, 50 words or more, describing the scene
 
-    LLM 失敗時は prompt をそのまま使うフォールバックを返す。
+    Falls back to using the prompt as-is when the LLM call fails.
     """
     lines: list[str] = [
         "You are a story director for AI anime image generation.",
@@ -634,10 +638,11 @@ async def refine_axis_tag_hints(
     ollama,
     target: int = 12,
 ) -> list[str]:
-    """VLM で候補タグを精査し、ユーザー意図と整合する上位タグだけ返す。
+    """Sift the candidate tags through the VLM, returning only the top ones that
+    agree with the user's intent.
 
-    raw_hints が空か ollama が None の場合はそのまま返す。
-    VLM 呼び出しが失敗した場合も raw_hints をフォールバックとして返す。
+    Returns them unchanged when `raw_hints` is empty or `ollama` is None, and falls
+    back to `raw_hints` when the VLM call fails.
     """
     if not raw_hints or not ollama:
         return raw_hints

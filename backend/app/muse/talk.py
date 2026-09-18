@@ -88,18 +88,20 @@ def restore_tag(session: dict[str, Any], tag: str) -> bool:
 
 
 def word_hit(needle: str, haystack: str) -> bool:
-    """`needle` が `haystack` に**語として**出るか。
+    """Does `needle` appear in `haystack` **as a word**?
 
-    **部分一致をやめる（2026-09-09）。** 実測（純関数だけで再現）:
+    **Substring matching was dropped (2026-09-09).** Measured (reproduced with
+    pure functions alone):
 
-        'shirt' を脱ぐ → 'white shirt, t-shirt, skirt, shirt dress' が 'skirt' だけに
-        'top' を禁止   → tank_top / rooftop / laptop / stopwatch まで消える
+        take off 'shirt' → 'white shirt, t-shirt, skirt, shirt dress' becomes
+                            just 'skirt'
+        ban 'top'        → tank_top / rooftop / laptop / stopwatch all vanish
 
-    `shirt` は `white shirt` と `shirt dress` に当たってほしい。`skirt` や
-    `rooftop` には当たってほしくない。**語の境目で見る**とその通りになる。
+    `shirt` should hit `white shirt` and `shirt dress`. It should not hit `skirt`
+    or `rooftop`. **Looking at word boundaries** gives exactly that.
 
-    アンダースコアと空白は同じもの扱い —— `white_shirt` と `white shirt` は
-    同じ服（昨日の採点でこちらが踏んだ穴でもある）。
+    Underscores and spaces are the same thing — `white_shirt` and `white shirt`
+    are one garment (a hole the previous day's scoring fell into as well).
     """
     n = re.sub(r"[\s_]+", " ", str(needle or "").strip().lower())
     h = re.sub(r"[\s_]+", " ", str(haystack or "").strip().lower())
@@ -109,22 +111,25 @@ def word_hit(needle: str, haystack: str) -> bool:
 
 
 def live_banned(session: dict[str, Any], ledger: dict[str, str] | None = None) -> list[str]:
-    """禁止のうち、**いま台帳が名指ししていないもの**だけ。
+    """Only the bans **the ledger is not currently naming**.
 
-    現行 Muse が 2026-08-30 に同じ欠陥を直している（`muse.service.banned_now`）
-    —— 「一度でも禁止すると、後から手帖が戻っても絵は戻れない。weave は毎ターン
-    書き、毎ターン黙って消される」。Refine にはこの剪定が無く、実測（純関数）で
-    そのまま出た:
+    The Muse of the day fixed the same defect on 2026-08-30
+    (`muse.service.banned_now`) — "ban something once and the picture cannot come
+    back even after the notebook returns; weave writes it every turn and it is
+    silently removed every turn". Refine had no such pruning, and it showed
+    (measured with pure functions):
 
-        カーディガンを脱ぐ    wearing='' ／ banned=['cardigan']
-        台帳が着直す          wearing='cardigan, white shirt'
-        絵                    ['white_shirt', 'skirt']   ← カーディガンだけ落ちる
+        take the cardigan off   wearing='' / banned=['cardigan']
+        the ledger dresses again wearing='cardigan, white shirt'
+        the picture             ['white_shirt', 'skirt']   ← only the cardigan is lost
 
-    総監督の報告「**指示がないのに服の脱着が繰り返される**」の後半がこれ。
-    台帳は着ていると言い、絵は着ていない。監督が言い直すたびに繰り返す。
+    This is the second half of the Showrunner's report: "**clothes keep coming off
+    and going on without being asked**". The ledger says dressed, the picture says
+    otherwise, and it repeats every time he says it again.
 
-    **禁止を弱めるものではない。** 禁止は立ち続け、台帳がその服を名指しし直した
-    ときだけ引っ込む（総監督の判断・2026-09-09「Muse と同じ規則」）。
+    **This does not weaken a ban.** The ban stands and only steps back while the
+    ledger names that garment again (the Showrunner's decision, 2026-09-09: "the
+    same rule as Muse").
     """
     gone = [str(t).strip() for t in (session.get("banned") or []) if str(t).strip()]
     if not gone or not ledger:
@@ -139,7 +144,7 @@ def filter_banned_tags(
     session: dict[str, Any], tags: list[str],
     *, ledger: dict[str, str] | None = None,
 ) -> list[str]:
-    """禁止された語を落とす。`ledger` を渡すと、台帳が着ているものは残る。"""
+    """Drop banned words. Pass `ledger` and whatever it says she wears stays."""
     gone = [g.lower() for g in live_banned(session, ledger)]
     if not gone:
         return tags

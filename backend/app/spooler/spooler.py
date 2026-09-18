@@ -263,11 +263,13 @@ class JobSpooler:
     # A group is any set of jobs sharing the same meta["group_id"].
 
     def dismiss(self, job_id: str) -> bool:
-        """終わったジョブを履歴から片付ける。**走っているものには効かない。**
+        """Clear a finished job out of the history. **Has no effect on a running
+        one.**
 
-        失敗したジョブは `_registry` に居ないので `cancel` が届かず、画面から
-        消す手段が無かった（総監督「job キャンセルがエラー時だけない」）。
-        止めるものはもう無いので、これは取り消しではなく**片付け**。
+        A failed job is not in `_registry`, so `cancel` never reached it and there
+        was no way to clear it from the screen (the Showrunner: "job cancel is
+        missing only when it errored"). There is nothing left to stop, so this is
+        not a cancel — it is **tidying up**.
         """
         if self._registry.get(job_id) is not None:
             return False          # まだ動いている —— `cancel` の領分
@@ -306,13 +308,13 @@ class JobSpooler:
     # ── Retry ──────────────────────────────────────────────────────────────────
 
     def _find(self, job_id: str) -> Job | None:
-        """走っているものと、終わったもの、どちらからでも引く。
+        """Look a job up whether it is running or finished.
 
-        **終わったジョブは `_registry` から消えて `_history` へ移る**
-        （`_move_to_history` —— 履歴が source of truth）。`retry` は
-        `_registry` しか見ていなかったので、**失敗したジョブの再実行は
-        定義上いつも 404 だった**。画面は履歴から一覧を出しているので、
-        押せるのに必ず失敗する、という食い違いになっていた。
+        **A finished job leaves `_registry` and moves into `_history`**
+        (`_move_to_history` — the history is the source of truth). `retry` only
+        looked at `_registry`, so **retrying a failed job was 404 by definition**.
+        The screen lists from the history, which left a button you could press
+        that was certain to fail.
         """
         job = self._registry.get(job_id)
         if job is not None:

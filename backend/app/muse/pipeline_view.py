@@ -29,18 +29,20 @@ _STAGE_IDS = (
 
 
 def _tokens(text: str) -> set[str]:
-    """照合用の語。**下線でも空白でも同じ語になるように割る。**（2026-09-10）
+    """Words for comparison. **Split so an underscore and a space give the same
+    word.** (2026-09-10)
 
-    総監督「ずっと missing と出ているけど理由は？」。値は絵に入っていた ——
-    突き合わせ方が揃っていなかっただけ:
+    The Showrunner: "it keeps saying missing — why?". The value was in the picture
+    all along; only the two sides were not being compared the same way:
 
-        台帳          casual_clothes            ← writer は danbooru 風に書く
-        craft.prompt  casual clothes            ← `anima.format_for_anima` が
-                                                   最後に下線を空白へ戻す
-        重なり        （無し）→ 「missing」
+        ledger        casual_clothes            ← the writer writes danbooru-style
+        craft.prompt  casual clothes            ← `anima.format_for_anima` turns
+                                                   underscores back into spaces
+        overlap       (none) → "missing"
 
-    繋がったままの語（`casual_clothes`）と、割った語（`casual` / `clothes`）の
-    **両方**を返す。完全一致も、書き方の違いも、どちらも拾える。
+    Returns **both** the joined word (`casual_clothes`) and the split words
+    (`casual` / `clothes`), so an exact match and a difference of spelling are
+    both caught.
     """
     out: set[str] = set()
     for t in re.findall(r"[A-Za-z][A-Za-z0-9_-]{2,}", str(text or "").lower()):

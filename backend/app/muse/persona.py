@@ -199,10 +199,10 @@ _CLASSIC_OUTPUT_MARK = "OUTPUT FORMAT — labelled blocks, nothing else:"
 
 
 def _without_classic_output(base: str) -> str:
-    """classic 側の出力書式を落とす。**声と人格と契約はそのまま残す。**
+    """Drop classic's output format. **Voice, personality and contract stay.**
 
-    見つからなければ何もしない —— classic 側の文言が変わっても、黙って
-    人格まで削らないため。
+    Does nothing when it is not found — so that a change of wording on the classic
+    side never quietly takes the personality with it.
     """
     text = str(base or "")
     i = text.find(_CLASSIC_OUTPUT_MARK)
@@ -219,23 +219,28 @@ def _first_person(who: dict[str, Any], fallback: str) -> str:
 def w_output_block(
     lead: dict[str, Any], partner: dict[str, Any], *, locale: str,
 ) -> str:
-    """W撮りのときだけ足す出力の形。**一人のときは一度も呼ばない。**（2026-09-10）
+    """The output shape added only for a duet. **Never called for a solo shoot.**
+    (2026-09-10)
 
-    総監督「Muse Refine で2人で会話しているときに会話分離ができてないですね。
-    Muse Classic を参考に修正お願い」「内心を話すときもどちらかランダムで」。
+    The Showrunner: "in Muse Refine, when two of them are talking the speakers are
+    not separated. Please fix it the way Muse Classic does", "and pick at random
+    which one mutters".
 
-    実機（`83d31174`）では全25行が主演名義の1行に潰れ、本文に私（みお）と
-    アタシ（あさひ）が同居していた。分ける側（`identity.parse_duet_speakers`）は
-    最初から呼ばれていて、**接頭辞を書けという指示だけが届いていなかった** ——
-    それは classic の出力書式の末尾にしか無く、`_without_classic_output` が
-    落としている（残す 7,588字に該当行 0本／落とす 2,718字に 4本）。
+    Live (`83d31174`) all 25 lines collapsed into one row under the lead's name,
+    with 私 (Mio's first person) and アタシ (Asahi's) inside the same body of text.
+    The splitter (`identity.parse_duet_speakers`) had been called from the start —
+    **only the instruction to write the prefix never arrived.** That instruction
+    lived at the tail of classic's output format, which `_without_classic_output`
+    removes (0 such lines in the 7,588 characters kept, 4 in the 2,718 dropped).
 
-    **落とした 2,718字を戻さない。** 戻すと `OUTPUT FORMAT` が二つ・`MY_FEEL`
-    が四つ並ぶ状態に逆戻りする（それを直したのが `_without_classic_output`）。
-    ここでは Refine の書式に合わせて、W に要る規則だけを書く。
+    **The 2,718 characters are not brought back.** Bringing them back returns to
+    two `OUTPUT FORMAT` blocks and four `MY_FEEL` lines, which is what
+    `_without_classic_output` was written to fix. What is written here is only the
+    rules a duet needs, in Refine's own format.
 
-    声の条文（`--- MUSE A VOICE ---` / `--- MUSE B VOICE ---` と各々の一人称）は
-    残っている側に入っているので、ここでは繰り返さず**名指しで結びつける**だけ。
+    The voice clauses (`--- MUSE A VOICE ---` / `--- MUSE B VOICE ---` and each
+    first person) are in the part that is kept, so they are not repeated here —
+    this only **binds them by name**.
     """
     a = str(lead.get("name_ja") or lead.get("name") or "A").strip()
     b = str(partner.get("name_ja") or partner.get("name") or "B").strip()
@@ -421,7 +426,7 @@ def is_commit_pitch(text: str) -> bool:
 
 
 def note_standing(session: dict[str, Any], text: str) -> str | None:
-    """Explicit standing lines: 「常設: …」 / 「standing: …」."""
+    """Explicit standing lines: 「常設: …」 ("standing: …") / "standing: …"."""
     raw = str(text or "").strip()
     m = re.match(r"(?is)^\s*(?:常設|standing)\s*[:：]\s*(.+)$", raw)
     if not m:

@@ -192,15 +192,16 @@ _WARDROBE_NAMES_JA = {
 
 def wardrobe_sets(preset: dict[str, Any], *,
                   outfit: list[str], props: list[str]) -> list[dict[str, Any]]:
-    """その子が持っている服。**`signature` は必ず在る。**
+    """The clothes this one owns. **`signature` always exists.**
 
-    総監督（2026-08-29）「default の衣装や持ち物がないので、会話開始後に
-    いきなりおかしな状態に陥ることがあります」。手帖の `wearing` は空で
-    始まるので、**服が無い状態から「脱いで」と言われて宙に浮いていた。**
+    The Showrunner (2026-08-29): "with no default outfit or belongings, things go
+    strange right after a conversation starts". The notebook's `wearing` begins
+    empty, so **being told "take it off" with no clothes on left her in mid-air.**
 
-    `wardrobe` を持たないプリセットは、いまの `favorite_clothes` +
-    `footwear` から `signature` を一件だけ組む —— 書き終わるまでも、将来の
-    新しい子でも壊れない。**代表服は変わらない。**
+    A preset with no `wardrobe` gets one `signature` set built from its current
+    `favorite_clothes` + `footwear` — which holds while the data is still being
+    written and for any new character later. **The signature outfit never
+    changes.**
     """
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -404,7 +405,8 @@ async def list_presets(db, *, limit: int = 300) -> list[dict[str, Any]]:
 
 
 def _could_be_a_point(preset_id: str) -> bool:
-    """Qdrant が点の id として受け取れる形か（UUID か非負整数）。"""
+    """Is this a shape Qdrant accepts as a point id (a UUID or a non-negative
+    integer)?"""
     import uuid
 
     text = str(preset_id or "").strip()
@@ -1059,8 +1061,9 @@ async def add_chemistry_record(
     copy pointing at the other as `partner_character_id` (plus her name, so the
     dossier can label the entry with no cross-fetch).
 
-    **同一ペアは前回1件だけ。** 同じ相手との新しいメモが来たら古い方を消し、
-    置き換える。30人ローテでも「今の相手の前回」が押し出されないようにする。
+    **One entry per pair, the most recent.** A new note about the same partner
+    deletes the old one and takes its place, so "last time with this partner" is
+    never pushed out even on a 30-person rotation.
     """
     presets_by_id = {
         cid: await get_preset(db, cid) for cid in (char_a_id, char_b_id)
@@ -1344,9 +1347,10 @@ async def get_recent_chemistry_notes(
 ) -> list[str]:
     """Short prose from stored chemistry — Muse talk only.
 
-    **同一の相手だけで呼ぶ。** ``partner_id`` が無いときは掛け合いに載せない
-    （別の相手の古いメモを誤って渡さない）。同一ペアは保存側で1件なので、
-    通常は最新＝唯一のメモが1件返る。
+    **Only ever called for the same partner.** With no ``partner_id`` nothing is
+    put into the exchange (so an old note about somebody else is never handed over
+    by mistake). Storage keeps one entry per pair, so normally the single note
+    returned is both the latest and the only one.
     """
     preset = await get_preset(db, preset_id)
     if not preset:
