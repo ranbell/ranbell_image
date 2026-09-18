@@ -1,13 +1,15 @@
 """The Muse crew — the production staff you cast before the first frame.
 
-No real creator names. There are seventeen jobs on the crew (演出, 撮影, 衣装,
-照明, 作画監督…) and most of them have more than one person who does it. The job
+No real creator names. There are seventeen jobs on the crew — 演出 (staging),
+撮影 (camera), 衣装 (wardrobe), 照明 (lighting), 作画監督 (animation direction)
+and so on — and most of them have more than one person who does it. The job
 decides what gets solved; the person decides how. Two lighting artists both light
 the scene, and one of them will hand you hard rim light while the other hands you
 something soft enough to sleep in.
 
-Each person carries a taste on three axes — 鮮やか↔渋い, 実写的↔フラット,
-斬新↔定番 — and `style_direction` averages the room into one base look, plus the
+Each person carries a taste on three axes — vivid↔muted (鮮やか↔渋い),
+photoreal↔flat (実写的↔フラット), bold↔classic (斬新↔定番) — and
+`style_direction` averages the room into one base look, plus the
 flavour tags each of them brings. That is the game: pick the people, not just the
 jobs, and the picture moves.
 """
@@ -1774,8 +1776,9 @@ def _packed_person_card(muse_id: str, index: int, *, locale: str, seed: str,
     """One speaker's full person card inside the packed table-talk prompt.
 
     A one-line roster (name + techniques) was what the packed turn used to get,
-    and it is why every seat came out sounding the same: the voice, the 口調,
-    the catchphrase and the example line are what make「重心」and「逆光」two
+    and it is why every seat came out sounding the same: the voice, the 口調
+    (manner of speech), the catchphrase and the example line are what make
+    「重心」 (Centre-of-gravity) and 「逆光」 (Backlight) two
     different mouths. They are cheap — three cards is a few hundred tokens —
     and without them the pack is one narrator wearing three name tags.
 
@@ -1828,18 +1831,22 @@ def field_table_prompt(
     preset_id: str = "",
     seed: str = "",
 ) -> str:
-    """欄ごとの会議の前置き —— 同じ台帳の欄を持つ席が、一度に喋る。（2026-09-14）
+    """The preamble for one field corner — the seats that share a ledger field
+    speak in a single call. (2026-09-14)
 
-    総監督「同じ台帳のメンバーを束ねて1つのセッションにして、結論として一つの
-    台帳をだしたらいい。そうすると衝突は回避できる」。
+    The Showrunner: "bundle the members who share a ledger field into one session
+    so they produce a single ledger as the conclusion — that avoids the
+    collisions."
 
-    実機（`6dc11d0e`）で `look` は色彩設計と線画が別々に足して12語になり、
-    `amber_theme` と `magenta_theme` が同居していた。二人を**同じ部屋で喋らせて
-    一つの値を出させる**ので、矛盾はその場で潰れる。呼び出しも席数から欄数へ減る
-    （standard は 12 → 9）。
+    Live (`6dc11d0e`) `look` had grown to twelve words because colour design and
+    line art each added their own, with `amber_theme` and `magenta_theme` sitting
+    together. Putting the two **in one room and making them agree on one value**
+    settles the contradiction on the spot. It also cuts the calls from one per
+    seat to one per field (12 → 9 on `standard`).
 
-    出力の形はここには書かない —— `crew_room.GROUP_OUTPUT` が最後に言う
-    （一席の `SEAT_OUTPUT` と同じ約束: **最後に読んだ形式が勝つ**）。
+    The output shape is not written here — `crew_room.GROUP_OUTPUT` says it last
+    (the same bargain as a single seat's `SEAT_OUTPUT`: **the format read last
+    wins**).
     """
     ids = [resolve_member(s) for s in speakers]
     cards = [
@@ -2208,9 +2215,11 @@ GENRES: dict[str, dict[str, str]] = {
 def genre_block(genre: str) -> str:
     """The expert for one genre, or "" when none is picked.
 
-    **例文だけを渡す。** 説明を足さないのは、足すと例より説明に従うから
-    （実測: 絵作り係で例を外したら造語に落ちた。逆に例だけ見せると、その形で
-    書く）。四欄それぞれ一行。
+    **Hand over the examples alone.** No explanation is added, because when it is
+    added the model follows the explanation rather than the examples (measured:
+    dropping the examples from the picture clerk dropped it into invented words;
+    show only examples and it writes in that shape). One line per field, four
+    fields.
     """
     row = GENRES.get(str(genre or "").strip().lower())
     if not row:
@@ -2671,10 +2680,11 @@ def lounge_share_prompt(
 
 
 def _outing_sheet(c: dict[str, Any]) -> str:
-    """相談と語りに渡す一人分。**好き嫌いが要る** —— そこで意見が割れる。
+    """One person's sheet for the planning and the telling. **Likes and dislikes
+    are needed** — that is where they disagree.
 
-    `student_past` は渡さない。学生時代の話は日記の側の材料で、お出かけに
-    出すと年齢の線がぼやける。
+    `student_past` is not handed over. School days are material for the diary; in
+    an outing they blur the line on age.
     """
     name = str(c.get("name_ja") or "")
     age = int(c.get("age") or 0)
@@ -2698,15 +2708,19 @@ def outing_plan_prompt(
     season_ja: str = "",
     errand: bool = False,
 ) -> str:
-    """**まだ出かけていない。** 休みが合って、どこへ行くかを相談している所。
+    """**Nobody has left yet.** Their days off line up and they are deciding where
+    to go.
 
-    性格を二度効かせるための一段目 —— ここで「その人なら何を選ぶか」が出る。
-    実測（みなも／あかり／すず）で、深夜のコンビニのあかりが人混みを嫌がり、
-    暗室のみなもが眩しくない所を推し、書道のすずが「はらいが美しくできない」
-    と断った。**全部それぞれの設定から出ている。**
+    The first of two places personality bites — this is where "what would she
+    pick" comes out. Measured (Minamo / Akari / Suzu): Akari, who works the
+    late-night convenience store, did not want crowds; Minamo of the darkroom
+    pushed for somewhere not too bright; Suzu the calligrapher turned one down
+    because "the sweeping stroke would not come out beautifully". **All of it
+    falls out of their own sheets.**
 
-    `errand` のときは、総監督から写真を頼まれた日。**行き先の相談は変わらず
-    自分たちでする** —— 頼まれたのは撮ることであって、どこへ行くかではない。
+    With `errand` set, it is a day the Showrunner asked for photographs. **Where
+    to go is still theirs to decide** — what was asked for was the shooting, not
+    the destination.
     """
     who = "\n".join(_outing_sheet(c) for c in cast if c.get("name_ja"))
     menu = "\n".join(f"- {n}（{h}）" for n, h in choices)
@@ -2751,13 +2765,14 @@ def outing_prompt(
     planned_talk: str = "",
     errand: bool = False,
 ) -> str:
-    """撮影の外で、仲のいい子同士が出かけた日の短い掛け合い。
+    """A short exchange from a day two friends went out, away from any shoot.
 
-    楽屋の他の投稿と違って、**撮影の材料を一切受け取らない**。session_log も
-    photo_desc も渡さない。渡せば必ずその話になるので、渡さない。
+    Unlike every other lounge post, **it is handed no shoot material at all** — no
+    session_log, no photo_desc. Hand those over and the talk turns to them every
+    time, so they are not handed over.
 
-    一度の呼び出しで全員ぶん書かせる（`normalize_outing` が `TURN_N_*` を
-    話者に割る）。人数が増えても呼び出しは増えない。
+    One call writes everyone's lines (`normalize_outing` assigns the `TURN_N_*`
+    blocks to speakers). More people does not mean more calls.
     """
     who = "、".join(
         f"『{str(c.get('name_ja') or '')}』" for c in cast if c.get("name_ja")
@@ -2872,13 +2887,15 @@ def showrunner_taste_prompt(
     Two wrong shapes came before this one.
 
     First it was derived from the notebook snapshot with no model at all: the
-    word "low" anywhere in `frame` taught her 「ローアングルの近い距離」 and
+    word "low" anywhere in `frame` taught her 「ローアングルの近い距離」 ("a low
+    angle, close in") and
     the clothes she happened to end in became a preference. That is a
     description of the take, not anything learned from it.
 
     Then it read his lines on their own — and that is still wrong, because a
-    line on its own has no content. 「いいよ、今の良かった」 says nothing
-    unless you know what she had just done. And 「震えはいらない」 is not a
+    line on its own has no content. 「いいよ、今の良かった」 ("good — that one was
+    good") says nothing unless you know what she had just done. And
+    「震えはいらない」 ("no trembling") is not a
     rule: it was said to one quiet scene where she had her fingertips shaking,
     and carried forward as a standing preference it would break the next shoot
     that wants a tremble.
@@ -3627,7 +3644,8 @@ def production_contract(*, declined: int = 0) -> str:
     """The paper she signed. Goes into her system prompt on every turn.
 
     `declined` used to append 「この撮影で、受け入れられない依頼が N 回ありま
-    した」. Nothing counts declines any more — the answer to a flag is that she
+    した」 ("there were N requests you could not accept in this shoot"). Nothing
+    counts declines any more — the answer to a flag is that she
     lets it go by — and telling her a tally would only make an ordinary shoot
     feel like a record of trouble. The argument is kept for callers.
     """

@@ -313,7 +313,8 @@ def restore_banned(session: dict[str, Any], tag: str) -> dict[str, Any]:
 
 
 async def _load_runtime_cfg(db, session: dict[str, Any]) -> dict[str, Any]:
-    """実行時設定をセッションに積む。**文脈長を判定係と揃えるため。**"""
+    """Put the runtime config on the session. **So the context length matches the
+    clerks'.**"""
     try:
         from ..runtime_config import get_runtime_config
         cfg = await get_runtime_config(db)
@@ -533,21 +534,24 @@ def _change_event(
     after: dict[str, str],
     locale: str,
 ) -> None:
-    """台帳が動いたことを**記録に**残す。会話欄には出さない。（2026-09-10）
+    """Keep a move of the ledger **in the record**. Nothing is put in the
+    conversation. (2026-09-10)
 
-    総監督「会話部分の情報が多いので、画の更新などの情報は表示しなくていいかな。
-    ログで見えるので」。
+    The Showrunner: "there is a lot of information in the conversation part —
+    picture updates and the like do not need to be shown, I can see them in the
+    log".
 
-    以前はここで `kind: "ledger_change"` の行を会話に積んでいた。`record_rewrite`
-    が書き換え記録と `ledger_rewrite` の SSE を出すので、`/debug` と `/pipeline`
-    には今まで通り残る。会話の側は、彼女の台詞に付く 🖼 のアイコン
-    （`_mark_turn_shot`）で足りる。
+    This used to push a `kind: "ledger_change"` row into the conversation.
+    `record_rewrite` emits the rewrite record and the `ledger_rewrite` SSE, so
+    `/debug` and `/pipeline` still carry everything. On the conversation side the
+    🖼 icon on her line (`_mark_turn_shot`) is enough.
 
-    **消したのは `ledger_change` だけ。** `ledger_missed`（絵の指示に見えるのに
-    台帳が動かなかった回）は言い直しの合図なので、今まで通り会話に出す。
+    **Only `ledger_change` was removed.** `ledger_missed` — a turn that looked like
+    a picture direction where the ledger did not move — is the cue to say it again,
+    so it still appears in the conversation.
 
-    `patch` と `locale` は呼び出し側の形をそのままにしてある —— 会話に戻したく
-    なったときに、呼ぶ側を触らずに済むように。
+    `patch` and `locale` keep the caller's shape as it was, so putting this back
+    into the conversation would not mean touching the callers.
     """
     debug_mod.record_rewrite(
         session, source, before=before, after=after, intent=source,
@@ -557,11 +561,12 @@ def _change_event(
 def _publish_floor(
     session: dict[str, Any], floor: list[dict[str, Any]], *, locale: str,
 ) -> None:
-    """班の発言を会話欄に積む。（2026-09-11）
+    """Push the crew's lines into the conversation. (2026-09-11)
 
-    席の一言は `kind: "seat"`、やじは `kind: "heckle"`。どちらも
-    **画面では彼女の台詞と別の見た目**にする —— 18人が喋るので、主演の声が
-    埋もれないように。欄を持つ席には、その欄の名前を旗として付ける。
+    A seat's line is `kind: "seat"`, a heckle is `kind: "heckle"`. Both **look
+    different from her lines on screen** — eighteen people speak, so the lead's
+    voice must not be buried. A seat that owns a field carries that field's name
+    as a flag.
     """
     for row in floor:
         meta: dict[str, Any] = {
@@ -587,15 +592,17 @@ def _publish_floor(
 def _mark_turn_shot(
     session: dict[str, Any], *, mark: int, before: dict[str, str],
 ) -> None:
-    """この回が画を動かしたかを、彼女の台詞の行に押す。（2026-09-10）
+    """Stamp whether this turn moved the picture onto her line. (2026-09-10)
 
-    総監督「会話オンリーか画像プロンプト生成かはアイコンで分かるように」。
+    The Showrunner: "make it clear from an icon whether a turn was conversation
+    only or generated an image prompt".
 
-    `mark` はターンの頭で控えた `len(chat)`。そこから後ろの `say` の行にだけ
-    押す —— 内心（banter）や提案（pitch）は喋りの続きなので、印は台詞に一つ。
+    `mark` is the `len(chat)` noted at the head of the turn. Only `say` rows after
+    that point are stamped — the mutter (banter) and the pitch are continuations of
+    the same speech, so one stamp goes on the line itself.
 
-    **古い行には触らない。** 押していない行は `meta.shot` を持たないので、
-    画面は何も出さない（`=== true` / `=== false` で見る）。
+    **Older rows are never touched.** A row that was never stamped has no
+    `meta.shot`, so the screen shows nothing (read with `=== true` / `=== false`).
     """
     after = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
     shot = bool(ledger_mod.changed_fields(before, after))
@@ -618,20 +625,21 @@ _NOTES_MAX = 24
 
 
 def _keep_note(session: dict[str, Any], text: str) -> None:
-    """絵を動かした監督の一行を控える。（2026-09-10）
+    """Note the director's line when it moved the picture. (2026-09-10)
 
-    総監督「癖メモかけるようにしよう」。
+    The Showrunner: "let's have it write habit notes".
 
-    スタジオ手帖の癖メモは classic の `finish_session` が出すが、二つの門が
-    どちらも `session["notes"]` を読む —— `lounge.should_write_habit` と、
-    書く側の `muse.service._director_highlights`。**Refine は常設の指示を
-    `standing` に入れていて `notes` を一度も埋めていなかった**ので、一度も
-    出ていなかった。
+    The studio notebook's habit note is emitted by classic's `finish_session`, but
+    two gates both read `session["notes"]` — `lounge.should_write_habit` and, on
+    the writing side, `muse.service._director_highlights`. **Refine put standing
+    orders into `standing` and never filled `notes` at all**, so a habit note was
+    never written once.
 
-    入れるのは**絵を動かした一行だけ**。「かわいいよ」のような会話だけの回は
-    癖の材料にならないし、条文（`crew.showrunner_habit_prompt`）が求めている
-    のも「総監督の指示メモ」。同じ行が続けて来たら積み直さない（classic の
-    `_add_note` と同じ）。
+    Only **a line that moved the picture** is kept. A conversation-only turn such
+    as "you look lovely" is not material for a habit, and what the contract
+    (`crew.showrunner_habit_prompt`) asks for is the Showrunner's direction notes.
+    The same line twice in a row is not stacked again (same as classic's
+    `_add_note`).
     """
     line = " ".join(str(text or "").split()).strip()
     if not line:
@@ -644,12 +652,13 @@ def _keep_note(session: dict[str, Any], text: str) -> None:
 
 
 def _note_blind(session: dict[str, Any], *, locale: str) -> None:
-    """絵が模型に届かなかったことを、口に出して言う。（2026-09-10）
+    """Say out loud that the picture never reached the model. (2026-09-10)
 
-    絵を読めないモデルは**断らずに空を返す**。黙って絵抜きに落ちると、
-    総監督からは「今日は口数が少ないな」にしか見えない。一度だけ言う。
+    A model that cannot read images **returns empty rather than refusing**.
+    Falling back to no-picture in silence looks, from the Showrunner's side, like
+    nothing worse than "she is quiet today". Said once.
 
-    classic の `muse.service._note_blind` と同じ文言・同じ作法。
+    Same wording and same manners as classic's `muse.service._note_blind`.
     """
     if session.get("_blind_said"):
         return
@@ -1340,14 +1349,16 @@ async def rebuild(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
 
 
 def _board_seed(board: dict[str, Any]) -> int:
-    """OK を出した試し撮りが実際に使った種。
+    """The seed the approved draft actually used.
 
-    正本は `board["seed"]`（描き終わったときに `session_db.attach_board_image`
-    が書き戻す）。**それが空の古い行のために写真の側からも拾う** —— 種は昔から
-    一枚ごとの meta に残っていたが、欄へ上げる道が無かった。
+    The document of record is `board["seed"]`, written back by
+    `session_db.attach_board_image` when the render finishes. **For older rows
+    where that is empty, it is also picked up from the photos** — the seed has
+    always been in each frame's meta, there was simply no road up into the field.
 
-    一回の試し撮りは一つの種（ComfyUI の batch なので、枚数が複数でも種は同じで
-    添字で絵が分かれる）。本番も同じ枚数で撮るので、添字どおりに対応する。
+    One draft press means one seed (it is a ComfyUI batch, so several frames share
+    the seed and differ by index). The final shoot takes the same number of
+    frames, so the indices line up.
     """
     seed = int(board.get("seed") or 0)
     if seed:
@@ -1628,16 +1639,19 @@ async def list_refine_sessions(db, *, limit: int = 20) -> list[dict[str, Any]]:
 
 
 async def open_table(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
-    """班を開く —— 開幕の三席が当たりを付ける。（2026-09-11）
+    """Open the table — the three opening seats rough the shot in. (2026-09-11)
 
-    総監督「スタジオ撮り（複数の撮影スタッフのモード）を Muse refine に取り込みたい」。
+    The Showrunner: "I want the studio shoot (the mode with several crew members)
+    inside Muse refine".
 
-    classic の `start_table` と同じ二段構え。まず**衣装 → 撮影 → 主演**の三席だけで
-    場所と芝居を決め、そこから先は総監督が絵を見て注文する。全18席が空の台帳を
-    前に二十ターン頷き合う、という classic の失敗を繰り返さないため。
+    The same two stages as classic's `start_table`. First **wardrobe → camera →
+    lead** settle the place and the performance on their own; from there the
+    Showrunner looks at a picture and asks for what he wants. This is what keeps
+    classic's failure from repeating — eighteen seats nodding at each other for
+    twenty turns in front of an empty ledger.
 
-    **開けるのはここだけ。** 印（`crew_room.TABLE_OPEN`）が立っていない
-    セッションでは、会話のターンで班は一度も回らない。
+    **This is the only door.** In a session without the mark
+    (`crew_room.TABLE_OPEN`), the crew never walks on a conversation turn.
     """
     if not (session.get("character") or {}).get("character_id"):
         raise RefineError(

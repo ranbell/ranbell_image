@@ -223,15 +223,16 @@ def bare_tag(part: str) -> str:
 def _drop_unbalanced_brackets(text: str) -> str:
     """Brackets with no partner in this tag — a JSON leftover, not emphasis.
 
-    実測（`2acfdbe2`・2026-08-30）で板のプロンプトに `anime_illustration]` が
-    載った。weave が JSON の配列ごと文字列にして返した回で、`split_weight` は
-    **比べる用の値**からしか括弧を落とさない（`bare_tag` は正しく
-    `anime_illustration` を返していた）ので、サンプラーへ行く生の文字のほうに
-    `]` が残る。
+    Measured (`2acfdbe2`, 2026-08-30): the board prompt carried
+    `anime_illustration]`. On a turn where weave returned a whole JSON array as a
+    string, `split_weight` only strips brackets from **the value used for
+    comparison** (`bare_tag` correctly returned `anime_illustration`), so the `]`
+    survived in the raw characters headed for the sampler.
 
-    `[...]` も `(...)` もプロンプトでは**強調の構文**なので、片方だけ残ると
-    その語の重みが変わる。**釣り合っているものは触らない** —— 相方のいない
-    片割れだけを落とす。語の一覧ではなく、括弧が合っているかどうかだけを見る。
+    Both `[...]` and `(...)` are **emphasis syntax** in a prompt, so leaving one
+    half changes that word's weight. **Balanced pairs are left alone** — only a
+    half with no partner is dropped. No word list; the only question is whether the
+    brackets match.
     """
     s = str(text or "")
     for open_ch, close_ch in (("(", ")"), ("[", "]")):
@@ -243,16 +244,17 @@ def _drop_unbalanced_brackets(text: str) -> str:
 
 
 def _strip_edge_underscores(text: str) -> str:
-    """`_anime_illustration` / `__` / `__n/a__` —— JSON の残りかす。
+    """`_anime_illustration` / `__` / `__n/a__` — leftovers from JSON.
 
-    **本物のタグは `_` では始まらないし、終わらない。** 実測（2026-08-30）で
-    weave が配列ごと文字列にして返す回があり、板のプロンプトに `_solo`
-    `__n/a__` `_anime_illustration` がそのまま載った。`bare_tag` は比べる用の
-    値からしか落とさないので、サンプラーへ行く生の文字に残る。
+    **A real tag neither starts nor ends with `_`.** Measured (2026-08-30), weave
+    returned a whole array as a string on some turns and the board prompt carried
+    `_solo`, `__n/a__` and `_anime_illustration` verbatim. `bare_tag` only strips
+    the value used for comparison, so they survive in the raw characters headed
+    for the sampler.
 
-    語の一覧ではなく、**縁のアンダースコア**だけを見る。中の `_` は
-    danbooru の区切りなので触らない。全部が `_` だった語は空になり、
-    `clamp_weights` が落とす。
+    No word list — only **underscores at the edges**. The `_` inside is danbooru's
+    separator and is left alone. A word that was all underscores comes back empty
+    and `clamp_weights` drops it.
     """
     return str(text or "").strip().strip("_").strip()
 
@@ -519,7 +521,8 @@ _BARE_LABEL_TAIL_RE = re.compile(
 
 
 def _split_labels(line: str) -> list[tuple[str, str | None, str]]:
-    """一行を「欄名の手前」「欄名」「その後ろ」に割る。欄名が無ければ一片だけ。"""
+    """Split a line into "before the label", "the label" and "after it". One piece
+    when there is no label."""
     marks = list(_INLINE_LABEL_RE.finditer(line))
     if not marks:
         return [(line, None, "")]
@@ -535,7 +538,7 @@ def _split_labels(line: str) -> list[tuple[str, str | None, str]]:
 
 
 def _drop_bare_label_tail(text: str) -> str:
-    """末尾に残った裸の欄名を落とす（`… CARD` / `… PITCH:`）。"""
+    """Drop a bare field name left at the tail (`… CARD` / `… PITCH:`)."""
     out = str(text or "")
     for _ in range(3):
         stripped = _BARE_LABEL_TAIL_RE.sub("", out).rstrip()
@@ -546,15 +549,16 @@ def _drop_bare_label_tail(text: str) -> str:
 
 
 def trim_to_a_sentence(text: str, cap: int) -> str:
-    """上限を超える文章を、**文の切れ目**で止める。（2026-09-18）
+    """Stop text that exceeds a cap **at a sentence boundary**. (2026-09-18)
 
-    総監督「prompt のオーバフローで文字が切れる場合がある」。長さの上限そのものは
-    要る（絵に渡す散文も、彼女に渡す記憶も、青天井にはできない）。直すのは
-    **どこで切るか** —— `text[:900]` は単語の真ん中で落とすので、
-    `a heavy knit card` のような尻切れがそのまま下流へ流れる。
+    The Showrunner: "it looks like text gets cut off by prompt overflow". The cap
+    itself is needed — neither the prose handed to the picture nor the memory
+    handed to her can be unbounded. What is wrong is **where the cut falls**:
+    `text[:900]` lands in the middle of a word, so a tail like `a heavy knit card`
+    flows straight downstream.
 
-    最後の句点までで止め、句点が無ければ語の切れ目で。上限の半分より手前まで
-    戻ってしまうときは、それ以上戻らない（短くしすぎない）。
+    Stop at the last full stop; with no full stop, on a word boundary. Never walk
+    back past half the cap (do not shorten it too far).
     """
     body = str(text or "").strip()
     if len(body) <= cap:
@@ -642,19 +646,20 @@ _ASIDE_WHO_RE = re.compile(r"(?is)^\s*[*_>\-]*\s*([AB])\s*[:：]\s*(.*)$")
 def parse_aside_speaker(
     aside: str, *, name_a: str = "", name_b: str = "",
 ) -> tuple[str, str]:
-    """`("A"|"B"|"", つぶやき本文)`。接頭辞が無ければ話者は ""。
+    """`("A"|"B"|"", the mutter itself)`. With no prefix the speaker is "".
 
-    W撮りのつぶやきは**どちらが呟いてもよい**のに、部屋は常に主演の名義で
-    積んでいた。実測（総監督の W撮り）で、みおの名義でこう出た:
+    In a duet **either of them may mutter**, yet the room always filed it under
+    the lead. Measured (the Showrunner's duet), this came out under Mio's name:
 
-        （ふふっ、**みおちゃんも**案外楽しそう。さっきまでの沈んだ顔、
-          どこに行っちゃったのかしら。）
+        (Hee — **Mio-chan** looks like she is enjoying herself after all. Where
+         did that downcast face from a moment ago go?)
 
-    自分のことを三人称で呼び、語尾も相手のもの ―― **中身はすみれの声**
-    だった。SAY は `A:` / `B:` で分けているので、つぶやきも同じ形に揃える。
+    She refers to herself in the third person and the sentence endings are the
+    other one's — **the voice inside is Sumire's**. SAY is already split by
+    `A:` / `B:`, so the mutter is brought into the same shape.
 
-    接頭辞が無いとき（主演撮り、または守らなかったとき）は "" を返し、
-    呼び出し側がこれまでどおり主演の名義にする。
+    With no prefix (a lead shoot, or a turn that did not obey) it returns "" and
+    the caller files it under the lead as before.
     """
     m = _ASIDE_WHO_RE.match(str(aside or "").strip())
     if m:
@@ -908,25 +913,28 @@ def craft_hairstyles(tags: str) -> set[str]:
 
 
 def prose_without_cast_names(scene: str, cast: Iterable[dict] | None) -> str:
-    """一人の撮影では、散文からキャラ名を落とす。
+    """On a solo shoot, drop the cast names from the prose.
 
-    人名タグを落とす門は既にある（`_scrub_invented_tags`）—— 記録の理由は
-    「danbooru では人名タグは実在のキャラを指すので、**別人の顔を引いてくる**」。
-    塞いであったのはタグ側だけで、**散文は素通り**だった。
+    The gate that drops person-name tags already exists (`_scrub_invented_tags`) —
+    the recorded reason is that in danbooru a person-name tag points at a real
+    character, so it **pulls in somebody else's face**. Only the tag side was
+    closed; **the prose walked straight through**.
 
-    weave の言い聞かせを 1,257字落としたら（`aefe230`）その穴が露出した。
-    実測（30本パック）:
+    Cutting 1,257 characters of coaxing out of weave (`aefe230`) exposed the hole.
+    Measured (30-sample pack):
 
-        8/28  散文に名前 1/30
-        8/31  刈る前     0/30
-        8/31  刈った後   5/30   ← 最終プロンプトにも 5/30 で載る
-            「…, crying, tears, Mio sits slumped at the piano, …」
+        08-28  names in prose      1/30
+        08-31  before the trim     0/30
+        08-31  after the trim      5/30   ← and 5/30 in the final prompt too
+            "…, crying, tears, Mio sits slumped at the piano, …"
 
-    **二人の撮影では落とさない。** そこでは名前が仕事をしている ——
-    「Mio leans on Sumire's shoulder」から名前を抜くと、誰が誰か分からなく
-    なる。一人のときは何も指しておらず、サンプラーが読む余計な語でしかない。
+    **Not dropped on a two-person shoot.** There the names are doing work — take
+    them out of "Mio leans on Sumire's shoulder" and nobody knows who is who. On a
+    solo shoot they point at nothing and are just extra words for the sampler to
+    read.
 
-    名前は `she` に置き換える（消すと主語の無い文が残る）。
+    Names are replaced with `she` (deleting them leaves a sentence with no
+    subject).
     """
     people = [c for c in (cast or []) if c]
     if len(people) != 1:
@@ -961,19 +969,21 @@ def prose_without_cast_names(scene: str, cast: Iterable[dict] | None) -> str:
 
 
 def latin_names(text: str, people: Iterable[dict] | None) -> str:
-    """値に混ざった日本語の名前を、ラテン表記へ差し替える。
+    """Replace Japanese names mixed into a value with their Latin spelling.
 
-    **条文だけでは漏れる。** 係には「English only」と言ってあり、渡す JSON の
-    鍵は日本語名なので、目の前に日本語の名前がある状態で書かせている。実機
-    （`2088299b`・2026-09-02）で:
+    **The contract alone leaks.** The clerks are told "English only", yet the keys
+    of the JSON they are handed are Japanese names — they write with a Japanese
+    name in front of them. Live (`2088299b`, 2026-09-02):
 
         beat_b: standing near the fountain, finger poking **みお's** cheek
 
-    そのまま絵のプロンプトへ載る。人名タグを落とす門は前からあるが、あれは
-    タグ側だけで、欄の文面は素通りだった。
+    which rides straight into the picture prompt. The gate that drops person-name
+    tags has been there a while, but it only covered tags; the text of a field
+    went through untouched.
 
-    **ラテン表記は既にある** —— `identity.subject_handles` が名前行のために
-    出している同じもの。門でも同じ名前を使うので、行と欄で表記がぶれない。
+    **The Latin spelling already exists** — the same one `identity.subject_handles`
+    produces for the name line. The gate uses those names too, so the line and the
+    fields never disagree on spelling.
     """
     body = str(text or "")
     members = [c for c in (people or []) if isinstance(c, dict)]
@@ -1014,7 +1024,8 @@ SIDE_WORDS: dict[str, tuple[str, str]] = {
 
 
 def side_of(*, lead: bool) -> tuple[str, str]:
-    """(絵に書く英語, 日記に書く日本語)。`lead=False` は相方の側。"""
+    """(the English written into the picture, the Japanese written into the diary).
+    `lead=False` gives the partner's side."""
     key = LEAD_SIDE if lead else ("left" if LEAD_SIDE == "right" else "right")
     return SIDE_WORDS[key]
 
@@ -1024,31 +1035,33 @@ def assemble_from_boxes(
     style: str = "", framing: str | None = "auto", scene: str = "",
     support: Iterable[str] | None = None,
 ) -> str:
-    """人ごとの箱から、そのまま組む。**取り合いをしない。**
+    """Build straight from the per-person boxes. **Nothing is fought over.**
 
-    総監督（2026-08-31）「髪型などの**静的特性は先頭部でよい**が、その他の
-    感情や行動は**別枠にしないといけない**」「priority はプロンプト内の位置」。
+    The Showrunner (2026-08-31): "**static traits like hair may go up front**, but
+    feelings and actions **have to be in their own slot**", "priority is position
+    within the prompt".
 
-    いままでは静的と動的が同じ行に混ざり、しかも `placed` が全体で一つだった
-    ので、**二人が同じ姿勢のとき片方しか座れなかった**（実測 `8c48e8cb`）:
+    Static and dynamic used to share a line, and `placed` was global, so **when
+    both had the same pose only one of them got to sit** (measured, `8c48e8cb`):
 
-        Subaru is navy_hair, …, sitting, …      ← 先に来たほうが総取り
-        Mio is silver_hair, …, （姿勢なし）
+        Subaru is navy_hair, …, sitting, …      ← whoever came first took it
+        Mio is silver_hair, …, (no pose)
 
-    ここでは箱に入っているものはその人の行に出る。**同じ語が両方に出てよい。**
-    二人とも `sitting` なら二人とも座る。
+    Here whatever is in a box appears on that person's line. **The same word may
+    appear for both.** If both are `sitting`, both sit.
 
-    並びは位置＝優先度で決める:
+    Order is priority:
 
         2girls, Subaru and Mio,
-        Subaru is <静的>,
-        Mio is <静的>,
-        Subaru: <姿勢・服・表情>,      ← 名前のすぐ後ろ。後ろへ落とさない
-        Mio: <姿勢・服・表情>,
-        <場所・背景・光・画角・ルック>,
-        <散文>
+        Subaru is <static>,
+        Mio is <static>,
+        Subaru: <pose, clothes, expression>,   ← right after the name, never
+        Mio: <pose, clothes, expression>,        pushed to the back
+        <place, background, light, crop, look>,
+        <prose>
     """
-    # solo=True: 一人でも箱経路を使う（flat bag 最終をやめる）。
+    # solo=True: a single person goes through the box path too (no flat-bag
+    # ending any more).
     named = named_identity(cast, solo=True)
     if not named or not people:
         return ""

@@ -1,5 +1,7 @@
 # Muse × DWPose — ComfyUI node wiring
 
+**Unreleased.** Whether Muse will ship this is still under consideration. This page is a wiring note.
+
 How to wire a workflow so Muse can inject the **shot-preview still** (from pose coaching) into ControlNet on board / final renders.
 
 Muse inspects the graph and only auto-injects when:
