@@ -266,35 +266,41 @@ _DRIFT_SPAN = 4
 
 
 def quote_drift(text: str, sources: list[str]) -> list[dict[str, Any]]:
-    """日記が写した「」が、元の発言から1〜2文字ずれていないか。
+    """Has a quotation in the diary drifted a character or two from what was said?
 
-    実物（2026-08-21）:
+    A real case (2026-08-21):
 
-        対話ログ  「きっと、マイクの前で用意した言葉じゃなくて、もっと、こう…」
-        日記      「きっと、マインの前で用意した言葉じゃなくて、もっと、こう…」
+        chat log  「きっと、マイクの前で用意した言葉じゃなくて、もっと、こう…」
+        diary     「きっと、マインの前で用意した言葉じゃなくて、もっと、こう…」
 
-    **同じ日記の前半では「マイク」と書けている。** 語を知らないのではなく、
-    長い引用を書き写している最中にずれる。92本の測定で、崩れたのは全て
-    逐語の引用の中。自分の言葉で書いている所では一度も崩れなかった。
+    ("surely not words prepared in front of the マイク / マイン (microphone)…")
 
-    ## 直さないこと
+    **She spells マイク correctly earlier in the same diary.** She does not lack
+    the word; she slips while copying a long quotation out. Across 92 samples
+    every corruption was inside a verbatim quote. Nothing broke where she was
+    writing in her own words.
 
-    彼女は逆に、こちらの誤字を直すことがある —— ログ「手を降るシーン」が
-    日記では「手を振るシーン」になっていた。機械で原文に戻すと、それを潰す。
-    **見つけたと言うだけにして、直すかどうかは人が決める。**
+    ## What is not fixed
 
-    ## 測って決めた三つ
+    She also corrects *our* typos — the log's 「手を降るシーン」 became
+    「手を振るシーン」 in the diary (both read "a scene where she waves", the
+    first with the wrong kanji). Machine-restoring the original would crush that.
+    **Only say it was found; a person decides whether to change it.**
 
-    - **全体の一致率では測れない。** 日記は台詞だけを切り取るので、前置きの
-      ついたログ行と比べると一致率が 0.71 に落ちる。実際それで取り逃した。
-      見るのは*引用のどれだけがログで説明できるか*（被覆率 0.80 以上）
-    - 報告するのは**両側4字以下の置換だけ**。前置きの削除は書き写しの
-      ずれではないので黙る
-    - **括弧だけの違いは黙る。** `「`→`『` は正しい入れ子
+    ## Three things settled by measuring
 
-    片仮名の1文字違いを語単位で探す網も試したが、`ポーズ` を（ログにたまたま
-    `ポーン` があるだけで）誤りと数え、`マフィ`（2文字ずれ）と `マいて`
-    （平仮名混じり）を取り逃した。**引用というまとまりで見るほうが正しい。**
+    - **Whole-string similarity cannot measure it.** The diary quotes the line
+      alone, so comparing against a log row with its preamble drops similarity to
+      0.71 — which is how a real case was missed. What is measured is *how much of
+      the quote the log explains* (coverage ≥ 0.80)
+    - Only **substitutions of four characters or fewer on both sides** are
+      reported. Dropping a preamble is not a copying slip, so it stays quiet
+    - **A difference only in brackets is ignored.** `「`→`『` is correct nesting
+
+    A word-level net for single-kana differences was tried too: it counted `ポーズ`
+    ("pose") as an error merely because `ポーン` happened to be in the log, and it
+    missed `マフィ` (two characters off) and `マいて` (mixed kana).
+    **Looking at the quote as a unit is the right grain.**
     """
     import difflib
 
@@ -374,10 +380,12 @@ _STRAY_SCRIPT_RE = re.compile(
 
 
 def stray_script(text: str) -> str:
-    """日本語の本文に紛れた、日本語で使わない文字。無ければ ""。
+    """Characters not used in Japanese that slipped into Japanese prose. "" when
+    there are none.
 
-    見つけた字を**そのまま**返す（ログと再生成の判断に使う）。文章は直さない
-    —— 直すのは書き手の仕事で、こちらは書き直してもらうだけ。
+    Returns the characters found **as they are** (used for the log and for
+    deciding whether to ask again). The prose itself is not corrected — correcting
+    is the writer's job; this only asks her to write it again.
     """
     hits = _STRAY_SCRIPT_RE.findall(str(text or ""))
     return "".join(dict.fromkeys(hits))

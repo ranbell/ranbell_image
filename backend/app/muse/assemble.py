@@ -81,7 +81,7 @@ _SIDE_NAMED_RE = re.compile(
 
 
 def _sides_named(ledger: dict[str, str]) -> bool:
-    """監督の指示に立ち位置が入っているか。入っていればそちらが勝つ。"""
+    """Does the director's direction already name the sides? If so, it wins."""
     return any(
         _SIDE_NAMED_RE.search(str(ledger.get(k) or ""))
         for k in ("beat", "beat_b", "frame")
@@ -89,11 +89,13 @@ def _sides_named(ledger: dict[str, str]) -> bool:
 
 
 def _telling_marks(who: dict[str, Any] | None) -> str:
-    """その人を見分ける語（髪の色と体つき）。**二人のときだけ使う。**
+    """The words that tell one person from the other (hair colour and build).
+    **Used only when there are two.**
 
-    総監督（2026-09-10）の実機で、立ち位置は合ったのに**胸だけが入れ替わって**
-    いた。タグの側は人ごとに分かれているが、散文の側は名前しか持っていなかった
-    ので、名前と体つきを結ぶ手がかりが一つしか無かった。名前のすぐ隣に置く。
+    Live for the Showrunner (2026-09-10) the sides were right yet **the chests had
+    swapped**. The tags are split per person, but the prose carried nothing except
+    the names, so there was a single thread tying a name to a body. Put it right
+    next to the name.
     """
     tags = [str(t).strip().replace("_", " ")
             for t in ((who or {}).get("identity_tags") or []) if str(t).strip()]
@@ -255,9 +257,10 @@ def _person_box(
 ) -> dict[str, list[str]]:
     """One Muse's dynamic tags — clothes / pose / face only.
 
-    **禁止は台帳と突き合わせる（2026-09-09）。** 台帳がいま着ていると言って
-    いる服は、たとえ一度脱いだ服でも絵に出す（`talk.live_banned`）。ここを
-    素通しにしていたので「台帳は着ている、絵は着ていない」が起きていた。
+    **Bans are read against the ledger (2026-09-09).** A garment the ledger
+    currently says she wears goes into the picture even if it was once taken off
+    (`talk.live_banned`). Letting this pass unchecked is what produced "the ledger
+    says dressed, the picture says undressed".
     """
     wear = talk.filter_banned_tags(
         session, _phrase_to_tags(wearing), ledger={"wearing": wearing},
@@ -481,7 +484,8 @@ PROSE_MAX = 900
 
 
 def _trim_to_a_sentence(text: str, cap: int) -> str:
-    """後方互換の別名。実体は `identity.trim_to_a_sentence`（切り方は一本）。"""
+    """Backwards-compatible alias. The body is `identity.trim_to_a_sentence` —
+    there is one way to cut."""
     return identity.trim_to_a_sentence(text, cap)
 
 
@@ -583,14 +587,16 @@ async def quality_enrich(
     base_tags: list[str],
     num_ctx: int | None = None,
 ) -> list[str]:
-    """絵作りの語を足す。**WD14 は使わない（2026-09-09）。**
+    """Add the words that make the picture. **WD14 is not used (2026-09-09).**
 
-    総監督「muse refine の WD14 ですが、やっぱり以前検討した通り、**不要な単語が
-    大量に検出される**ため、機能を削除して」。語彙の近傍は場面と関係のない服や
-    小道具を連れてくる —— classic 側で欄ごとに引き直しても雑音が半分近かった。
+    The Showrunner: "about WD14 in muse refine — as we discussed before, it
+    **detects a great many unnecessary words**, so remove the feature". Vocabulary
+    neighbourhoods drag in clothes and props with nothing to do with the scene —
+    even looking them up per field on the classic side, close to half was noise.
 
-    （classic Muse の推薦 `service._suggest_tags` は残す。あちらは欄ごとに引いて
-    彼女に渡し、彼女が落とす形で、そちらは実測で 5/5 きれいだった）
+    (Classic Muse's recommendation path, `service._suggest_tags`, stays. That one
+    looks up per field, hands the result to her, and she drops what does not fit;
+    measured, it came back 5/5 clean.)
     """
     prompt = (
         f"{_QUALITY_SYSTEM}\n\n"
@@ -632,7 +638,8 @@ async def rebuild_craft(
 ) -> dict[str, Any]:
     """Refresh craft from ledger.
 
-    **WD14 は外した（2026-09-09）** —— 総監督「不要な単語が大量に検出される」。
+    **WD14 was removed (2026-09-09)** — the Showrunner: "it detects a great many
+    unnecessary words".
     """
     import time
 
@@ -718,26 +725,30 @@ async def rebuild_craft(
 
 
 def touch_craft(session: dict[str, Any]) -> dict[str, Any]:
-    """会話のターン用の、**模型を使わない** craft 更新。（2026-09-10）
+    """A **model-free** craft update for conversation turns. (2026-09-10)
 
-    総監督「撮影に入らないときの会話のみの回答はもっと早くしてほしい」。
+    The Showrunner: "when we are not shooting, a conversation-only reply should
+    come back faster".
 
-    実機の記録（`stage_ms`）を読むと、会話だけの一手にこれだけ乗っていた:
+    Reading the live record (`stage_ms`), a conversation-only move carried all of
+    this:
 
-        writer                4.45s   台帳を書く（要る）
-        quality_enrich        4.42s   ┐ `rebuild_craft` の中身。どちらも模型
-        prose_densify         6.93s   ┘
-        actress              21.93s   彼女が喋る（要る）
-        assemble_after_propose 9.55s  彼女が表情を足したので、また組み直し
-        verify                6.81s
-        ──────────────────────────── 合計 ≈54秒
+        writer                 4.45s   writes the ledger (needed)
+        quality_enrich         4.42s   ┐ inside `rebuild_craft`; both call a model
+        prose_densify          6.93s   ┘
+        actress               21.93s   she speaks (needed)
+        assemble_after_propose 9.55s   she added an expression, so it builds again
+        verify                 6.81s
+        ───────────────────────────── ≈54s in total
 
-    組み上げた `craft["prompt"]` を使うのは**試し撮りと本番だけ**で、そちらは
-    もう自前で `rebuild_craft` を呼んでいる。会話の途中で組む理由がない。
+    The assembled `craft["prompt"]` is used **only by the draft and the final
+    shoot**, and both already call `rebuild_craft` themselves. There is no reason
+    to assemble it mid-conversation.
 
-    ここでやるのは純関数だけ —— `now`（正本の一行）と `tags`。**台帳が正本**
-    なので、画面の台帳欄と NOW 行は今まで通り毎ターン動く。散文とタグの
-    組み上げだけが撮る時まで待つ。`stale` はそれを画面に言うための旗。
+    What happens here is pure functions only — `now` (the line of record) and
+    `tags`. **The ledger is the document of record**, so the ledger pane and the
+    NOW line still move every turn; only the prose and tag assembly waits for the
+    shutter. `stale` is the flag that says so on screen.
     """
     led = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
     inputs = session.get("inputs") or {}

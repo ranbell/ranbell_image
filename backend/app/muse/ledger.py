@@ -94,10 +94,12 @@ _LABEL_HEAD_RE = re.compile(
 
 
 def strip_field_label(value: str) -> str:
-    """値の頭から欄名を剥がす。重なっていても剥がす（`WEARING: BEAT: …`）。
+    """Strip a field name from the head of a value, however many are stacked
+    (`WEARING: BEAT: …`).
 
-    **欄名に似ているだけの語は残す** —— `atmospheric, dusty` はコロンが無いので
-    触らない。剥がした結果が空になったら、その値は捨てられる（呼び出し側で）。
+    **A word that merely looks like a field name stays** — `atmospheric, dusty`
+    has no colon, so it is untouched. If stripping empties the value, the caller
+    throws it away.
     """
     text = str(value or "")
     for _ in range(4):
@@ -186,11 +188,12 @@ _NOT_THE_OBJECT = frozenset({
 
 
 def _axis_of(phrase: str) -> tuple[str, str, frozenset[str]] | None:
-    """この句が答えている軸・その答え・軸の中の鍵。乗らないなら `None`。
+    """The axis this phrase answers, its answer, and the key within that axis.
+    `None` when it does not sit on one.
 
-    鍵は掴みの軸だけで意味を持つ —— **掴んでいる物**。物が違えば同じ軸でも
-    別の答えとして両方立つ。ほかの軸（体重・腰・頭）は体に一つしかないので
-    鍵は空。
+    The key only means anything on the holding axis — **the object being held**.
+    Different objects stand as different answers on the same axis. The other axes
+    (weight, hips, head) exist once per body, so their key is empty.
     """
     words = re.sub(r"[_\-]+", " ", phrase.lower())
     for axis, parts, answers in _BODY_AXES:
@@ -215,14 +218,16 @@ def _axis_of(phrase: str) -> tuple[str, str, frozenset[str]] | None:
 
 
 def one_body(value: str) -> tuple[str, list[str]]:
-    """`beat` を一つの体に畳む。残した句と、落とした句を返す。
+    """Fold `beat` into one body. Returns the phrases kept and the phrases dropped.
 
-    落とすのは**同じ軸の二つ目**だけ。部位を名指ししただけの句や、向きの語が
-    無い句（`arms_stiff` / `forearms tensed` / `standing`）には触らない。
-    掴みの軸は**物ごと**に数えるので、トレイとカップは両方立つ。
+    Only **the second phrase on the same axis** is dropped. A phrase that merely
+    names a body part, or carries no direction (`arms_stiff` / `forearms tensed` /
+    `standing`), is untouched. The holding axis counts **per object**, so a tray
+    and a cup both stand.
 
-    完全に同じ句と、他の句に語として含まれてしまう句（`hand on hip` は
-    `left hand on hip` の中にある）も落とす —— 同じことを二度言っている。
+    Exact duplicates go too, as do phrases contained in another as words
+    (`hand on hip` sits inside `left hand on hip`) — that is saying the same thing
+    twice.
     """
     parts = [p.strip() for p in str(value or "").replace(";", ",").split(",")]
     parts = [p for p in parts if p]
@@ -259,7 +264,8 @@ def normalize_patch(
 ) -> dict[str, str]:
     """Keep only known keys; coerce to stripped strings.
 
-    値の頭に付いた欄名もここで落とす —— 台帳への入口はここ一つ。
+    A field name stuck to the head of a value is stripped here too — this is the
+    single door into the ledger.
     """
     out: dict[str, str] = {}
     if not isinstance(raw, dict):
@@ -306,11 +312,11 @@ def apply_patch(ledger: dict[str, str], patch: dict[str, str]) -> dict[str, str]
 
 
 def _posture_of(value: str) -> str:
-    """この体が名指している姿勢（`standing` / `sitting` …）。無ければ空。
+    """The posture this body names (`standing` / `sitting` …), empty when none.
 
-    語の表は `tags.conflict` の `posture` 槽をそのまま使う —— 姿勢の語は
-    danbooru の正確な語で来るので、あちらが当たる（自由文の向きとは違う）。
-    二つ持つと必ずずれるので、ここで列を作らない。
+    The word table is `tags.conflict`'s `posture` slot as it stands — posture
+    words arrive as exact danbooru terms, so that table hits (unlike free-text
+    direction). Keeping two tables guarantees drift, so no list is built here.
     """
     from ..tags import conflict
 
@@ -322,15 +328,16 @@ def _posture_of(value: str) -> str:
 
 
 def keep_the_posture(new: str, before: str) -> str:
-    """姿勢を名指し忘れた体に、前の姿勢を戻す。
+    """Give back the previous posture to a body that forgot to name one.
 
-    **欄は丸ごと書き直す所なので、書かれなかったものは消える。** 実測
-    （2026-09-12・台で A/B）: 「一つの体」の条文を足すと矛盾は消えたが、
-    同じ回で `standing` が落ちた —— 台本係が「既に分かっていること」として
-    省いた。条文の言い回しでは戻らなかったので、ここで守る。
+    **The field is rewritten whole, so anything not written disappears.** Measured
+    (2026-09-12, A/B on the bench): adding the "one body" clause removed the
+    contradictions, and in the same runs `standing` vanished — the writer left it
+    out as "something already known". No wording of the contract brought it back,
+    so it is protected here.
 
-    戻すのは**新しい体が姿勢を一つも名指していないとき**だけ。名指していれば
-    そちらが正しい（「座って」と言われた回を立たせない）。
+    It is only restored **when the new body names no posture at all**. If it names
+    one, that one is right (a turn told "sit down" does not get stood up).
     """
     if not str(new or "").strip():
         return new
@@ -419,11 +426,11 @@ def guard_muse_propose(
     settled face when scene-ish axes just moved (scene / atmosphere / beat /
     light / frame / bg) so the expression can track the shot.
 
-    **W撮りでは顔は二つある（2026-09-10）。** 彼女は二人ぶんを演じているので、
-    `expression_b` も同じ演技の軸として扱う —— 相方の顔だけ台帳に据え置かれる
-    と、場面が動いても相方の表情が置き去りになる。監督がその回に顔を名指し
-    したかどうかも、欄ごとに見る（`expression` を指定した回に `expression_b`
-    まで凍らせない）。
+    **In a duet there are two faces (2026-09-10).** She is performing both, so
+    `expression_b` counts as the same performance axis — leave only the partner's
+    face pinned to the ledger and it is left behind whenever the scene moves.
+    Whether the director named a face this turn is also read per field (naming
+    `expression` does not freeze `expression_b` as well).
     """
     raw = dict(patch or {})
     if not raw:
@@ -485,24 +492,26 @@ def chips_for(fields: list[str], *, locale: str = "ja") -> list[dict[str, str]]:
 #: 二人目の欄。一人しかいない撮影では**見せない**。
 PARTNER_KEYS: tuple[str, ...] = ("wearing_b", "beat_b", "expression_b")
 
-#: 体の姿勢の欄。二人ぶんある（`one_body` を掛ける先）。
+#: The posture fields, one per person — what `one_body` is applied to.
 BODY_KEYS: tuple[str, ...] = ("beat", "beat_b")
 
 
 def for_model(ledger: dict[str, str], *, partner: bool) -> dict[str, str]:
-    """模型に見せる台帳。**一人のときは二人目の欄を落とす。**
+    """The ledger as the model sees it. **On a solo shoot the second person's
+    fields are dropped.**
 
-    総監督（2026-09-09）「一人しかいないときに muse_b の tag を編集して
-    しまう。**1人か2人の区別の説明が足りていない**」。
+    The Showrunner (2026-09-09): "when there is only one person it still edits
+    muse_b's tags. **The explanation of one versus two is not enough.**"
 
-    条文には「partner Muse が居るときだけ `wearing_b` / `beat_b` を書く」と
-    最初から書いてあった。足りなかったのは**居るかどうかを伝えること** ——
-    `blank()` が全欄を埋めるので、模型には常に二人目の欄が空で見えていた。
-    空欄は「埋めろ」に見える。
+    The contract had said from the start to write `wearing_b` / `beat_b` only when
+    a partner Muse is present. What was missing was **telling it whether there is
+    one** — `blank()` fills every field, so the model always saw an empty second
+    person. An empty field looks like an instruction to fill it.
 
-    **箱を出さなければ入れられない。** 条文に一行足すより、欄そのものを
-    消すほうが強い（この現場では逆向きの実測が何度もある —— 箱を作ると
-    入れてくれる）。呼び出し側は `cast_line()` で人数も一行で言う。
+    **Take the box away and nothing can be put in it.** Removing the field is
+    stronger than adding a line to the contract (this studio has measured the
+    converse many times — give them a box and they fill it). The caller also says
+    the headcount in one line with `cast_line()`.
     """
     out = {k: v for k, v in (ledger or {}).items()
            if partner or k not in PARTNER_KEYS}
@@ -510,7 +519,8 @@ def for_model(ledger: dict[str, str], *, partner: bool) -> dict[str, str]:
 
 
 def cast_line(*, partner: bool, name_a: str = "", name_b: str = "") -> str:
-    """人数を一行で。台帳から欄を消すだけでなく、言葉でも言う。"""
+    """The headcount in one line — said in words as well as by removing fields from
+    the ledger."""
     a = (name_a or "the lead").strip()
     if not partner:
         return (
