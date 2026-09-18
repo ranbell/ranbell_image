@@ -232,6 +232,28 @@ def opening_seats(cast: list[str]) -> list[str]:
     return sorted(seats, key=lambda m: rank.get(crew.role_of(m) or "", 99))
 
 
+#: CRAFT 行の上限。**語の途中では切らない。**（2026-09-18）
+CRAFT_MAX = 280
+
+
+def _clip_craft(clause: str) -> str:
+    """長すぎる CRAFT を、**語の切れ目**で止める。
+
+    以前は `clause[:280]` だった。左半分は台帳に入るタグなので、真ん中で切ると
+    `silver_sug` のような**半分の語**が欄に着く。実機の欄は最長 167字なので
+    まだ踏んでいないが、踏んだときに気づけない壊れ方なので先に直しておく。
+    """
+    text = str(clause or "").strip()
+    if len(text) <= CRAFT_MAX:
+        return text
+    head = text[:CRAFT_MAX]
+    for mark in ("|", ",", " "):
+        cut = head.rfind(mark)
+        if cut > CRAFT_MAX // 2:
+            return head[:cut].strip(" ,|")
+    return head.strip(" ,|")
+
+
 def split_craft(body: str) -> tuple[str, str]:
     """一席の返事を、喋りと CRAFT 行に分ける。classic の `_split_craft_line` と同じ。
 
@@ -248,7 +270,7 @@ def split_craft(body: str) -> tuple[str, str]:
     say = _CRAFT_LINE_RE.sub("", text)
     if clause.lower() in ("none", "-", "n/a", "omit", "(omit)"):
         clause = ""
-    return identity.sanitize_muse_say(say, locale="ja"), clause[:280]
+    return identity.sanitize_muse_say(say, locale="ja"), _clip_craft(clause)
 
 
 def banter_mode(session: dict[str, Any]) -> str:
@@ -512,6 +534,26 @@ def _stream_to(session: dict[str, Any], muse_id: str):
         return None
 
 
+def _watch_the_window(session: dict[str, Any], who: str):
+    """枠で切られた回を記録に残す合図。**黙って短い返事にしない。**（2026-09-18）
+
+    総監督「prompt のオーバフローで文字が切れる場合があるようです」。枠
+    （`num_ctx`）は前置きと出力の合計なので、前置きが長い回は書いている途中で
+    打ち切られる。Ollama は `done_reason: "length"` と言っているので、それを
+    `/debug` に残して**あとから数えられる**ようにする。
+    """
+    def _note(done: dict[str, Any]) -> None:
+        if str(done.get("reason") or "") != "length":
+            return
+        debug_mod.note(
+            session, "cut_by_the_window",
+            detail=f"{who}: 前置き {done.get('prompt_tokens')}tok "
+                   f"＋ 出力 {done.get('eval_tokens')}tok で枠に当たった",
+        )
+        logger.warning("[muse] %s was cut by the window: %s", who, done)
+    return _note
+
+
 async def _seat_turn(ollama, session: dict[str, Any], muse_id: str, *,
                      model: str, prompt: str) -> str:
     """一席ぶんの呼び出し。**絵は渡さない**（板を見せるのは女優の段の仕事）。"""
@@ -533,6 +575,7 @@ async def _seat_turn(ollama, session: dict[str, Any], muse_id: str, *,
         num_ctx=refine_num_ctx(session),
         think=False,
         on_token=_stream_to(session, muse_id),
+        on_done=_watch_the_window(session, f"席 {crew.role_of(muse_id) or muse_id}"),
     )
 
 
@@ -708,6 +751,7 @@ async def _group_turn(ollama, session: dict[str, Any], seats: list[str], *,
         num_ctx=refine_num_ctx(session),
         think=False,
         on_token=_packed_stream(session, seats),
+        on_done=_watch_the_window(session, f"会議 {field}"),
     )
 
 

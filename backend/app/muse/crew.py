@@ -3842,7 +3842,14 @@ def system_prompt_for(
         # 出力の形は `SEAT_OUTPUT` が最後に言う（あちらが唯一の形式）。
         SEAT_CARRY,
         m["specialty"],
-        WARDROBE_COSTUME_TAIL if role_of(mid) == "wardrobe" else "",
+        # **衣装の席に COSTUME の尻尾は付けない（2026-09-18）。** あれは
+        # 「SCENE ブロックのあとに八行を足せ」という classic の prep 用で、
+        # Refine の席には SCENE そのものが無い。打ち消されるはずが打ち消されず、
+        # **八行の機械ブロックがそのまま吹き出しに出た**（実機 `0239133f`:
+        # 「……布が台無しになっちゃうわよ」のあとに SILHOUETTE / LAYERS /
+        # GARMENTS が並んだ 479字）。服のタグは席の `CRAFT:` が運ぶので、
+        # ここは 1,341字ぶん要らない。classic の prep（`mode == "prep"`）では
+        # 今も現役。
     ]
     return "\n\n".join(b for b in blocks if b)
 

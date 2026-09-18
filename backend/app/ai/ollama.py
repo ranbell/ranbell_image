@@ -180,7 +180,8 @@ class OllamaClient:
         return events
 
     async def _generate_stream(
-        self, payload: dict, *, model: str | None = None
+        self, payload: dict, *, model: str | None = None,
+        with_done: bool = False,
     ) -> AsyncGenerator[dict, None]:
         """Shared /api/generate streaming loop for the text and vision callers.
 
@@ -247,6 +248,28 @@ class OllamaClient:
                         yield event
                     for event in _fallback():
                         yield event
+                    # **枠に当たって止まったことを、黙って捨てない。**（2026-09-18）
+                    #
+                    # 総監督「prompt のオーバフローで文字が切れる場合がある」。
+                    # 枠（`num_ctx`）は前置きと出力の合計なので、前置きが長い回は
+                    # **書いている途中で打ち切られる**。Ollama は最後の一行で
+                    # `done_reason: "length"` と言っているのに、ここで読み捨てて
+                    # いたため、アプリからは「短い返事」と見分けが付かなかった。
+                    reason = str(data.get("done_reason") or "")
+                    if reason == "length":
+                        logger.warning(
+                            "[ollama] %s was cut by the window "
+                            "(prompt %s tok + output %s tok)",
+                            model or payload.get("model"),
+                            data.get("prompt_eval_count"), data.get("eval_count"),
+                        )
+                    if with_done:
+                        yield {
+                            "type": "done",
+                            "reason": reason,
+                            "prompt_tokens": int(data.get("prompt_eval_count") or 0),
+                            "eval_tokens": int(data.get("eval_count") or 0),
+                        }
                     return
         for event in _track(parser.flush()):
             yield event
@@ -291,6 +314,7 @@ class OllamaClient:
         options: dict | None = None,
         think: bool | str | None = None,
         system: str | None = None,
+        with_done: bool = False,
     ) -> AsyncGenerator[dict, None]:
         images_b64 = [base64.b64encode(b).decode() for b in image_bytes_list]
         model_name = model or settings.vlm_model
@@ -308,7 +332,9 @@ class OllamaClient:
             },
             think,
         )
-        async for event in self._generate_stream(payload, model=model_name):
+        async for event in self._generate_stream(
+            payload, model=model_name, with_done=with_done,
+        ):
             yield event
 
     @staticmethod
@@ -438,8 +464,15 @@ class OllamaClient:
         options: dict | None = None,
         think: bool | str | None = None,
         system: str | None = None,
+        with_done: bool = False,
     ) -> AsyncGenerator[dict, None]:
-        """Stream text generation without vision inputs."""
+        """Stream text generation without vision inputs.
+
+        `with_done` を立てると、最後に `{"type": "done", "reason", …}` を一つ
+        流す（**枠で切られたか**を呼び元が知るため）。既定は流さない ——
+        Inspire と job runner はイベントをそのまま画面へ転送しているので、
+        知らない種類を増やさない。
+        """
         model_name = model or settings.vlm_model
         payload = self._with_think(
             {
@@ -451,7 +484,9 @@ class OllamaClient:
             },
             think,
         )
-        async for event in self._generate_stream(payload, model=model_name):
+        async for event in self._generate_stream(
+            payload, model=model_name, with_done=with_done,
+        ):
             yield event
 
     async def health(self, url: str | None = None) -> bool:

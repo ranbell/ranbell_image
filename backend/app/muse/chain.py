@@ -76,17 +76,31 @@ async def _call(
     ollama, *, system: str, prompt: str, model: str,
     images: list[bytes] | None, num_ctx: int | None,
     think: bool, on_token: TokenCallback | None = None,
+    on_done=None,
 ) -> str:
+    """一回の呼び出し。`on_done` を渡すと、**どう終わったか**を受け取れる。
+
+    `on_done({"reason": "length" | "stop", "prompt_tokens": …, "eval_tokens": …})`
+    —— `length` は**枠に当たって書きかけで止まった**という意味（2026-09-18）。
+    """
     # Family sampling (Gemma → temp 1.0 / top_k 64 / top_p 0.95). Do not
     # hardcode temperature — model-card defaults live in llm_options.
     from ..ai.llm_options import llm_options
     options = llm_options({"num_predict": -1}, model=model, num_ctx=num_ctx)
     kwargs = dict(model=model, options=options, system=system, think=think)
 
+    if on_done is not None:
+        kwargs["with_done"] = True
     stream = (ollama.generate_vlm_stream(prompt, images, **kwargs) if images
               else ollama.generate_text_stream(prompt, **kwargs))
     parts: list[str] = []
     async for event in stream:
+        if event.get("type") == "done" and on_done is not None:
+            try:
+                on_done(event)
+            except Exception:
+                logger.debug("[muse.chain] on_done failed", exc_info=True)
+            continue
         if event.get("type") == "token" and event.get("text"):
             parts.append(event["text"])
             if on_token is not None:

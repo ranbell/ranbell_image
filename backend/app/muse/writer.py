@@ -280,6 +280,25 @@ def parse_verify(raw: str) -> tuple[bool, str, dict[str, str]]:
     return ok, comment, repair
 
 
+def _watch_the_window(session: dict[str, Any], who: str):
+    """枠で切られた回を `/debug` に残す。**黙って短い返事にしない。**（2026-09-18）"""
+    def _note(done: dict[str, Any]) -> None:
+        if str(done.get("reason") or "") != "length":
+            return
+        try:
+            from . import debug as debug_mod
+
+            debug_mod.note(
+                session, "cut_by_the_window",
+                detail=f"{who}: 前置き {done.get('prompt_tokens')}tok "
+                       f"＋ 出力 {done.get('eval_tokens')}tok で枠に当たった",
+            )
+        except Exception:
+            logger.debug("[muse] could not note the cut", exc_info=True)
+        logger.warning("[muse] %s was cut by the window: %s", who, done)
+    return _note
+
+
 async def actress_turn(
     ollama,
     *,
@@ -332,8 +351,11 @@ async def actress_turn(
         # 途中から文字が出るのとでは待たされ方が違う。classic は既にこうしている。
         opts = {"num_ctx": num_ctx} if num_ctx else None
         blind = False
+        # **枠で切られたら記録に残す（2026-09-18）。** ここは1ターンでいちばん
+        # 長い前置き（実測 14,000〜18,000字）なので、溢れるとすれば先にここ。
+        watch = _watch_the_window(sess, "主演")
         raw = await _say(ollama, prompt, model=model, options=opts,
-                         on_token=on_token, images=images)
+                         on_token=on_token, images=images, on_done=watch)
         out = parse_actress(raw)
         # **絵を見せた回に黙ったら、絵抜きで一度だけ撮り直す。**
         #
@@ -349,7 +371,7 @@ async def actress_turn(
             )
             blind = True
             raw = await _say(ollama, prompt, model=model, options=opts,
-                             on_token=on_token, images=None)
+                             on_token=on_token, images=None, on_done=watch)
             out = parse_actress(raw)
         # **黙った回は、返ってきたものを残す。** 実機で無言になったとき、
         # 記録にあったのは「空だった」だけで、模型が何を返したのか分からな
@@ -372,7 +394,7 @@ async def actress_turn(
 
 async def _say(
     ollama, prompt: str, *, model: str, options: dict | None,
-    on_token=None, images: list[bytes] | None = None,
+    on_token=None, images: list[bytes] | None = None, on_done=None,
 ) -> str:
     """一回だけ喋らせる。絵があれば絵つき、流す先があれば流す。
 
@@ -391,14 +413,22 @@ async def _say(
     stream = (
         ollama.generate_vlm_stream(
             prompt, images, model=model or None, think=False, options=options,
+            with_done=on_done is not None,
         )
         if images else
         ollama.generate_text_stream(
             prompt, model=model or None, think=False, options=options,
+            with_done=on_done is not None,
         )
     )
     parts: list[str] = []
     async for event in stream:
+        if event.get("type") == "done" and on_done is not None:
+            try:
+                on_done(event)
+            except Exception:
+                logger.debug("[muse] on_done failed", exc_info=True)
+            continue
         if event.get("type") == "token" and event.get("text"):
             parts.append(event["text"])
             try:

@@ -448,8 +448,15 @@ _BARE_BLOCK_LABEL_RE = re.compile(
     r"(?i)^(?:SAY|ASIDE|CARD|PITCH|MY_FEEL|DECLINE|"
     r"TAGS(?:_SHARED|_A|_B)?|SCENE|CRAFT_SCENE|INTENT)$"
 )
+#: ここから先は**機械が読む所**なので、吹き出しからは切り落とす。
+#:
+#: `COSTUME` 一族は 2026-09-18 に足した —— 衣装の席が八行の装いブロックを
+#: そのまま喋ってしまい、実機（`0239133f`）で 479字の吹き出しになった。
+#: 出どころ（席の条文）も直したが、**届く手前でも落とす** —— 模型の行儀に
+#: 画面の綺麗さを預けない（`craft_tags` で欄名を剥がすのと同じ構え）。
 _SAY_LEAK_CUT_RE = re.compile(
-    r"(?im)^\s*(?:TAGS(?:_SHARED|_A|_B)?|SCENE|CRAFT_SCENE)\s*[:：]"
+    r"(?im)^\s*(?:TAGS(?:_SHARED|_A|_B)?|SCENE|CRAFT_SCENE|COSTUME|SILHOUETTE"
+    r"|LAYERS|COLOURWAY|PATTERN|FABRIC|CONDITION|HERO|GARMENTS)\s*[:：]"
 )
 _EN_HEADING_RE = re.compile(r"^[A-Z][A-Z0-9][A-Z0-9 _/&'-]{2,}$")
 # Latin-script stage directions the model tucks in after Japanese SAY.

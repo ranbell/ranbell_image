@@ -476,6 +476,35 @@ No (tag:weight). No comma-tag lists. Output the paragraph only.
 """
 
 
+#: 絵に渡す散文の上限。**文の切れ目で止める**（`_trim_to_a_sentence`）。
+PROSE_MAX = 900
+
+
+def _trim_to_a_sentence(text: str, cap: int) -> str:
+    """上限を超える散文を、**文の切れ目**で止める。（2026-09-18）
+
+    総監督「prompt のオーバフローで文字が切れる場合があるようです」。
+
+    ここは長らく `text[:900]` だった。実機の散文は 145〜831字で、**上限の 92%**
+    まで来ている —— 超えた回は**単語の途中で切れたまま**絵のプロンプトに入る
+    （`a woman in a heavy knit card` のような尻切れが、そのまま CLIP に渡る）。
+
+    上限は変えない。**どこで切るか**だけ変える —— 最後の句点までで止め、
+    句点が見つからないときだけ従来どおり切る（その場合も語の途中では切らない）。
+    """
+    body = str(text or "").strip()
+    if len(body) <= cap:
+        return body
+    head = body[:cap]
+    for mark in (". ", "。", "! ", "? "):
+        cut = head.rfind(mark)
+        if cut > cap // 2:
+            return head[: cut + len(mark)].strip()
+    # 句点が無い —— せめて語の途中では切らない。
+    space = head.rfind(" ")
+    return (head[:space] if space > cap // 2 else head).strip()
+
+
 async def densify_scene_prose(
     ollama,
     *,
@@ -532,7 +561,7 @@ async def densify_scene_prose(
     low = text.lower()
     if must and not any(m and m in low for m in must):
         return base_prose
-    return text[:900]
+    return _trim_to_a_sentence(text, PROSE_MAX)
 
 
 def merge_support_tags(

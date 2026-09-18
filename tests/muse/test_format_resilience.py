@@ -168,3 +168,37 @@ def test_an_ordinary_word_is_not_a_label():
 
 def test_an_unlabelled_reply_is_still_her_line():
     assert identity.parse_talk_blocks("ラベルのない返事です。")["say"] == "ラベルのない返事です。"
+
+
+def test_the_wardrobe_costume_block_never_reaches_the_bubble():
+    """**機械が読む八行は、吹き出しに出さない。**（2026-09-18）
+
+    実機（`0239133f`）で衣装の席が
+
+        砂糖袋なんてそんな小道具、布が台無しになっちゃうわよ。……
+        SILHOUETTE: loose_top / structured_bottom
+        LAYERS: knit_cardigan / professional_blouse
+        GARMENTS: top=knit_cardigan / bottom=tailored_trousers …
+
+    と 479字の吹き出しを出した。`COSTUME` の尻尾は classic の prep 用の条文で、
+    Refine の席には宛先（SCENE ブロック）が無い。出どころは直したが、
+    **届く手前でも落とす。**
+    """
+    raw = (
+        "砂糖袋なんてそんな小道具、布が台無しになっちゃうわよ。\n\n"
+        "SILHOUETTE: loose_top / structured_bottom\n"
+        "LAYERS: knit_cardigan / professional_blouse\n"
+        "GARMENTS: top=knit_cardigan / bottom=tailored_trousers"
+    )
+    out = identity.sanitize_muse_say(raw)
+    assert out == "砂糖袋なんてそんな小道具、布が台無しになっちゃうわよ。"
+
+
+def test_the_refine_seat_is_not_asked_for_a_costume_block():
+    """出どころ側 —— 席の条文から尻尾を外す（classic の prep では現役）。"""
+    from app.muse import crew
+
+    seat = [m for m in crew.MUSES if crew.role_of(m) == "wardrobe"][0]
+    assert "SILHOUETTE" not in crew.system_prompt_for(seat)
+    prep = crew.actress_duet_prompt({"name": "x"}, mode="prep", locale="ja", seed="s")
+    assert "SILHOUETTE" in prep, "classic の prep からは外さない"
