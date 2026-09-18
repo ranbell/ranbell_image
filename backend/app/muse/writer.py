@@ -378,8 +378,22 @@ async def actress_turn(
         # かった。次に起きたときに読めるように、生の返事を持ち帰る。
         if not str(out.get("say") or "").strip():
             out["raw"] = (raw or "")[:400]
-    except Exception:
+    except Exception as exc:
         logger.exception("[muse] actress failed")
+        # **黙って「……」にしない（2026-09-18）。** ここは例外を拾って placeholder を
+        # 返すので、**プログラムの間違いが「彼女が言葉少なだった回」に化ける**。
+        # 実機で踏んだ: `with_done` を覆い（`LlmGateway`）に足し忘れて `TypeError`
+        # になり、台詞が「……」・段の時間 0.0 秒。台帳も種も正しいので e2e は
+        # 緑のまま通ってしまった。**記録に残れば次は一目で分かる。**
+        try:
+            from . import debug as debug_mod
+
+            debug_mod.note(
+                sess, "actress_failed",
+                detail=f"{type(exc).__name__}: {exc}"[:240],
+            )
+        except Exception:
+            logger.debug("[muse] could not note the actress failure", exc_info=True)
         return {
             "say": "……" if locale.startswith("ja") else "...",
             "aside": "",

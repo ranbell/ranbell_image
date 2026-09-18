@@ -87,9 +87,11 @@ class LlmGateway:
         options: dict | None = None,
         think: bool | str | None = None,
         system: str | None = None,
+        with_done: bool = False,
     ) -> AsyncGenerator[dict, None]:
         async for event in self._ollama.generate_text_stream(
             prompt, model=model, options=options, think=think, system=system,
+            with_done=with_done,
         ):
             yield event
 
@@ -115,10 +117,11 @@ class LlmGateway:
         options: dict | None = None,
         think: bool | str | None = None,
         system: str | None = None,
+        with_done: bool = False,
     ) -> AsyncGenerator[dict, None]:
         async for event in self._ollama.generate_vlm_stream(
             prompt, image_bytes_list, model=model, options=options, think=think,
-            system=system,
+            system=system, with_done=with_done,
         ):
             yield event
 

@@ -111,3 +111,33 @@ async def test_a_studio_turn_reaches_the_end(quiet, monkeypatch):
     assert out["refine_ledger"]["light"] == "rim_light", "席の結論が着地していない"
     assert out[C.CREW_WORDS]["light"] == ["rim_light"], "誰の語かの控えが残っていない"
     assert [r for r in out["chat"] if (r.get("meta") or {}).get("kind") == "seat"]
+
+
+@pytest.mark.asyncio
+async def test_a_broken_call_leaves_a_trace_instead_of_just_dots(monkeypatch):
+    """**「……」で終わらせない。**（2026-09-18）
+
+    `actress_turn` は例外を拾って placeholder（「……」）を返す。おかげで
+    ターンは落ちないが、**プログラムの間違いが「言葉少なだった回」に化ける** ——
+    実機で `TypeError`（覆いへの引数の足し忘れ）がまさにそうなり、台帳も種も
+    正しいので e2e は緑のまま通った。記録に残れば次は一目で分かる。
+    """
+    class _Boom:
+        async def generate_text_stream(self, *a, **kw):
+            raise TypeError("generate_text_stream() got an unexpected keyword")
+            yield {}
+
+        async def generate_text(self, *a, **kw):
+            raise TypeError("generate_text() got an unexpected keyword")
+
+    session = _session()
+    out = await writer.actress_turn(
+        _Boom(), model="m", locale="ja", name="各務 みお", now="",
+        ledger={}, identity_blurb="", user_line="こっちを見て", director_tail="",
+        session=session,
+    )
+    assert out["say"] == "……"
+    notes = [n for n in (session.get("refine_log") or [])
+             if n.get("kind") == "actress_failed"]
+    assert notes, "黙って「……」になっている（記録に残っていない）"
+    assert "TypeError" in str(notes[0].get("detail"))
