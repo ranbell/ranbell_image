@@ -1,7 +1,8 @@
-"""楽屋のお出かけ —— 友達と撮った一枚。
+"""The green room's outings — a photo taken with a friend.
 
-**この機能は削らない。** 軽量化の対象外（総監督の指示）。ここで見るのは、
-出来上がるプロンプトが「休みの日にスマホで撮った写真」になっているか。
+**This feature is never cut.** It is out of scope for any slimming down (the
+Showrunner's instruction). What is checked here is whether the prompt that comes
+out reads as "a photo taken on a phone on a day off".
 """
 from __future__ import annotations
 
@@ -17,11 +18,13 @@ from app.muse import lounge  # noqa: E402
 
 
 def test_the_outing_photo_says_what_they_are_wearing():
-    """総監督（2026-08-29）「友達とのお出かけ写真がみんな水着に……」。
+    """The Showrunner (2026-08-29): "the outing photos with friends all come out in
+    swimsuits……".
 
-    プロンプトに**服が一つも無かった**ので、サンプラーが埋めていた。人数が
-    複数・屋外・服の指定なしという並びだと、行き先に関わらず同じ既定へ寄る。
-    季節の一語だけ置いて、あとは決めすぎない。
+    The prompt had **no clothing at all**, so the sampler filled it in. Several
+    people, outdoors, no clothing named — that combination drifts to the same
+    default whatever the destination. One word for the season is placed and nothing
+    more is decided.
     """
     cast = [{"subject_tag": "1girl"}] * 3
     for season, expect in (("冬", "coat"), ("夏", "short_sleeves"),
@@ -38,7 +41,7 @@ def test_the_outing_photo_says_what_they_are_wearing():
 
 
 def test_indoors_is_not_dressed_for_outdoors():
-    """図書館でマフラーを巻いている絵は、それだけで嘘になる。"""
+    """A picture with a scarf wrapped on in a library is a lie on that alone."""
     cast = [{"subject_tag": "1girl"}] * 3
     inside = lounge.snapshot_prompt(
         cast, identity_tags=[[]], occasion="library", season="冬",
@@ -51,10 +54,10 @@ def test_indoors_is_not_dressed_for_outdoors():
 
 
 def test_the_outing_photo_is_not_a_group_portrait():
-    """総監督「集合写真みたいになってなんだか変」。
+    """The Showrunner: "it comes out like a group photo, which is somehow odd".
 
-    もとは `standing together, looking at viewer` —— 並んでレンズを見る絵で、
-    それは集合写真そのものだった。遊んでいる最中を撮る。
+    It used to be `standing together, looking at viewer` — lined up looking into
+    the lens, which is a group photo exactly. Shoot them mid-play instead.
     """
     cast = [{"subject_tag": "1girl"}] * 3
     seen = set()

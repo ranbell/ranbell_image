@@ -73,10 +73,11 @@ def fake_request(db, ollama=None):
 
 
 def diaries(spooler):
-    """spool された**日記のジョブだけ**。
+    """**Only the diary jobs** that were spooled.
 
-    総数で縛ると、撮影の後ろで走る別のジョブ（お出かけの生成など）が増える
-    たびに落ちる ―― 実際に6件が落ちた。数えたいのは日記なので、日記で数える。
+    Pinning the total count fails every time another job running behind the shoot
+    is added (generating an outing, say) — six tests really did fail. What is to be
+    counted is diaries, so count diaries.
     """
     return [c for c in spooler.calls
             if c["title"] == "generate_actress_diary"]
@@ -624,10 +625,11 @@ async def test_reading_a_diary_that_is_not_there_is_a_404(monkeypatch):
 
 # ── 写した引用がずれていないか（見るだけ・直さない） ────────────────────────
 def test_a_copied_line_that_came_out_changed_is_reported():
-    """実物（2026-08-21）。同じ日記の前半では「マイク」と書けていた。
+    """A real one (2026-08-21). Earlier in the same diary she had written 「マイク」
+    ("mic") correctly.
 
-    92本の測定で崩れたのは全て逐語の引用の中で、自分の言葉で書いている所では
-    一度も崩れなかった。**書き写しの最中だけ壊れる。**
+    Across 92 measurements every breakage was inside a verbatim quote; where she
+    writes in her own words it never broke once. **It breaks only while copying.**
     """
     # 実際のログの一行そのまま。**短く刈り込まない** —— 前後がついた長い行に
     # 対して短い引用を当てるのがこの網の仕事で、刈ると被覆率が 0.78 に落ちて
@@ -650,10 +652,11 @@ def test_a_copied_line_that_came_out_changed_is_reported():
 
 
 def test_the_page_she_fixed_is_left_alone():
-    """彼女はこちらの誤字を直すことがある。**それを誤りと数えない。**
+    """She sometimes corrects our typos. **That is not counted as a slip.**
 
-    ログ「手を降るシーンにしよう」が、日記では「手を振る」になっていた。
-    直す側に回ると、この仕事を潰す。だから見つけたと言うだけで直さない。
+    The log's 「手を降るシーン」 (a homophone typo for "a waving scene") had become
+    「手を振る」 — the correct spelling — in the diary. Turning corrector here would
+    crush that work, so it is only reported, never fixed.
     """
     log = ["じゃあここでお別れにしようか。バイバイ。って手を降るシーンにしよう。"]
     page = "「バイバイ、って手を振るシーンにしよう」って言われて、現実に戻された。"
@@ -664,14 +667,16 @@ def test_the_page_she_fixed_is_left_alone():
 
 
 def test_a_quote_inside_a_quote_is_not_a_slip():
-    """引用の中の引用は『』に変わる。正しい書き換えなので黙る。"""
+    """A quote inside a quote turns into 『』. That is a correct rewrite, so nothing is
+    said."""
     log = ["みおちゃんの、日記の中の「本当の私」ってどんな私？"]
     page = "「みおちゃんの、日記の中の『本当の私』ってどんな私？」と聞かれた。"
     assert muse_diary.quote_drift(page, log) == []
 
 
 def test_her_own_words_are_not_measured_against_the_log():
-    """写していない文は対象外。似ているだけの地の文を誤りと数えない。"""
+    """A sentence she did not copy is out of scope. Ordinary prose that merely resembles
+    the log is not counted as a slip."""
     log = ["カメラってこっちね。私を見てね。"]
     page = "カメラを見るのは、やっぱり少し怖い。総監督さんの声だけが頼りだった。"
     assert muse_diary.quote_drift(page, log) == []

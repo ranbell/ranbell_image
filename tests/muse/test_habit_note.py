@@ -1,13 +1,14 @@
-"""**癖メモが書かれるようにする。**（2026-09-10）
+"""**Make the habit note get written.** (2026-09-10)
 
-総監督「癖メモかけるようにしよう」。
+The Showrunner: "let us make the habit note writable".
 
-スタジオ手帖の癖メモは classic の `finish_session` が出すが、二つの門がどちらも
-`session["notes"]` を読む —— `lounge.should_write_habit`（材料が空なら即やめ）と、
-書く側の `muse.service._director_highlights`（末尾8件を条文に入れる）。
+The studio notebook's habit note is produced by classic's `finish_session`, but two
+gates both read `session["notes"]` — `lounge.should_write_habit` (stop at once if
+the material is empty) and, on the writing side,
+`muse.service._director_highlights` (the last 8 go into the contract).
 
-**Refine は常設の指示を `standing` に入れていて `notes` を一度も埋めていなかった**
-ので、Refine で撮った日は癖メモが一度も出ていなかった。
+**Refine put standing orders into `standing` and never filled `notes` once**, so on
+a day shot in Refine the habit note never appeared.
 """
 from __future__ import annotations
 
@@ -24,7 +25,8 @@ def test_a_picture_direction_is_kept():
 
 
 def test_the_same_line_twice_is_kept_once():
-    """常設の指示は二度積めば二度効く。classic の `_add_note` と同じ。"""
+    """Stack a standing order twice and it bites twice. The same as classic's
+    `_add_note`."""
     session: dict = {}
     service._keep_note(session, "座って。")
     service._keep_note(session, "座って。")
@@ -40,7 +42,8 @@ def test_notes_do_not_pile_up():
 
 
 def test_only_picture_lines_are_kept():
-    """「かわいいよ」は癖の材料にならない —— 台帳を動かした回だけ控える。"""
+    """"You look lovely" is not material for a habit — only turns that moved the ledger
+    are noted."""
     src = inspect.getsource(service.chat)
     keep = src.index("_keep_note(session, text)")
     gate = src.rindex("if ledger_mod.touched_picture(patch):", 0, keep)
@@ -48,7 +51,7 @@ def test_only_picture_lines_are_kept():
 
 
 def test_both_gates_open_once_notes_exist():
-    """材料さえあれば、classic 側の二つの門はどちらも通る。"""
+    """Given material, both of classic's gates open."""
     session = {"notes": ["窓際に立って、外を見て。", "カーディガンは脱いで。"]}
     # 門1: 材料が空だと即やめ（乱数の前）
     assert lounge_mod.should_write_habit(notes=[]) is False
@@ -63,7 +66,8 @@ def test_both_gates_open_once_notes_exist():
 
 
 def test_the_wrap_says_whether_the_habit_can_happen():
-    """総監督「これなかなか各タイミングが分かりにくい」——材料の有無を残す。"""
+    """The Showrunner: "the timing of each of these is quite hard to see" — so whether
+    there was material is recorded."""
     src = inspect.getsource(service.finish_session)
     assert "wrap_handover" in src
     assert "habit_possible" in src

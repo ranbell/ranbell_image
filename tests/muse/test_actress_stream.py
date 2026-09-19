@@ -1,14 +1,15 @@
-"""**彼女の台詞を流す。**（2026-09-10）
+"""**Her lines are streamed.** (2026-09-10)
 
-総監督「会話がストリーミングされないので、待ち時間をやっぱり感じてしまう」。
+The Showrunner: "the conversation is not streamed, so the wait really is felt".
 
-この段は実測 20.3秒で、そのうち 18.1秒はプロンプトを読む時間（16,272字＝
-5,424tok＠300tok/s）。総時間は変わらないが、無言で終わりを待つのと途中から
-文字が出るのとでは待たされ方が違う。
+This stage measures 20.3 seconds, of which 18.1 is reading the prompt (16,272
+characters = 5,424 tokens at 300 tok/s). The total does not change, but waiting in
+silence for the end and seeing characters appear partway are different kinds of
+waiting.
 
-**流していいのは `SAY:` の中だけ。** 欄の名前も `MY_FEEL:` も画面に出しては
-いけない。classic の `_say_only` がその仕事をしていて、Refine の欄名は
-そちらの `_SAY_SHUT_RE` に全部入っている。
+**Only what is inside `SAY:` may be streamed.** Neither field names nor `MY_FEEL:`
+may reach the screen. Classic's `_say_only` does that job, and every Refine field
+name is in its `_SAY_SHUT_RE`.
 """
 from __future__ import annotations
 
@@ -19,7 +20,7 @@ from app.muse import ledger as L, writer
 
 
 class _Ollama:
-    """`generate_text` と `generate_text_stream` のどちらが呼ばれたか数える。"""
+    """Counts which of `generate_text` and `generate_text_stream` was called."""
 
     def __init__(self, raw: str):
         self.raw = raw
@@ -66,7 +67,7 @@ def test_with_a_listener_it_streams_and_still_parses():
 
 
 def test_only_the_spoken_part_reaches_the_screen():
-    """`_say_only` を通すと、欄の名前も内心も漏れない。"""
+    """Through `_say_only`, neither field names nor mutters leak."""
     o = _Ollama(_RAW)
     seen: list[str] = []
     _turn(o, on_token=muse_service._say_only(seen.append))
@@ -77,7 +78,7 @@ def test_only_the_spoken_part_reaches_the_screen():
 
 
 def test_a_broken_listener_does_not_break_the_turn():
-    """画面が落ちても撮影は続く。"""
+    """The shoot goes on even when the screen falls over."""
     o = _Ollama(_RAW)
 
     def _boom(_text):

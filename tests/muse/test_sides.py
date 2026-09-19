@@ -1,12 +1,15 @@
-"""**二人のとき、立ち位置を決めて書き分ける。**（2026-09-10）
+"""**With two people, fix where each one stands and write them apart.**
+(2026-09-10)
 
-総監督「best practice で右と左って指示するといいらしい。それぞれがどっちにいるかを
-決めて、かき分けてみよう。Mio (left), Asahi (right) もしくは top / bottom かな」。
+The Showrunner: "best practice apparently says to say right and left. Let us decide
+which of them is where and write them apart. Mio (left), Asahi (right), or maybe
+top / bottom."
 
-人ごとにまとめて書くこと自体は既に入っている（`identity.assemble_from_boxes`・
-2026-09-02）。足りないのは**どちらがどちら側か**。
+Writing each person's words together is already in (`identity.assemble_from_boxes`,
+2026-09-02). What is missing is **which one is on which side**.
 
-**一人のときは何も足さない。** 監督が既に場所を言っている回も、そちらが勝つ。
+**Solo adds nothing.** And on a turn where the director already named a place, the
+director wins.
 """
 from __future__ import annotations
 
@@ -49,21 +52,22 @@ def test_two_in_frame_get_a_side_each():
 
 
 def test_the_side_comes_first_in_her_run():
-    """位置＝優先度。後ろに付けると効きが落ちる。"""
+    """Position is priority. Appended at the end it bites less."""
     got = assemble.assemble_prompt(_session(partner=True), BASE)
     mio = _line(got, "Mio")
     assert mio.startswith(f"Mio: {LEAD_EN},"), mio
 
 
 def test_a_solo_shoot_gets_no_side():
-    """**一人の会話・一人の絵を壊さない。**"""
+    """**The solo conversation and the solo picture do not break.**"""
     solo = {**L.blank(), "wearing": "cardigan", "beat": "standing", "scene": "room"}
     got = assemble.assemble_prompt(_session(partner=False), solo)
     assert "on the left" not in got and "on the right" not in got
 
 
 def test_the_director_wins_when_he_named_a_side():
-    """監督が置き場所を言った回は、既定を**片方も**足さない。"""
+    """On a turn where the director named a placement, the default is not added for
+    **either** of them."""
     led = {**BASE, "beat_b": "standing on the right, holding menu"}
     got = assemble.assemble_prompt(_session(partner=True), led)
     # 監督の言葉（`standing on the right`）はそのまま残る。既定が**足されない**
@@ -101,7 +105,8 @@ def test_the_prose_stays_quiet_for_one_person():
 
 
 def test_the_pair_lives_in_one_place():
-    """**絵と日記が同じ正本を読む。** 別々に持つと片方を替えたとき食い違う。"""
+    """**The picture and the diary read the same source of truth.** Held separately,
+    changing one makes them disagree."""
     assert identity.LEAD_SIDE in identity.SIDE_WORDS
     # 主演と相方は必ず反対側
     assert identity.side_of(lead=True) != identity.side_of(lead=False)
@@ -114,5 +119,5 @@ def test_the_pair_lives_in_one_place():
 
 
 def test_the_lead_is_on_the_right_today():
-    """総監督のご指定（2026-09-10）。替えるときはここも一緒に替える。"""
+    """The Showrunner's choice (2026-09-10). Change it and change this with it."""
     assert identity.LEAD_SIDE == "right"
