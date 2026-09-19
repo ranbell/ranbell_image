@@ -297,7 +297,8 @@ def _build_completion_prompt(
                 lines.append(f"  {k}: {v}")
         lines.append("")
 
-    # Pro prompt spec: ユーザーが直接書いたプロンプトの展開仕様 — seed hints より高優先度
+    # Pro prompt spec: how a prompt the user wrote directly is expanded — higher
+    # priority than the seed hints
     if pro_prompt_spec:
         visual_spec = pro_prompt_spec.get("visual_spec", "")
         action_tags = pro_prompt_spec.get("action_tags", [])

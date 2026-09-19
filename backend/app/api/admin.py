@@ -34,7 +34,7 @@ class ConfigBody(BaseModel):
     cluster_common_tags: list[str] | None = None
     prompt_removal_tags: list[str] | None = None
     ollama_num_ctx: Annotated[int, Field(ge=512)] | None = None
-    # Muse の既定（空なら画面が選ばせる）
+    # Muse's defaults (empty means the screen asks to choose)
     muse_model: str | None = None
     muse_workflow: str | None = None
     frozenset_classification: bool | None = None
