@@ -120,7 +120,8 @@ async def _cfg(db):
 
 
 async def case_rooftop_rapid(db, lines: list[str]) -> None:
-    """Case A: 屋上あさひ — 帽子着脱・煽り・見上げ・雑談・OPEN肯定."""
+    """Case A: Asahi on the rooftop — hat on and off, low angle, looking up, small talk,
+    an affirmed OPEN."""
     lines.append("## Case A — 屋上あさひ（高速変更＋雑談＋OPEN）\n")
     scripts = {
         "セーラー": _scripter_block(
@@ -235,7 +236,7 @@ async def case_rooftop_rapid(db, lines: list[str]) -> None:
 
 
 async def case_wmuse_asymmetric(db, lines: list[str]) -> None:
-    """Case B: W-Muse 非対称 → 二人立ち."""
+    """Case B: an asymmetric W-Muse turn -> both of them standing."""
     lines.append("## Case B — W-Muse 非対称（あさひ／みなも）\n")
     scripts = {
         "読書": """
@@ -359,7 +360,7 @@ CRAFT_SCENE: Both standing side by side.
 
 
 async def case_format_breakage(db, lines: list[str]) -> None:
-    """Case C: 壊れた出力 → craft 非上書き・SAY浄化・repair."""
+    """Case C: broken output -> craft is not overwritten, SAY is cleaned, repair runs."""
     lines.append("## Case C — フォーマット崩れ耐性\n")
 
     class BreakOllama(SimOllama):
@@ -430,7 +431,8 @@ async def case_format_breakage(db, lines: list[str]) -> None:
 
 
 async def case_reunion_memory(db, lines: list[str]) -> None:
-    """Case D: 再会 → recall → 雑談スキップ → またあの感じ."""
+    """Case D: a reunion -> recall -> small talk skipped -> 「またあの感じ」
+    ("that feeling again")."""
     lines.append("## Case D — 再会・記憶・雑談スキップ\n")
 
     async def _bond(db, cid):
@@ -541,7 +543,7 @@ async def case_reunion_memory(db, lines: list[str]) -> None:
 
 
 async def case_open_fade(db, lines: list[str]) -> None:
-    """Case E: OPEN スルー2回で自然引き."""
+    """Case E: two ignored OPENs and it withdraws on its own."""
     lines.append("## Case E — OPEN スルーで自然引き\n")
     scripts = {
         "ベンチ": _scripter_block(
