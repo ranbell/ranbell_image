@@ -1,10 +1,10 @@
 <script setup>
 /*
- * Muse —— 総監督スタジオ。台帳（ledger）が正本。
+ * Muse — the Showrunner's studio. The ledger is the record of truth.
  *
- * classic を退役させて撮影室は一つになった（2026-09-12）。名前に `Refine` が
- * 残っているのは保存値（`service.STUDIO`）と観測の識別子だけで、画面と URL は
- * `muse` に畳んである。
+ * With classic retired there is one studio (2026-09-12). `Refine` survives in the
+ * name only as a stored value (`service.STUDIO`) and as the observation identifier;
+ * the screen and the URLs are folded into `muse`.
  */
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -16,15 +16,16 @@ const props = defineProps({
   show: { type: Boolean, default: false },
   comfyOffline: { type: Boolean, default: false },
   getJobsMap: { type: Function, default: () => () => new Map() },
-  // 名簿（`CharacterGallery`）が選んだ相手。**開いた一度だけ**読む。
-  // classic の退役で、名簿からの導線がこちらへ来る（2026-09-12）。
+  // Whoever the roster (`CharacterGallery`) chose. Read **once, on opening**.
+  // With classic retired, the path from the roster comes here (2026-09-12).
   initialCharacterId: { type: String, default: '' },
   initialPartnerId: { type: String, default: '' },
 })
 const emit = defineEmits(['update:show', 'toast', 'select-image', 'session-state'])
 const { t, locale } = useI18n()
 
-//: 名簿（`CharacterGallery`）の開閉。classic と同じ二枚 —— 主演と相方。
+//: Opening and closing the roster (`CharacterGallery`). The same two as classic —
+//: the lead and the partner.
 const showPicker = ref(false)
 const showPartnerPicker = ref(false)
 const session = ref(null)
@@ -47,46 +48,50 @@ const showDiary = ref(false)
 const themeDraft = ref('')
 const streamLive = ref(false)
 const speaking = ref(false)
-// 彼女が喋っている最中の、まだ確定していない一行（`chat_delta`）。
+// The line she is still speaking, not yet settled (`chat_delta`).
 const liveSay = ref('')
-// 流れている台詞の主。班だと席が次々に替わる。
+// Who owns the streaming line. With a crew the seat changes one after another.
 const liveName = ref('')
 const liveIsLead = ref(true)
-// **誰の言葉が流れているか（2026-09-16）。** `muse_speaking` を一つ取りこぼすと、
-// 二人の言葉が一つの吹き出しに積まれていた（総監督「Muse同士の会話が混ざる」）。
-// `chat_delta` にも `muse_id` が乗っているので、変わったらそこで畳む。
+// **Whose words are streaming (2026-09-16).** Miss one `muse_speaking` and two
+// people's words piled into one bubble (the Showrunner: "the Muses' conversations
+// get mixed up"). `chat_delta` carries a `muse_id` too, so it folds when that
+// changes.
 const liveId = ref('')
-// このターンで流し終えた席。確定した行が届くまでの間だけ画面に残す。
+// The seats that finished streaming this turn. Kept on screen only until the
+// settled rows arrive.
 const liveDone = ref([])
 
 /**
- * 喋りの後始末。**`speaking` は `busy` より長生きしてはいけない。**
+ * Cleaning up after speech. **`speaking` must never outlive `busy`.**
  *
- * 総監督「会話終了処理がよくなくて、busy になり続けるのでその後一切の入力が
- * できなくなる」。原因は `speaking` のほう —— `chatLocked` は
- * `busy || renderLocked || speaking` で、SSE の `muse_speaking` が立てた旗を
- * 下ろすのは `chat` / `session_updated` の分岐だけ、しかも **`!busy` のとき
- * だけ**だった。POST の最中に届いた合図はそこで捨てられるので、POST が
- * 終わったときには誰も下ろす人が居ない。
+ * The Showrunner: "the end-of-conversation handling is poor — it stays busy and
+ * after that no input is possible at all". The cause was `speaking`: `chatLocked` is
+ * `busy || renderLocked || speaking`, and the flag raised by the SSE
+ * `muse_speaking` was lowered only in the `chat` / `session_updated` branches, and
+ * **only while `!busy`**. A signal arriving mid-POST was discarded there, so by the
+ * time the POST finished nobody was left to lower it.
  *
- * スタジオ撮りで踏み抜いた —— 班を開くと席が3〜6回 `muse_speaking` を出し、
- * `runStage` は `busy` しか下ろさないので、そのまま入力が死んだ。
+ * Hit on a studio shoot — opening a crew makes the seats emit `muse_speaking` 3-6
+ * times, and `runStage` lowers only `busy`, so the input simply died.
  */
 function stopSpeaking() {
   speaking.value = false
   liveSay.value = ''
   liveName.value = ''
   liveId.value = ''
-  // 確定した行が `session.chat` で届くので、流していたぶんは役目を終える。
+  // The settled rows arrive in `session.chat`, so what was streaming has done its
+  // job.
   liveDone.value = []
 }
 
 /**
- * 流し終えた台詞を畳んで、次の人のために枠を空ける。
+ * Fold the finished line away and clear the slot for the next person.
  *
- * **前の席の言葉を消さない（2026-09-12）。** 総監督「役が話す毎にリセット処理が
- * 入るのか、毎回巻き戻されてしまいます」。確定した行が出るのは POST が返ってから
- * なので、ここで畳んでおかないと次の席が始まった瞬間に前の言葉が消える。
+ * **The previous seat's words are not erased (2026-09-12).** The Showrunner: "it is
+ * as if a reset runs every time a seat speaks — it keeps rewinding". The settled
+ * rows appear only once the POST returns, so without folding here the previous
+ * words vanish the moment the next seat begins.
  */
 function foldLive() {
   if (liveSay.value.trim()) {
@@ -94,15 +99,17 @@ function foldLive() {
       name: liveName.value,
       text: liveText.value,
       lead: liveIsLead.value,
-      // **畳んだあとも顔は残す（2026-09-18）。** 流し終えた吹き出しだけ
-      // サムネイルが消えると、同じ人が喋り続けているのに顔が出たり消えたりする。
+      // **The face stays after folding (2026-09-18).** With the thumbnail gone
+      // from folded bubbles alone, the same person speaking on and on made the face
+      // appear and disappear.
       face: liveIsLead.value ? leadFace.value : '',
     }].slice(-24)
   }
   liveSay.value = ''
 }
-// W撮りでは `A:` / `B:` が行頭に付いてくる（誰の台詞かの目印）。**確定した行は
-// 名前で分かれて出る**ので、流れている間だけの目印は画面に出さない。
+// In a duet, `A:` / `B:` arrive at the start of a line (the marker for whose line
+// it is). **The settled rows come out separated by name**, so a marker that only
+// exists while streaming is not shown.
 const liveText = computed(() =>
   liveSay.value.replace(/^[ \t]*[AB][:：][ \t]*/gm, ''),
 )
@@ -118,13 +125,15 @@ const inputs = computed(() => session.value?.inputs || {})
 const ledger = computed(() => session.value?.refine_ledger || {})
 const craft = computed(() => session.value?.craft || {})
 const chat = computed(() => session.value?.chat || [])
-// 右のデバッグ枠が読むもの。**判定には使わない。**
+// What the debug pane on the right reads. **Never used to decide anything.**
 //
-// 削除したのは「可視結果」だけ（総監督「観測という機能はあまり有効に働かない
-// ので削除。キーワードベースでほとんど使われていない」）—— 風・後ろ姿を正規
-// 表現で拾って散文に足していた `visible_consequence_cues` は裏ごと落とした。
-// 枠そのものと、書き換え・段の時間・イベントログは残す。会話欄から「画の更新」
-// を落としたぶん、**行き先はここしかない**。
+// What was removed is only the "visible result" (the Showrunner: "the observation
+// feature does not work very effectively, so remove it. It is keyword-based and
+// hardly ever used") — `visible_consequence_cues`, which caught wind and back views
+// by regular expression and added them to the prose, went along with its backend.
+// The pane itself, the rewrites, the stage times and the event log all stay. With
+// "picture updated" dropped from the conversation, **this is the only place left
+// for them**.
 const refineLog = computed(() => [...(session.value?.refine_log || [])].slice().reverse())
 const stageMs = computed(() => [...(session.value?.stage_ms || [])].slice(-12).reverse())
 const turnTrace = computed(() => [...(session.value?.turn_trace || [])].slice().reverse())
@@ -160,7 +169,7 @@ function mergeRewriteLog(keep, next) {
   return [...byAt.values()].sort((a, b) => Number(a?.at || 0) - Number(b?.at || 0)).slice(-24)
 }
 const characters = computed(() => characterList.value)
-//: 開始の前に埋まっていなければならないもの。**足りない物を名前で言う。**
+//: What must be filled in before starting. **What is missing is named.**
 const missingBeforeStart = computed(() => {
   const want = []
   if (!inputs.value.character_id) want.push(t('muse.pickCharacter'))
@@ -189,14 +198,18 @@ const standing = computed(() => session.value?.standing || [])
 const bond = computed(() => session.value?.bond || {})
 const banned = computed(() => session.value?.banned || [])
 const opened = computed(() => !!session.value?.opened)
-// 会話のターンでは散文とタグの組み上げを撮る時まで待つ（裏の `touch_craft`）。
+// On a conversation turn, building the prose and tags waits until the shot (the
+// backend's `touch_craft`).
 const craftStale = computed(() => !!craft.value?.stale)
-// スタジオ撮り（班）が開いているか。裏の `crew_room.TABLE_OPEN` と同じ印。
+// Whether a studio shoot (with a crew) is open. The same mark as the backend's
+// `crew_room.TABLE_OPEN`.
 const tableOpen = computed(() => !!session.value?.crew_open)
 const crewSeats = computed(() => Number(session.value?.crew_seats || 0))
-// 班の顔ぶれは `crew.PRESETS` が正本（カタログ経由）。画面に直書きしない。
+// `crew.PRESETS` is the record of truth for who is on a crew (through the
+// catalogue). Never written out on the screen.
 const crewPresets = computed(() => catalog.value?.crew?.presets || [])
-// 開く前に選ぶ撮り方。開いたあとはセッションの印が正本。
+// The kind of shoot, chosen before opening. Once open, the session's mark is the
+// record of truth.
 const shootMode = ref('solo')
 watch(tableOpen, (on) => { if (on) shootMode.value = 'studio' })
 const diaryState = computed(() => session.value?.diary || {})
@@ -278,7 +291,8 @@ const ledgerRows = computed(() => {
     'wearing', 'beat', 'expression', 'scene', 'light', 'bg', 'frame',
     'lettering', 'atmosphere', 'look',
   ]
-  // 相方の欄は相方が居るときだけ。台帳側も `PARTNER_KEYS` で同じ切り方をする。
+  // The partner's fields only when there is a partner. The ledger side splits the
+  // same way, through `PARTNER_KEYS`.
   if (partner.value?.character_id) {
     rows.push('wearing_b', 'beat_b', 'expression_b')
   }
@@ -325,10 +339,11 @@ async function startFresh(characterId = '') {
   speaking.value = false
   try {
     await ensureCatalog()
-    // **一覧の先頭を当てない（総監督・2026-09-13）。**
-    // 「使用する llm・画像モデルも空にして、実行前に選択するように。管理画面で
-    // デフォルト決めていたら、そのデフォルト値を使用して開始できるように」。
-    // 既定は**管理画面が決めたものだけ** —— 無ければ空にして、開始の前に選ばせる。
+    // **The first of the list is not applied (the Showrunner, 2026-09-13).**
+    // "Empty the llm and image model too, so they are chosen before running. If a
+    // default is set in the admin screen, it should be possible to start from that
+    // default." The default is **only what the admin screen decided** — failing
+    // that it stays empty and asks to choose before starting.
     const admin = catalog.value?.admin_defaults || {}
     const body = {
       locale: isJa.value ? 'ja' : 'en',
@@ -408,7 +423,8 @@ async function openSession() {
     fail(new Error(t('muse.needCharacter')))
     return
   }
-  // 選び忘れたまま撮り始めない。どれも**開いたあとでは替えにくい**もの。
+  // A shoot never starts with something unchosen. All of these are **hard to change
+  // once open**.
   if (!inputs.value.model) { fail(new Error(t('muse.needModel'))); return }
   if (!inputs.value.workflow) { fail(new Error(t('muse.needWorkflow'))); return }
   if (shootMode.value === 'studio' && !tableOpen.value && !inputs.value.crew_preset) {
@@ -422,7 +438,8 @@ async function openSession() {
     if (themeDraft.value.trim() && themeDraft.value.trim() !== (inputs.value.theme || '')) {
       await patchInputs({ theme: themeDraft.value.trim() })
     }
-    // スタジオ撮りは別の扉。班は途中から呼べないので、開始のときに決まる。
+    // A studio shoot has its own door. A crew cannot be called in partway, so it is
+    // settled at the start.
     const door = shootMode.value === 'studio' && !tableOpen.value ? 'table' : 'open'
     session.value = await api(
       `/api/muse/sessions/${session.value.session_id}/${door}`,
@@ -493,23 +510,24 @@ async function finishSession() {
 }
 
 /**
- * その行の顔。**「誰の言葉か」で決める。**（2026-09-18）
+ * The face for a row. **Decided by whose words they are.** (2026-09-18)
  *
- * 総監督「Muse が喋ったときのサムネイルが抜けている場合がある」。
+ * The Showrunner: "the thumbnail is sometimes missing when Muse speaks".
  *
- * ここは以前「assistant の行なら主演の顔」を返していたので、班の席にまで彼女の
- * 顔が付いてしまい、**吹き出しの種類の許可リスト**（say / banter / verify…）で
- * 抑えていた。その許可リストに**やじ（heckle）が入っていなかった** —— 彼女は
- * 1ターンに2〜3回やじを入れるので、**同じ人なのにその回だけ顔が消えていた。**
+ * This used to return "the lead's face for an assistant row", which put her face on
+ * the crew seats as well, so it was held back by **an allow-list of bubble kinds**
+ * (say / banter / verify…). **Heckling was not on that allow-list** — she heckles
+ * two or three times a turn, so **the same person lost her face on exactly those
+ * rows.**
  *
- * 許可リストではなく、行が持っている `meta.role`（席の役）で決める。班の席は
- * 顔を持たず、主演の行は種類にかかわらず顔が付く。
+ * Rather than an allow-list, it is decided by the row's own `meta.role` (the seat's
+ * job). A crew seat has no face; the lead's rows carry one whatever their kind.
  */
 function faceShaForRow(row) {
   const id = row?.meta?.speaker_id
   if (id && id === partner.value?.character_id) return partnerFaceSha.value
   if (id && id === leadCharacter.value?.character_id) return leadFaceSha.value
-  // 班の席（演出・照明…）は顔を持たない。主演だけが `actress`。
+  // The crew seats (staging, lighting…) have no face. Only the lead is `actress`.
   const role = row?.meta?.role
   if (role && role !== 'actress') return ''
   if (row?.role === 'assistant') {
@@ -525,8 +543,8 @@ function isSayRow(row) {
   const kind = row?.meta?.kind
   return row?.role === 'assistant' && (!kind || kind === 'say')
 }
-// この回が画を動かしたか（🖼）、喋っただけか（💬）。
-// **押していない古い行には何も出さない** —— `undefined` は third state。
+// Whether this turn moved the picture (🖼) or only talked (💬).
+// **Nothing is shown on older rows with no stamp** — `undefined` is a third state.
 function turnIcon(row) {
   const shot = row?.meta?.shot
   if (shot === true) return '🖼'
@@ -552,8 +570,8 @@ async function sendChat() {
       `/api/muse/sessions/${session.value.session_id}/chat`,
       { method: 'POST', body: JSON.stringify({ message: msg }) },
     )
-    // 本物の行が入った。流していたぶんは**ここで**畳む —— finally まで
-    // 待つと、その一瞬だけ同じ台詞が二度出る。
+    // The real rows have arrived. What was streaming folds **here** — wait until
+    // `finally` and the same line appears twice for that instant.
     stopSpeaking()
     await scrollChat()
   } catch (err) {
@@ -650,8 +668,9 @@ function openStream(id) {
     if (data.type === 'muse_speaking') {
       speaking.value = true
       foldLive()
-      // **誰が喋っているか。** スタジオ撮りでは18人が順に喋るので、流れている
-      // 吹き出しに主演の名前を出しっぱなしにすると、誰の言葉か分からない。
+      // **Who is speaking.** On a studio shoot 18 people speak in turn, so leaving
+      // the lead's name on the streaming bubble makes it impossible to tell whose
+      // words they are.
       liveName.value = String(data.name || '')
       liveId.value = String(data.muse_id || '')
       liveIsLead.value = !data.muse_id
@@ -659,14 +678,14 @@ function openStream(id) {
       if (!startedAt) startedAt = Date.now()
       return
     }
-    // **彼女が喋っているところを流す（2026-09-10）。** 総監督「会話が
-    // ストリーミングされないので、待ち時間をやっぱり感じてしまう」。
-    // 裏が `_say_only` を通しているので、ここに来るのは SAY の中身だけ。
+    // **Stream her as she speaks (2026-09-10).** The Showrunner: "the conversation
+    // is not streamed, so the wait really is felt". The backend passes it through
+    // `_say_only`, so what arrives here is the contents of SAY and nothing else.
     if (data.type === 'chat_delta') {
       speaking.value = true
-      // **言葉の主が替わったら、そこで畳む。** 欄ごとの会議は一度の返事に
-      // 何人ぶんも入っているので、`muse_speaking` を取りこぼすと前の席の
-      // 吹き出しに次の席の言葉が続いてしまう。
+      // **When the owner of the words changes, fold there.** A field corner holds
+      // several people's lines in one reply, so missing a `muse_speaking` lets the
+      // next seat's words continue in the previous seat's bubble.
       const who = String(data.muse_id || '')
       if (who && liveId.value && who !== liveId.value) {
         foldLive()
@@ -685,7 +704,7 @@ function openStream(id) {
       return
     }
     if (data.type === 'chat' || data.type === 'chat_message') {
-      // 確定した行が来たら、流れていた下書きは役目を終える。
+      // Once the settled rows arrive, the streaming draft has done its job.
       liveSay.value = ''
       liveName.value = ''
       // Local sendChat owns speaking/busy until POST returns.
@@ -693,11 +712,12 @@ function openStream(id) {
       scheduleRefresh(true)
       return
     }
-    // **楽屋に何が届いたか、その場で言う（2026-09-10）。** 総監督「これなかなか
-    // 各タイミングが分かりにくいのが難点」。撮影を終えると日記・報告・提案・
-    // 癖メモが裏で走るが、Refine はこの合図を拾っていなかったので、
-    // 画面上は何も起きていないように見えていた。**種類ごとに言い分ける。**
-    // （お出かけだけは合図を出さないので、ここには出ない）
+    // **Say what reached the green room, there and then (2026-09-10).** The
+    // Showrunner: "the trouble is that the timing of each of these is quite hard to
+    // see". When a shoot ends, the diary, the report, the proposals and the habit
+    // note run in the background; Refine was not picking up these signals, so on
+    // screen nothing appeared to happen. **Each kind is announced separately.**
+    // (Only the outings emit no signal, so they do not appear here.)
     if (data.type === 'lounge_status') {
       const msg = {
         shared: t('muse.loungeShared'),
@@ -767,10 +787,11 @@ async function refresh(opts = {}) {
     session.value = next
     sampleJob()
   } catch (err) {
-    // **黙って落ちない（2026-09-10）。** ここが握り潰していたせいで、
-    // `mergeRewriteLog` の定義を消して呼び出しを残した事故が実機まで届いた。
-    // セッションが二度と更新されず、`board.pending` が下りずに入力が固まった。
-    // 画面は今まで通り邪魔しない（GET の失敗はよくある）が、痕跡は残す。
+    // **Never fail silently (2026-09-10).** This swallowing is how the accident of
+    // deleting `mergeRewriteLog`'s definition while leaving the call reached
+    // production. The session was never updated again, `board.pending` never came
+    // down, and the input froze. The screen still does not get in the way (a failed
+    // GET is common), but a trace is left.
     console.error('[muse] refresh failed', err)
   }
 }
@@ -821,8 +842,8 @@ watch(() => props.show, async (open) => {
   }
   try {
     await ensureCatalog()
-    // 名簿が別の相手を指したら、その人で撮り直す。同じ人なら座ったまま
-    // （セッションは開け閉めで消えない）。
+    // If the roster points at someone else, shoot again with them. The same person
+    // stays seated (a session does not disappear on opening and closing).
     const wanted = String(props.initialCharacterId || '')
     const seated = String(session.value?.inputs?.character_id || '')
     if (wanted && wanted !== seated) {
@@ -837,8 +858,8 @@ watch(() => props.show, async (open) => {
   }
 })
 
-// 止めてある撮影を名簿に知らせる（「撮影中」の札）。閉じてもセッションは
-// 残るので、閉じたあとに戻れることを名簿の側が知っている必要がある。
+// Tell the roster about a shoot that is paused (the "shooting" tag). A session
+// survives being closed, so the roster has to know it can be returned to.
 function publishSessionState() {
   const s = session.value
   emit('session-state', {
@@ -854,8 +875,9 @@ watch(
   { immediate: true },
 )
 
-// **保険。** どこかで後始末を書き忘れても、`busy` が下りた時点で必ず下ろす。
-// 入力が二度と戻らない、という壊れ方だけは作らない。
+// **A safety net.** Even if cleanup is forgotten somewhere, this always lowers it
+// the moment `busy` comes down. The one breakage never to create is input that
+// never comes back.
 watch(busy, (now) => {
   if (!now) stopSpeaking()
 })
@@ -874,8 +896,9 @@ function rowChips(row) {
 function isBanterRow(row) {
   return (row?.meta?.kind || row?.kind) === 'banter'
 }
-// 班の席（🎬）と、席の間のやじ（〃）。18人が喋るので、彼女の台詞とは
-// はっきり別の見た目にする —— 主演の声が埋もれないように。
+// The crew seats (🎬) and the heckling between them (〃). Eighteen people speak, so
+// they look clearly different from her lines — the lead's voice must not be
+// buried.
 function isSeatRow(row) {
   return (row?.meta?.kind) === 'seat'
 }
@@ -916,9 +939,10 @@ function isStruckRow(row) {
       @keydown.esc.stop="close"
     >
       <!--
-        **中央に寄せて左右を広く使う（総監督・2026-09-12）。** 右端に寄せた
-        `max-w-5xl` の柱だと、会話と台帳が同じ幅を取り合って両方狭かった。
-        画面いっぱいまで伸ばし、広い画面では端を切る（`max-w-[1680px]`）。
+        **Centred, using the full width (the Showrunner, 2026-09-12).** As a
+        `max-w-5xl` column pinned to the right, the conversation and the ledger
+        fought over the same width and both were narrow. It now stretches to the
+        whole screen, capped on wide displays (`max-w-[1680px]`).
       -->
       <div
         class="flex h-full w-full max-w-[1680px] flex-col border-x border-pink-500/30 bg-slate-900/95 text-gray-100 shadow-2xl"
@@ -989,10 +1013,10 @@ function isStruckRow(row) {
             <div class="border-b border-pink-500/15 px-3 py-2">
               <div class="flex flex-wrap items-center gap-2">
                 <!--
-                  **プルダウンをやめて一覧に戻す（総監督・2026-09-12）。**
-                  「Muse の選択切り替えは Muse Classic と同じようにして。
-                  プルダウンではなく Muse 一覧を表示」。名簿は
-                  `CharacterGallery` —— classic が開いていたのと同じ一枚。
+                  **Back from a dropdown to the roster (the Showrunner,
+                  2026-09-12).** "Make switching the Muse work the same as in Muse
+                  Classic. Show the Muse roster rather than a dropdown." The roster
+                  is `CharacterGallery` — the very one classic used to open.
                 -->
                 <button
                   type="button"
@@ -1035,9 +1059,10 @@ function isStruckRow(row) {
                   </span>
                 </button>
                 <!--
-                  **相方は無選択に戻せる（総監督・2026-09-13）。** 名簿には
-                  「選ばない」札が無いので、外した操作はここに置く。カードの
-                  すぐ隣に ✕ —— 離れた所に置くと、選んだ後に戻せないように見える。
+                  **The partner can go back to none (the Showrunner, 2026-09-13).**
+                  The roster has no "choose nobody" tile, so the clearing action
+                  lives here. The ✕ sits right beside the card — placed further away
+                  it looks as though a choice cannot be undone.
                 -->
                 <button
                   v-if="inputs.partner_preset"
@@ -1072,10 +1097,12 @@ function isStruckRow(row) {
                 </button>
               </div>
               <!--
-                **撮影班は主画面で選ぶ（総監督・2026-09-13）。**「プリセットの
-                呼び出しは設定ではなく画面で簡単に変えられるように」。設定枠の
-                奥にあると、撮影版を選んだ流れのまま班を決められない。
-                **既定は空** —— 選ばないとスタジオ撮りは開けない。
+                **The crew is chosen on the main screen (the Showrunner,
+                2026-09-13).** "Make calling up a preset easy to change on the
+                screen, not in the settings." Buried in the settings pane, the crew
+                cannot be decided in the same flow as choosing the shoot.
+                **The default is empty** — without a choice, a studio shoot does not
+                open.
               -->
               <div v-if="shootMode === 'studio'" class="mt-2">
                 <div class="flex flex-wrap items-center gap-1.5">
@@ -1234,11 +1261,12 @@ function isStruckRow(row) {
                   >{{ t('muse.struck') }}</span>
                 </span>
                 <!--
-                  **提案は押せる形で出す（2026-09-10）。** 総監督「Muse からの
-                  提案はあってもいいけど、もう少し分かりやすく」。これまでは
-                  `A ｜ B` というただの文字列で、押せるボタンは入力欄の上に
-                  離れて置いてあった。行そのものを提案カードにする。
-                  入力欄の上の列は残す —— 提案が上に流れたときの受け皿。
+                  **Proposals are shown as something you can press (2026-09-10).**
+                  The Showrunner: "proposals from Muse are fine, but make them a
+                  little clearer". They used to be the bare string `A ｜ B`, with the
+                  pressable buttons sitting separately above the input. The row
+                  itself becomes the proposal card. The row above the input stays —
+                  it catches proposals once they have scrolled up.
                 -->
                 <div
                   v-if="row.meta?.kind === 'pitch' && (row.meta?.options || []).length"
@@ -1358,11 +1386,12 @@ function isStruckRow(row) {
 
             <form class="flex flex-col gap-2 border-t border-pink-500/15 p-3" @submit.prevent="sendChat">
               <!--
-                **入力欄の上の追加推測指示は出さない（総監督・2026-09-12）。**
-                「添付画像の赤丸の部分の追加推測指示は表示要らないです」。
-                提案（PITCH）は会話の中の押せるカードとして出ているので、
-                入力欄の上の受け皿は二重になっていた。学んだ好み（taste）も
-                ここに並べない —— 撮る手を止めて読むものではない。
+                **No extra guessed suggestions above the input (the Showrunner,
+                2026-09-12).** "The extra suggestions circled in red in the attached
+                image do not need to be shown." Proposals (PITCH) already appear as
+                pressable cards inside the conversation, so the catcher above the
+                input was a duplicate. The learned tastes are not listed here either
+                — they are not something to stop shooting and read.
               -->
               <div class="flex flex-wrap items-center gap-2">
                 <button
@@ -1397,11 +1426,12 @@ function isStruckRow(row) {
                 {{ t('muse.approveNeedsBoard') }}
               </p>
               <!--
-                **3行の入力欄。Enter は素の改行（総監督・2026-09-13）。**
-                「文字送信は送信ボタンでおねがい。日本語ユーザが困るので」——
-                かな漢字変換の確定で Enter を押すので、Enter を送信にすると
-                **変換の途中で飛んでいく**。送信はボタン一つだけにする。
-                縁を掴めば伸ばせる（`resize-y`）。
+                **A three-line input. Enter is a plain newline (the Showrunner,
+                2026-09-13).** "Please send with the send button — it is a problem
+                for Japanese users." Enter is what confirms a kana-kanji conversion,
+                so binding Enter to send makes it **fly off mid-conversion**. There
+                is one way to send: the button. Grab the edge to make it taller
+                (`resize-y`).
               -->
               <div class="flex items-end gap-2">
                 <textarea
@@ -1595,9 +1625,10 @@ function isStruckRow(row) {
 
             <div v-if="showSettings" class="space-y-2 rounded-xl border border-gray-800 bg-gray-950 p-3 text-xs">
               <!--
-                **どこで決めるかを書く（総監督・2026-09-13）。**「llm, 画像モデルを
-                どこから呼べばいいのか分からない」。二段あることが分からないと、
-                毎回ここで選び直すことになる。
+                **Say where each thing is decided (the Showrunner, 2026-09-13).**
+                "I cannot tell where to call up the llm and the image model." Without
+                knowing there are two levels, they get chosen again here every
+                time.
               -->
               <p class="rounded-lg border border-pink-500/20 bg-pink-950/20 p-2 leading-snug text-[10px] text-pink-100/80">
                 {{ t('muse.whereToSetThisShoot') }}<br>
@@ -1610,7 +1641,8 @@ function isStruckRow(row) {
                   :value="inputs.workflow || ''"
                   @change="patchInputs({ workflow: $event.target.value })"
                 >
-                  <!-- **未選択を出す。** 既定を当てないので、空が正当な状態。 -->
+                  <!-- **Show the unchosen state.** No default is applied, so empty
+                       is a legitimate state. -->
                   <option value="">{{ t('muse.needWorkflow') }}</option>
                   <option v-for="w in workflows" :key="w" :value="w">{{ w }}</option>
                 </select>
@@ -1773,9 +1805,9 @@ function isStruckRow(row) {
   </Teleport>
 
   <!--
-    **Muse の一覧。** classic が開いていたのと同じ `CharacterGallery`
-    （総監督・2026-09-12「プルダウンではなく Muse 一覧を表示」）。
-    ワークフローの選びもあちらが持っているので、そのまま繋ぐ。
+    **The Muse roster.** The same `CharacterGallery` classic used to open (the
+    Showrunner, 2026-09-12: "show the Muse roster rather than a dropdown"). It owns
+    the workflow picker too, so that is wired straight through.
   -->
   <CharacterGallery
     :show="showPicker"
@@ -1849,7 +1881,7 @@ function isStruckRow(row) {
 .refine-wait-pulse {
   animation: refine-wait-soft 1.6s ease-in-out infinite;
 }
-/* 流れている行の末尾。まだ書いている途中だと分かるように。 */
+/* The tail of a streaming line, so it reads as still being written. */
 .refine-caret {
   animation: refine-caret-blink 1s step-end infinite;
   opacity: 0.6;
