@@ -76,7 +76,8 @@ def test_fight_craft_scene_drops_conflicting_prose():
 
 
 def test_solo_assemble_uses_person_boxes():
-    """箱が無いと書けない — solo も boxes 経路で最終を組む。"""
+    """They will not write it without a box — a solo shoot builds its final prompt
+    through the box path too."""
     out = identity.assemble_from_boxes(
         cast=_solo_cast(),
         people=notebook.mint_person_box(_session_with_shot()["notebook"]),
@@ -101,17 +102,19 @@ def test_classify_fields_include_atmosphere():
 
 
 def test_the_prose_check_drops_sentences_not_the_whole_prose():
-    """散文は**手帖と正面から矛盾する文だけ**落とす。
+    """The prose loses **only the sentences that contradict the notebook head-on**.
 
-    最初の版は内容語の過半数が手帖に無ければ散文ごと捨てた。実データ13本で
-    **4本（31%）が全損**し、しかも良い散文だった:
+    The first version threw the whole paragraph away when most content words were
+    absent from the notebook. Over 13 real samples **4 (31%) were lost entirely**,
+    and they were good prose:
 
-        「A wide shot shows her sitting on a park bench, her weight settled
-         back against the wood…」        未知 52% → 落とす
+        "A wide shot shows her sitting on a park bench, her weight settled
+         back against the wood…"        52% unknown → dropped
 
-    散文は手帖に無い言葉で書くもの。見るのは**服と場所の二軸**だけで、
-    手帖のどこかにある語は許す（`oversized_hoodie` は `hoodie` を許す）。
-    直したあと、同じ13本は **13/13 そのまま**。
+    Prose is written in words the notebook does not have. What is inspected is
+    **two axes only, clothes and place**, and any word present anywhere in the
+    notebook is allowed (`oversized_hoodie` allows `hoodie`). After the fix the
+    same 13 come through **13/13 untouched**.
     """
     from app.muse import notebook
 
@@ -139,7 +142,8 @@ def test_the_prose_check_drops_sentences_not_the_whole_prose():
 
 
 def test_the_prose_keeps_its_paragraph_breaks():
-    """二人の撮影では、改行が二人の描写を分けている。潰さない。"""
+    """In a two-person shoot the line breaks are what separate the two
+    descriptions. They are not flattened."""
     from app.muse import notebook
 
     nb = notebook.blank(partner=True)
@@ -152,10 +156,11 @@ def test_the_prose_keeps_its_paragraph_breaks():
 
 
 def test_an_unchanged_marker_never_reaches_the_picture():
-    """合図が値に混ざる回がある。丸ごと一致だけ見る版は通してしまう。
+    """Sometimes the marker is mixed into the value, and a version that only checks
+    for an exact whole-field match lets it through.
 
-    実機で場所の係が「その場所, unchanged」と返し、`unchanged` がそのまま
-    絵に載った。
+    Live, the place clerk returned "that place, unchanged" and `unchanged` went
+    straight into the picture.
     """
     import asyncio
     from app.muse import chain
@@ -183,18 +188,20 @@ def test_an_unchanged_marker_never_reaches_the_picture():
 
 
 def test_the_camera_box_reaches_the_picture():
-    """**焦点はカメラワークの箱。** 書ける箱にしても、届かなければ意味がない。
+    """**Focus belongs to the camera-work box.** A box you can write in is
+    pointless if what you write does not arrive.
 
-    総監督（2026-09-01）「視点は Muse A/B がどこを向いているのかなので、
-    自ずと beat に入るかな。**焦点はカメラワークがいいかも。`focus to …` とか
-    `long shot` とかはこの箱**かと」。
+    The Showrunner (2026-09-01): "viewpoint is where Muse A and B are looking, so
+    that naturally goes in beat. **Focus is probably camera work — `focus to …`
+    and `long shot` belong in this box**."
 
-    `frame` の文面はどこにも出ていなかった —— 絵に載っていたのは
-    `framing_tags` が正規化した一語（`full_body` など）だけ。手帖に
-    `focus on Mio` と書いても届かない。
+    The text of `frame` was reaching nothing — all that showed in the picture was
+    the single word `framing_tags` normalised to (`full_body` and the like).
+    Writing `focus on Mio` into the notebook never arrived.
 
-    **共有面の先頭に置く。** 総監督「priority はプロンプト内の位置」で、
-    どちらに寄るかは場所や光より先に効いてほしい。
+    **Put it at the head of the shared run.** The Showrunner: "priority is
+    position within the prompt", and which of them the camera favours should bite
+    before place or light.
     """
     from app.muse import notebook
 
@@ -213,10 +220,12 @@ def test_the_camera_box_reaches_the_picture():
 
 
 def test_the_gaze_belongs_to_each_person_now():
-    """視線は人ごとの箱（`beat`）に入る。**共有の一欄では二つの答えを持てない。**
+    """The gaze goes into each person's box (`beat`). **One shared field cannot
+    hold two answers.**
 
-    実機（`c9d83e6e`）で「すみれちゃんは後ろを向いて、遠くを見てて。
-    みおちゃんはこっち見て」が `frame` 一本に潰れ、片方が消えた。
+    Live (`c9d83e6e`), 「すみれちゃんは後ろを向いて、遠くを見てて。みおちゃんは
+    こっち見て」 ("Sumire, turn away and look into the distance; Mio, look at me")
+    collapsed into a single `frame` and one of them disappeared.
     """
     from app.muse import chain, identity, notebook
 
@@ -246,24 +255,26 @@ def test_the_gaze_belongs_to_each_person_now():
 
 
 def test_a_person_is_never_background():
-    """「すみれちゃんは背景で」は**カメラの話**であって、背景の欄ではない。
+    """"Put Sumire in the background" is **about the camera**, not about the
+    background field.
 
-    実機（`47cb5f1c`・2026-09-01）で焦点は正しく動いたが、`bg` にこれが
-    残った:
+    Live (`47cb5f1c`, 2026-09-01) the focus moved correctly and this stayed behind
+    in `bg`:
 
-        frame: long shot, focus on both        ← 正しい
+        frame: long shot, focus on both        ← correct
         bg   : **Mio close up, Sumire in background**
 
-    「みおちゃんに寄って。すみれちゃんは背景でいいよ」の**「背景で」を背景の
-    欄への指示と読んだ**。引きに戻したあとも `Mio close up` がプロンプトに
-    残り、焦点の指示と正面から矛盾していた。
+    In 「みおちゃんに寄って。すみれちゃんは背景でいいよ」 ("move in on Mio;
+    Sumire can be in the background") **the words "in the background" were read as
+    an instruction for the background field**. Even after pulling back to a wide,
+    `Mio close up` stayed in the prompt, contradicting the focus outright.
 
-    実測（4件×5回・係を直接叩く）:
+    Measured (4 cases × 5 runs, hitting the clerk directly):
 
-        みおちゃんに寄って。すみれちゃんは背景でいいよ  書いた 0/5  ✓
-        今度はすみれちゃんに焦点を。みおちゃんはぼかして 書いた 0/5  ✓
-        背景に噴水を入れて                       書いた 5/5  ✓
-        後ろにベンチをもう一つ置こう                書いた 5/5  ✓
+        move in on Mio; Sumire can be in the background   written 0/5  ✓
+        now focus on Sumire; blur Mio                     written 0/5  ✓
+        put a fountain in the background                  written 5/5  ✓
+        let's add another bench behind them               written 5/5  ✓
     """
     from app.muse import chain
 
@@ -283,19 +294,19 @@ def test_a_person_is_never_background():
 
 
 def test_each_person_is_written_as_one_run():
-    """**一人ぶんを一続きに書く。** 交互に並べると体型が混ざる。
+    """**Write one person as one run.** Interleave them and the bodies mix.
 
-    実機（`d2a56ace`・2026-09-02）の並びと、その絵:
+    The order live (`d2a56ace`, 2026-09-02), and the picture it gave:
 
         Mio is …, flat_chest, slim,
         Subaru is …, large_breasts, tall,
         Mio: lying on the bench, …
         Subaru: standing near the bench, …
 
-    **人が二回ずつ交互に出る**ので、どこからどこまでが一人ぶんか見失う。
-    絵ではみおがすばるの胸を引き受け、すばるの姿勢（立つ）も座りに化けた。
-    総監督「Mio danbooru / Mio 散文 / Subaru danbooru / Subaru 散文 と
-    したほうがいいかも」。
+    **Each person appears twice, alternating**, so where one person ends is lost.
+    In the picture Mio took on Subaru's chest, and Subaru's pose (standing) turned
+    into sitting. The Showrunner: "it might be better as Mio danbooru / Mio prose
+    / Subaru danbooru / Subaru prose".
     """
     from app.muse import identity, notebook
 
@@ -328,10 +339,11 @@ def test_each_person_is_written_as_one_run():
 
 
 def test_the_compile_is_told_a_person_is_never_background():
-    """人が背景の欄に入る。係には言ってあったが、**compile には言っていなかった**。
+    """People end up in the background field. The clerks had been told; **compile
+    had not**.
 
-    実機（`d2a56ace`）で `bg: two people, park trees`。総監督の報告
-    「背景に『すばる』という文言が入った」と同じ形。
+    Live (`d2a56ace`): `bg: two people, park trees`. The same shape as the
+    Showrunner's report that "the word 'Subaru' went into the background".
     """
     from app.muse import chain
 
@@ -342,22 +354,24 @@ def test_the_compile_is_told_a_person_is_never_background():
 
 
 def test_a_japanese_name_never_leaves_the_clerk():
-    """係の出口で、名前をラテン表記へ差し替える。
+    """Names are replaced with their Latin spelling at the clerk's exit.
 
-    実機（`2088299b`・2026-09-02）で姿勢の係がこう書いた:
+    Live (`2088299b`, 2026-09-02) the pose clerk wrote:
 
         beat_b: standing near the fountain, finger poking **みお's** cheek
 
-    そのまま絵のプロンプトへ載る。人名タグを落とす門は前からあるが
-    （`_scrub_invented_tags`）、**あれはタグ側だけで、欄の文面は素通り**
-    だった。
+    which goes straight into the picture prompt. The gate that drops person-name
+    tags has been there a while (`_scrub_invented_tags`), but **it only covered
+    tags; the text of a field went through untouched**.
 
-    **条文には足していない。** 「名前はラテン表記で」と書き足して測ったが、
-    条文あり／なし・門あり／なしの三通りとも **0/30** で差が出なかった ——
-    実機で一度出たものが、同じ行を30回叩いても再現しない稀な事象。
-    **効果の測れない条文は入れない**（この現場の 8,281字 → 2,327字 の教訓）。
+    **Nothing was added to the contract.** "Write names in Latin script" was added
+    and measured, and all three arms — contract on/off, gate on/off — came back
+    **0/30** with no difference: something that appeared once live does not
+    reproduce in 30 runs of the same line. **A clause whose effect cannot be
+    measured does not go in** (the lesson of this studio's 8,281 → 2,327
+    characters).
 
-    門は決定的に効く。確率ではなく保証。
+    The gate bites decisively. Not a probability — a guarantee.
     """
     from app.muse.chain import latin_names_in
 

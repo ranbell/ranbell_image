@@ -1,4 +1,4 @@
-"""主演撮り: Muse CARD + Script compile/weave, struck, still-as-base."""
+"""Lead shoot: Muse CARD + Script compile/weave, struck, still-as-base."""
 from __future__ import annotations
 
 import sys
@@ -244,7 +244,8 @@ def test_everyone_who_touches_the_notebook_reads_the_same_contract():
     version ("Crop plus gaze. Not where you are looking; that is the frame.")
     was reachable from exactly one call site, the restate turn.
 
-    So the showrunner's 「カメラ見て」 landed in `frame`, the old gaze stayed in
+    So the showrunner's 「カメラ見て」 ("look at the camera") landed in `frame`,
+    the old gaze stayed in
     `beat`, and weave — never told which field owns it — took the concrete one.
     He said it three times, the last time as a raw danbooru tag, and the board
     did not move. Nobody was wrong; nothing agreed.
@@ -405,16 +406,18 @@ def test_the_reason_is_one_line_not_a_second_notebook():
 # ── compile が実際に使う契約 ──────────────────────────────────────────────
 
 def test_compile_runs_on_the_built_contract_not_the_old_one():
-    """`SCRIPTER_SYSTEM` は残してあるが、compile はもう読んでいない。
+    """`SCRIPTER_SYSTEM` is kept, but compile no longer reads it.
 
-    標準30試験パック（30本 × 5回・言い直し込み）で同条件比較:
+    Compared under identical conditions on the standard 30-case pack (30 cases ×
+    5 runs, restatements included):
 
-        SCRIPTER_SYSTEM  8,281字   52.7%（1回判定）
-        積み上げ          2,327字   96.0%（詰まり 4.0%）
+        SCRIPTER_SYSTEM  8,281 chars   52.7% (judged in one pass)
+        built from blocks 2,327 chars   96.0% (4.0% stalled)
 
-    区分で見ると差の出方がはっきりする。動かさない仕事はどちらも 100% で、
-    差がつくのは動かす側 — 姿勢 16%→100%、服 24%→88%。禁止33／肯定6 の
-    指示は「動かさない」を完璧にして「動かす」を壊していた。
+    Split by category the shape of the difference is plain. Leaving things alone
+    scores 100% either way; the difference is in moving them — pose 16%→100%,
+    clothes 24%→88%. Thirty-three prohibitions against six positives made "do not
+    move it" perfect and broke "move it".
     """
     import inspect
     src = inspect.getsource(chain.run_scripter)
@@ -467,10 +470,11 @@ def test_the_built_contract_says_what_each_field_is_and_forbids_almost_nothing()
 
 
 def test_a_proposal_has_somewhere_to_go():
-    """行き場が無いと、思いついたものを欄に押し込む。
+    """With nowhere to put it, an idea gets pushed into a field.
 
-    t21「おいしそう？」で、ノートに食べ物が無いのに 5/5 で手にパンを持たせた。
-    禁止で塞ぐのではなく `PROPOSE:` を作ったら 5/5 で通るようになった。
+    On t21 「おいしそう？」 ("does it look good?") it put bread in her hands 5/5
+    with no food anywhere in the notebook. Making `PROPOSE:` rather than
+    prohibiting it cleared all five.
     """
     assert "PROPOSE" in chain.build_scripter_system()
     parsed = notebook.parse_scripter(
@@ -481,11 +485,12 @@ def test_a_proposal_has_somewhere_to_go():
 
 
 def test_intent_is_not_bought_at_the_notebook_s_expense():
-    """intent の説明はブロックとして持つが、既定には入れない。
+    """The intent explanation exists as a block but is not in the default.
 
-    足すと intent は 68%→93% になるが、ノートが 96.0%→86.7% に落ちる
-    （服の区分は 88%→48%、上がった試験はゼロ）。intent は別の道で採る —
-    `classify_intent` の clerk と、patch が欄を動かしたかどうか（実測 92%）。
+    Adding it takes intent from 68% to 93% and drops the notebook from 96.0% to
+    86.7% (the clothes category 88%→48%, with not one test improving). Intent is
+    taken by another road — the `classify_intent` clerk, and whether the patch
+    moved a field (92%, measured).
     """
     assert "intent" in chain.SCRIPTER_BLOCKS          # 残してある
     assert "intent" not in chain.SCRIPTER_BUILD_DEFAULT
@@ -493,17 +498,18 @@ def test_intent_is_not_bought_at_the_notebook_s_expense():
 
 
 def test_a_solo_shoot_has_no_partner_fields_to_write_into():
-    """相手役の欄が空いていると、彼女の服がそこに入って消える。
+    """Leave the partner's fields open and her clothes go in there and vanish.
 
-    実測（「カーディガン羽織って。」・ソロ・10回）:
+    Measured (「カーディガン羽織って。」 — "put a cardigan on", solo, 10 runs):
 
-        wearing に入った          6
-        wearing_b に入って消えた   2   ← 服が着られないまま次のターンへ
-        出力が崩れた / 空          2
+        landed in wearing              6
+        landed in wearing_b, then lost  2   ← on to the next turn still undressed
+        malformed / empty output        2
 
-    `guard_partner_patch` は書かれた**後**に落とすので、中身は失われる。
-    契約は既に「女優は一人」と言っているが、それでは止まらなかった。
-    **欄そのものを渡さない。** 無い鍵には書けない。
+    `guard_partner_patch` drops them **after** they are written, so the content is
+    lost. The contract already says there is one actress and that did not stop it.
+    **Do not hand over the field at all.** You cannot write into a key that is not
+    there.
     """
     solo = notebook.scripter_format_schema(False)["properties"]
     duo = notebook.scripter_format_schema(True)["properties"]
@@ -521,11 +527,12 @@ def test_a_solo_shoot_has_no_partner_fields_to_write_into():
 
 
 def test_the_rewrite_log_keeps_a_whole_shoot():
-    """12 だと実撮影の前半が消える。分析に使う記録は撮影1本ぶん残す。
+    """Twelve loses the first half of a real shoot. A record used for analysis
+    keeps one whole shoot.
 
-    コミケの回（2026-08-20）は監督の発言が21ターンあったのに、記録は直近12件
-    だけで、「場所がいつ入ったか」を追えなかった。言い直しと fold を含めると
-    1撮影で 50 件前後になる。
+    The Comiket session (2026-08-20) had 21 turns of direction and the log held
+    only the last 12, so "when did the place go in" could not be followed.
+    Counting restatements and folds, one shoot runs to about 50 entries.
     """
     assert notebook.REWRITE_LOG_MAX >= 50
 
@@ -541,16 +548,17 @@ def test_the_rewrite_log_keeps_a_whole_shoot():
 
 
 def test_the_notebook_has_somewhere_for_what_is_behind_her():
-    """BG —— 彼女以外に画面に写っているもの。無いと絵から消える。
+    """BG — what is in frame besides her. Without it, that falls out of the picture.
 
-    実撮影（コミケ・2026-08-20）で監督は場所を4回、背景を3回頼んだのに、
-    撮影3本のうち2本に建物も人混みも入らなかった。6欄のどこにも置き場が
-    無かったから。
+    In a real shoot (Comiket, 2026-08-20) the director asked for the place four
+    times and the background three, and two of the three renders had neither the
+    building nor the crowd. There was nowhere among the six fields to put them.
 
-    名前は測って決めた（7本 × 10回）。`set` `backdrop` `scenery` はどれも
-    届かず、現場の略語 `BG` だけが届いた（44% → 68%）。`backdrop` は
-    このライブラリに1枚も無い語で、`set_dressing` も `extras` も `mob` も
-    0 枚。**現場で実際に使われている語だけが通った。**
+    The name was settled by measuring (7 cases × 10 runs). `set`, `backdrop` and
+    `scenery` never arrived; only the studio's own abbreviation `BG` did
+    (44% → 68%). `backdrop` does not appear on a single image in this library, and
+    `set_dressing`, `extras` and `mob` are all zero. **Only the word actually used
+    on set came through.**
     """
     assert "bg" in notebook.SHOT_KEYS
     assert "bg" in notebook.blank()
@@ -568,11 +576,13 @@ def test_the_notebook_has_somewhere_for_what_is_behind_her():
 
 
 def test_the_label_table_comes_from_shot_keys():
-    """欄名の出典は一つ。書き忘れると値が黙って捨てられる。
+    """One source for the field names. Forget to list one and its value is silently
+    thrown away.
 
-    `wearing_drop` が実際にそうなっていた —— `_FIELD_RE` と JSON schema には
-    あるのに `key_map` に無くて、ラベル形式で答えたターン（画像が付く回と、
-    JSON パースが落ちた回の全部）で脱衣が床に落ちていた。
+    `wearing_drop` was exactly that — present in `_FIELD_RE` and the JSON schema
+    but missing from `key_map`, so on every turn answered in label form (all the
+    turns with an image attached, and every turn where JSON parsing failed) taking
+    a garment off fell on the floor.
     """
     parsed = notebook.parse_scripter(
         "INTENT: shot\nBG: a crowd of cosplayers\nWEARING_DROP: coat"
@@ -582,26 +592,30 @@ def test_the_label_table_comes_from_shot_keys():
 
 
 def test_the_angle_word_names_the_camera_not_the_gaze():
-    """`up` / `down` を説明に入れると、その語が取り違えの材料になる。
+    """Put `up` / `down` into the explanation and those words become the material
+    for the mix-up.
 
-    実撮影（ブランコ・2026-08-21）で、監督の「カメラを少し上から」を compile は
-    `high-angle` と正しく書き、直後の言い直しが `low-angle` に化けさせた。
-    残っていた理由の欄:
+    In a real shoot (the swing, 2026-08-21) the director's 「カメラを少し上から」
+    ("the camera a little from above") was written correctly by compile as
+    `high-angle`, and the restatement right after turned it into `low-angle`. The
+    reason field it left behind:
 
-      「カメラが高い位置にあるんですね」という理解と…指示通りの構図
-      （被写体を見上げるアングル）に彼女が合わせようとしていることを読み取った
+      read as the understanding that "the camera is up high"… and that she is
+      trying to match the composition as directed (an angle looking up at the
+      subject)
 
-    **カメラの位置は分かっていて、語だけが逆。** 監督は次のターンで
-    「from above っていうんだよ。ローアングルじゃないよ」と訂正している。
+    **The camera position was understood; only the word was inverted.** The
+    director corrected it the next turn: "it is called from above, not low angle".
 
-    直すのに3つ測った（言い直し・実会話つき・各8回）:
+    Three fixes were measured (restatement, with the real conversation, 8 runs
+    each):
 
-        「カメラの高さと視線は逆になる」と説明     0/8
-        カメラの位置だけに絞る                    7/8
-        位置だけ＋「彼女は逆を向くことが多い」     0/8
+        explaining "camera height and gaze are inverted"   0/8
+        narrowing to the camera position alone             7/8
+        position alone + "she often faces the other way"   0/8
 
-    説明に `up` / `down` が一語でも入ると総崩れする。**取り違えを説明しようと
-    すると、説明に使う語が取り違えの材料になる。**
+    One `up` or `down` anywhere in the explanation collapses it. **Trying to
+    explain the mix-up hands over the very words the mix-up is made of.**
     """
     frame = notebook.FIELD_CONTRACTS["frame"]
     assert "where the camera stands" in frame
@@ -633,11 +647,12 @@ _REAL = _scripter_block(
 
 
 def test_weave_refusal_does_not_fire_on_ordinary_picture_words():
-    """`scene` `light` `frame` `beat` `standing` はどれも絵の語として正しい。
+    """`scene`, `light`, `frame`, `beat` and `standing` are all legitimate picture
+    words.
 
-    欄名との一致だけで弾いた版は、既存の試験
-    `test_weave_drops_old_place_hour_pose_and_crop` を落とした。本物のタグは
-    `_` では始まらない —— そこだけを見る。
+    The version that rejected on a match against field names alone broke the
+    existing test `test_weave_drops_old_place_hour_pose_and_crop`. A real tag does
+    not start with `_` — that is the only thing looked at.
     """
     assert not notebook.weave_refusal(
         "standing, looking_at_viewer, scene_light, classroom",
@@ -648,10 +663,12 @@ def test_weave_refusal_does_not_fire_on_ordinary_picture_words():
 
 
 def test_frame_owns_the_crop_without_a_word_list():
-    """画角の家族の一覧（10語）を外しても、旧が守っていたものは全部守る。
+    """Dropping the crop families (10 words) still protects everything the old code
+    protected.
 
-    保存済みの weave 出力 30本では旧と 30/30 一致。ここに置くのは、食い違う
-    袋を作ったときに**旧が取りこぼしていた**二つ。
+    Against 30 stored weave outputs it matches the old code 30/30. What is kept
+    here are the two cases where, given a deliberately conflicting bag, **the old
+    code was the one dropping things**.
     """
     # FRAME は上半身。旧は `close_up` を残していた —— 顔寄りが生き残る。
     got = notebook.drop_crops_not_in_frame(
@@ -678,10 +695,11 @@ def test_frame_owns_the_crop_without_a_word_list():
 
 
 def test_the_crop_word_lists_are_gone():
-    """`_WIDE_CROP_TAGS` / `_CLOSE_CROP_TAGS` は戻さない。
+    """`_WIDE_CROP_TAGS` / `_CLOSE_CROP_TAGS` are not coming back.
 
-    穴を塞ぐたびに語が増えるのがこの現場の硬直の正体で、画角は
-    `framing_from_phrase` という**既にある一つの出どころ**で足りる。
+    Words multiplying every time a hole is patched is what makes this studio
+    rigid, and the crop is covered by `framing_from_phrase` — **one source that
+    already exists**.
     """
     assert not hasattr(notebook, "_WIDE_CROP_TAGS")
     assert not hasattr(notebook, "_CLOSE_CROP_TAGS")
@@ -690,10 +708,10 @@ def test_the_crop_word_lists_are_gone():
 
 
 def test_the_route_recorder_changes_nothing_it_only_writes_it_down():
-    """**記録を足しただけ。** 同じ手帖から同じプロンプトが出る。
+    """**Only a record was added.** The same notebook yields the same prompt.
 
-    総監督（2026-08-31）「まずは観測して事実だけを回収して。今は何も決めない」。
-    挙動を変えていないことを、ここで証明する。
+    The Showrunner (2026-08-31): "observe first and collect only facts. Decide
+    nothing yet." This proves the behaviour did not change.
     """
     # 段の内訳を頼んでも、`scrub_craft_tags` の答えは変わらない。
     args = dict(wearing="blouse, skirt", scene="", beat="sitting",

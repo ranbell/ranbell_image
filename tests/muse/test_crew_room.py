@@ -1,17 +1,19 @@
-"""**スタジオ撮り（班）を Refine に載せる。**（2026-09-11）
+"""**Carrying the studio shoot (the crew) onto Refine.** (2026-09-11)
 
-総監督「スタジオ撮り（複数の撮影スタッフのモード）を Muse refine に取り込みたい」
-「classic からそのまま移植したあと、磨きましょう」「18役職を全部残す」。
+The Showrunner: "I want the studio shoot (the mode with several crew members)
+inside Muse refine", "port it straight from classic first, then polish", "keep all
+18 roles".
 
-classic では席は talk-only で、書くのは Scripter 一人だった。Refine ではその席に
-`writer.write_patch` が座る —— だから手帖は要らない。
+In classic the seats were talk-only and one Scripter did the writing. In Refine
+`writer.write_patch` sits in that chair — so the notebook is not needed.
 
-**そして一人撮りを壊さないこと。** 門は「総監督が班を開けたか」の一つの印だけ。
+**And the solo shoot must not break.** The gate is a single mark: did the
+Showrunner open the table?
 
-**既定は空になった（2026-09-13）** —— 総監督「スタジオ撮りのデフォルトは空にして、
-選択しないとスタジオ撮影できないようにして」。以前は `ALL_DEFAULTS` から
-`"standard"` が入っていて、席の有無を門にすると一人撮りでも16席が回った。
-いまは二重の守り（既定が空、かつ印が要る）。
+**The default is now empty (2026-09-13)** — the Showrunner: "make the studio
+shoot default to nothing, so you cannot shoot without choosing". It used to take
+`"standard"` from `ALL_DEFAULTS`, and gating on "are there seats" ran sixteen of
+them in a solo shoot. Now there are two guards (an empty default, and the mark).
 """
 from __future__ import annotations
 
@@ -21,7 +23,8 @@ from app.muse import ledger as L, service
 
 
 def _session(*, crew_preset: str = "standard", **kw):
-    """班を使う試験は**明示的に選ぶ**。既定は空なので、選ばないと席が組めない。"""
+    """A test that uses a crew **chooses one explicitly**. The default is empty, so
+    without choosing there are no seats to build."""
     s = service.new_session({"locale": "ja", "model": "m"})
     s["character"] = {"character_id": "c1", "name_ja": "各務 みお", "name": "Mio"}
     if crew_preset:
@@ -32,9 +35,10 @@ def _session(*, crew_preset: str = "standard", **kw):
 
 # ── 門 ──────────────────────────────────────────────────────────────────
 def test_a_plain_session_has_no_crew():
-    """**選んでいないセッションには、そもそも席が無い。**（2026-09-13）
+    """**A session that chose nothing has no seats at all.** (2026-09-13)
 
-    既定が空になったので、班は「選ぶ」と「開く」の二段を越えないと回らない。
+    With the default empty, a crew only walks after both steps — choosing and
+    opening.
     """
     bare = service.new_session({"locale": "ja", "model": "m"})
     assert bare["inputs"].get("crew_preset") == ""          # 既定は空
@@ -68,14 +72,14 @@ def test_the_chat_turn_asks_the_gate_not_the_mode():
 
 # ── 席 ──────────────────────────────────────────────────────────────────
 def test_all_eighteen_roles_are_kept():
-    """総監督「18役職を全部残す」。"""
+    """The Showrunner: "keep all 18 roles"."""
     s = _session()
     cast = C.cast_of(s)
     assert len({crew.role_of(m) for m in cast}) == len(crew.ROLE_ORDER) == 18
 
 
 def test_five_seats_have_no_pen():
-    """classic が取り上げたペンは取り上げたまま（`NOTE_MUTED`）。"""
+    """The pens classic took away stay taken away (`NOTE_MUTED`)."""
     s = _session()
     cast = C.cast_of(s)
     pens = {crew.role_of(m) for m in C.writing_seats(cast)}
@@ -86,7 +90,8 @@ def test_five_seats_have_no_pen():
 
 
 def test_the_opening_dresses_her_before_framing_her():
-    """衣装 → 撮影 → 主演。席順ではなく着付けの順（classic の実測）。"""
+    """Wardrobe → camera → lead. Dressing order, not seat order (measured in
+    classic)."""
     s = _session()
     got = [crew.role_of(m) for m in C.opening_seats(C.cast_of(s))]
     assert got == ["wardrobe", "lens", "actress"]
@@ -100,7 +105,8 @@ def test_every_seat_with_a_slot_owns_a_ledger_field():
 
 
 def test_two_seats_may_share_a_field():
-    """演出と振付はどちらも体、レイアウトと撮影はどちらも構図。classic も同じ。"""
+    """Staging and choreography are both the body; layout and camera are both the
+    frame. Classic was the same."""
     assert C.SLOT_FIELD["BODY"] == "beat"
     assert C.SLOT_FIELD["SHAPE"] == C.SLOT_FIELD["OPTICS"] == "frame"
 
@@ -129,10 +135,11 @@ def test_omit_words_count_as_no_craft():
 
 # ── writer への材料 ─────────────────────────────────────────────────────
 def test_only_the_tag_half_reaches_the_ledger():
-    """`CRAFT: <tags> | <prose>` の散文側は台帳に渡さない。
+    """The prose half of `CRAFT: <tags> | <prose>` never reaches the ledger.
 
-    実機で渡したら、欄にパイプと日本語が入り、しかも欄をまたいで混ざった
-    （`light` に `translucent_fabric | 襟が夕陽を透かす` が着いた）。
+    Handed through live, it put a pipe and Japanese into the field and the halves
+    bled across fields (`light` ended up holding
+    `translucent_fabric | 襟が夕陽を透かす`).
     """
     assert C.craft_tags("backlight, rim_light | golden hour, warm") == "backlight, rim_light"
     assert C.craft_tags("sitting") == "sitting"
@@ -140,7 +147,8 @@ def test_only_the_tag_half_reaches_the_ledger():
 
 
 def test_the_craft_is_grouped_by_field_not_interleaved():
-    """**欄ごとに一行。** 交互に並べると writer がどちらを採るか迷う。"""
+    """**One line per field.** Interleaved, the writer is left unsure which to
+    take."""
     got = C.craft_block([
         {"name": "照明", "role": "gaffer", "field": "light", "craft": "rim_light | low sun"},
         {"name": "演出", "role": "beat", "field": "beat", "craft": "sitting | weight left"},
@@ -162,7 +170,8 @@ def test_a_field_never_repeats_a_tag():
 
 
 def test_the_seat_format_overrides_the_classic_one():
-    """職能文の直後に classic の OUTPUT（TAGS/SCENE）が来る。最後に上書きする。"""
+    """Classic's OUTPUT (TAGS/SCENE) follows the specialty text. Ours overrides it
+    last."""
     assert "REPLACES any format above" in C.SEAT_OUTPUT
     assert "CRAFT:" in C.SEAT_OUTPUT
     # TAGS は**禁止として**だけ出てくる（求めてはいない）
@@ -179,7 +188,8 @@ def test_no_crew_means_no_block():
 
 
 def test_the_writer_only_hears_the_crew_when_there_is_one():
-    """**一人撮りの条文を一字も動かさない。** 規則ごと班の回にだけ届ける。"""
+    """**Not one character of the solo contract moves.** The rules reach only the
+    turns where a crew spoke."""
     import inspect
     from app.muse import writer
     assert "THE CREW SPOKE" not in writer.WRITER_SYSTEM
@@ -190,15 +200,17 @@ def test_the_writer_only_hears_the_crew_when_there_is_one():
 
 # ── 手帖の欄名が漏れてくる（実機 2026-09-11）─────────────────────────────
 def test_a_notebook_label_never_reaches_the_ledger():
-    """席の職能文は `BEAT` `WEARING` を名指しで説明するので、模型が写す。
+    """A seat's specialty text explains `BEAT` and `WEARING` by name, so the model
+    copies them.
 
-    実機で台帳にこう着いた:
+    Live, the ledger ended up holding:
 
         wearing: "BEAT: standing still, eyes towards the light"
-        bg:      "ATMOSPHERE:"        ← 中身すら無い
+        bg:      "ATMOSPHERE:"        ← not even a value
 
-    条文でも禁じたが、**届く手前でも落とす**。模型の行儀に台帳の綺麗さを
-    預けない（[[feedback-a-box-or-it-wont-land]] の裏返し）。
+    The contract forbids it too, but **it is also dropped before it arrives**. The
+    ledger's cleanliness is not left to the model's manners (the flip side of
+    [[feedback-a-box-or-it-wont-land]]).
     """
     assert C.craft_tags("BEAT: standing still, eyes towards the light | 重心") \
         == "standing still, eyes towards the light"
@@ -208,7 +220,7 @@ def test_a_notebook_label_never_reaches_the_ledger():
 
 
 def test_an_ordinary_tag_that_looks_like_a_label_survives():
-    """`atmospheric` は欄名ではない。コロンが無いものは剥がさない。"""
+    """`atmospheric` is not a field name. Without a colon, nothing is stripped."""
     assert C.craft_tags("atmospheric, dusty") == "atmospheric, dusty"
     assert C.craft_tags("backlight, rim_light") == "backlight, rim_light"
 
@@ -224,12 +236,13 @@ def test_the_seat_contract_forbids_labels_too():
 
 
 def test_the_ledger_door_strips_labels_whoever_knocked():
-    """**台帳の値が、欄の名前で始まってはいけない。**（2026-09-11）
+    """**A ledger value must never begin with a field name.** (2026-09-11)
 
-    出どころは一つではなかった —— 班の席の CRAFT だけでなく、女優の CARD
-    （`persona.card_to_patch`）も writer の JSON も、ラベルを頭に付けてくる。
-    実機で `wearing: "BEAT: standing by the railing…"` が残り続けたのは、
-    班の経路だけを塞いでいたから。**入口は `normalize_patch` 一つ。**
+    It came from more than one place — not only the crew's CRAFT but the actress's
+    CARD (`persona.card_to_patch`) and the writer's JSON all arrive with a label
+    at the head. `wearing: "BEAT: standing by the railing…"` kept surviving live
+    because only the crew's road had been closed. **There is one door:
+    `normalize_patch`.**
     """
     from app.muse import persona
 
@@ -252,7 +265,7 @@ def test_a_value_that_merely_looks_like_a_label_survives():
 
 
 def test_there_is_only_one_label_stripper():
-    """二つ持つと必ずずれる。班は台帳のものを使う。"""
+    """Keep two and they drift. The crew uses the ledger's."""
     import inspect
     assert not hasattr(C, "_LABEL_HEAD_RE")
     assert "ledger_mod.strip_field_label" in inspect.getsource(C.craft_tags)
@@ -260,7 +273,7 @@ def test_there_is_only_one_label_stripper():
 
 # ── 画面の配線 ──────────────────────────────────────────────────────────
 def test_the_panel_is_told_whether_the_table_is_open():
-    """ボタンの出し分けは公開ビューの二つで決まる。"""
+    """Which button shows is decided by two fields of the public view."""
     s = _session()
     v = service.public_view(s)
     assert v["crew_open"] is False and v["crew_seats"] == 0
@@ -270,7 +283,7 @@ def test_the_panel_is_told_whether_the_table_is_open():
 
 
 def test_the_crew_presets_come_from_the_catalogue_not_the_panel():
-    """画面に直書きすると、席を足した日に黙ってずれる。"""
+    """Written into the panel, they drift silently the day a seat is added."""
     panel = __import__("pathlib").Path(
         "frontend/src/components/MusePanel.vue"
     ).read_text(encoding="utf-8")
@@ -280,7 +293,7 @@ def test_the_crew_presets_come_from_the_catalogue_not_the_panel():
 
 
 def test_the_seat_rows_have_their_own_look():
-    """18人が喋るので、彼女の台詞と同じ見た目にしない。"""
+    """Eighteen people speak, so they must not look like her lines."""
     panel = __import__("pathlib").Path(
         "frontend/src/components/MusePanel.vue"
     ).read_text(encoding="utf-8")
@@ -290,10 +303,12 @@ def test_the_seat_rows_have_their_own_look():
 
 
 def test_the_mode_is_chosen_before_the_session_opens():
-    """総監督「監督のみ / スタジオ撮りは Muse Classic のUI のような選択がいい」。
+    """The Showrunner: "director-only versus studio shoot should be a choice like
+    Muse Classic's UI".
 
-    班は途中から呼べない（開幕の三席が当たりを付けてから全班、という順番が
-    classic の設計）ので、**開始の扉で分かれる**。
+    A crew cannot be called in mid-session (classic's design is three opening
+    seats roughing it in, then the whole crew), so **the roads part at the start
+    door**.
     """
     panel = __import__("pathlib").Path(
         "frontend/src/components/MusePanel.vue"
@@ -307,7 +322,7 @@ def test_the_mode_is_chosen_before_the_session_opens():
 
 
 def test_the_seat_rows_do_not_show_the_say_label():
-    """総監督「スタジオ撮りだと SAY: が露出する」。"""
+    """The Showrunner: "in the studio shoot, SAY: shows up"."""
     say, craft = C.split_craft("SAY: 総監督、いいですね。\nCRAFT: rim_light | low sun")
     assert say == "総監督、いいですね。"
     assert not say.startswith("SAY")
@@ -315,7 +330,7 @@ def test_the_seat_rows_do_not_show_the_say_label():
 
 
 def test_the_stream_stops_before_the_craft_line():
-    """流れている間も danbooru 語を出さない。"""
+    """No danbooru words on screen while it streams, either."""
     from app.muse import shared
 
     out = []
@@ -328,7 +343,7 @@ def test_the_stream_stops_before_the_craft_line():
 
 
 def test_the_seats_stream_too():
-    """総監督「streaming 表示しないので待たされる感覚がかなり大きい」。"""
+    """The Showrunner: "without a streaming display the wait feels very long"."""
     import inspect
     assert "on_token=_stream_to(session, muse_id)" in inspect.getsource(C._seat_turn)
     assert "on_token=_stream_to(session, muse_id)" in inspect.getsource(C._banter_turn)
@@ -337,13 +352,13 @@ def test_the_seats_stream_too():
 # ── 班の画風が絵に届くこと（2026-09-13） ──────────────────────────────────
 
 def test_the_crew_look_reaches_the_picture_only_when_the_table_is_open():
-    """**門は班の実体。**（2026-09-13）
+    """**The gate is whether a crew actually exists.** (2026-09-13)
 
-    `runtime.style_for` は `mode == "duet"` で分けていた。Refine のセッションは
-    `new_session` が全件 `duet` を入れるので、**班の平均を取る枝に永久に入らず**、
-    6プリセットとも `anime illustration` になっていた —— `photoreal` を選んでも
-    `flat` を選んでも同じ絵。[[project-refine-as-muse]]「`is_duet()` を門に
-    しない」と同じ轍を、別の場所で踏んでいた。
+    `runtime.style_for` branched on `mode == "duet"`. Every Refine session gets
+    `duet` from `new_session`, so **it never entered the branch that averages the
+    crew** and all six presets came out as `anime illustration` — the same picture
+    whether you chose `photoreal` or `flat`. The same rut as
+    [[project-refine-as-muse]]'s "do not gate on `is_duet()`", in another place.
     """
     from app.muse import runtime
 
@@ -364,11 +379,14 @@ def test_the_crew_look_reaches_the_picture_only_when_the_table_is_open():
 
 
 def test_the_seat_keeps_its_own_way_of_opening():
-    """席の口調を保つ段が、席の前置きに載っていること。（2026-09-13）
+    """That the block which keeps a seat's voice is in the seat preamble.
+    (2026-09-13)
 
-    実測で席の **46% が「総監督、」で始まり、42% が同じ4文字**で切り出していた。
-    前日 `crew.OUTPUT` を外したとき、その中の SAY の段が一緒に落ちたのが原因。
-    戻したのは 380字（魅せる指示＋開きの重複禁止）で、**時間は変わらない**。
+    Measured, **46% of seat lines opened with 「総監督、」 ("Showrunner,") and 42%
+    began with the same four characters**. The cause was that removing
+    `crew.OUTPUT` the day before took its SAY block with it. What came back is 380
+    characters (the charm instruction plus the ban on repeating the last opening),
+    and **the time is unchanged**.
     """
     import inspect
 
