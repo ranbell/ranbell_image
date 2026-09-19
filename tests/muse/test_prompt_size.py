@@ -1,14 +1,15 @@
-"""**同じことを二度渡さない。**（2026-09-10）
+"""**The same thing is not handed over twice.** (2026-09-10)
 
-総監督「Muse による再チェックがかなり時間かかるので、そこかな？ コンテキスト
-全部渡してるからすごく時間かかってる」。
+The Showrunner: "Muse's re-check takes quite a while, so is it that? It is passing
+the whole context, which takes a very long time."
 
-測ったら、犯人は再チェックではなく**女優のプロンプト**だった。1ターンで読む
-入力は約 9,500tok で、そのうち女優が 5,300tok（56%）。しかも classic の女優
-条文が持つ出力書式と `REFINE_OUTPUT` が**二重**に入っていた。
+Measured, the culprit was not the re-check but **the actress's prompt**. The input
+read in one turn is about 9,500 tokens, of which the actress is 5,300 (56%). And
+the output format carried by classic's actress contract and `REFINE_OUTPUT` were
+both in there, **twice over**.
 
-入力の処理は実測 **約 300 tok/s**（LLM が VRAM に 7.4GB しか載らず、残りが
-システムメモリ）。**字数がそのまま秒になる。**
+Input is processed at a measured **~300 tok/s** (only 7.4 GB of the LLM fits in
+VRAM, the rest in system memory). **Characters turn straight into seconds.**
 """
 from __future__ import annotations
 
@@ -33,14 +34,14 @@ def _system() -> str:
 
 
 def test_the_output_format_is_given_once():
-    """**二つ並べると、どちらに従うか決めさせることになる。**"""
+    """**Put two side by side and the model has to decide which to obey.**"""
     s = _system()
     assert len(re.findall(r"OUTPUT FORMAT", s)) == 1
     assert len(re.findall(r"^SAY:", s, re.M)) == 1
 
 
 def test_her_voice_and_contract_stay():
-    """速さのために人格を削らない —— 落とすのは書式だけ。"""
+    """Her character is not cut for speed — only the format is dropped."""
     s = _system()
     assert crew.PRODUCTION_CONTRACT[:120] in s
     assert persona.ENTERTAINMENT_CRAFT[:80] in s
@@ -48,7 +49,7 @@ def test_her_voice_and_contract_stay():
 
 
 def test_the_cut_is_safe_when_the_marker_moves():
-    """classic 側の文言が変わったら、**黙って人格まで削らない**。"""
+    """If classic's wording changes, **it does not silently cut into her character**."""
     assert persona._without_classic_output("no marker here") == "no marker here"
     got = persona._without_classic_output(
         "voice and contract\n\nOUTPUT FORMAT — labelled blocks, nothing else:\nSAY: …")
@@ -56,7 +57,8 @@ def test_the_cut_is_safe_when_the_marker_moves():
 
 
 def test_verify_reads_her_voice_but_not_the_craft_guide():
-    """再判定に要るのは声だけ。愛らしさの指針は判定に関係ない。"""
+    """The re-check needs only her voice. The charm guide has nothing to do with the
+    judgement."""
     import inspect
 
     src = inspect.getsource(writer.verify_and_repair)
@@ -66,6 +68,7 @@ def test_verify_reads_her_voice_but_not_the_craft_guide():
 
 
 def test_the_actress_prompt_stays_under_its_measured_budget():
-    """**字数がそのまま秒になる。** 上限は実測で決める（300 tok/s）。"""
+    """**Characters turn straight into seconds.** The cap is set from measurement
+    (300 tok/s)."""
     n = len(_system())
     assert n < 12000, f"{n}字 —— 約 {n/3/300:.1f}s を毎ターン読むことになる"

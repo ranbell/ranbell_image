@@ -1,16 +1,17 @@
-"""**文脈長を判定係と揃える。**（2026-09-10）
+"""**The context length is kept the same as the clerk's.** (2026-09-10)
 
-総監督「純粋に推論に時間がかかっていると思う。Muse の会話ターンで 20-30sec
-かかるようです」。実体は**モデルの読み直し**だった。
+The Showrunner: "I think it is purely inference taking time. A Muse conversation
+turn seems to take 20-30 sec." What it really was: **the model being reloaded**.
 
-Ollama は文脈長が違うと別インスタンスとして読み直す。実測（26B・実機）:
+Ollama reloads as a separate instance when the context length differs. Measured
+(26B, live):
 
-    同じ長さを続ける    1回目 21.8s（読込 20.4s）→ 2回目 0.2s（読込 0.0s）
-    長さを交互に変える   毎回 12.8s（読込 11.3s）
+    same length repeated     1st 21.8s (load 20.4s) -> 2nd 0.2s (load 0.0s)
+    lengths alternating      12.8s every time (load 11.3s)
 
-Refine は `num_ctx` を一つも渡しておらず、判定係（`muse.chain._call`）は
-`ollama_num_ctx` を渡す。1ターンの中で交互になり、**最低2回の読み込み**が
-乗っていた。生成そのものは 35〜48tps で正常だった。
+Refine passed no `num_ctx` at all while the clerk (`muse.chain._call`) passes
+`ollama_num_ctx`. They alternated within a single turn, carrying **at least two
+loads**. Generation itself was fine at 35-48 tps.
 """
 from __future__ import annotations
 
@@ -24,7 +25,7 @@ PKG = Path(__file__).resolve().parents[2] / "backend" / "app" / "muse"
 
 
 def test_the_same_number_as_the_clerk():
-    """**同じ式でなければ意味がない。** 数字が一つでも違えば読み直しになる。"""
+    """**Only the same expression counts.** One different number and it reloads."""
     session = {"inputs": {}, "_runtime_cfg": {"ollama_num_ctx": 16384}}
     assert refine_num_ctx(session) == 16384
     assert muse_service._num_ctx({}, {"ollama_num_ctx": 16384}) == 16384
@@ -36,13 +37,13 @@ def test_the_same_number_as_the_clerk():
 
 
 def test_no_number_means_no_option():
-    """設定が読めないときは何も渡さない（既定に任せる）。"""
+    """When the setting cannot be read, nothing is passed (leave it to the default)."""
     assert refine_num_ctx({}) is None
     assert refine_num_ctx(None) is None
 
 
 def test_every_llm_call_carries_a_context_length():
-    """**席が増えたら落ちる。** 一つ素通しがあれば、そこで読み直しになる。"""
+    """**A new seat fails this.** One call without it and the model reloads there."""
     missing = []
     seen = 0
     for path in sorted(PKG.glob("*.py")):

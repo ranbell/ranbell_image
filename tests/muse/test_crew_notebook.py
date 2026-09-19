@@ -1,4 +1,4 @@
-"""制作スタッフ: PLAN/COSTUME → living notebook → scripter craft compile."""
+"""The studio crew: PLAN/COSTUME -> living notebook -> scripter craft compile."""
 from __future__ import annotations
 
 import sys
@@ -54,7 +54,7 @@ def test_person_cards_expose_vibe_and_shoot_style():
 
 
 def test_packed_prompt_carries_each_person_card():
-    """1行ロスターではなく、席ごとの声・口調・例セリフが入る。"""
+    """Not a one-line roster: each seat's voice, manner and sample line go in."""
     from app.muse import crew
     speakers = ["wardrobe:shiwa", "spine:bane", "gaffer:gyakkou"]
     prompt = crew.table_talk_system_prompt(
@@ -90,7 +90,8 @@ def test_craft_slots_have_one_owner_each():
 
 
 def test_light_is_its_own_field_end_to_end():
-    """「逆光にして」が scene や atmosphere に紛れず、次のターンで消えない。"""
+    """"Make it backlit" does not get lost in `scene` or `atmosphere`, and does not
+    vanish on the next turn."""
     session = {"mode": "duet", "inputs": {"locale": "ja"}, "notebook": notebook.blank()}
     nb = notebook.of(session)
     notebook.apply_patch(nb, {"scene": "a classroom at dusk", "light": "backlit, hard rim"})
@@ -108,7 +109,8 @@ def test_light_is_its_own_field_end_to_end():
 
 # ── struck は「いま写っているもの」を締め出してはいけない ──────────────────
 def test_struck_never_holds_what_the_shot_now_says():
-    """立ち上がった後にまた座れる。struck は追記専用の墓場ではない。"""
+    """She can sit down again after standing up. `struck` is not an append-only
+    graveyard."""
     session = {"mode": "", "inputs": {"locale": "ja"}, "notebook": notebook.blank()}
     nb = notebook.of(session)
     notebook.apply_patch(nb, {"beat": "sitting on the bench", "wearing": "sailor uniform, straw hat"})
@@ -131,7 +133,7 @@ def test_struck_never_holds_what_the_shot_now_says():
 
 
 def test_struck_does_not_mint_grammar_pairs():
-    """文をまたいだ語のペアは物の名前ではない。"""
+    """A pair of words spanning two sentences is not the name of a thing."""
     toks = notebook.wearing_tokens(
         "sitting on the wooden bench while staring at nothing",
     )
@@ -141,7 +143,7 @@ def test_struck_does_not_mint_grammar_pairs():
 
 
 def test_removed_garment_is_not_put_back_by_coverage():
-    """脱がせた服は復活させない（drop_banned の抜け道を作らない）。"""
+    """A garment taken off is not revived (no way around `drop_banned`)."""
     session = {
         "mode": "", "inputs": {"locale": "ja"}, "notebook": notebook.blank(),
         "craft": {}, "character": {}, "banned": ["straw_hat"],
@@ -162,7 +164,8 @@ def test_removed_garment_is_not_put_back_by_coverage():
 
 # ── ルックの明示指定・strike の誤爆・提案の経路 ─────────────────────────────
 def test_named_look_beats_the_room_average():
-    """16席の平均は常に無難な真ん中に落ちる。名前で呼べば総監督が決める。"""
+    """The average of 16 seats always lands on a safe middle. Name it and the
+    Showrunner decides."""
     from app.muse import crew
     cast = crew.resolve_crew(preset="standard")
     assert crew.base_style_for(cast, "", "") == "anime illustration"  # 平均の実測値
@@ -175,11 +178,13 @@ def test_named_look_beats_the_room_average():
 
 
 def test_fold_moves_the_body_and_nothing_else():
-    """fold が触れるのは beat だけ。絵そのものは総監督の指示でしか動かない。
+    """Fold touches `beat` and nothing else. The picture itself moves only on the
+    Showrunner's instruction.
 
-    提案欄 `open` は撤去した。390セッションで一度も提案が入らず、入っていた
-    50件は `$$OPEN$$` や `clear_open: true` といったパーサのゴミで、それが
-    台本のプロンプトに戻りパネルにも出ていた。席の提案は chat に残る。
+    The proposal field `open` was removed. Across 390 sessions not one proposal
+    ever landed in it; the 50 that had content held parser debris such as
+    `$$OPEN$$` or `clear_open: true`, which went back into the script's prompt and
+    showed on the panel too. A seat's proposals live on in the chat.
     """
     assert notebook.FOLD_PATCH_KEYS == ("beat", "beat_b")
     from app.muse import chain
@@ -194,7 +199,8 @@ def test_weave_is_told_the_camera_is_not_a_subject():
 
 
 def test_the_partner_wardrobe_is_restored_too():
-    """相方の服も戻す（旧: WEARING_B だけ weave に落とされたまま）。"""
+    """The partner's clothes are restored too (before: only WEARING_B was left dropped
+    into weave)."""
     session = {
         "mode": "", "session_id": "s-w", "inputs": {"locale": "ja"},
         "notebook": notebook.blank(partner=True), "craft": {},
@@ -223,7 +229,8 @@ def _w_session(**over) -> dict:
 
 
 def test_the_photo_is_not_read_back_into_the_notebook():
-    """写真読みの配線を外した。**手帖は会話で書かれるのが正本。**"""
+    """The photo-reading wiring was removed. **The notebook written in conversation is
+    the record of truth.**"""
     import inspect
 
     from app.muse import runner as muse_runner

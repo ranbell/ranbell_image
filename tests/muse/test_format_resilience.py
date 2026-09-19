@@ -130,14 +130,18 @@ def test_scripter_json_salvages_truncated_object():
 # ── 欄名の尻尾（2026-09-16）─────────────────────────────────────────────
 
 def test_a_label_in_the_middle_of_a_line_still_starts_its_block():
-    """**行の途中から始まる欄も、欄の切れ目として読む。**（2026-09-16）
+    """**A field that starts mid-line is read as a break between fields too.**
+    (2026-09-16)
 
-    総監督「SAY などの Tag が漏れる」。実機（`f8961eaa`）で内心の吹き出しに
+    The Showrunner: "tags such as SAY leak". Live (`f8961eaa`) a mutter bubble
+    showed
 
         恥ずかしいけど、猫ちゃんはふわふわしてて気持ちいい……。 CARD
+        ("it is embarrassing, but the kitty is so soft and feels lovely……. CARD")
 
-    が出ていた。行頭の欄名しか見ていなかったので `CARD` が内心に残り、
-    **CARD の中身（着ているもの）は行の続きごと捨てられていた。**
+    Only a field name at the start of a line was read, so `CARD` stayed inside the
+    mutter and **CARD's content (what she is wearing) was thrown away along with
+    the rest of the line.**
     """
     raw = (
         "SAY: こんばんは、総監督。\n"
@@ -160,7 +164,8 @@ def test_two_blocks_on_one_line_are_split():
 
 
 def test_an_ordinary_word_is_not_a_label():
-    """**落としすぎない。** 裸の欄名は大文字のときだけ（英単語を切らない）。"""
+    """**Not cut too far.** A bare field name counts only in upper case, so an ordinary
+    English word is not sliced."""
     blocks = identity.parse_talk_blocks("SAY: 誕生日の card を渡すところ。")
     assert blocks["say"] == "誕生日の card を渡すところ。"
     assert blocks["card"] == ""
@@ -171,18 +176,19 @@ def test_an_unlabelled_reply_is_still_her_line():
 
 
 def test_the_wardrobe_costume_block_never_reaches_the_bubble():
-    """**機械が読む八行は、吹き出しに出さない。**（2026-09-18）
+    """**The eight lines a machine reads never reach the bubble.** (2026-09-18)
 
-    実機（`0239133f`）で衣装の席が
+    Live (`0239133f`) the wardrobe seat put out a 479-character bubble:
 
         砂糖袋なんてそんな小道具、布が台無しになっちゃうわよ。……
+        ("a prop like a sugar sack will ruin the fabric……")
         SILHOUETTE: loose_top / structured_bottom
         LAYERS: knit_cardigan / professional_blouse
         GARMENTS: top=knit_cardigan / bottom=tailored_trousers …
 
-    と 479字の吹き出しを出した。`COSTUME` の尻尾は classic の prep 用の条文で、
-    Refine の席には宛先（SCENE ブロック）が無い。出どころは直したが、
-    **届く手前でも落とす。**
+    The `COSTUME` tail belongs to classic's prep contract; a Refine seat has no
+    addressee for it (the SCENE block). The source was fixed, and **it is dropped
+    before arrival as well.**
     """
     raw = (
         "砂糖袋なんてそんな小道具、布が台無しになっちゃうわよ。\n\n"
@@ -195,7 +201,8 @@ def test_the_wardrobe_costume_block_never_reaches_the_bubble():
 
 
 def test_the_refine_seat_is_not_asked_for_a_costume_block():
-    """出どころ側 —— 席の条文から尻尾を外す（classic の prep では現役）。"""
+    """The source side — the tail comes off the seat's contract (it is still in service
+    in classic's prep)."""
     from app.muse import crew
 
     seat = [m for m in crew.MUSES if crew.role_of(m) == "wardrobe"][0]

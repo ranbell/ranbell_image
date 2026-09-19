@@ -1,18 +1,20 @@
-"""**素通しの覆いが、素通しになっていること。**（2026-09-18）
+"""**The pass-through facade actually passes everything through.** (2026-09-18)
 
-アプリが握っているのは `OllamaClient` ではなく、その覆いの `LlmGateway`
-（`main.py` の `app.state.ollama`）。覆いは引数をそのまま渡すだけなので、
-**本体に引数を足したのに覆いに足し忘れる**と、呼んだ瞬間に `TypeError` になる。
+What the app holds is not `OllamaClient` but its facade `LlmGateway` (`main.py`'s
+`app.state.ollama`). The facade only hands arguments on, so **adding an argument to
+the client and forgetting the facade** is a `TypeError` the moment it is called.
 
-実機で踏んだ（2026-09-18・`d532fd2`）:
+Hit live (2026-09-18, `d532fd2`):
 
-    `with_done` を `OllamaClient` にだけ足した
-    → 主演の段が `TypeError` で落ち、`actress_turn` の except が拾って
-      **台詞が「……」だけ・段の時間 0.0 秒**（実機 `10d85603`）
-    → 席と会議も同じ経路なので、班は丸ごと黙る
+    `with_done` was added to `OllamaClient` alone
+    -> the actress stage fell over with `TypeError`, `actress_turn`'s except
+       caught it and **her line was just "……" with a stage time of 0.0 s**
+       (live `10d85603`)
+    -> the seats and the corners take the same road, so the whole crew goes quiet
 
-単体試験は全部通っていた —— 試験の模型は覆いを通らないから。だから
-**覆いと本体の署名を突き合わせる**。ここが合っていれば、足し忘れは起きない。
+Every unit test passed — the test doubles do not go through the facade. So **the
+facade's signature is matched against the client's**. Keep these aligned and the
+omission cannot happen.
 """
 from __future__ import annotations
 
@@ -51,7 +53,7 @@ def test_the_gateway_accepts_every_argument_the_client_does(name: str):
 
 @pytest.mark.parametrize("name", PASS_THROUGH)
 def test_the_gateway_hands_them_all_on(name: str):
-    """受け取るだけで渡し忘れていないこと（本文に名前が出ているか）。"""
+    """Not merely accepted and then forgotten (the name appears in the body)."""
     body = inspect.getsource(getattr(LlmGateway, name))
     head, _, tail = body.partition("self._ollama.")
     for arg in inspect.signature(getattr(OllamaClient, name)).parameters:
