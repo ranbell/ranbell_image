@@ -596,15 +596,15 @@ class ComfyUIClient:
         It is opt-in because the frames are one JPEG per sampler step and only
         Muse, which lets you watch a draft form and abort it, has any use for them.
         """
-        # **描画ごとに別の clientId。** 一つを共有していたので、撮影を
-        # 「やり直し」で続けると、前の描画がまだ生きているうちに同じ
-        # clientId で二本目の websocket が開き、ComfyUI 側が古いほうを
-        # 落としてストリーミングが途切れていた。
+        # **A separate clientId per render.** They used to share one, so continuing
+        # a shoot with a retake opened a second websocket on the same clientId while
+        # the previous render was still alive, ComfyUI dropped the older one and the
+        # streaming broke off.
         #
-        # プレビューの取り違えも同じ根 —— プレビューのフレームは
-        # `prompt_id` を持たないので、`stream_progress` は「この
-        # クライアントがいま待っているもの」とみなすしかない。
-        # **clientId を分ければ、その仮定が本当になる。**
+        # Mixed-up previews have the same root — a preview frame carries no
+        # `prompt_id`, so `stream_progress` can only take it as "whatever this client
+        # is waiting for right now". **Separate the clientIds and that assumption
+        # becomes true.**
         body: dict = {"prompt": workflow, "client_id": client_id or self.client_id}
         if preview:
             body["extra_data"] = {"preview_method": "auto"}
@@ -632,8 +632,8 @@ class ComfyUIClient:
             .replace("http://", "ws://")
             .replace("https://", "wss://")
         )
-        # `queue_prompt` に渡したのと**同じ**clientId で待つこと。違うと
-        # ComfyUI はこちらへ何も送らない。
+        # Wait on **the same** clientId that was passed to `queue_prompt`. With a
+        # different one, ComfyUI sends nothing this way.
         ws_url = f"{ws_url}/ws?clientId={client_id or self.client_id}"
 
         import time

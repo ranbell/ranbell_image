@@ -128,20 +128,24 @@ async def run_board_job(reporter, cancel, *, db, comfy, session_id: str, ollama=
         raise
     finally:
         await session_db.finish_board(db, session_id, error=error)
-        # **写真読み（`service.still_read_after_board`）はここから外した。**
+        # **The photo read (`service.still_read_after_board`) was taken out of
+        # here.**
         #
-        # 描いた board を VLM で読み返して手帖を揃える処理で、悪くない考えだった
-        # が、実測で三つ払っていた:
+        # It read the rendered board back with the VLM to bring the notebook into
+        # line — not a bad idea, but measurement showed it paying three costs:
         #
-        #   1. 描画の直前に `unload_vlm` でモデルを落としているので、**この呼び
-        #      出しが VRAM 読み込みを毎回払う**（総監督の実測で 30秒超）
-        #   2. 手帖の rev が必ず一つ進むので、本番が「遅れている」と判断して
-        #      **織り直す** —— 総監督が OK を出したボードとは違う指示で撮る
-        #   3. **書き戻しが手帖を汚す。** 実測（`42b55492`）で、台本係が掃除した
-        #      直後の frame に `各務 みお WEARING: …` を入れ直していた
+        #   1. the model is dropped with `unload_vlm` immediately before the render,
+        #      so **this call pays for a VRAM load every time** (over 30 seconds,
+        #      measured by the Showrunner)
+        #   2. the notebook's rev always advances by one, so the final decides it is
+        #      "behind" and **re-weaves** — shooting on different instructions from
+        #      the board that was approved
+        #   3. **writing back dirties the notebook.** Measured (`42b55492`), it put
+        #      `各務 みお WEARING: …` back into a frame the writer had just cleaned
         #
-        # 手帖は会話で書かれるのが正本。写真から逆に書き戻す道は、いまは無い。
-        # 関数と `chain` の指示文は残してあるので、繋ぎ直せる。
+        # The notebook written in conversation is the record of truth. There is no
+        # road back from the photograph at present. The function and `chain`'s
+        # instructions are kept, so it can be wired up again.
 
 
 async def run_shoot_job(

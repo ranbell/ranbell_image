@@ -80,7 +80,8 @@ COSTUME_FIELDS: tuple[tuple[str, str], ...] = (
     ("hero", "HERO"),
     # LAYERS is an under/mid/outer axis — how the cloth stacks. It is not a
     # coverage axis, and nothing else in the seven checked whether the girl had
-    # anything on below the waist: 体操着 (one Japanese word implying a top AND a
+    # anything on below the waist: 体操着 ("gym clothes", one Japanese word implying
+    # a top AND a
     # bottom) shipped as `base_layer / short_sleeved_jersey` with no legs at all,
     # and a model asked for a shirt and trousers called the trousers the "inner"
     # layer. GARMENTS is the coverage axis, in slots, so a missing bottom is a
@@ -188,23 +189,26 @@ def garment_tags(costume: dict[str, Any] | None) -> list[str]:
 # `yukata`, `navy_blazer` and `blazer`, `charcoal_grey_heavy_coat` and
 # `heavy_wool_coat + dark_tights`. HERO, LAYERS and GARMENTS describe one outfit
 # at three grains, and joining them is what makes the copies. That is what broke
-# 「コートを脱いで」: with two coats in the list, the request has no single
+# 「コートを脱いで」 ("take the coat off"): with two coats in the list, the request
+# has no single
 # referent, and the scripter answered the rest of the line and left wearing
 # alone.
 #
-# **6 → 10（2026-09-06）。** 「六品は余裕がある —— 主演撮りの平均は 1.8」で
-# 決めた数字だったが、**その前提が古い**。実測した実撮影3件はすべて**ちょうど
-# 6品**で、衣装のプリセットが枠を使い切っている:
+# **6 -> 10 (2026-09-06).** The number was decided on "six pieces is generous — the
+# lead shoot averages 1.8", and **that premise is out of date**. All three real
+# shoots that were measured held **exactly six pieces**, the wardrobe preset using
+# the whole allowance:
 #
 #     professional_blouse, knit_cardigan, tailored_trousers,
 #     small_earrings, loafers, headphones
 #
-# そこへ「マフラーを巻いて」と言うと、**7つ目が黙って落ちた**（scarf / beret /
-# wool_coat すべて 0）。同じ日に髪型で踏んだ穴が、服の側に残っていた。
+# Say 「マフラーを巻いて」 ("put a scarf on") into that and **the seventh was
+# silently dropped** (scarf / beret / wool_coat all 0). The hole hit with hairstyles
+# the same day was still there on the clothing side.
 #
-# **重複を止めているのは頭名詞での排除のほう**で、品数はその二重の網。字数の
-# 上限（`_SHOT_FIELD_CAPS["wearing"]` = 240）が本当の歯止めで、10品でも約150字
-# なので収まる。
+# **What stops duplicates is the exclusion by head noun**; the count is a second net
+# over it. The real brake is the character cap (`_SHOT_FIELD_CAPS["wearing"]` = 240),
+# and ten pieces is about 150 characters, so it fits.
 WEARING_MAX_ITEMS = 10
 
 _PAREN_RE = re.compile(r"\([^)]*\)")
@@ -314,13 +318,14 @@ def tidy_wearing(text: str, *, max_items: int = WEARING_MAX_ITEMS) -> str:
         # Nothing had a readable head noun, but she is dressed. Say so rather
         # than hand back an empty outfit. `none` alone still means nothing.
         kept = dressed[:1]
-    # **髪型は服の枠を奪わない（2026-09-06）。** 上限は着るものの数を抑える
-    # ためのもので、髪はそこに並ぶものではない。実機で「髪を結んで。ポニー
-    # テールにして。」が三度とも消えた —— 係は `ponytail` を正しく返していた
-    # のに、それが**七番目**だったので上限で切られていた。
+    # **A hairstyle does not take a clothing slot (2026-09-06).** The cap exists to
+    # hold down the number of things worn, and hair does not stand in that line.
+    # Live, 「髪を結んで。ポニーテールにして。」 ("tie your hair up. Make it a
+    # ponytail.") vanished three times out of three — the clerk returned `ponytail`
+    # correctly and it was **seventh**, so the cap cut it.
     #
-    # **一つだけ通す。** 二つ通すと `bob_cut` と `ponytail` が並ぶ。順番は
-    # そのまま（先に出たほうが新しい指定）。
+    # **Only one gets through.** Two and `bob_cut` stands next to `ponytail`. The
+    # order is unchanged (whichever came first is the newer instruction).
     from .identity import HAIR_CUT_TAGS
 
     def _is_hair(piece: str) -> bool:

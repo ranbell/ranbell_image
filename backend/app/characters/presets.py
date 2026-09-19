@@ -181,8 +181,9 @@ def personality_text_from_preset(preset: dict[str, Any], *, locale: str = "ja") 
     return "\n".join(b for b in bits if b)
 
 
-#: 衣装セットの並び順。**`signature` が代表服** —— 紹介ページと参照ボードが
-#: 見ているのはこれで、既存の `favorite_clothes` + `footwear` と同じ。
+#: The order of the wardrobe sets. **`signature` is the signature outfit** — it is
+#: what the profile page and the reference board read, and it is the same as the
+#: existing `favorite_clothes` + `footwear`.
 WARDROBE_KEYS = ("signature", "work", "casual_a", "casual_b")
 _WARDROBE_NAMES_JA = {
     "signature": "いつもの", "work": "お仕事",
@@ -260,8 +261,9 @@ def preset_to_character(preset: dict[str, Any]) -> dict[str, Any]:
     # UI shows.
     personality = {
         "traits": _strings(preset.get("personality")),
-        # 成人であること、いまいる場所、そして**学生時代の記憶**と**将来の夢**。
-        # 過去は消さずに本人の記憶へ移してある —— 消すと人格が薄くなる。
+        # That she is an adult, where she is now, and **the memories of her school
+        # years** and **her hopes**. The past is not erased but moved into her own
+        # memories — erasing it thins the character.
         "age": int(preset.get("age") or 0) or None,
         "occupation": str(preset.get("occupation") or ""),
         "occupation_ja": str(
@@ -350,8 +352,9 @@ def preset_summary(preset: dict[str, Any], *, point_id: str = "") -> dict[str, A
         "summary": str(preset.get("summary") or ""),
         "summary_ja": str(preset.get("summary_ja") or preset.get("summary") or ""),
         "gender": str(preset.get("gender") or ""),
-        # **全員が成人。** 学生設定のままだと、未成年と取られる余地が構造的に
-        # 残る。年齢は数字で持つ —— 職業の書きぶりだけだと曖昧さが残るため。
+        # **Everyone is an adult.** Left as students, there is structurally still
+        # room to be taken as minors. The age is held as a number — writing only the
+        # occupation leaves it ambiguous.
         "age": int(preset.get("age") or 0) or None,
         "occupation": str(preset.get("occupation") or ""),
         "occupation_ja": str(
@@ -427,16 +430,17 @@ async def get_preset(db, preset_id: str) -> dict[str, Any] | None:
             with_payload=True,
         )
     except Exception:
-        # **id の形が悪いだけなら「居ない」。**（2026-09-12）
+        # **A merely malformed id means "not there".** (2026-09-12)
         #
-        # Qdrant は UUID か整数しか点の id にできないので、`"c2"` のような
-        # 文字列は照会の時点で弾かれる。呼び元は `None`（＝居ない）を待って
-        # いて、例外は想定していない —— Muse の相方選びで実際に 500 が出た
-        # （`POST /api/muse/sessions` に `partner_preset: "c2"`）。**居ない
-        # ものは居ないと答える。**
+        # Only a UUID or an integer can be a point id in Qdrant, so a string such as
+        # `"c2"` is rejected at the lookup. The caller waits for `None` (= not there)
+        # and does not expect an exception — a real 500 came out of choosing a
+        # partner in Muse (`POST /api/muse/sessions` with `partner_preset: "c2"`).
+        # **What is not there is answered as not there.**
         #
-        # 形が正しい id での失敗はそのまま投げる —— Qdrant が落ちているのを
-        # 「居ない」に化けさせると、名簿が空になった理由が分からなくなる。
+        # A failure on a well-formed id is raised as it is — disguising a Qdrant
+        # outage as "not there" leaves no way to know why the roster came up
+        # empty.
         if _could_be_a_point(preset_id):
             raise
         return None

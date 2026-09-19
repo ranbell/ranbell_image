@@ -52,9 +52,10 @@ async def load(db, session_id: str) -> dict[str, Any] | None:
 # handful — a report over "the last five sessions" was five sessions picked at
 # random, which is worse than useless when the whole point is a trend.
 _SCROLL_PAGE = 256
-#: **`studio` を載せる（2026-09-07）。** Muse Refine が同じコレクションに座った
-#: ので、どちらのスタジオの回かを一覧の段階で見分ける必要がある。`character` は
-#: 載せない —— 一覧を重くしないため（名前が要る側が自分の分だけ load する）。
+#: **Carry `studio` (2026-09-07).** Muse Refine sits in the same collection, so
+#: which studio a session belongs to has to be told apart at the listing stage.
+#: `character` is not carried — to keep the listing light (whoever needs the names
+#: loads only their own rows).
 _LIST_FIELDS = ["session_id", "status", "inputs", "created_at", "studio"]
 
 
@@ -136,11 +137,12 @@ async def attach_board_image(db, session_id: str, image_id: str, meta: dict) -> 
         "index": len(images), "image_id": image_id,
         "seed": used,
     })
-    # **この回に実際に使った種を欄に書き戻す。** 頼むときは 0（＝引き直して）で
-    # 出すので、描き終わるまで欄は嘘をついていた。本番はこの欄を読む
-    # （`service.approve_and_shoot`）—— 書き戻さないと 0 のまま渡り、
-    # **総監督が OK を出した絵とは違う種で本番が走る**（2026-09-12 に実機の
-    # 6セッションすべてで不一致を確認した）。
+    # **Write the seed actually used back into the field.** The request goes out
+    # with 0 (= draw a new one), so until the render finished the field was lying.
+    # The final reads this field (`service.approve_and_shoot`) — without the write
+    # back it is handed 0 and **the final runs on a different seed from the picture
+    # the Showrunner approved** (on 2026-09-12 all six live sessions were confirmed
+    # to disagree).
     if not board.get("seed") and used:
         board["seed"] = int(used)
     await save(db, session, publish=False)
@@ -183,8 +185,8 @@ async def attach_shoot_image(db, session_id: str, image_id: str, meta: dict) -> 
         "index": len(images), "image_id": image_id,
         "seed": used,
     })
-    # 本番は board から種を受け取っているので既に入っているが、受け取れなかった
-    # 古い行のために同じ形で書き戻す。
+    # The final receives the seed from the board and already has it; the same write
+    # back is done for older rows that could not receive one.
     if not shoot.get("seed") and used:
         shoot["seed"] = int(used)
     await save(db, session, publish=False)
