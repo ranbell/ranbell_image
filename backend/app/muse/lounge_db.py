@@ -154,7 +154,7 @@ async def count_all(db) -> int:
 
 async def delete_all(db) -> int:
     """Hard-delete every lounge thread and the trends doc — used by the
-    "記憶の消去" admin action."""
+    "記憶の消去" (erase memory) admin action."""
     n = await count_all(db)
     if n:
         await db._qc.delete(

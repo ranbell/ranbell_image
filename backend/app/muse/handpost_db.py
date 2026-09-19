@@ -84,7 +84,7 @@ async def count_generated_pages(db) -> int:
 async def purge_generated_pages(db) -> int:
     """Delete auto-generated handpost pages; legacy director notices stay.
 
-    Used by the "記憶の消去" admin action — old hand-typed notices are not
+    Used by the "記憶の消去" (erase memory) admin action — old hand-typed notices are not
     a character's memory, so they are not part of what gets erased.
     """
     ids = [str(p["id"]) for p in await list_pages(db) if _is_generated(p)]
