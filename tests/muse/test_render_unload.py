@@ -1,13 +1,14 @@
-"""**描画の直前に LLM を VRAM から落とす。**（2026-09-07）
+"""**The LLM comes out of VRAM immediately before the render.** (2026-09-07)
 
-総監督「ollama の GPU VRAM アンロードがないので comfyui がコケてしまいます。
-unload を Muse と同じく実装お願い」。
+The Showrunner: "there is no ollama GPU VRAM unload, so comfyui falls over. Please
+implement unload the same as in Muse."
 
-Refine は描画を積む一つ上で `rebuild_craft` がモデルを使う。返さないまま
-ComfyUI に渡すと、26B が ~13GB を握ったままで latent が置けない。
+One step above queueing the render, Refine's `rebuild_craft` uses the model. Hand
+over to ComfyUI without giving it back and the 26B keeps ~13 GB, leaving nowhere to
+put the latent.
 
-見るのは**順番**だけ —— 落としてから積むこと。Muse の `_maybe_unload` を
-そのまま使うので、切り替え（`unload_vlm`）の意味も一つしかない。
+What is watched is only **the order** — unload, then queue. Muse's `_maybe_unload`
+is used as it is, so the switch (`unload_vlm`) has only one meaning.
 """
 from __future__ import annotations
 
@@ -98,7 +99,8 @@ async def test_the_model_is_dropped_before_the_shoot_is_queued(rig):
 
 @pytest.mark.asyncio
 async def test_the_switch_is_muses_switch(rig):
-    """`unload_vlm` を切れば落とさない —— 判定は Muse と同じ一つ。"""
+    """Turn `unload_vlm` off and nothing is unloaded — the same single decision as
+    Muse's."""
     session = _session()
     session["inputs"] = {**session["inputs"], "unload_vlm": False}
 

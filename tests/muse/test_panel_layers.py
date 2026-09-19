@@ -1,11 +1,11 @@
-"""**Muse の中から開く窓は、Muse より上に出す。**（2026-09-13）
+"""**A window opened from inside Muse comes out above Muse.** (2026-09-13)
 
-総監督が踏んだ: 主演の名前を押しても名簿が開かないように見えた。実際には開いて
-いて、**Muse の画面の裏に出ていた** —— 名簿（`CharacterGallery`）は
-`--z-panel`（600）、Muse の画面は `--z-panel-muse`（640）。
+Hit by the Showrunner: pressing the lead's name looked as if the roster would not
+open. It did open — **behind Muse's panel**. The roster (`CharacterGallery`) is
+`--z-panel` (600), Muse's panel is `--z-panel-muse` (640).
 
-段は `frontend/src/style.css` に並べてある。Muse が持つ窓のための段
-（`--z-panel-muse-child` 650）が既にあったので、呼ぶ側から渡す。
+The layers are laid out in `frontend/src/style.css`. A layer for windows Muse owns
+(`--z-panel-muse-child`, 650) already existed, so the caller passes it in.
 """
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ def test_the_muse_owned_layer_is_above_the_muse_shell():
 
 @pytest.mark.parametrize("which", ["showPicker", "showPartnerPicker"])
 def test_the_roster_opened_from_muse_sits_above_it(which):
-    """名簿を開く二枚（主演・相方）とも、Muse より上の段を渡していること。"""
+    """Both places that open the roster (lead and partner) pass a layer above Muse."""
     src = PANEL.read_text(encoding="utf-8")
     start = src.index(f':show="{which}"')
     block = src[start:start + 400]
@@ -40,7 +40,8 @@ def test_the_roster_opened_from_muse_sits_above_it(which):
 
 
 def test_the_roster_takes_the_layer_from_whoever_opens_it():
-    """既定は据え置き（名簿は他からも開く）。渡されたときだけ上へ。"""
+    """The default stays put (the roster opens from elsewhere too). It goes up only when
+    it is passed one."""
     src = GALLERY.read_text(encoding="utf-8")
     assert "layerClass: { type: String, default: 'z-[var(--z-panel)]' }" in src
     assert ':class="layerClass"' in src

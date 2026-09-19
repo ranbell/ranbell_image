@@ -1,13 +1,14 @@
-"""土台の試験が使うセッションの器。
+"""The session container the foundation tests use.
 
-Muse Classic の `schema.new_session` が持っていた形を、**試験側に引き取った**もの
-（2026-09-12 の退役）。`facets` / `notebook` / `brief` / `crew` / `identity` は
-いまも `backend/app/muse/` に残っている土台で、それを試すには入れ物が要る ——
-けれど器そのものは classic の器だったので、`private/muse_classic/` に退いた。
+The shape `schema.new_session` had in Muse Classic, **taken over by the tests** when
+classic retired (2026-09-12). `facets`, `notebook`, `brief`, `crew` and `identity`
+are foundations that still live in `backend/app/muse/`, and testing them needs
+something to hold — but the container itself was classic's, and it went back into
+`private/muse_classic/`.
 
-ここは**撮影の正本ではない**。いまの正本は `muse.service.new_session`。
-この器は「土台のモジュールを単体で叩くための皿」以上のものではないので、
-Refine の形に合わせて直す必要はない。
+This is **not the record of truth for a shoot**. That is now
+`muse.service.new_session`. This container is no more than "a dish for hitting the
+foundation modules on their own", so it need not be reshaped to match Refine.
 """
 from __future__ import annotations
 

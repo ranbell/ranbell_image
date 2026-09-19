@@ -709,7 +709,7 @@ def test_every_colour_on_the_roster_has_a_swatch():
 # ── 点の id にできない文字列 ─────────────────────────────────────────────────
 
 class _QdrantThatOnlyHoldsUuids:
-    """Qdrant の写し。**UUID か整数しか点の id にできない。**"""
+    """A stand-in for Qdrant. **Only a UUID or an integer can be a point id.**"""
 
     def __init__(self, rows=None):
         self.rows = rows or {}
@@ -727,11 +727,11 @@ class _QdrantThatOnlyHoldsUuids:
 
 
 def test_an_id_qdrant_cannot_even_hold_is_simply_not_found():
-    """**居ないものは居ないと答える。**（2026-09-12）
+    """**What is not there is answered as not there.** (2026-09-12)
 
-    Muse の相方選びで実機の 500 を踏んだ —— `POST /api/muse/sessions` に
-    `partner_preset: "c2"`。`pick_partner` は「見つからない」を待っていて
-    `RefineError` → 400 になるはずが、その手前の照会で例外が上がっていた。
+    A live 500 was hit choosing a partner in Muse — `POST /api/muse/sessions` with
+    `partner_preset: "c2"`. `pick_partner` was waiting for "not found" and should
+    have become `RefineError` -> 400; the lookup before it raised instead.
     """
     from app.characters.presets import get_preset
 
@@ -741,9 +741,9 @@ def test_an_id_qdrant_cannot_even_hold_is_simply_not_found():
 
 
 def test_a_well_formed_id_that_fails_is_still_an_error():
-    """**Qdrant が落ちているのを「居ない」に化けさせない。**
+    """**Qdrant being down is not disguised as "not there".**
 
-    化けさせると、名簿が空になった理由が分からなくなる。
+    Disguise it and there is no way to know why the roster came up empty.
     """
     from app.characters.presets import get_preset
 

@@ -45,9 +45,11 @@ def test_runtime_negative_and_settings():
 
 
 def test_negative_carries_only_the_box_and_the_refusals():
-    """図の守りはポジティブ側でやる。ネガティブに体型・年齢を積まない。
+    """The picture is guarded on the positive side. Body type and age are not stacked
+    into the negative.
 
-    主演撮りも班撮影も `runtime.negative_for` の一本道なので、両方に効く。
+    Both the lead's shoot and the crew shoot take the single road of
+    `runtime.negative_for`, so this bites on both.
     """
     session = {
         "inputs": {
@@ -78,7 +80,8 @@ def test_negative_carries_only_the_box_and_the_refusals():
 
 
 def test_default_negative_does_not_fight_a_plain_background():
-    """白ホリの撮影は simple_background そのものを頼む。既定で撃たない。"""
+    """A white-cyclorama shoot asks for `simple_background` itself. The default does not
+    shoot it down."""
     from app.muse.defaults import STYLE_DEFAULTS
     box = str(STYLE_DEFAULTS["negative_prompt"])
     assert "simple_background" not in box
@@ -87,11 +90,12 @@ def test_default_negative_does_not_fight_a_plain_background():
 
 
 def test_the_chosen_look_rules_its_opposite_out():
-    """セル画を頼んだ班の絵が柔らかいままだった。
+    """A crew picture that asked for cel shading stayed soft.
 
-    43語中3語の cel_shading では、チェックポイントの既定を押し切れない。
-    体型・年齢の自動注入とは別物 — あれは被写体について言い争っていたが、
-    これは総監督がいま断ったレンダリングを名指しする。
+    Three words of `cel_shading` out of 43 cannot push past the checkpoint's
+    default. This is not the automatic body-type and age injection — that argued
+    about the subject, while this names the rendering the Showrunner has just
+    refused.
     """
     from app.muse import crew
     # **班が開いているセッションでだけ、班の画風を取る（2026-09-13）。**

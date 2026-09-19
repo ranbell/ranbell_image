@@ -1,12 +1,14 @@
-"""**試し撮りのあとは、彼女に絵を見せる。**（2026-09-10）
+"""**After a test shot, she is shown the picture.** (2026-09-10)
 
-総監督「試し撮りしたあとは Muse が画像見るようにしよう」。
+The Showrunner: "after a test shot, let us have Muse look at the image".
 
-台帳は「こう撮ってほしい」で、絵は「こう撮れた」。台帳しか見えないと、撮れた絵
-そのものについて話せない。classic は試し撮り以降、毎ターン板を渡している。
+The ledger is "shoot it like this"; the picture is "this is how it came out". With
+only the ledger in view she cannot talk about the picture itself. From the test shot
+onward, classic hands over the board every turn.
 
-**絵を読めないモデルは、断らずに空を返す。** そのままだと「今日は口数が少ない
-な」にしか見えないので、一度だけ絵抜きで撮り直し、口に出して言う。
+**A model that cannot read pictures returns empty rather than refusing.** Left
+alone that reads only as "she is quiet today", so it retries once without the
+picture and says so out loud.
 """
 from __future__ import annotations
 
@@ -16,7 +18,8 @@ from app.muse import ledger as L, service, writer
 
 
 class _Ollama:
-    """絵つきで呼ばれたら空を返す（＝絵を読めないモデル）ようにも作れる。"""
+    """Can also be built to return empty when called with a picture (a model that cannot
+    read pictures)."""
 
     def __init__(self, *, can_see: bool = True, raw: str = "SAY: 見えてます。\n"):
         self.can_see, self.raw = can_see, raw
@@ -64,7 +67,7 @@ def test_a_board_is_handed_over():
 
 
 def test_a_blind_model_retries_without_the_picture():
-    """空が返ったら、黙って諦めず絵抜きでもう一度。"""
+    """On an empty reply it does not give up silently — once more without the picture."""
     o = _Ollama(can_see=False)
     out = _turn(o, images=[b"jpeg-bytes"])
     assert o.calls == ["vlm:1", "text"]

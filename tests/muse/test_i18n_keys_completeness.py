@@ -11,16 +11,17 @@ EN_JSON_PATH = Path(__file__).parent.parent.parent / "frontend/src/locales/en.js
 
 
 def test_every_key_the_panel_asks_for_exists_in_both_locales():
-    """**画面が引く鍵を、画面から読む。**
+    """**The keys the screen asks for are read from the screen.**
 
-    元は手で並べた一覧だった（`partnerCharacter` / `wMuseMode` / `quick.*` …）。
-    あれは classic の画面の契約で、画面ごと退役した（2026-09-12）ので、
-    並べ直す代わりに**撮影室の画面そのものから抜く**ことにした。手で足すのを
-    忘れても落ちる。
+    This used to be a hand-written list (`partnerCharacter` / `wMuseMode` /
+    `quick.*` …). That was classic's screen contract, and it retired along with the
+    screen (2026-09-12), so instead of rewriting the list the keys are now
+    **extracted from the studio screen itself**. Forget to add one by hand and this
+    still fails.
 
-    組み立てる鍵（`muse.` に変数を継ぐ書き方）は写らない —— 画風（`muse.looks.*`）と
-    欄（`muse.fields.*`）と姿勢の下絵（`muse.poseSketch.*`）がそれで、
-    下の鍵の左右対称の試験が受け持つ。
+    Assembled keys (written as `muse.` plus a variable) do not appear — the looks
+    (`muse.looks.*`), the fields (`muse.fields.*`) and the pose sketches
+    (`muse.poseSketch.*`) are those, and the key-symmetry test below covers them.
     """
     import re
 

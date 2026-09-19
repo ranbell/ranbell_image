@@ -1,12 +1,12 @@
-"""**呼んでいる関数が実在するか。**
+"""**Does the function being called actually exist?**
 
-実際にやった（2026-08-29）: `pick_partner` に `ollama` を通したとき、API 側で
-`_ollama(request)` と書いた —— **そんな補助関数は無かった**。相方の登録が
-実行時 `NameError` で 500 になったが、**全 1729 件の試験は緑のまま**通った。
-どの試験もその経路を踏んでいなかった。
+Really done (2026-08-29): while threading `ollama` into `pick_partner`, the API side
+was written as `_ollama(request)` — **there was no such helper**. Registering a
+partner became a runtime `NameError` and a 500, and **all 1,729 tests stayed green**.
+Not one of them walked that path.
 
-実行時にしか出ない名前の間違いを、読むだけで拾う。関数の中で使っている名前が
-モジュールにも組み込みにも無ければ落とす。
+A name mistake that only shows at runtime is caught by reading. If a name used
+inside a function is neither in the module nor a builtin, this fails.
 """
 from __future__ import annotations
 
@@ -22,7 +22,8 @@ _MUSE = root_dir / "backend" / "app" / "muse"
 
 
 def _bound(node: ast.AST) -> set[str]:
-    """その関数の中で束縛される名前（引数・代入・for・with・except・内包）。"""
+    """The names bound inside that function (arguments, assignment, `for`, `with`,
+    `except`, comprehensions)."""
     out: set[str] = set()
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
         a = node.args
