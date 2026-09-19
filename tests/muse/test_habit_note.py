@@ -53,14 +53,14 @@ def test_only_picture_lines_are_kept():
 def test_both_gates_open_once_notes_exist():
     """Given material, both of classic's gates open."""
     session = {"notes": ["窓際に立って、外を見て。", "カーディガンは脱いで。"]}
-    # 門1: 材料が空だと即やめ（乱数の前）
+    # Gate 1: empty material stops it at once (before the random draw)
     assert lounge_mod.should_write_habit(notes=[]) is False
-    # 目が出る乱数を渡せば通ること（0.18 未満）
+    # A winning draw lets it through (under 0.18)
     class _R:
         @staticmethod
         def random(): return 0.01
     assert lounge_mod.should_write_habit(notes=session["notes"], rng=_R) is True
-    # 門2: 書く側が条文に入れる材料
+    # Gate 2: the material the writing side puts into the contract
     got = muse_service._director_highlights(session)
     assert "窓際" in got and "カーディガン" in got
 

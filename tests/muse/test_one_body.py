@@ -27,14 +27,16 @@ from __future__ import annotations
 from app.muse import ledger as L
 
 
-#: 実機で観測した値そのまま（2026-09-12・「今日もメイドさんで」の再現）。
+#: The values observed live, exactly as they were (2026-09-12, reproducing 「今日も
+#: メイドさんで」 — "the maid outfit again today").
 BLOATED = (
     "standing, weight on right leg, hips jutting out sharply, left hand on hip, "
     "arms_stiff, hands_clutching_tray_edge, weight on back foot, hips pushed "
     "forward, elbows flared outward, hands gripping tray_edge with knuckles "
     "white, forearms tensed, hugging tray, hand on hip"
 )
-#: 同じ台本を人が撮ったときの値（元のセッション）。**ここは一語も落としてはいけない。**
+#: The values from the original session, where a person shot the same script.
+#: **Not one word here may be dropped.**
 CLEAN = (
     "standing, weight_on_front_foot, one_hand_on_hip, "
     "other_arm_holding_tray_at_waist, chin_lifted, chest_pushed_forward, "
@@ -50,10 +52,11 @@ def test_two_answers_for_the_weight_keep_the_first():
 
 def test_the_same_thing_said_twice_is_said_once():
     kept, dropped = L.one_body(BLOATED)
-    # 腰の向きは一つ。言い換え（jutting / pushed forward）も二つ目は落ちる。
+    # The hips face one way. A paraphrase (jutting / pushed forward) is dropped as
+    # the second answer too.
     assert "hips jutting out sharply" in kept
     assert "hips pushed forward" in dropped
-    # 手の中のトレイは一つ。三つの言い方のうち最初だけ残る。
+    # There is one tray in her hands. Of three phrasings only the first survives.
     assert "hands_clutching_tray_edge" in kept
     assert "hugging tray" in dropped
     assert "hands gripping tray_edge with knuckles white" in dropped

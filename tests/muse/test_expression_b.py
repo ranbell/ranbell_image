@@ -59,7 +59,7 @@ def test_the_partner_gets_her_face_in_the_picture():
     asahi = [l for l in got.splitlines() if l.startswith("Asahi:")]
     assert asahi, got
     assert "teasing_grin" in asahi[0] or "teasing grin" in asahi[0]
-    # 主演の顔が相方に写っていないこと
+    # The lead's face is not copied onto the partner
     assert "bright_smile" not in asahi[0]
 
 
@@ -86,7 +86,7 @@ def test_a_face_the_director_named_is_not_overwritten():
         {"expression": "grin", "expression_b": "grin"},
         cur, director_keys={"scene", "expression_b"},
     )
-    # 監督が相方の顔を名指しした回は、相方の顔だけ据え置き
+    # On a turn where the director named the partner's face, only her face stays put
     assert got == {"expression": "grin"}
 
 

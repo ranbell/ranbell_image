@@ -63,7 +63,7 @@ def test_verify_reads_her_voice_but_not_the_craft_guide():
 
     src = inspect.getsource(writer.verify_and_repair)
     assert "{voice}" in src
-    # コメントではなく**埋め込み**を見る（`{persona.ENTERTAINMENT_CRAFT}`）。
+    # It looks at the **interpolation**, not a comment (`{persona.ENTERTAINMENT_CRAFT}`).
     assert "{persona.ENTERTAINMENT_CRAFT}" not in src
 
 

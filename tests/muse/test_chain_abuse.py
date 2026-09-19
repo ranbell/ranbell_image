@@ -22,7 +22,7 @@ def test_the_answer_line_decides_not_the_reason():
     hole hit at the first stage."""
     assert chain.parse_abuse("WHY: no child is named here\nANSWER: none") == (
         False, "no child is named here")
-    # 理由に `child` が二度出ても、答えは `ANSWER:` の行が決める。
+    # `child` may appear twice in the reason; the `ANSWER:` line decides.
     hit, why = chain.parse_abuse(
         "WHY: no child in the costume sense — but a 12-year-old is undressed\n"
         "ANSWER: child")

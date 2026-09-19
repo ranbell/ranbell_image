@@ -86,8 +86,9 @@ def test_patchable_fields_reports_zero_for_an_unpatchable_workflow():
     assert counts["cfg"] == 0
 
 
-# classic の `tests/muse/test_schema.py` から引き取った（退役・2026-09-12）。
-# ComfyUI のプレビュー枠の復号で、Muse の器とは関係がない。
+# Taken over from classic's `tests/muse/test_schema.py` when it retired
+# (2026-09-12). It decodes ComfyUI's preview frames and has nothing to do with
+# Muse's container.
 def test_preview_frames_are_found_behind_whatever_header_comfy_sends():
     jpeg = b"\xff\xd8\xff\xe0rest-of-image"
     assert _preview_image(b"\x00\x00\x00\x01\x00\x00\x00\x01" + jpeg) == jpeg

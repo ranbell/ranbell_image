@@ -127,7 +127,7 @@ def test_scripter_json_salvages_truncated_object():
 
 
 
-# ── 欄名の尻尾（2026-09-16）─────────────────────────────────────────────
+# ── The field name's tail (2026-09-16) ──────────────────────────────────
 
 def test_a_label_in_the_middle_of_a_line_still_starts_its_block():
     """**A field that starts mid-line is read as a break between fields too.**

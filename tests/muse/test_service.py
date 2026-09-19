@@ -58,7 +58,7 @@ class FakeOllama:
                 "SAY: 画角はそのまま寄せます。"
             )
         elif "ASIDE:" in system:
-            # The Lead's own turn (`_duet_talk`) — SAY + 独り言 + CARD.
+            # The Lead's own turn (`_duet_talk`) — SAY + the mutter + CARD.
             text = (
                 "SAY: はい、そうしますね。\n\n"
                 "ASIDE: ……ちょっと、どきどきする。\n\n"
@@ -160,9 +160,9 @@ def test_every_crew_is_a_working_studio():
         assert "plan" in roles, f"{name} に構成席が無い"
         assert roles[-1] == "finisher" and "actress" in roles
         looks[name] = crew.base_style_for(ids, "", "")
-    # 6班6様 — 同じ look の班を2つ置かない（それは選択肢ではない）
+    # Six crews, six characters — no two crews share a look (that is not a choice)
     assert len(set(looks.values())) == len(looks), looks
-    # 消した名前を渡しても壊れない（既存セッションの互換）
+    # A deleted name does not break it (compatibility with existing sessions)
     assert crew.resolve_crew(preset="trio") == crew.resolve_crew(preset="standard")
 
 

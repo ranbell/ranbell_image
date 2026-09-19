@@ -26,7 +26,7 @@ from __future__ import annotations
 from app.muse import ledger as L, talk
 
 
-# ── ①② 仕様として残す側 ───────────────────────────────────────────────
+# ── Steps 1 and 2: the side that stays as designed ─────────────────────
 def test_dropping_the_last_garment_still_empties_the_slot():
     led = L.apply_patch({**L.blank(), "wearing": "cardigan"},
                         {"wearing_drop": "cardigan"})
@@ -48,7 +48,8 @@ def test_she_may_not_touch_a_settled_outfit():
                                 director_keys=set()) == {}
 
 
-# ── ③ 直した側：台帳が着ているものは絵に出る ──────────────────────────
+# ── Step 3, the side that was fixed: what the ledger wears reaches the
+# picture ─────────────────────────────────────────────────────────────
 def test_a_garment_the_ledger_names_again_comes_back_to_the_picture():
     """**The second half of the Showrunner's report.** A garment taken off and put back
     on never reached the picture."""
@@ -58,7 +59,7 @@ def test_a_garment_the_ledger_names_again_comes_back_to_the_picture():
         session, ["cardigan", "white_shirt", "skirt"], ledger=led,
     )
     assert out == ["cardigan", "white_shirt", "skirt"]
-    # 禁止そのものは消えていない —— 台帳が黙れば、また効く。
+    # The ban itself has not gone — let the ledger fall silent and it bites again.
     assert session["banned"] == ["cardigan"]
     assert talk.filter_banned_tags(session, ["cardigan"], ledger=L.blank()) == []
 
@@ -74,7 +75,7 @@ def test_without_a_ledger_the_ban_still_bites():
     assert talk.filter_banned_tags({"banned": ["hoodie"]}, ["hoodie", "jeans"]) == ["jeans"]
 
 
-# ── 語の境目 ──────────────────────────────────────────────────────────
+# ── Word boundaries ────────────────────────────────────────────────────
 def test_dropping_a_shirt_does_not_take_the_skirt():
     led = L.apply_patch(
         {**L.blank(), "wearing": "white shirt, t-shirt, skirt, shirt dress"},

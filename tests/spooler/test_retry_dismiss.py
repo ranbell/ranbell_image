@@ -63,7 +63,7 @@ async def test_a_failed_job_can_be_retried():
         assert sp._registry.get(jid) is None, "失敗したジョブが registry に残っている"
         assert sp._find(jid) is not None, "履歴から引けない"
 
-        new_id = sp.retry(jid)          # 以前はここで KeyError → 404
+        new_id = sp.retry(jid)          # this used to be a KeyError -> 404
         assert new_id and new_id != jid
     finally:
         await sp.stop()
@@ -133,7 +133,7 @@ async def test_a_job_waits_while_the_resource_is_down():
 
         async def _flaky(reporter, cancel, **kwargs):
             tries.append(1)
-            if len(tries) < 3:            # 二回落ちて、三回目で繋がる
+            if len(tries) < 3:            # fails twice, connects on the third
                 raise httpx.ConnectError("All connection attempts failed")
             return "ok"
 

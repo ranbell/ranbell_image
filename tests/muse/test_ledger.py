@@ -75,7 +75,8 @@ def test_wd14_is_gone_from_refine():
     assert not hasattr(assemble, "_split_picked_vs_free")
     src = inspect.getsource(assemble)
     assert "use_wd14" not in src
-    # 絵作りの語（`enhance_quality`）は残す —— こちらは語彙の近傍ではない。
+    # The picture-making words (`enhance_quality`) stay — those are not a vocabulary
+    # neighbourhood.
     assert hasattr(assemble, "quality_enrich")
 
 

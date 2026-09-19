@@ -60,7 +60,7 @@ def test_with_a_listener_it_streams_and_still_parses():
     seen: list[str] = []
     out = _turn(o, on_token=seen.append)
     assert (o.plain, o.streamed) == (0, 1)
-    # 流したうえで、いつも通り欄に分かれること
+    # Streamed, and still split into fields as usual
     assert "おかえりなさい" in out["say"]
     assert "緊張" in out["aside"]
     assert seen

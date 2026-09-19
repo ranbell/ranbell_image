@@ -87,7 +87,7 @@ def test_the_change_row_is_gone_from_chat():
     kinds = [(r.get("meta") or {}).get("kind") for r in session["chat"]]
     assert "ledger_change" not in kinds
     assert session["chat"] == []
-    # ログ（デバッグの書き換え記録）には残っていること
+    # It survives in the log (the debug record of rewrites)
     assert session.get("rewrite_log")
 
 

@@ -83,7 +83,7 @@ async def test_a_solo_turn_reaches_the_end(quiet):
     assert out is session
     said = [r for r in out["chat"] if (r.get("meta") or {}).get("kind") in (None, "say")]
     assert any("総監督" in str(r.get("text") or "") for r in said)
-    # 班の跡が付いていないこと
+    # No trace of a crew is attached
     assert not [r for r in out["chat"] if (r.get("meta") or {}).get("kind") == "seat"]
     assert not out.get(C.CREW_WORDS)
 

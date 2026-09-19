@@ -163,9 +163,10 @@ def test_store_and_public_view_redacts_jpeg():
         "at": 1.0,
         "bytes": len(jpeg),
     }
-    # classic の `public_view` は `{**session}` を撒いてから `direction_still`
-    # を名指しで伏せていた。Refine の公開ビューは**欄を挙げて組む**ので、
-    # 伏せ忘れという事故が起きない ―― 血を見るのはこちら側（2026-09-12 の退役）。
+    # Classic's `public_view` spread `{**session}` and then hid `direction_still` by
+    # name. Refine's public view **builds itself by listing the fields**, so
+    # forgetting to hide something cannot happen — this is the side that bleeds (the
+    # retirement of 2026-09-12).
     view = public_view(session)
     assert "jpeg_b64" not in json.dumps(view, default=str)
     assert "jpeg_b64" in session["direction_still"]

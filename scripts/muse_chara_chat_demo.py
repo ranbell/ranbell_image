@@ -96,7 +96,7 @@ def _build_say(system: str, user: str) -> str:
     fast = "早口" in (v["quirks"] or "") or f == "アタシ"
     whisper = "囁" in (v["quirks"] or "") or "小声" in (v["quirks"] or "")
     flower = "花屋" in (v["quirks"] or "") or a.endswith("様")
-    # Opening turn: theme briefing, no "総監督がいま言ったこと".
+    # Opening turn: theme briefing, no "what the Showrunner has just said".
     opening = (
         "総監督がいま言ったこと:" not in user
         and ("お題" in user or "このターンの話し方" in user)

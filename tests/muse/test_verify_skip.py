@@ -27,7 +27,7 @@ from app.muse import service
 def test_the_gate_reads_both_conditions():
     src = inspect.getsource(service.chat)
     gate = src[src.index("moved_by_director = "):src.index("ok, comment, repair")]
-    # 台帳が動いていない **かつ** 取りこぼしでもない、の両方が要る
+    # Both are required: the ledger did not move **and** it was not a miss
     assert "if not moved_by_director and not missed:" in gate
     assert "verify_skipped" in gate
 
@@ -65,7 +65,7 @@ def test_the_gate_measures_the_director_not_her():
     re-check for that one word.
     """
     src = inspect.getsource(service.chat)
-    # 監督のパッチを当てた直後に控えていること（女優の段より前）
+    # It is noted immediately after the director's patch (before the actress's stage)
     assert "after_director = dict(led)" in src
     assert src.index("after_director = dict(led)") < src.index("actress = await writer.actress_turn")
     gate = src[src.index("moved_by_director = "):src.index("ok, comment, repair")]

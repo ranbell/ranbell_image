@@ -26,7 +26,8 @@ import pytest
 
 from app.muse import identity, shared as muse_service, shared
 
-#: 主演／相方がどちら側か。**直書きしない**（`identity.LEAD_SIDE` を替えたら追従）。
+#: Which side the lead and the partner are on. **Never written out here** (change
+#: `identity.LEAD_SIDE` and this follows).
 LEAD_JA = identity.side_of(lead=True)[1]
 PART_JA = identity.side_of(lead=False)[1]
 
@@ -101,7 +102,8 @@ def test_the_diary_and_the_picture_agree():
             "inputs": {"locale": "ja"}, "refine_ledger": led, "banned": []}
     prose = assemble.scene_prose(led, partner=True, name_a="Mio", name_b="Asahi")
     en_lead, en_part = identity.side_of(lead=True)[0], identity.side_of(lead=False)[0]
-    # 絵で主演が置かれた側と、日記で本人に伝える側が一致すること
+    # The side the lead is placed on in the picture matches the side she is told in
+    # the diary
     left_name, right_name = (
         ("Asahi", "Mio") if identity.LEAD_SIDE == "right" else ("Mio", "Asahi")
     )
@@ -169,7 +171,8 @@ async def test_two_in_frame_are_read_separately(monkeypatch):
     )
     assert "TWO girls" in seeing.system
     assert "left" in seeing.system and "right" in seeing.system
-    # **短く。** 目録にならないよう、一人ぶんの読みと同じ分量に収める。
+    # **Short.** Held to the same length as the single-person reading, so it does not
+    # become a catalogue.
     assert "ONE short English sentence each" in seeing.system
 
 

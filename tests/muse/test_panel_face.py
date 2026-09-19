@@ -38,7 +38,7 @@ def _fn(name: str) -> str:
     return body[: body.index("\n}\n") + 2]
 
 
-# ── 確定した行 ──────────────────────────────────────────────────────────
+# ── Settled rows ────────────────────────────────────────────────────────
 
 def test_the_face_is_chosen_by_who_spoke_not_by_the_kind_of_bubble():
     body = _fn("faceShaForRow")
@@ -62,7 +62,7 @@ def test_a_crew_seat_has_no_face():
     assert i_role < i_lead, "席を弾く前に主演の顔を返している"
 
 
-# ── 流している間 ────────────────────────────────────────────────────────
+# ── While it streams ────────────────────────────────────────────────────
 
 def test_the_folded_bubble_keeps_its_face():
     """If only folded bubbles lose the face, it blinks while she keeps talking."""
@@ -82,7 +82,7 @@ def test_the_lead_streams_under_her_own_id():
     seat = [m for m in crew.resolve_crew(preset="standard")
             if crew.role_of(m) == "actress"][0]
     assert crew_room.stream_id(session, seat) == "c1"
-    # 班の席はそのまま（顔を持たない側）
+    # The crew seats are unchanged (the side with no face)
     assert crew_room.stream_id(session, "gaffer:gyakkou") == "gaffer:gyakkou"
 
 

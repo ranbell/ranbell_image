@@ -89,8 +89,8 @@ async def test_run_render_raises_so_the_job_fails_and_frees_the_lane():
         def patch_workflow(self, wf, *a, **kw):
             return {}
 
-        # 本物と同じ口を持たせる。**描画ごとに clientId を分ける**ように
-        # なったので、偽物にもそれが要る
+        # Give it the same mouth as the real thing. Now that **each render gets its
+        # own clientId**, the stand-in needs one too
         @staticmethod
         def new_client_id():
             return "test-client"
@@ -174,7 +174,7 @@ def test_each_render_gets_its_own_client_id():
     import inspect
     from backend.app.jobs import render as render_mod
     src = inspect.getsource(render_mod.run_render)
-    # 積むときと待つときで、同じ id を使うこと（違うと何も届かない）
+    # The same id is used to queue and to wait (a different one and nothing arrives)
     assert "client_id = comfy.new_client_id()" in src
     assert "client_id=client_id" in src
     assert src.count("client_id=client_id") >= 2
@@ -182,6 +182,6 @@ def test_each_render_gets_its_own_client_id():
     from backend.app.ai.comfy import ComfyUIClient as ComfyClient
     a, b = ComfyClient.new_client_id(), ComfyClient.new_client_id()
     assert a and b and a != b
-    # 渡さなければ、これまでどおりクライアント共通の id を使う
+    # Pass none and it uses the client-wide id, as before
     for fn in (ComfyClient.queue_prompt, ComfyClient.stream_progress):
         assert inspect.signature(fn).parameters["client_id"].default == ""

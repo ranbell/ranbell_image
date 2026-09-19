@@ -18,7 +18,8 @@ import asyncio
 
 from app.muse import ledger as L, talk, writer
 
-#: 実機で起きた形 —— 模型は何かを返したが、台詞として取り出せるものが無かった。
+#: The shape that happened live — the model returned something, and there was
+#: nothing in it that could be taken out as a line.
 NO_LINE = "   \n"
 FULL = "SAY: はい、総監督。\nASIDE: （どきどき）\n"
 
@@ -28,7 +29,7 @@ class _Ollama:
 
     def __init__(self, first: str, second: str = FULL):
         self.replies = [first, second]
-        self.calls: list[bool] = []      # 絵つきで呼ばれたか
+        self.calls: list[bool] = []      # whether it was called with a picture
 
     async def generate_vlm(self, prompt, images, **kw):
         self.calls.append(True)
@@ -68,7 +69,7 @@ def test_a_turn_with_no_picture_is_left_alone():
     out = _turn(o)
     assert o.calls == [False]
     assert not out["say"].strip()
-    # 黙った回は、返ってきたものを持ち帰る（次に読めるように）
+    # On a silent turn, what came back is carried home (so it can be read next time)
     assert "raw" in out
 
 
@@ -86,7 +87,7 @@ def test_an_empty_line_never_becomes_a_row():
     s = _publish("", aside="（どきどき）")
     kinds = [(r.get("meta") or {}).get("kind") for r in s["chat"]]
     assert "say" not in kinds
-    # 内心のほうは今まで通り出る
+    # The mutter still comes out as before
     assert "banter" in kinds
 
 

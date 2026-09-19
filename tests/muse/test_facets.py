@@ -492,8 +492,9 @@ def _legacy_session() -> dict:
                  "cardigan, warm_sunlight, potted_plant"),
         "scene": "A long paragraph that was already rendering.",
     }
-    # classic の `_reassemble` を呼んでいた一行は落とした（退役・2026-09-12）。
-    # ここで欲しいのは「facets 表を持たない古い行」で、craft は上で据えてある。
+    # The line calling classic's `_reassemble` was dropped (it retired 2026-09-12).
+    # What is wanted here is "an old row with no facets table", and craft is set
+    # above.
     return s
 
 

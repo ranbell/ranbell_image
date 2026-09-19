@@ -45,6 +45,7 @@ def test_the_roster_takes_the_layer_from_whoever_opens_it():
     src = GALLERY.read_text(encoding="utf-8")
     assert "layerClass: { type: String, default: 'z-[var(--z-panel)]' }" in src
     assert ':class="layerClass"' in src
-    # 根の要素に固定の段を焼き付けていないこと（焼き付けると渡しても効かない）
+    # No fixed layer is baked into the root element (baked in, passing one has no
+    # effect)
     root = src[src.index("<template>"):src.index("<template>") + 400]
     assert "z-[var(--z-panel)]" not in root, "根に固定していると上書きできない"

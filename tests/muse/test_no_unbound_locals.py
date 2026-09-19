@@ -55,11 +55,11 @@ def _surely_bound(body: list[ast.stmt]) -> set[str]:
                 for h in st.handlers
             )
             if st.handlers and exits:
-                out |= _surely_bound(st.body)       # 例外側は必ず抜ける
+                out |= _surely_bound(st.body)       # the handler always falls through
             elif st.handlers:
                 safe = _surely_bound(st.body)
                 for h in st.handlers:
-                    safe &= _surely_bound(h.body)   # どちらを通っても在る
+                    safe &= _surely_bound(h.body)   # bound whichever way it goes
                 out |= safe
     return out
 
@@ -106,7 +106,7 @@ def unbound_reads(path: Path) -> list[str]:
                     continue
                 if node.id not in maybe or node.id in before:
                     continue
-                # その文が自分で束縛しているなら（ループ変数など）見送る
+                # If the statement binds it itself (a loop variable, say), skip it
                 if any(isinstance(m, ast.Name) and m.id == node.id
                        and isinstance(m.ctx, ast.Store) for m in ast.walk(st)):
                     continue

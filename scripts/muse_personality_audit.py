@@ -25,10 +25,10 @@ OUT = Path("/opt/cursor/artifacts/muse_personality_audit_report.md")
 
 # Diverse sample across clubs / voices.
 SAMPLE_IDS = [
-    "c001",  # みなも — shy photographer, 私
-    "c002",  # かほ — librarian whisper
-    "c014",  # すみれ — 総監督様 + flower
-    "c020",  # つばさ — アタシ, fast
+    "c001",  # Minamo — shy photographer, first person 私
+    "c002",  # Kaho — librarian whisper
+    "c014",  # Sumire — calls him 総監督様, and flowers
+    "c020",  # Tsubasa — first person アタシ, fast
     "c005",  # another
     "c010",
 ]
@@ -88,7 +88,7 @@ def _marker_hit(prompt: str, key: str, needle: str) -> bool | None:
     n = (needle or "").strip()
     if not n:
         return None
-    # Single-char first person (「私」) is valid Japanese — match the VOICE line.
+    # A single-character first person (「私」) is valid Japanese — match the VOICE line.
     if key == "first_person":
         if re.search(rf"一人称\s*/\s*first person:\s*{re.escape(n)}\b", prompt):
             return True
@@ -97,7 +97,7 @@ def _marker_hit(prompt: str, key: str, needle: str) -> bool | None:
         # Distinctive multi-char forms (アタシ / うち) can substring-match.
         if len(n) >= 2:
             return n in prompt
-        return n in prompt  # still accept bare「私」in contract text
+        return n in prompt  # still accept a bare 「私」 in the contract text
     if len(n) < 2:
         return None
     return n in prompt

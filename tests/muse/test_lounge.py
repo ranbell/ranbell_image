@@ -35,7 +35,7 @@ def test_the_outing_photo_says_what_they_are_wearing():
         )
         assert "casual clothes" in out
         assert expect in out, (season, out)
-    # 季節が読めなくても、服はある
+    # Even with no readable season, there are clothes
     assert "casual clothes" in lounge.snapshot_prompt(
         cast, identity_tags=[[]], occasion="street", rng=random.Random(0))
 

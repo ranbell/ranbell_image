@@ -20,9 +20,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 @pytest.fixture
 def lounge_client(tmp_path):
-    # fixture の中で import する理由は classic の api テストと同じ: 兄弟の
-    # ディレクトリが収集中に "app.*" を sys.modules から掃除するので、
-    # module 直下で束ねると monkeypatch が別オブジェクトに当たる。
+    # The reason for importing inside the fixture is the same as in classic's api
+    # tests: a sibling directory sweeps "app.*" out of sys.modules during collection,
+    # so binding at module level makes monkeypatch hit a different object.
     from app.muse.lounge_api import router
 
     app = FastAPI()
@@ -43,6 +43,6 @@ def test_lounge_like_toggles(lounge_client, monkeypatch):
     assert res.status_code == 200
     assert res.json()["liked"] is True
 
-    # 本文なしは「反転」。classic の api と同じ振る舞い。
+    # No body means "toggle". The same behaviour as classic's api.
     res = lounge_client.post("/api/muse/lounge/threads/p1/like", json={})
     assert res.status_code == 200

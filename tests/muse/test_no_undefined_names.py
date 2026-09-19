@@ -33,8 +33,8 @@ def _bound(node: ast.AST) -> set[str]:
             if extra:
                 out.add(extra.arg)
     for sub in ast.walk(node):
-        # **入れ子の関数と lambda の引数も束縛。** ここを落とすと、内側の
-        # 引数が「未定義」に見える
+        # **A nested function's and a lambda's arguments bind too.** Miss this and
+        # the inner arguments look "undefined"
         if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
             a = sub.args
             for arg in (*a.posonlyargs, *a.args, *a.kwonlyargs):

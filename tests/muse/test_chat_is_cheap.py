@@ -86,12 +86,12 @@ def test_touch_craft_moves_now_and_flags_stale():
     }
     assemble.touch_craft(session)
     craft = session["craft"]
-    # 正本の一行とタグは動く
+    # The record of truth's line and the tags do move
     assert craft["now"]
     assert "white_shirt" in craft["tags"] or "white shirt" in craft["tags"]
-    # 組み上げたプロンプトはそのまま残る（消さない）
+    # The assembled prompt stays as it is (never erased)
     assert craft["prompt"] == "（前の回に組んだもの）"
-    # 古いという旗が立つ
+    # The stale flag goes up
     assert craft["stale"] is True
 
 

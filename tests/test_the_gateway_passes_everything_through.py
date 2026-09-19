@@ -30,7 +30,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 from app.ai.llm import LlmGateway
 from app.ai.ollama import OllamaClient
 
-#: 覆いが持っている素通しの口。
+#: The pass-through mouths the facade holds.
 PASS_THROUGH = (
     "generate_text",
     "generate_text_stream",

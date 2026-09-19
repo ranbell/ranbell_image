@@ -129,9 +129,10 @@ def test_portrait_drops_only_the_wardrobe_that_shows_the_legs():
     half still needs clothes — dropping the wardrobe wholesale came back
     bare-shouldered."""
     positive, _ = _portrait()
-    # **本体と同じ判定を使う。** 手書きの語リストを持っていたら、みなもが
-    # 制服（pleated_skirt）から大人の服（linen_trousers, work_boots）に
-    # 変わった時点で、下半身の服を「上半身」と数えて落ちた
+    # **The same decision as the code itself.** With a hand-written word list, the
+    # moment Minamo changed from a uniform (pleated_skirt) into adult clothes
+    # (linen_trousers, work_boots) it counted the lower-body garment as "upper body"
+    # and failed
     lower = [t for t in CHARACTER["outfit_tags"] if _shows_the_legs(str(t))]
     upper = [t for t in CHARACTER["outfit_tags"] if t not in lower]
     assert lower, "the fixture character should own something below the waist"

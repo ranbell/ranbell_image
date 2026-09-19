@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 import pytest
 
 
-# ── 一覧が読むもの ──────────────────────────────────────────────────────────
+# ── What the listing reads ──────────────────────────────────────────────────
 class _ScrollDb:
     """Qdrant's scroll has no ordering and pages via an offset cursor."""
 
@@ -82,7 +82,8 @@ async def test_the_two_studios_do_not_show_up_in_each_others_lists():
     refine = await session_db.list_recent(db, limit=10, studio="muse_refine")
     assert [r["session_id"] for r in refine] == ["r1"]
 
-    # 既定は全部 —— 呼び元がスタジオを言わないうちは、これまでと同じ。
+    # The default is everything — until a caller names a studio, it behaves as
+    # before.
     both = await session_db.list_recent(db, limit=10)
     assert [r["session_id"] for r in both] == ["m1", "r1"]
 

@@ -72,7 +72,7 @@ def test_a_blind_model_retries_without_the_picture():
     out = _turn(o, images=[b"jpeg-bytes"])
     assert o.calls == ["vlm:1", "text"]
     assert out["blind"] is True
-    assert "見えてます" in out["say"]      # 二度目は返ってくる
+    assert "見えてます" in out["say"]      # the second time it comes back
 
 
 def test_streaming_also_carries_the_picture():
@@ -87,7 +87,7 @@ def test_streaming_also_carries_the_picture():
 def test_the_studio_says_so_once_when_she_cannot_see():
     session: dict = {"chat": [], "inputs": {"locale": "ja"}}
     service._note_blind(session, locale="ja")
-    service._note_blind(session, locale="ja")   # 二度目は黙る
+    service._note_blind(session, locale="ja")   # the second time it says nothing
     rows = [r for r in session["chat"] if r.get("role") == "system"]
     assert len(rows) == 1
     assert "vision_model" in rows[0]["text"]
@@ -97,5 +97,5 @@ def test_the_vision_model_is_only_swapped_in_for_picture_turns():
     import inspect
     src = inspect.getsource(service.chat)
     assert 'vision_model' in src
-    # 板が無い回は今まで通り model のまま
+    # With no board it stays on `model`, as before
     assert 'if board_shots else model' in src
