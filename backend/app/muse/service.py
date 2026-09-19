@@ -16,10 +16,11 @@ from .ctx import refine_num_ctx
 
 logger = logging.getLogger(__name__)
 
-#: **保存されている値なので変えない。** セッションの行に書いてあり、
-#: `session_db.list_recent(studio=...)` の仕切りと、この撮影室が自分の行かを
-#: 見分ける鍵（`_require_studio`）になっている。パッケージと URL は
-#: `muse` に畳んだ（2026-09-12）が、この文字列を動かすと**既存の行が開かなくなる**。
+#: **A stored value, so it does not change.** It is written on the session row and
+#: is the partition for `session_db.list_recent(studio=...)` as well as the key this
+#: studio uses to tell its own rows apart (`_require_studio`). The package and the
+#: URLs were folded into `muse` (2026-09-12); move this string and **existing rows
+#: stop opening**.
 STUDIO = "muse_refine"
 
 
@@ -53,11 +54,13 @@ def public_view(session: dict[str, Any]) -> dict[str, Any]:
             "theme": inputs.get("theme", ""),
             "character_id": inputs.get("character_id", ""),
             "partner_preset": inputs.get("partner_preset", ""),
-            # **画面が読む値は返す（2026-09-13）。** 昨日 `InputsPatch` に欄を
-            # 足して「送れる」ようにしたが、**返していなかった** —— 画面は
-            # `inputs.crew_preset || 'standard'` を読むので、選んで保存されても
-            # 開き直すと `standard` に見える。**操作は効くのに表示が嘘をつく**、
-            # いちばん気づきにくい壊れ方。往復で見ないと分からない。
+            # **Return the values the screen reads (2026-09-13).** A field was
+            # added to `InputsPatch` yesterday so it could be *sent*, and it was
+            # **not returned** — the screen reads
+            # `inputs.crew_preset || 'standard'`, so a choice that saved correctly
+            # looked like `standard` again on reopening. **The action works and the
+            # display lies**, the hardest breakage to notice: only a round trip
+            # shows it.
             "crew_preset": inputs.get("crew_preset", ""),
             "banter_mode": inputs.get("banter_mode", ""),
             "workflow": inputs.get("workflow", ""),
@@ -91,8 +94,9 @@ def public_view(session: dict[str, Any]) -> dict[str, Any]:
             "scene": craft.get("scene", ""),
             "quality_tags": craft.get("quality_tags", ""),
             "support_tags": craft.get("support_tags", ""),
-            # 会話のターンでは散文とタグの組み上げを撮る時まで待つ（`touch_craft`）。
-            # 画面はこの旗を見て「試し撮りで組み直します」と出す。
+            # On a conversation turn, building the prose and tags waits until the
+            # shot (`touch_craft`). The screen reads this flag to say it will be
+            # rebuilt on the test shot.
             "stale": bool(craft.get("stale")),
         },
         "chat": list(session.get("chat") or [])[-40:],
@@ -120,7 +124,8 @@ def public_view(session: dict[str, Any]) -> dict[str, Any]:
         },
         "diary": session.get("diary") or {},
         "opened": bool(session.get("opened")),
-        # スタジオ撮り（班）。画面はこの二つでボタンの出し分けをする。
+        # The studio shoot (with a crew). The screen chooses which buttons to show
+        # from these two.
         "crew_open": bool(session.get(crew_room.TABLE_OPEN)),
         "crew_seats": len(crew_room.cast_of(session)) if session.get(crew_room.TABLE_OPEN) else 0,
         "banned": list(session.get("banned") or [])[-20:],
@@ -337,11 +342,13 @@ async def open_session(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
     model = str(inputs.get("model") or "")
     name = char.get("name_ja") or char.get("name") or "Muse"
     theme = str(inputs.get("theme") or "").strip()
-    # **文脈長を最初のターンから揃える。** 判定係（`persona.contract_check_with_db`）
-    # が `_runtime_cfg` を積むのは会話が始まってからで、開幕だけ既定値のまま
-    # 走ると、そこで一度モデルを読み直す（実測 11〜24秒）。
+    # **Match the context length from the very first turn.** The clerk
+    # (`persona.contract_check_with_db`) only stacks `_runtime_cfg` once the
+    # conversation has begun, so running the opening on the default reloads the
+    # model once, right there (measured 11-24 seconds).
     await _load_runtime_cfg(db, session)
-    # 開幕の一言も同じ —— 一人なら二人目の欄を見せない（`chat` と同じ判断）。
+    # The opening line is the same — solo means the second person's fields are not
+    # shown (the same decision as in `chat`).
     partner_char = session.get("partner_character") or {}
     has_partner = bool(str(partner_char.get("character_id") or "").strip())
     name_b = str(partner_char.get("name_ja") or partner_char.get("name") or "")
@@ -360,9 +367,10 @@ async def open_session(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
     if dress_patch:
         debug_mod.note(session, "opening_dress", detail=str(dress_patch), patch=dress_patch)
 
-    # **「またあの感じ」は Refine では出さない（2026-09-10）。** 総監督
-    # 「前回の内容からの提案は削除して時間短縮」。`vitality.again_that_feel_hint`
-    # 自体は classic Muse が使うので残してある。
+    # **「またあの感じ」 ("that feeling again") is not offered in Refine
+    # (2026-09-10).** The Showrunner: "remove the proposal drawn from last time, to
+    # save time". `vitality.again_that_feel_hint` itself is kept because classic
+    # Muse uses it.
     talk.prepare_vitality_flags(session, user_line="")
     # Opening: B does not steal the first hello unless W and turn says so.
     session["w_b_leads"] = False
@@ -446,11 +454,12 @@ async def restate_field(
         f"DIRECTOR LINES:\n{recent or '(none)'}\n"
     )
     try:
-        # **thinking は明示して切る（2026-09-07）。** 送らないと模型側の
-        # 既定に従い、この一回が 14〜15秒（`think=False` なら 1.1〜1.6秒・
-        # 実測 26B・同じプロンプト n=2）。**出力も薄くなる**（67〜91字 対
-        # 141〜146字）。1ターンに数回叩くので、分単位の待ちになって描画まで
-        # 届かない。Muse は `chain._call` が毎回 `think=False` を送っている。
+        # **Thinking is switched off explicitly (2026-09-07).** Unsent, the
+        # model's own default applies and this one call takes 14-15 seconds (1.1-1.6
+        # with `think=False`; measured, 26B, same prompt, n=2). **The output is
+        # thinner as well** (67-91 characters against 141-146). It is called several
+        # times a turn, so the wait runs into minutes and never reaches the render.
+        # In Muse, `chain._call` sends `think=False` every time.
         raw = await ollama.generate_text(
             prompt, model=model or None, think=False,
             options={"num_ctx": refine_num_ctx(session)},
@@ -620,7 +629,8 @@ def _mark_turn_shot(
         session["chat"] = chat
 
 
-#: 癖メモが読むのは末尾8件（`muse.service._director_highlights`）。**溜めない。**
+#: The habit note reads the last 8 (`muse.service._director_highlights`).
+#: **Nothing piles up.**
 _NOTES_MAX = 24
 
 
@@ -714,10 +724,11 @@ async def chat(
     locale = str(inputs.get("locale") or "ja")
     char = session.get("character") or {}
     name = char.get("name_ja") or char.get("name") or "Muse"
-    # **一人か二人か（2026-09-09）。** 台帳の二人目の欄は `blank()` が常に
-    # 埋めるので、模型には空の `wearing_b` / `beat_b` が見えていた。空欄は
-    # 「埋めろ」に見える —— 総監督「一人しかいないときに muse_b の tag を
-    # 編集してしまう」。ここで一度決めて、模型に触る三つの席へ渡す。
+    # **One person or two (2026-09-09).** `blank()` always fills the ledger's
+    # second-person fields, so the model saw an empty `wearing_b` / `beat_b`. An
+    # empty field looks like "fill me in" — the Showrunner: "when there is only one
+    # person it edits muse_b's tags". It is decided once here and handed to the
+    # three seats that touch the model.
     partner_char = session.get("partner_character") or {}
     has_partner = bool(str(partner_char.get("character_id") or "").strip())
     name_b = str(partner_char.get("name_ja") or partner_char.get("name") or "")
@@ -761,10 +772,11 @@ async def chat(
     session["commit_pitch"] = persona.is_commit_pitch(text)
     talk.prepare_vitality_flags(session, user_line=text)
 
-    # **この回が「喋っただけ」か「画を動かした」か（2026-09-10）。** 総監督
-    # 「会話オンリーか画像プロンプト生成かはアイコンで分かるように」。彼女の
-    # 台詞は propose や自己修復より前に積まれるので、その場では決まらない。
-    # ここで印をつける位置だけ控えて、ターンの終わりに `_mark_turn_shot` で押す。
+    # **Did this turn only talk, or did it move the picture? (2026-09-10)** The
+    # Showrunner: "make it clear from an icon whether it was conversation only or
+    # image-prompt generation". Her line is stacked before propose and the self
+    # repair, so it cannot be decided there and then. Only the position of the mark
+    # is noted here; `_mark_turn_shot` stamps it at the end of the turn.
     turn_mark = len(session.get("chat") or [])
 
     _append_chat(session, role="user", name="Director", text=text)
@@ -804,15 +816,16 @@ async def chat(
     led = dict(before)
     director_recent = _director_tail(session)
 
-    # **班が居るなら、writer の手前で一周する（2026-09-11）。** 総監督
-    # 「スタジオ撮りを Muse refine に取り込みたい」。席は台帳に直接書かない ——
-    # classic の「書くのは Scripter 一人」をそのまま持ってきていて、Refine では
-    # その Scripter が下の `write_patch`。門は `mode` ではなく席の実体。
+    # **With a crew, go once round before the writer (2026-09-11).** The
+    # Showrunner: "I want to bring the studio shoot into Muse refine". The seats
+    # never write the ledger directly — classic's "only the Scripter writes" is
+    # carried over as it was, and in Refine that Scripter is `write_patch` below.
+    # The gate is the seats' existence, not `mode`.
     crew_craft = ""
-    # **班が居ない回でも束は空で在る（2026-09-18）。** ここを `if` の中だけで
-    # 作っていたので、一人撮り・W撮りのターンが下の `if floor:` で
-    # `UnboundLocalError` になり、**会話が 500 で落ちていた**（2026-09-14 の
-    # `0019b5b` から）。班の試験しか無かったので、四日間気づけなかった。
+    # **The floor exists, empty, on turns with no crew (2026-09-18).** This was
+    # created only inside the `if`, so a solo or duet turn hit `UnboundLocalError`
+    # at `if floor:` below and **the chat fell over with a 500** (since `0019b5b` on
+    # 2026-09-14). There were only crew tests, so it went unnoticed for four days.
     floor: list[dict[str, Any]] = []
     if crew_room.has_crew(session):
         t0 = time.monotonic()
@@ -865,9 +878,10 @@ async def chat(
         debug_mod.note(session, "atm_look_cue", detail=str(cue), patch=patch)
 
     # Long-chat durability: drop accidental empty clears; track director sticky touches.
-    # **一つの体に畳んだぶんは記録に残す（2026-09-12）。** 18席が同じ欄に順に
-    # 書くので、言い換えと矛盾が積もる。落としたのは「同じ軸の二つ目」だけで、
-    # 何を落としたかは画面のデバッグ枠から読める。
+    # **What was folded into one body is recorded (2026-09-12).** Eighteen seats
+    # write the same field in turn, so paraphrases and contradictions pile up. Only
+    # "the second on the same axis" is dropped, and what was dropped can be read in
+    # the screen's debug pane.
     folded: dict[str, list[str]] = {}
     patch = ledger_mod.scrub_patch(patch, led, allow_clear=allow_clear, report=folded)
     if folded:
@@ -939,20 +953,24 @@ async def chat(
         )
         debug_mod.note(session, "writer_missed", detail=text[:240])
 
-    # **欄の会議が出した結論を、監督が触らなかった欄へ着地させる（2026-09-14）。**
+    # **Land each field corner's conclusion in the fields the director did not
+    # touch (2026-09-14).**
     #
-    # 総監督「美術や色彩などでいい提案しているのに、それらがプロンプトに乗って
-    # こないのはやっぱりもったいない」。席は台帳に触れず材料を渡すだけで、台本係は
-    # 監督の一行にある欄しか直さない —— だから**名指しされなかった欄の craft は
-    # どこにも着地しなかった**（実測で `look` は 88%、`atmosphere` は 76% の
-    # セッションで空のまま）。
+    # The Showrunner: "the art and colour seats make good proposals and it really
+    # is a waste that they never reach the prompt". The seats do not touch the
+    # ledger, they only hand over material, and the writer fixes only the fields the
+    # director's line names — so **the craft for any field left unnamed landed
+    # nowhere** (measured, `look` stayed empty in 88% of sessions and `atmosphere`
+    # in 76%).
     #
-    # **監督が書いた欄は素通し。** 班が口を出すのは、監督が黙っていた欄だけ。
-    # 模型は呼ばないので1ターンの時間は変わらない。
+    # **A field the director wrote passes straight through.** The crew has its say
+    # only in the fields the director was silent about. No model is called, so the
+    # turn takes no longer.
     #
-    # **監督が書いた欄の「班の語」は忘れる（2026-09-14）。** 台本係がその欄を
-    # 書き直した時点で、中身はぜんぶ監督の言葉になる。控えを残したままだと、
-    # 次の会議が監督の言葉を自分のものとして消せてしまう。
+    # **The crew's words in a field the director wrote are forgotten (2026-09-14).**
+    # Once the writer has rewritten that field, its contents are all the director's
+    # words. Keeping the note would let the next corner erase the director's words
+    # as if they were its own.
     words = dict(crew_room.crew_words_of(session))
     for key in patch:
         words.pop(key, None)
@@ -977,18 +995,21 @@ async def chat(
                 patch=fill,
             )
     if words or session.get(crew_room.CREW_WORDS):
-        # 班の居ないセッションには印を付けない（一人撮り・W撮りは素通り）。
+        # No mark on a session without a crew (solo and duet pass straight
+        # through).
         session[crew_room.CREW_WORDS] = words
 
-    # **会話の途中で絵を組み直さない（2026-09-10）。** 総監督「撮影に入らない
-    # ときの会話のみの回答はもっと早くしてほしい」。ここで組んだ散文とタグを
-    # 使うのは試し撮りと本番だけで、そちらは自前で `rebuild_craft` を呼ぶ。
-    # 女優が要るのは `now` の一行だけなので、模型を使わずに更新する。
+    # **The picture is not rebuilt mid-conversation (2026-09-10).** The Showrunner:
+    # "when we are not going into a shot, a conversation-only reply should be much
+    # faster". The prose and tags built here are used only by the test shot and the
+    # final, and both call `rebuild_craft` themselves. All the actress needs is the
+    # one `now` line, so it is updated without a model.
     assemble.touch_craft(session)
     now = str((session.get("craft") or {}).get("now") or "")
     led = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
-    # 監督の一行がどこまで台帳を動かしたか、ここで確定する。以降で動くのは
-    # 彼女自身の propose と自己修復なので、再判定の要否はここで測る。
+    # How far the director's line moved the ledger is settled here. What moves
+    # after this is her own propose and the self repair, so whether a re-check is
+    # needed is measured at this point.
     after_director = dict(led)
 
     lead_cid = str(char.get("character_id") or "")
@@ -999,20 +1020,23 @@ async def chat(
         logger.debug("[muse] token publisher unavailable", exc_info=True)
         on_token = None
 
-    # **試し撮りのあとは、彼女に絵を見せる（2026-09-10）。** 総監督
-    # 「試し撮りしたあとは Muse が画像見るようにしよう」。
+    # **After a test shot, she is shown the picture (2026-09-10).** The Showrunner:
+    # "after a test shot, let us have Muse look at the image".
     #
-    # 台帳は「こう撮ってほしい」で、絵は「こう撮れた」。台帳しか見えないと、
-    # 撮れた絵そのものについて話せない —— classic は試し撮り以降、毎ターン板を
-    # 渡している（`board_images` → `run_duet_talk`）。同じものを使う（縮小も
-    # 読み込みもあちらが見ていて、板が無い・生成中・読めないときは空が返る）。
+    # The ledger is "shoot it like this"; the picture is "this is how it came out".
+    # With only the ledger in view she cannot talk about the picture itself — from
+    # the test shot onward, classic hands over the board every turn (`board_images`
+    # -> `run_duet_talk`). The same thing is used here (that side handles the
+    # resizing and loading, and returns empty when there is no board, when one is
+    # still rendering, or when it cannot be read).
     board_shots: list[bytes] = []
     try:
         from . import shared as muse_service
         board_shots = await muse_service.board_images(db, session)
     except Exception:
         logger.debug("[muse] board image unavailable", exc_info=True)
-    # 絵を渡す回だけ、絵を読めるモデルに換える（空欄なら model と同じ）。
+    # Only on a turn that hands over a picture, switch to a model that can read one
+    # (when unset, the same as `model`).
     say_model = (str(inputs.get("vision_model") or "") or model) if board_shots else model
     events.publish(session["session_id"], {
         "type": "muse_speaking",
@@ -1034,9 +1058,9 @@ async def chat(
         character=char,
         partner=has_partner, name_b=name_b,
         num_ctx=refine_num_ctx(session),
-        # `_say_only` が `SAY:` の中だけを通す —— 欄の名前も `MY_FEEL:` も
-        # 画面に出さない。Refine の欄名は classic の `_SAY_SHUT_RE` に
-        # 全部入っている（SAY / ASIDE / CARD / PITCH / MY_FEEL）。
+        # `_say_only` passes only what is inside `SAY:` — neither field names nor
+        # `MY_FEEL:` reach the screen. Every Refine field name is in classic's
+        # `_SAY_SHUT_RE` (SAY / ASIDE / CARD / PITCH / MY_FEEL).
         on_token=on_token,
         images=board_shots or None,
     )
@@ -1096,12 +1120,12 @@ async def chat(
             ),
         )
 
-    # **彼女が服を選んだ回は、そう記録する（2026-09-09）。** 総監督
-    # 「埋めてよいが、記録に残す」「彼女自体がこうしたいと思った内容をちゃんと
-    # 反映できるようにしたい」。`wearing` は空欄のときだけ通る（fill-empty・
-    # `guard_muse_propose`）ので、通ったということは**誰も服を着せていない場面
-    # で彼女が決めた**ということ。デバッグ枠に出さないと、総監督からは
-    # 「指示がないのに着替えた」としか見えない。
+    # **When she chose the clothes, record it (2026-09-09).** The Showrunner: "she
+    # may fill it, but keep a record", "I want what she herself wanted to do to be
+    # reflected properly". `wearing` gets through only when the field is empty
+    # (fill-empty, `guard_muse_propose`), so getting through means **she decided in
+    # a scene where nobody had dressed her**. Without showing it in the debug pane,
+    # all the Showrunner sees is "she changed clothes with no instruction".
     if str(propose.get("wearing") or "").strip():
         chose = str(propose["wearing"]).strip()
         lifted = [
@@ -1157,20 +1181,25 @@ async def chat(
     led = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
     now = str((session.get("craft") or {}).get("now") or "")
 
-    # **絵が動いていない回は、再判定に訊くことがない（2026-09-10）。**
+    # **On a turn where the picture did not move, there is nothing to ask the
+    # re-check (2026-09-10).**
     #
-    # verify の仕事は「台帳が監督の意図と合っているか」。台帳が一つも動かず、
-    # 監督の一行も絵の話に見えないターン（「今日はありがとう」）では、比べる
-    # 相手がいない。それでも毎回走らせて 2,797字を読ませ、彼女の声で一言
-    # 書かせていた —— 入力だけで約4秒。
+    # Verify's job is "does the ledger match the director's intent". On a turn where
+    # not one field moved and the director's line does not look like picture talk
+    # (「今日はありがとう」 — "thank you for today"), there is nothing to compare
+    # against. It still ran every time, reading 2,797 characters and writing a line
+    # in her voice — about 4 seconds on the input alone.
     #
-    # **取りこぼしの穴は開けない。** `missed`（絵の指示に見えるのに writer が
-    # 何も書かなかった回）は、まさに verify に拾ってほしい回なので走らせる。
-    # **測るのは「監督が動かしたぶん」だけ（2026-09-10）。** `before` と今の
-    # 台帳を比べると、彼女が表情を一語足しただけの回まで「動いた」になり、
-    # 実測 5.9〜6.8秒の再判定が毎回走っていた。verify の仕事は台帳が**監督の**
-    # 意図と合っているかなので、監督が絵の話をしていない回には比べる相手が
-    # いない。彼女の propose は `guard_muse_propose` が空欄埋めに限っている。
+    # **No hole is opened for misses.** `missed` (a turn that looks like a picture
+    # instruction where the writer wrote nothing) is exactly the turn verify should
+    # catch, so it runs.
+    #
+    # **What is measured is only what the director moved (2026-09-10).** Comparing
+    # `before` against the ledger now counted a turn where she added one expression
+    # word as "moved", and a 5.9-6.8 second re-check ran every time. Verify's job is
+    # whether the ledger matches **the director's** intent, so a turn where the
+    # director said nothing about the picture has nothing to compare against. Her
+    # propose is held to filling empty fields by `guard_muse_propose`.
     moved_by_director = ledger_mod.changed_fields(before, after_director)
     if not moved_by_director and not missed:
         debug_mod.note(
@@ -1191,8 +1220,9 @@ async def chat(
         user_line=text,
         ledger=led,
         now=now,
-        # ターン前の台帳と直近の流れ。条文の「前ターンを保て」は、これが
-        # 無いと比べようがない（`before` はこの関数の最初から手元にある）。
+        # The ledger before the turn, and the recent flow. The contract's "keep the
+        # previous turn" has nothing to compare against without it (`before` has
+        # been to hand since the top of this function).
         before=before,
         recent=director_recent,
         partner=has_partner, name_b=name_b,
@@ -1429,30 +1459,32 @@ async def start_shoot(db, request, session: dict[str, Any]) -> dict[str, Any]:
         "error": "",
         "images": [],
         "pending": True,
-        # **試し撮りと同じ種で撮る（総監督・2026-09-12）。**
+        # **Shoot on the same seed as the test shot (the Showrunner, 2026-09-12).**
         #
-        #   「試し撮りでいいシーンがあったら、そのシードを変更せず同じプロンプトで
-        #     高画質の画像を取得するという設計です」
+        #   "the design is that when a test shot gives you a good scene, you get the
+        #    high-quality image from the same prompt without changing that seed"
         #
-        # canvas は試し撮りと本番で同じで、変わるのは steps と cfg だけ
-        # （12/4.0 → 30/4.5）。だから種を揃えると**OK を出したのと同じ絵の
-        # 仕上げ版**になる。0 を渡すと `runner` が `None` に畳んで引き直すので、
-        # ここが空振りすると黙って別の絵が出る（実機6件すべてで不一致だった）。
+        # The canvas is the same for the test shot and the final; only steps and cfg
+        # change (12/4.0 -> 30/4.5). So matching the seed gives **the finished
+        # version of the very picture that was approved**. Passing 0 makes `runner`
+        # fold it to `None` and draw a fresh one, so a miss here silently produces a
+        # different picture (all six live cases disagreed).
         "seed": _board_seed(board),
         "job_id": "",
     }
     session["status"] = "shooting"
     await session_db.save(db, session)
 
-    # **描画の直前に LLM を VRAM から落とす（Muse と同じ）。**
+    # **The LLM comes out of VRAM immediately before the render (as in Muse).**
     #
-    # 一つ上で `rebuild_craft` がモデルを使っているので、ここで返さないと
-    # 26B が ~13GB を握ったまま ComfyUI が latent を置きにいく —— 16GB の
-    # カードでは置けずにコケる（総監督の実測）。Muse は board / shoot の
-    # 両方でこの一行を踏んでいて、Refine だけが踏んでいなかった。
+    # One step above, `rebuild_craft` uses the model, so without giving it back here
+    # the 26B keeps ~13 GB while ComfyUI goes to place the latent — on a 16 GB card
+    # there is nowhere to put it and it falls over (measured by the Showrunner).
+    # Muse walks this line on both board and shoot; only Refine did not.
     #
-    # 既定は `unload_vlm: True`（`ALL_DEFAULTS` から来る）。切り替えの意味も
-    # 判定も Muse と同じものを使う —— 二つ目の実装を持たない。
+    # The default is `unload_vlm: True` (it comes from `ALL_DEFAULTS`). Both the
+    # meaning of the switch and the decision are Muse's own — no second
+    # implementation.
     from . import shared as muse_service
     await muse_service._maybe_unload(request.app.state.ollama, session)
 
@@ -1504,13 +1536,14 @@ async def start_board(db, request, session: dict[str, Any]) -> dict[str, Any]:
         "error": "",
         "images": [],
         "pending": True,
-        # **毎回引き直す。0 は「引き直して」の意味（総監督・2026-09-12）。**
+        # **Drawn afresh every time. 0 means "draw a new one" (the Showrunner,
+        # 2026-09-12).**
         #
-        #   「試し撮りを押すと seed が変わるのは、撮影の際に何枚も写真を取って
-        #     いいシーンを選び出すのと同じ」
+        #   "the seed changing when you press the test shot is the same as taking
+        #    many photographs on a shoot and picking out the good scene"
         #
-        # セッションに一つの種を持たせる形（classic の `session_seed`）には
-        # **しない**。選ぶための枚数がそこから出てくる。
+        # It is **not** given one seed per session (classic's `session_seed`). The
+        # number of frames to choose from comes from exactly this.
         "seed": 0,
         "job_id": "",
         "ledger_fp": "|".join(str(led.get(k) or "") for k in ledger_mod.LEDGER_KEYS),
@@ -1519,15 +1552,16 @@ async def start_board(db, request, session: dict[str, Any]) -> dict[str, Any]:
     session["status"] = "boarding"
     await session_db.save(db, session)
 
-    # **描画の直前に LLM を VRAM から落とす（Muse と同じ）。**
+    # **The LLM comes out of VRAM immediately before the render (as in Muse).**
     #
-    # 一つ上で `rebuild_craft` がモデルを使っているので、ここで返さないと
-    # 26B が ~13GB を握ったまま ComfyUI が latent を置きにいく —— 16GB の
-    # カードでは置けずにコケる（総監督の実測）。Muse は board / shoot の
-    # 両方でこの一行を踏んでいて、Refine だけが踏んでいなかった。
+    # One step above, `rebuild_craft` uses the model, so without giving it back here
+    # the 26B keeps ~13 GB while ComfyUI goes to place the latent — on a 16 GB card
+    # there is nowhere to put it and it falls over (measured by the Showrunner).
+    # Muse walks this line on both board and shoot; only Refine did not.
     #
-    # 既定は `unload_vlm: True`（`ALL_DEFAULTS` から来る）。切り替えの意味も
-    # 判定も Muse と同じものを使う —— 二つ目の実装を持たない。
+    # The default is `unload_vlm: True` (it comes from `ALL_DEFAULTS`). Both the
+    # meaning of the switch and the decision are Muse's own — no second
+    # implementation.
     from . import shared as muse_service
     await muse_service._maybe_unload(request.app.state.ollama, session)
 
@@ -1571,10 +1605,12 @@ async def finish_session(db, request, session: dict[str, Any]) -> dict[str, Any]
     _append_chat(
         session, role="system", name="Studio", text=coda, meta={"kind": "finish"},
     )
-    # **何を楽屋に投げたか、後から分かるようにする（2026-09-10）。** 総監督
-    # 「これなかなか各タイミングが分かりにくいのが難点」。日記・報告・お出かけ・
-    # 提案・癖メモは `muse.service.finish_session` が spooler に積むので、Refine
-    # からは見えないまま終わっていた。少なくとも**材料が揃っていたか**は残す。
+    # **Make it possible to tell afterwards what was thrown to the green room
+    # (2026-09-10).** The Showrunner: "the trouble is that the timing of each of
+    # these is quite hard to see". The diary, the report, the outing, the proposals
+    # and the habit note are all stacked onto the spooler by
+    # `muse.service.finish_session`, so from Refine's side it ended invisibly. At
+    # the very least, **whether the material was there** is recorded.
     try:
         notes = [str(n).strip() for n in (session.get("notes") or []) if str(n).strip()]
         debug_mod.note(
@@ -1612,9 +1648,10 @@ async def finish_session(db, request, session: dict[str, Any]) -> dict[str, Any]
 
 
 async def list_refine_sessions(db, *, limit: int = 20) -> list[dict[str, Any]]:
-    # **studio は一覧が持つ（2026-09-07）。** 以前はここで全セッションを一つずつ
-    # load してから classic の分を捨てていた —— Muse の回まで読んでいた。
-    # `list_recent` が絞るので、load するのは自分の分だけ（名前を出すため）。
+    # **The listing owns `studio` (2026-09-07).** This used to load every session
+    # one by one and then throw classic's away — reading Muse's turns as well. Since
+    # `list_recent` filters, only this studio's own rows are loaded (to show the
+    # names).
     rows = await session_db.list_recent(db, limit=limit, studio=STUDIO)
     out: list[dict[str, Any]] = []
     for row in rows:
@@ -1659,8 +1696,9 @@ async def open_table(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
             if str(_inputs(session).get("locale") or "ja").startswith("ja") else
             "Cast the lead before opening the table."
         )
-    # **班を選んでいないと開けない（2026-09-13）。** 総監督のご指示で既定を空に
-    # した。顔ぶれで絵も速さも変わるので、黙って `standard` を当てない。
+    # **It does not open until a crew is chosen (2026-09-13).** The default was
+    # emptied on the Showrunner's instruction. Who is in the room changes both the
+    # picture and the speed, so `standard` is never applied silently.
     ja = str(_inputs(session).get("locale") or "ja").startswith("ja")
     if not str(_inputs(session).get("crew_preset") or "").strip():
         raise RefineError(
@@ -1677,17 +1715,20 @@ async def open_table(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
     session[crew_room.TABLE_OPEN] = True
     session.setdefault("opened", True)
 
-    # **班の扉でも服を着せる（2026-09-16）。** 総監督「初回の会話スタート時に
-    # デフォルト衣装の読み込みができていない場合あり」。
+    # **She gets dressed at the crew's door too (2026-09-16).** The Showrunner:
+    # "there are cases where the default outfit is not loaded when the first
+    # conversation starts".
     #
-    # 画面の「開始」は、スタジオ撮りのとき `/open` ではなく**ここ**を叩く
-    # （`MusePanel.vue` の `door`）。着せるのは `open_session` の側だけだったので、
-    # **班で始めたセッションは服が空のまま**だった（実機 `f8961eaa`：1ターン目の
-    # 台帳は `wearing` も空で、服が入ったのは総監督が「ネグリジェ」と言った時）。
+    # For a studio shoot, the screen's Start hits **here**, not `/open`
+    # (`MusePanel.vue`'s `door`). Only `open_session` did the dressing, so **a
+    # session started with a crew began with empty clothes** (live `f8961eaa`: on
+    # turn one the ledger's `wearing` was empty too, and clothes only went in when
+    # the Showrunner said 「ネグリジェ」 — "a negligee").
     #
-    # 開幕の三席より**前**に置く —— 衣装の席はその値を見て質感を足す仕事なので、
-    # 空の欄を見せると一から作り始める。`dress_from_signature` は**空のときだけ**
-    # 入れるので、二度通っても着替えない。
+    # It goes **before** the three opening seats — the wardrobe seat's job is to add
+    # texture to the value it sees, and shown an empty field it starts from nothing.
+    # `dress_from_signature` fills **only when empty**, so passing through twice
+    # does not change her clothes.
     dress_patch = talk.dress_from_signature(session)
     if dress_patch:
         debug_mod.note(session, "opening_dress", detail=str(dress_patch), patch=dress_patch)

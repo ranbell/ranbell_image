@@ -172,5 +172,6 @@ def test_the_studio_marker_on_the_saved_rows_is_not_tidied_up():
     assert service.STUDIO == "muse_refine"
     src = Path("backend/app/muse/service.py").read_text(encoding="utf-8")
     head = src[:src.index("STUDIO =")]
-    assert "保存されている値なので変えない" in head, "理由を添えずに置かない"
+    assert "A stored value, so it does not change" in head, \
+        "never left standing without the reason beside it"
 
