@@ -1,16 +1,16 @@
-"""**一人か二人か。**（2026-09-09）
+"""**One person or two.** (2026-09-09)
 
-総監督「一人しかいないときに muse_b の tag を編集してしまう。**1人か2人の
-区別の説明が足りていない**」。
+The Showrunner: "when there is only one person it edits muse_b's tags. **The
+explanation of one-versus-two is not enough**".
 
-条文には「partner Muse が居るときだけ `wearing_b` / `beat_b` を書く」と最初
-から書いてあった。足りなかったのは**居るかどうかを伝えること** ——
-`blank()` が全欄を埋めるので、模型には常に空の二人目の欄が見えていた。
-**空欄は「埋めろ」に見える。**
+The contract had said from the start "write `wearing_b` / `beat_b` only when a
+partner Muse is present". What was missing was **telling it whether one is
+present** — `blank()` fills every field, so the model always saw an empty set of
+second-person fields. **An empty field looks like "fill me in".**
 
-直し方は二つ重ねる:
-    欄を出さない   `ledger.for_model` が一人のときは `_b` を落とす
-    言葉でも言う   `ledger.cast_line` が一行で人数を言う
+The fix is two layers:
+    do not show the fields   `ledger.for_model` drops `_b` when solo
+    say it in words          `ledger.cast_line` states the headcount in one line
 """
 from __future__ import annotations
 
@@ -54,10 +54,10 @@ def test_the_cast_line_says_which_it_is():
 
 
 def test_every_ledger_shown_to_a_model_goes_through_for_model():
-    """**四つの席すべて。** 一つ素通しがあれば、そこから空欄が漏れる。
+    """**All four seats.** One pass-through and the empty fields leak from there.
 
-    `think=False` の試験と同じ作法で、呼び出しの形を見る —— 新しい席が
-    増えたときに落ちる。
+    The same manner as the `think=False` test: it looks at the shape of the call —
+    so a new seat fails it.
     """
     tree = ast.parse(WRITER.read_text(encoding="utf-8"))
     raw = []
@@ -80,7 +80,8 @@ def test_every_ledger_shown_to_a_model_goes_through_for_model():
 
 
 def test_the_drop_rule_warns_that_the_beat_still_names_the_garment():
-    """総監督の案 —— 「動作に服が残っている場合があるので消し忘れないように」。"""
+    """The Showrunner's idea — "the garment sometimes remains in the action, so do not
+    forget to clear it"."""
     from app.muse import writer
 
     text = writer.WRITER_SYSTEM

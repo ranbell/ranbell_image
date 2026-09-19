@@ -1,12 +1,13 @@
-"""失敗したジョブを、もう一度流す／片付ける。
+"""Running a failed job again, or clearing it away.
 
-**終わったジョブは `_registry` から消えて `_history` へ移る**
-（`_move_to_history` —— 履歴が source of truth）。`retry` も `cancel` も
-`_registry` しか見ていなかったので、失敗したジョブに対しては**定義上いつも
-404** だった。画面は履歴から一覧を出しているので、押せるのに必ず失敗する。
+**A finished job leaves `_registry` and moves into `_history`**
+(`_move_to_history` — the history is the source of truth). Both `retry` and
+`cancel` looked only at `_registry`, so against a failed job they were **404 by
+definition**. The screen lists jobs from the history, so the button was there to
+press and always failed.
 
-総監督（2026-08-29）「画面から retry が効かないです」「job キャンセルが
-エラー時だけないからこれもいるね」。
+The Showrunner (2026-08-29): "retry does not work from the screen", "job cancel
+is missing when there is an error, so we need that too".
 """
 from __future__ import annotations
 
@@ -52,7 +53,8 @@ async def _run_until_done(sp: JobSpooler, job_id: str, limit: float = 3.0) -> No
 
 @pytest.mark.asyncio
 async def test_a_failed_job_can_be_retried():
-    """**履歴に落ちたジョブを引けること。** ここが 404 の正体だった。"""
+    """**A job that has dropped into the history can still be fetched.** This was what
+    the 404 really was."""
     sp = _spooler()
     await sp.start()
     try:
@@ -69,7 +71,8 @@ async def test_a_failed_job_can_be_retried():
 
 @pytest.mark.asyncio
 async def test_a_finished_job_can_be_dismissed():
-    """止めるものはもう無い。要るのは取り消しではなく**片付け**。"""
+    """There is nothing left to stop. What is wanted is not a cancel but a **clear
+    away**."""
     sp = _spooler()
     await sp.start()
     try:
@@ -86,7 +89,7 @@ async def test_a_finished_job_can_be_dismissed():
 
 @pytest.mark.asyncio
 async def test_a_running_job_is_not_dismissed():
-    """走っているものは `cancel` の領分。片付けは効かない。"""
+    """A running job is `cancel`'s business. Dismissing does not touch it."""
     sp = _spooler()
     await sp.start()
     try:
@@ -112,12 +115,13 @@ async def test_dismiss_is_unknown_for_a_job_that_never_existed():
 
 @pytest.mark.asyncio
 async def test_a_job_waits_while_the_resource_is_down():
-    """総監督（2026-08-29）「spooler なので異常時は待機してその後流せるのが
-    やっぱり必要」。
+    """The Showrunner (2026-08-29): "it is a spooler, so when something is wrong it
+    really has to wait and then run afterwards".
 
-    ComfyUI が落ちて `muse_board` が `All connection attempts failed` で
-    倒れた場面。復帰は `monitor_remote_resources` が既に検知している ——
-    **復帰は分かっているのに、落ちている間のジョブを捨てていた。**
+    The case where ComfyUI went down and `muse_board` fell over with
+    `All connection attempts failed`. The comeback is already noticed by
+    `monitor_remote_resources` — **we knew it would come back and were throwing
+    away the jobs from while it was down.**
     """
     import httpx
 
@@ -145,7 +149,8 @@ async def test_a_job_waits_while_the_resource_is_down():
 
 @pytest.mark.asyncio
 async def test_waiting_does_not_go_on_for_ever():
-    """**永遠には粘らない。** 本当に死んでいるなら、いつかは失敗として見せる。"""
+    """**It does not hold on for ever.** If the resource is truly dead, it is shown as
+    a failure eventually."""
     import httpx
 
     from app.spooler import spooler as spooler_mod
@@ -169,7 +174,7 @@ async def test_waiting_does_not_go_on_for_ever():
 
 @pytest.mark.asyncio
 async def test_an_ordinary_bug_fails_at_once():
-    """**壊れたジョブは待たせない。** 待つのは資源が居ないときだけ。"""
+    """**A broken job is not made to wait.** Waiting is only for a missing resource."""
     sp = _spooler()
     sp._requeue_delay = 0.0
     await sp.start()

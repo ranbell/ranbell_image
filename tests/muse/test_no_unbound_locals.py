@@ -1,24 +1,27 @@
-"""**条件の中でだけ作った変数を、外で読まない。**（2026-09-18）
+"""**A variable made only inside a branch is never read outside it.** (2026-09-18)
 
-総監督から実機のログ:
+A live log from the Showrunner:
 
     File "/app/app/muse/service.py", line 945, in chat
         if floor:
     UnboundLocalError: cannot access local variable 'floor'
 
-`floor` は `if crew_room.has_crew(session):` の中でだけ作られていたので、
-**班の居ない回（一人撮り・W撮り）は会話が 500 で落ちていた**。2026-09-14 の
-`0019b5b` から四日間、誰も気づかなかった —— Python は実際にその道を通るまで
-教えてくれないし、`pyflakes` も `ruff` もこの形は見ない。
+`floor` was created only inside `if crew_room.has_crew(session):`, so **on a
+turn with no crew (solo and duet shoots) the chat fell over with a 500**. Nobody
+noticed for four days after `0019b5b` on 2026-09-14 — Python says nothing until
+that path is actually walked, and neither `pyflakes` nor `ruff` looks at this
+shape.
 
-だから**読む側で数える**。関数ごとに「必ず束縛される名前」を集め、その外で
-読まれている名前を探す:
+So **it is counted by reading**. For each function, collect the names that are
+surely bound and look for names read outside them:
 
-    必ず束縛      関数の最上位の代入・`with … as`・両側で代入する `if`/`try`
-    条件つき束縛   `if` の片側だけ・`for` の中・例外側が抜ける `try` の本体
+    surely bound       assignment at the function's top level, `with … as`,
+                       an `if`/`try` that assigns on both sides
+    bound on condition  one side of an `if`, inside a `for`, the body of a `try`
+                       whose handler falls through
 
-実際の `floor` を再現できることは `test_a_plain_turn_runs.py` が見ている。
-こちらは**同じ形が他に無いこと**を、muse のコード全体で保つための一本。
+That the real `floor` can be reproduced is `test_a_plain_turn_runs.py`'s job.
+This one keeps **the same shape from existing anywhere else** across muse's code.
 """
 from __future__ import annotations
 
@@ -30,7 +33,7 @@ MUSE = ROOT / "backend/app/muse"
 
 
 def _surely_bound(body: list[ast.stmt]) -> set[str]:
-    """この並びを通れば**必ず**束縛されている名前。"""
+    """Names that are **surely** bound after walking this block."""
     out: set[str] = set()
     for st in body:
         if isinstance(st, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
@@ -62,7 +65,8 @@ def _surely_bound(body: list[ast.stmt]) -> set[str]:
 
 
 def _comprehension_names(fn: ast.AST) -> set[str]:
-    """内包表記の変数はそのカッコの中だけ。外の話ではない。"""
+    """A comprehension's variables live inside its brackets. They are not the outside's
+    business."""
     out: set[str] = set()
     for node in ast.walk(fn):
         if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
@@ -119,7 +123,8 @@ def test_no_conditional_local_is_read_outside_its_branch():
 
 
 def test_the_scan_catches_the_shape_it_is_meant_to_catch(tmp_path):
-    """**試験そのものが効いていること。** 実機で踏んだ形をそのまま置いて確かめる。"""
+    """**That the test itself bites.** The shape hit in production is placed here as it
+    was and checked."""
     bad = tmp_path / "bad.py"
     bad.write_text(
         "async def chat(session):\n"

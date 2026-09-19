@@ -1,21 +1,25 @@
-"""**服のロックと禁止。**（2026-09-09）
+"""**The wardrobe lock and the ban list.** (2026-09-09)
 
-総監督「ロック機構に問題があるかも。**指示がないのに服の脱着が繰り返される**
-現象があった」。
+The Showrunner: "the lock mechanism may have a problem. There was a phenomenon
+where **clothes come off and go on again with no instruction**".
 
-朝の調査で、モデルを使わずに四つ続けて再現した:
+In the morning's investigation it was reproduced four steps in a row without a
+model:
 
-    ① 最後の一枚を脱ぐ   wearing = ''、banned = ['cardigan']
-    ② 空いた欄を女優が埋める  fill-empty が通る       ← 指示がないのに着る
-    ③ でも絵には出ない     禁止が残ったまま落とす    ← 台帳は着ている、絵は着ていない
-    ④ 監督が言い直す      → ②③のくり返し           ← 脱着の反復
+    1. the last garment comes off   wearing = '', banned = ['cardigan']
+    2. the actress fills the empty field   fill-empty passes    <- dressed with no
+                                                                   instruction
+    3. but it does not reach the picture   the ban still drops it
+                                           <- the ledger is dressed, the picture is not
+    4. the director says it again   -> 2 and 3 again            <- the on-off loop
 
-①②は**仕様として残す**（総監督「埋めてよいが、記録に残す」）。直したのは③で、
-現行 Muse が同じ欠陥に対して持っている規則をそのまま写した
-（`muse.service.banned_now`「台帳がいま名指ししているものは禁止ではない」）。
+Steps 1 and 2 **stay as designed** (the Showrunner: "she may fill it, but keep a
+record"). What was fixed is 3, copying the rule the current Muse already has for
+the same defect (`muse.service.banned_now`: "what the ledger names right now is
+not banned").
 
-あわせて、照合を**語の境目**にした。部分一致だと `shirt` を脱いだときに
-`skirt` が消え、`top` を禁止すると `rooftop` まで消えていた。
+Matching was also moved to **word boundaries**. On a substring match, taking off
+a `shirt` erased a `skirt`, and banning `top` erased `rooftop` as well.
 """
 from __future__ import annotations
 
@@ -30,7 +34,8 @@ def test_dropping_the_last_garment_still_empties_the_slot():
 
 
 def test_she_may_still_dress_an_empty_slot():
-    """総監督の判断 —— 彼女が決めたことは反映する。記録は service 側で残す。"""
+    """The Showrunner's call — what she decides is reflected. The record is kept on the
+    service side."""
     led = {**L.blank(), "wearing": ""}
     got = L.guard_muse_propose({"wearing": "cardigan, white shirt"}, led,
                                director_keys=set())
@@ -45,7 +50,8 @@ def test_she_may_not_touch_a_settled_outfit():
 
 # ── ③ 直した側：台帳が着ているものは絵に出る ──────────────────────────
 def test_a_garment_the_ledger_names_again_comes_back_to_the_picture():
-    """**総監督の報告の後半。** 一度脱いだ服を着直しても絵に出なかった。"""
+    """**The second half of the Showrunner's report.** A garment taken off and put back
+    on never reached the picture."""
     session = {"banned": ["cardigan"]}
     led = {**L.blank(), "wearing": "cardigan, white shirt"}
     out = talk.filter_banned_tags(

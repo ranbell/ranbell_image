@@ -1,16 +1,21 @@
-"""**絵が動いていない回は、再判定を走らせない。**（2026-09-10）
+"""**On a turn where the picture did not move, the re-check does not run.**
+(2026-09-10)
 
-verify の仕事は「台帳が監督の意図と合っているか」。台帳が一つも動かず、監督の
-一行も絵の話に見えないターン（「今日はありがとう」）では、比べる相手がいない。
-それでも毎回 2,797字を読ませ、彼女の声で一言書かせていた —— 入力だけで約4秒。
+Verify's job is "does the ledger match the director's intent". On a turn where
+not one field moved and the director's line does not look like picture talk
+("thank you for today"), there is nothing to compare against. It still read
+2,797 characters every time and wrote a line in her voice — about 4 seconds on
+the input alone.
 
-**穴は開けない。** 絵の指示に見えるのに writer が何も書かなかった回（`missed`）
-は、まさに verify に拾ってほしい回なので走らせる。
+**No hole is opened.** A turn that looks like a picture instruction where the
+writer wrote nothing (`missed`) is exactly the turn verify should catch, so it
+runs.
 
-**測るのは「監督が動かしたぶん」だけ（2026-09-10 追記）。** ターンの頭と今の
-台帳を比べると、彼女が表情を一語足しただけの回まで「動いた」になり、実測
-5.9〜6.8秒の再判定が毎回走っていた。比べる相手は `after_director` —— 監督の
-パッチを当て終えた地点。
+**What is measured is only what the director moved (added 2026-09-10).**
+Comparing the top of the turn against the ledger now counted a turn where she
+added one expression word as "moved", and a 5.9-6.8 second re-check ran every
+time. The thing to compare against is `after_director` — the point where the
+director's patch has been applied.
 """
 from __future__ import annotations
 
@@ -28,9 +33,10 @@ def test_the_gate_reads_both_conditions():
 
 
 def test_a_missed_picture_line_still_gets_checked():
-    """`missed` は「絵の指示に見えるのに writer が空だった」回。
+    """`missed` is a turn that "looks like a picture instruction and the writer came
+    back empty".
 
-    ここを飛ばすと、writer の取りこぼしを拾う唯一の段が消える。
+    Skip it and the only stage that catches the writer's misses is gone.
     """
     src = inspect.getsource(service.chat)
     assert "force_repair_hint=missed" in src
@@ -39,7 +45,8 @@ def test_a_missed_picture_line_still_gets_checked():
 
 
 def test_changed_fields_is_what_decides():
-    """判定は台帳の前後比較で行う（推測ではなく）。"""
+    """The decision is made by comparing the ledger before and after — not by
+    guessing."""
     from app.muse import ledger as L
 
     before = {**L.blank(), "beat": "standing"}
@@ -50,10 +57,12 @@ def test_changed_fields_is_what_decides():
 
 
 def test_the_gate_measures_the_director_not_her():
-    """比べる相手は「監督のパッチを当て終えた地点」。
+    """The thing to compare against is "the point where the director's patch has been
+    applied".
 
-    彼女の propose は `guard_muse_propose` が空欄埋めに限っているので、監督の
-    指示を上書きすることがない。その一語のために再判定を走らせる理由はない。
+    Her propose is held to filling empty fields by `guard_muse_propose`, so it
+    never overwrites the director's instruction. There is no reason to run a
+    re-check for that one word.
     """
     src = inspect.getsource(service.chat)
     # 監督のパッチを当てた直後に控えていること（女優の段より前）

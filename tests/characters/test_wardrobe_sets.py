@@ -1,11 +1,12 @@
-"""その子が持っている服。
+"""The clothes a character owns.
 
-総監督（2026-08-29）「default の衣装や持ち物がないので、会話開始後にいきなり
-おかしな状態に陥ることがあります」。手帖の `wearing` は空で始まるので、**服が
-無い状態から「脱いで」と言われて宙に浮いていた。**
+The Showrunner (2026-08-29): "there is no default outfit or belongings, so right
+after a conversation starts things can suddenly go strange". The notebook's
+`wearing` starts empty, so **being told "take it off" from a state of no clothes
+left her hanging in mid-air.**
 
-ここで守るのは二つ —— **代表服が変わらないこと**と、**書いていない子でも
-壊れないこと**。
+Two things are guarded here — **that the signature outfit never changes**, and
+**that a character with nothing written still does not break**.
 """
 from __future__ import annotations
 
@@ -30,7 +31,8 @@ def _presets() -> list[dict]:
 
 
 def test_a_preset_without_a_wardrobe_still_gets_one():
-    """**移行。** 書き終わるまでも、将来の新しい子でも壊れない。"""
+    """**Migration.** Nothing breaks while the writing is unfinished, nor for a new
+    character added later."""
     got = wardrobe_sets({}, outfit=["blouse", "loafers"], props=["tote_bag"])
     assert [r["key"] for r in got] == ["signature"]
     assert got[0]["tags"] == ["blouse", "loafers"]
@@ -38,12 +40,13 @@ def test_a_preset_without_a_wardrobe_still_gets_one():
 
 
 def test_nothing_to_wear_stays_nothing():
-    """服の無いプリセットに、勝手な一着を生やさない。"""
+    """No outfit is conjured for a preset that has none."""
     assert wardrobe_sets({}, outfit=[], props=[]) == []
 
 
 def test_the_signature_never_changes():
-    """紹介ページと参照ボードが見ているのは `outfit_tags`。**そこは動かさない。**"""
+    """The profile page and the reference board read `outfit_tags`. **That does not
+    move.**"""
     for preset in _presets():
         char = preset_to_character(preset)
         sets = char["wardrobe_sets"]
@@ -54,7 +57,8 @@ def test_the_signature_never_changes():
 
 
 def test_every_character_can_get_dressed():
-    """**全員が最低でも一着持っていること。** ここが空だと会話開始で宙に浮く。"""
+    """**Everyone owns at least one outfit.** Empty here and the conversation starts
+    in mid-air."""
     naked = [
         str(p.get("name_ja") or p.get("name"))
         for p in _presets() if not preset_to_character(p)["wardrobe_sets"]
@@ -63,7 +67,8 @@ def test_every_character_can_get_dressed():
 
 
 def test_written_sets_are_ordered_and_named():
-    """書いた子は `signature` が先頭で、鍵は決まった並びに載る。"""
+    """For a written character `signature` comes first and the keys follow a fixed
+    order."""
     written = [p for p in _presets() if p.get("wardrobe")]
     assert written, "まだ一人も書かれていない"
     for preset in written:
@@ -77,15 +82,15 @@ def test_written_sets_are_ordered_and_named():
 
 
 def test_every_preset_is_new_enough_to_reach_qdrant():
-    """**`version` を上げないと Qdrant に届かない。**
+    """**Without raising `version` it never reaches Qdrant.**
 
-    `sync_muse_presets_from_asset` は `preset_version(seed) > stored` の
-    ときだけ書き込む。総監督（2026-08-29）「json の各項目の rev 上げてくれて
-    る？ qdrant 上のデータが更新されないよ」—— 衣装セットを 30人ぶん書いた
-    のに、そのままでは一件も反映されなかった。
+    `sync_muse_presets_from_asset` writes only when `preset_version(seed) >
+    stored`. The Showrunner (2026-08-29): "are you raising the rev on each item in
+    the json? the data on qdrant is not being updated" — wardrobe sets had been
+    written for 30 characters and, as it stood, not one of them landed.
 
-    **アセットを編集したら `version` を上げる。** ここは「衣装セットを持つ子は
-    version 2 以上」という形で、その手順を落としたことに気づけるようにする。
+    **Edit an asset, raise its `version`.** This pins that step as "a character
+    with wardrobe sets is at version 2 or above", so forgetting it is noticed.
     """
     from app.characters.presets import preset_version
 

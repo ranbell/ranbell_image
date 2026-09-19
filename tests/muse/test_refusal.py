@@ -120,26 +120,30 @@ def test_every_seat_is_told_not_to_name_it_even_to_deny_it():
 
 
 def test_the_contract_lets_her_decide_when_she_is_asked_to():
-    """出演契約に「**選んでよい**」がある。
+    """The performing contract says she **may choose**.
 
-    総監督（2026-08-30）「『どうしたい』『したいことしてみて』などの自主的な
-    行動を求められた場合、**自らの希望する行動をとっていい**ことにしないと
-    いけない。これがないと、どうしようどうしようと何も決まらない状態となり、
-    回答の判断が難しくなる」。
+    The Showrunner (2026-08-30): "when she is asked to act on her own — 'what do
+    you want', 'try doing what you like' — she has to be allowed to **take the
+    action she herself wants**. Without that she ends up dithering with nothing
+    decided, and the answer becomes hard to judge."
 
-    契約には「降りてよい」（五条）はあったが「選んでよい」は無かった。断る
-    権利だけがあって、選ぶ権利が無い。
+    The contract had "she may walk away" (article five) but not "she may choose".
+    A right to refuse with no right to pick.
 
-    実測（`ask_decide.py`・5件×3回）では条項だけでは足りない —— 具体
-    9/15 対 9/15、迷い 5/15 → 3/15。「決めていい」は伝わるが「決めなさい」
-    までは押せない。中身は変わった:
+    Measured (`ask_decide.py`, 5 cases x 3 runs) the article alone is not enough —
+    concrete 9/15 against 9/15, dithering 5/15 -> 3/15. "You may decide" gets
+    through; it cannot push as far as "decide". The content did change:
 
-        条項なし 「総監督の好きなように指示してください。」
-        条項あり 「公園のベンチに座って、ふとした瞬間の、
+        without  「総監督の好きなように指示してください。」
+                 ("please direct it however you like, Showrunner")
+        with     「公園のベンチに座って、ふとした瞬間の、
                  どこか寂しそうな顔を撮ってください。」
+                 ("sit me on a park bench and shoot an off-guard moment,
+                 a face with something lonely in it")
 
-    害は無く、押しの強い提案が出る側に振れるので入れる。**訊かれたターンだけ
-    彼女に決めさせる**仕組みは別に組む。
+    It does no harm and leans toward a stronger proposal, so it goes in. A
+    mechanism that **makes her decide only on the turn where she is asked** is
+    built separately.
     """
     from app.muse import crew
 
