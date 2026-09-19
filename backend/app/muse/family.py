@@ -7,9 +7,10 @@ numbers Anima was validated at (`defaults.py`). The Showrunner: "I want to use
 krea2 in a workflow too, but there are differences — it needs no negative prompt,
 8 steps is enough."
 
-So a family carries three things: how many steps the draft and the final want,
-what cfg to ask for (**`None` means leave the workflow's own value alone**), and
-whether a negative prompt is sent at all.
+So a family carries four things: how many steps the draft and the final want,
+what cfg to ask for (**`None` means leave the workflow's own value alone**),
+whether a negative prompt is sent at all, and **who decides the size of the
+picture** — Muse's canvas, or the resolution the graph was saved at.
 
 **Anima's numbers are read from `defaults.py`, never copied.** That is what makes
 "nothing changes for existing shoots" structural rather than a promise: resolving
@@ -41,6 +42,12 @@ FAMILY_KREA2 = "krea2"
 #: What a workflow is when nothing says otherwise — today's behaviour, unchanged.
 DEFAULT_FAMILY = FAMILY_ANIMA
 
+#: Who decides the size of the picture. `muse` writes the session's canvas into
+#: the graph (what every shoot has always done); `workflow` leaves the graph with
+#: the resolution it was saved at.
+CANVAS_MUSE = "muse"
+CANVAS_WORKFLOW = "workflow"
+
 FAMILIES: dict[str, dict[str, Any]] = {
     FAMILY_ANIMA: {
         "label": "Anima",
@@ -50,6 +57,9 @@ FAMILIES: dict[str, dict[str, Any]] = {
         "final_steps": int(REFINE_DEFAULTS["final_steps"]),     # 30
         "final_cfg": float(REFINE_DEFAULTS["final_cfg"]),       # 4.5
         "negative": True,
+        # Muse names the canvas. The Anima graphs build a picture in two passes
+        # from a smaller latent, so the size Muse asks for is the size it wants.
+        "canvas": CANVAS_MUSE,
     },
     FAMILY_KREA2: {
         "label": "krea2",
@@ -63,6 +73,13 @@ FAMILIES: dict[str, dict[str, Any]] = {
         "draft_cfg": None,
         "final_cfg": None,
         "negative": False,
+        # **The workflow names the canvas.** The Showrunner: "krea2 can reach a
+        # high-quality picture without the two-stage process; Anima builds its
+        # images in two stages." Its graph is saved at the resolution it wants
+        # (the sample is 1284x1824, 2.3MP) and writing Muse's 896x1152 over that
+        # throws away exactly what the family is for. An explicit size still
+        # wins — that is the other half of "both ways" he asked for.
+        "canvas": CANVAS_WORKFLOW,
     },
 }
 
@@ -97,6 +114,11 @@ def render_overrides(family: str, *, draft: bool) -> dict[str, Any]:
     row = settings_for(family)
     prefix = "draft" if draft else "final"
     return {"steps": row.get(f"{prefix}_steps"), "cfg": row.get(f"{prefix}_cfg")}
+
+
+def owns_canvas(family: str) -> bool:
+    """Does Muse write the picture size, or does the workflow keep its own?"""
+    return str(settings_for(family).get("canvas", CANVAS_MUSE)) == CANVAS_MUSE
 
 
 def family_from_name(workflow_name: str) -> str:

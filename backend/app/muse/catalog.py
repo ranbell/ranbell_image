@@ -175,6 +175,9 @@ async def build_muse_catalog(
                 "draft_cfg": row["draft_cfg"],
                 "final_cfg": row["final_cfg"],
                 "negative": row["negative"],
+                # "muse" = the session's canvas is written into the graph;
+                # "workflow" = the graph keeps the resolution it was saved at.
+                "canvas": row["canvas"],
             }
             for name, row in family.FAMILIES.items()
         },

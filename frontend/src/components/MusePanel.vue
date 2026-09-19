@@ -212,6 +212,17 @@ function effectiveSteps (key) {
 }
 const draftSteps = computed(() => effectiveSteps('draft_steps'))
 const finalSteps = computed(() => effectiveSteps('final_steps'))
+
+// The canvas follows the same rule, with one difference: when the family leaves
+// the size to the workflow, an untouched field is shown **empty** — there is no
+// number to show, because the graph's own is the answer.
+function canvasValue (key) {
+  const mine = inputs.value?.[key]
+  const shipped = shippedDefaults.value?.[key]
+  const touched = mine !== undefined && shipped !== undefined && Number(mine) !== Number(shipped)
+  if (touched) return Number(mine)
+  return familyRow.value?.canvas === 'workflow' ? '' : Number(mine ?? shipped ?? 0)
+}
 const boardImages = computed(() => session.value?.board?.images || [])
 const shootImages = computed(() => session.value?.shoot?.images || [])
 const boardReady = computed(() => !!session.value?.board?.ready)
@@ -1685,6 +1696,9 @@ function isStruckRow(row) {
                 <span v-if="familyRow.draft_cfg === null" class="text-gray-500">
                   {{ t('muse.familyCfgFromWorkflow') }}
                 </span>
+                <span v-if="familyRow.canvas === 'workflow'" class="text-gray-500">
+                  {{ t('muse.familySizeFromWorkflow') }}
+                </span>
                 <span v-if="!familyRow.negative" class="text-gray-500">
                   {{ t('muse.familyNoNegative') }}
                 </span>
@@ -1711,6 +1725,31 @@ function isStruckRow(row) {
                     class="w-full rounded border border-gray-700 bg-gray-900 px-2 py-1.5"
                     :value="finalSteps"
                     @change="patchInputs({ final_steps: Number($event.target.value) })"
+                  >
+                </label>
+                <!--
+                  **Both ways (2026-09-20).** A family that owns no canvas leaves
+                  the fields empty and the workflow keeps the resolution it was
+                  saved at; type a number and that wins for every render after.
+                -->
+                <label class="block">
+                  <span class="mb-1 block text-gray-500">{{ t('muse.widthLabel') }}</span>
+                  <input
+                    type="number" min="256" max="2048" step="8"
+                    class="w-full rounded border border-gray-700 bg-gray-900 px-2 py-1.5"
+                    :value="canvasValue('width')"
+                    :placeholder="t('muse.familySizeFromWorkflow')"
+                    @change="patchInputs({ width: Number($event.target.value) })"
+                  >
+                </label>
+                <label class="block">
+                  <span class="mb-1 block text-gray-500">{{ t('muse.heightLabel') }}</span>
+                  <input
+                    type="number" min="256" max="2048" step="8"
+                    class="w-full rounded border border-gray-700 bg-gray-900 px-2 py-1.5"
+                    :value="canvasValue('height')"
+                    :placeholder="t('muse.familySizeFromWorkflow')"
+                    @change="patchInputs({ height: Number($event.target.value) })"
                   >
                 </label>
               </div>

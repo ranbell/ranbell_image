@@ -77,6 +77,21 @@ def test_the_knobs_muse_sends_for_this_family_all_land():
     assert out["80"]["inputs"]["value"] == 896
     assert out["81"]["inputs"]["value"] == 1152
     assert out["82"]["inputs"]["seed"] == 123
+
+
+def test_without_a_canvas_the_graph_keeps_its_own_resolution():
+    """krea2 sends no width/height, so the saved 1284x1824 survives.
+
+    That is the point of the family: the graph was saved at the resolution it
+    wants, and it reaches a high-quality picture in one pass.
+    """
+    out = _client().patch_workflow(
+        _wf(), "1girl, park", "", batch_count=1, seed=123,
+        width=None, height=None, steps=4, cfg=None, append_negative=True,
+    )
+    assert out["80"]["inputs"]["value"] == _wf()["80"]["inputs"]["value"]  # 1284
+    assert out["81"]["inputs"]["value"] == _wf()["81"]["inputs"]["value"]  # 1824
+    assert out["3"]["inputs"]["steps"] == 4                               # still patched
     # Untouched: the graph's own cfg literal and its sampler wiring.
     assert out["83"]["inputs"] == _wf()["83"]["inputs"]
     assert out["3"]["inputs"]["cfg"] == _wf()["3"]["inputs"]["cfg"]

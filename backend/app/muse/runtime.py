@@ -127,6 +127,15 @@ def render_settings(
     }
     if not family:
         return out
+    # **Who owns the canvas (2026-09-20).** The Showrunner: "the resolution should
+    # be overridable, but also able to use the workflow's default — krea2 reaches a
+    # high-quality picture without the two-stage process, while Anima builds its
+    # images in two stages." So a family that owns no canvas drops both keys and
+    # the graph keeps the size it was saved at; a size he typed still wins.
+    if not family_mod.owns_canvas(family):
+        if _untouched(inputs, "width") and _untouched(inputs, "height"):
+            out.pop("width")
+            out.pop("height")
     wanted = family_mod.render_overrides(family, draft=draft)
     if wanted.get("steps") is not None and _untouched(inputs, steps_key):
         out["steps"] = int(wanted["steps"])

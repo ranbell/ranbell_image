@@ -81,8 +81,37 @@ def test_krea2_asks_for_four_and_eight_and_leaves_cfg_alone():
     final = render_settings(inputs, draft=False, family="krea2")
     assert draft["steps"] == 4 and final["steps"] == 8
     assert "cfg" not in draft and "cfg" not in final
-    # The canvas is not a family's business.
-    assert draft["width"] == inputs["width"] and draft["height"] == inputs["height"]
+
+
+def test_krea2_keeps_the_workflows_own_canvas():
+    """**Both ways, as he asked (2026-09-20).** "The resolution should be
+    overridable, but also able to use the workflow's default — krea2 reaches a
+    high-quality picture without the two-stage process, while Anima builds its
+    images in two stages."
+
+    The sample graph is saved at 1284x1824 (2.3MP); writing Muse's 896x1152 over
+    it throws away what the family is for. So both keys are left out, and
+    `patch_workflow` does not touch the latent at all.
+    """
+    inputs = dict(ALL_DEFAULTS)
+    draft = render_settings(inputs, draft=True, family="krea2")
+    assert "width" not in draft and "height" not in draft
+
+    # Anima keeps naming the canvas — its graphs build from a smaller latent.
+    anima = render_settings(inputs, draft=True, family="anima")
+    assert (anima["width"], anima["height"]) == (inputs["width"], inputs["height"])
+
+
+def test_a_size_he_typed_beats_the_workflows_own():
+    """The override half. One edited side is enough to mean "I chose this"."""
+    inputs = {**ALL_DEFAULTS, "width": 1024, "height": 1536}
+    got = render_settings(inputs, draft=False, family="krea2")
+    assert (got["width"], got["height"]) == (1024, 1536)
+
+    # Only the width touched: the pair travels together, so both are sent.
+    one_side = {**ALL_DEFAULTS, "width": 1024}
+    got = render_settings(one_side, draft=False, family="krea2")
+    assert got["width"] == 1024 and got["height"] == ALL_DEFAULTS["height"]
 
 
 def test_a_number_he_set_himself_always_wins():

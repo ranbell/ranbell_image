@@ -78,6 +78,9 @@ async def test_a_krea2_workflow_renders_at_four_and_eight_with_no_negative(rende
     await _shoot(db, comfy)
     kw = render.await_args.kwargs
     assert kw["steps"] == 8 and "cfg" not in kw and kw["negative"] == ""
+    # **The canvas stays the workflow's.** `run_render` defaults width/height to
+    # None, and `patch_workflow` then leaves the latent alone.
+    assert "width" not in kw and "height" not in kw
 
 
 @pytest.mark.asyncio
@@ -89,6 +92,7 @@ async def test_an_anima_workflow_renders_exactly_as_before(render):
     await _board(db, comfy)
     kw = render.await_args.kwargs
     assert (kw["steps"], kw["cfg"]) == (20, 4.0)
+    assert (kw["width"], kw["height"]) == (896, 1152)
     assert "straw_hat" in kw["negative"]
 
     await _shoot(db, comfy)
@@ -117,6 +121,18 @@ async def test_the_marker_in_the_graph_is_read_at_render_time(render):
     await _board(db, comfy)
     kw = render.await_args.kwargs
     assert kw["steps"] == 4 and kw["negative"] == ""
+
+
+@pytest.mark.asyncio
+async def test_a_size_he_set_himself_reaches_a_krea2_render(render):
+    """The override half of "both ways"."""
+    session = _session("krea2_flux.json")
+    session["inputs"]["width"] = 1024
+    session["inputs"]["height"] = 1536
+    db = _Db(session)
+    await _shoot(db, MagicMock())
+    kw = render.await_args.kwargs
+    assert (kw["width"], kw["height"]) == (1024, 1536)
 
 
 @pytest.mark.asyncio
