@@ -224,3 +224,18 @@ def test_append_negative_still_extends_a_literal():
         _minimal_workflow(), "pos", "lowres", append_negative=True,
     )
     assert out["3"]["inputs"]["text"] == "neg, lowres"
+
+
+def test_an_empty_negative_leaves_the_workflow_its_own(monkeypatch):
+    """**The contract a family with no negative depends on.** (2026-09-20)
+
+    krea2 sends `negative=""` (`runtime.negative_for`), and the graph's own baked
+    negative has to survive untouched — that text is its author's choice. The
+    positive is still written.
+    """
+    client = ComfyUIClient.__new__(ComfyUIClient)
+    out = client.patch_workflow(
+        _minimal_workflow(), "pos tags", "", append_negative=True,
+    )
+    assert out["3"]["inputs"]["text"] == "neg"      # exactly as it was saved
+    assert out["2"]["inputs"]["text"] == "pos tags"

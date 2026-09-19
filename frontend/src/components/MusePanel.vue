@@ -187,6 +187,31 @@ const workflows = computed(() => {
   return Array.isArray(list) ? list : []
 })
 const models = computed(() => catalog.value?.llm?.models || [])
+
+// **Which image-model family this workflow belongs to (2026-09-20).** The
+// Showrunner: "I want to use krea2 too — it needs no negative prompt, 8 steps is
+// enough". The backend decides it from the workflow's name or a marker in the
+// graph (`muse/family.py`); the catalog carries the answer per workflow so the
+// panel can say so before the first frame.
+const workflowFamily = computed(() => {
+  const caps = catalog.value?.comfyui?.workflow_caps || []
+  const hit = caps.find(c => c?.name === (inputs.value.workflow || ''))
+  return String(hit?.family || 'anima')
+})
+const familyRow = computed(() => catalog.value?.image_families?.[workflowFamily.value] || null)
+
+// The same rule the render uses (`runtime.render_settings`): a knob still at the
+// shipped default is the family's to fill in; a number he typed is his.
+const shippedDefaults = computed(() => catalog.value?.suggested_run || {})
+function effectiveSteps (key) {
+  const mine = inputs.value?.[key]
+  const shipped = shippedDefaults.value?.[key]
+  if (mine !== undefined && shipped !== undefined && Number(mine) !== Number(shipped)) return Number(mine)
+  const wanted = familyRow.value?.[key]
+  return wanted == null ? Number(mine ?? shipped ?? 0) : Number(wanted)
+}
+const draftSteps = computed(() => effectiveSteps('draft_steps'))
+const finalSteps = computed(() => effectiveSteps('final_steps'))
 const boardImages = computed(() => session.value?.board?.images || [])
 const shootImages = computed(() => session.value?.shoot?.images || [])
 const boardReady = computed(() => !!session.value?.board?.ready)
@@ -1647,6 +1672,48 @@ function isStruckRow(row) {
                   <option v-for="w in workflows" :key="w" :value="w">{{ w }}</option>
                 </select>
               </label>
+              <!--
+                **Which family, and what it asks for (2026-09-20).** The numbers
+                come from the backend's table, never from here — change krea2's
+                4/8 in `muse/family.py` and this line follows.
+              -->
+              <div v-if="inputs.workflow && familyRow" class="flex flex-wrap items-center gap-1.5 text-[10px]">
+                <span class="rounded-full border border-cyan-500/40 bg-cyan-950/30 px-2 py-0.5 text-cyan-200">
+                  {{ familyRow.label }}
+                </span>
+                <span class="text-gray-500">{{ draftSteps }} / {{ finalSteps }} steps</span>
+                <span v-if="familyRow.draft_cfg === null" class="text-gray-500">
+                  {{ t('muse.familyCfgFromWorkflow') }}
+                </span>
+                <span v-if="!familyRow.negative" class="text-gray-500">
+                  {{ t('muse.familyNoNegative') }}
+                </span>
+              </div>
+              <!--
+                **The steps stay his to change (2026-09-20).** "4/8 as the
+                default, and let the user change it after that." A field left at
+                the shipped default follows the family; a number typed here wins.
+              -->
+              <div v-if="inputs.workflow" class="grid grid-cols-2 gap-2">
+                <label class="block">
+                  <span class="mb-1 block text-gray-500">{{ t('muse.draftSteps') }}</span>
+                  <input
+                    type="number" min="1" max="60"
+                    class="w-full rounded border border-gray-700 bg-gray-900 px-2 py-1.5"
+                    :value="draftSteps"
+                    @change="patchInputs({ draft_steps: Number($event.target.value) })"
+                  >
+                </label>
+                <label class="block">
+                  <span class="mb-1 block text-gray-500">{{ t('muse.finalSteps') }}</span>
+                  <input
+                    type="number" min="1" max="100"
+                    class="w-full rounded border border-gray-700 bg-gray-900 px-2 py-1.5"
+                    :value="finalSteps"
+                    @change="patchInputs({ final_steps: Number($event.target.value) })"
+                  >
+                </label>
+              </div>
               <label class="block">
                 <span class="mb-1 block text-gray-500">{{ t('muse.model') }}</span>
                 <select

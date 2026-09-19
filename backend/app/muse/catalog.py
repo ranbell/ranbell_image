@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Awaitable, Callable
 
+from . import family
 from .defaults import ALL_DEFAULTS
 
 logger = logging.getLogger(__name__)
@@ -62,12 +63,17 @@ async def build_muse_catalog(
                     "name": name,
                     "has_openpose": False,
                     "can_inject_image": False,
+                    # Which model family it belongs to, so the panel can say so
+                    # before the first frame. The graph is already being read
+                    # here for the pose caps — the marker costs no extra read.
+                    "family": family.family_from_name(name) or family.DEFAULT_FAMILY,
                 }
                 try:
                     wf = comfy.load_workflow(name)
                     info = comfy.inspect_workflow(wf)
                     cap["has_openpose"] = bool(info.get("has_openpose"))
                     cap["can_inject_image"] = bool(info.get("can_inject_image"))
+                    cap["family"] = family.resolve_family(name, wf)
                 except Exception:
                     pass
                 workflow_caps.append(cap)
@@ -157,6 +163,20 @@ async def build_muse_catalog(
             "workflow": suggested_workflow,
             "locale": "ja",
             **ALL_DEFAULTS,
+        },
+        # What each family asks for, so the panel prints the numbers from the
+        # table rather than hardcoding them. `cfg: null` means "the workflow's
+        # own" — that family's graphs keep whatever cfg they were saved with.
+        "image_families": {
+            name: {
+                "label": row["label"],
+                "draft_steps": row["draft_steps"],
+                "final_steps": row["final_steps"],
+                "draft_cfg": row["draft_cfg"],
+                "final_cfg": row["final_cfg"],
+                "negative": row["negative"],
+            }
+            for name, row in family.FAMILIES.items()
         },
         "framings": [
             "auto", "full_body", "upper_body", "face_closeup", "from_behind",

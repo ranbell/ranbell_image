@@ -6,7 +6,7 @@ import logging
 import time
 from typing import Any
 
-from . import events, session_db
+from . import events, family, session_db
 from .runtime import negative_for, render_settings
 
 logger = logging.getLogger(__name__)
@@ -91,6 +91,10 @@ async def run_board_job(reporter, cancel, *, db, comfy, session_id: str, ollama=
     inputs = session.get("inputs") or {}
     board = session.get("board") or {}
     ref = direction_still_bytes(session)
+    # Which model family this workflow belongs to decides the steps, the cfg and
+    # whether a negative is sent at all. Resolved here, where `comfy` can read the
+    # graph's own marker; a name-only answer is a fine fallback (`family.py`).
+    fam = family.for_workflow(comfy, str(inputs.get("workflow") or ""))
 
     async def _attach(sha256: str, meta: dict) -> None:
         await session_db.attach_board_image(db, session_id, sha256, meta)
@@ -102,7 +106,7 @@ async def run_board_job(reporter, cancel, *, db, comfy, session_id: str, ollama=
             db=db, comfy=comfy,
             workflow_name=str(inputs.get("workflow") or ""),
             positive=str(board.get("prompt") or ""),
-            negative=negative_for(session),
+            negative=negative_for(session, family=fam),
             seed=int(board.get("seed") or 0) or None,
             subdir=PLAYGROUND_SUBDIR,
             # The opening still is one frame, not four: at three seats in there
@@ -121,7 +125,7 @@ async def run_board_job(reporter, cancel, *, db, comfy, session_id: str, ollama=
             attach=_attach,
             preview=preview_publisher(session_id, "board"),
             reference_image=ref,
-            **render_settings(inputs, draft=True),
+            **render_settings(inputs, draft=True, family=fam),
         )
     except Exception as exc:
         error = str(exc)
@@ -160,6 +164,9 @@ async def run_shoot_job(
     inputs = session.get("inputs") or {}
     shoot = session.get("shoot") or {}
     ref = direction_still_bytes(session)
+    # The same family the board was shot under — one workflow renders both stages,
+    # and they differ only in steps and cfg.
+    fam = family.for_workflow(comfy, str(inputs.get("workflow") or ""))
 
     async def _attach(sha256: str, meta: dict) -> None:
         await session_db.attach_shoot_image(db, session_id, sha256, meta)
@@ -171,7 +178,7 @@ async def run_shoot_job(
             db=db, comfy=comfy,
             workflow_name=str(inputs.get("workflow") or ""),
             positive=str(shoot.get("prompt") or ""),
-            negative=negative_for(session),
+            negative=negative_for(session, family=fam),
             seed=int(shoot.get("seed") or 0) or None,
             batch_count=max(1, int(inputs.get("draft_count", 1))),
             subdir=MUSE_SHOOT_SUBDIR,
@@ -185,7 +192,7 @@ async def run_shoot_job(
             attach=_attach,
             preview=preview_publisher(session_id, "shoot"),
             reference_image=ref,
-            **render_settings(inputs, draft=False),
+            **render_settings(inputs, draft=False, family=fam),
         )
     except Exception as exc:
         error = str(exc)

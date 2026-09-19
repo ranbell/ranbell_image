@@ -5,9 +5,14 @@ the orchestration it is launched by.
 """
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from . import crew, identity
+from . import family as family_mod
+from .defaults import ALL_DEFAULTS
+
+logger = logging.getLogger("app.muse.runtime")
 
 
 def style_for(session: dict[str, Any]) -> str:
@@ -46,8 +51,13 @@ def style_for(session: dict[str, Any]) -> str:
     )
 
 
-def negative_for(session: dict[str, Any]) -> str:
+def negative_for(session: dict[str, Any], *, family: str = "") -> str:
     """The negative prompt for one render.
+
+    **A family that does not take one gets `""` (2026-09-20).** The Showrunner:
+    "krea2 needs no negative prompt". `comfy.patch_workflow` leaves the negative
+    node alone when the string is empty, so what the workflow itself bakes in
+    survives — that text is its author's choice, not ours to overwrite.
 
     `service` had a copy of this that nothing ever called, while the GEN-lane
     runner kept its own — so anything added to the service version reached no
@@ -68,7 +78,7 @@ def negative_for(session: dict[str, Any]) -> str:
     """
     inputs = session.get("inputs") or {}
     banned = [str(t) for t in (session.get("banned") or []) if str(t).strip()]
-    return identity.merge_negative(
+    built = identity.merge_negative(
         str(inputs.get("negative_prompt") or ""),
         identity.framing_negative(str(inputs.get("framing") or "auto")),
         # The rendering the chosen look rules out. Three flat tags among forty
@@ -80,19 +90,65 @@ def negative_for(session: dict[str, Any]) -> str:
         # in the positive prompt and the sampler makes it more likely, not less.
         ", ".join(banned),
     )
+    if family and not family_mod.sends_negative(family):
+        # **Never dropped in silence.** `patch_workflow` skips an empty negative
+        # without a word, which is how a knob with nowhere to go stays invisible
+        # (the diary's kana page was found the same way: by what was not logged).
+        if built.strip():
+            logger.info("[muse.family] %s sends no negative — %d chars dropped: %r",
+                        family, len(built), built[:120])
+        return ""
+    return built
 
 
-def render_settings(inputs: dict[str, Any], *, draft: bool) -> dict[str, Any]:
+def render_settings(
+    inputs: dict[str, Any], *, draft: bool, family: str = "",
+) -> dict[str, Any]:
     """The size and sampler knobs for one render.
 
     Width and height are shared: the draft and everything downstream are the
     same canvas, so the only thing that changes between stages is the prompt.
     That is what makes the four pictures of a run comparable at all.
+
+    **A family fills in only what the Showrunner has not set (2026-09-20).**
+    Every session carries all of `ALL_DEFAULTS`, so "he chose this" cannot be read
+    from the key's presence — it is read from the value still being the shipped
+    one. Set steps to 6 and switch to a krea2 workflow and it stays 6; leave them
+    alone and krea2's 4/8 apply. A family whose cfg is `None` leaves the key out
+    entirely, and the workflow's own cfg is what runs.
     """
     prefix = "draft" if draft else "final"
-    return {
+    steps_key, cfg_key = f"{prefix}_steps", f"{prefix}_cfg"
+    out: dict[str, Any] = {
         "width": int(inputs.get("width", 896)),
         "height": int(inputs.get("height", 1152)),
-        "steps": int(inputs.get(f"{prefix}_steps", 12 if draft else 30)),
-        "cfg": float(inputs.get(f"{prefix}_cfg", 4.0 if draft else 4.5)),
+        "steps": int(inputs.get(steps_key, 12 if draft else 30)),
+        "cfg": float(inputs.get(cfg_key, 4.0 if draft else 4.5)),
     }
+    if not family:
+        return out
+    wanted = family_mod.render_overrides(family, draft=draft)
+    if wanted.get("steps") is not None and _untouched(inputs, steps_key):
+        out["steps"] = int(wanted["steps"])
+    if _untouched(inputs, cfg_key):
+        if wanted.get("cfg") is None:
+            out.pop("cfg")          # the workflow keeps its own
+        else:
+            out["cfg"] = float(wanted["cfg"])
+    return out
+
+
+def _untouched(inputs: dict[str, Any], key: str) -> bool:
+    """Is this knob still the value every session ships with?
+
+    The one piece of provenance available without new bookkeeping: sessions
+    created before families existed have none, and a stored `inputs_touched` list
+    would be a second source of truth to keep honest.
+    """
+    if key not in ALL_DEFAULTS:
+        return False
+    stored = inputs.get(key, ALL_DEFAULTS[key])
+    try:
+        return float(stored) == float(ALL_DEFAULTS[key])  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return stored == ALL_DEFAULTS[key]
