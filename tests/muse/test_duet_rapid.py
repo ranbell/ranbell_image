@@ -158,7 +158,8 @@ def test_guard_partner_patch_keeps_both_cards_on_a_partner_shoot():
     """Who an edit was addressed to is the scripter's call, not a regex's.
 
     This used to drop the other Muse's edits whenever a line named one Muse
-    without also saying 二人 / ふたり / 一緒 / おそろ / 両方 — which is most
+    without also saying 二人 / ふたり / 一緒 / おそろ / 両方 (two of them /
+    both of them / together / matching / both) — which is most
     lines, so a change meant for both routinely landed on one of them.
     """
     patch = {

@@ -441,7 +441,8 @@ class InvokeSessionManager:
 
 
 def _maybe_submit_finalize(session: InvokeSession, session_id: str, session_manager) -> bool:
-    """全 spirit が generation フェーズを脱したら finalize ジョブを 1 回だけ submit する。"""
+    """Submit the finalize job exactly once, after every spirit has left the generation
+    phase."""
     if session.finalize_submitted:
         return False
     if all(
@@ -462,7 +463,7 @@ def _submit_session_finalize(
     session_manager,
     spirit_sha256s: dict,
 ) -> None:
-    """EMBEDDING ランに run_invoke_session_finalize を submit する。"""
+    """Submit run_invoke_session_finalize onto the EMBEDDING lane."""
     from ..jobs.runners import run_invoke_session_finalize
     from ..spooler.models import JobLane
     session.spooler.submit(

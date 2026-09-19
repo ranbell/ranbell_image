@@ -1,4 +1,4 @@
-"""衣装部屋 — the button that restates the whole outfit instead of editing it.
+"""衣装部屋 (the wardrobe room) — the button that restates the whole outfit instead of editing it.
 
 What is actually under test is the escape hatch from a measured failure: the
 compile writes `wearing` as a delta off one line of direction, that lands about

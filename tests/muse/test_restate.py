@@ -12,7 +12,7 @@ tag bag on the last take of the shoot.
 
 A field that has accreted stops being movable by a delta — the compile edits
 inside it instead of replacing it. Saying it over from the start is the move
-衣装部屋 already makes for the outfit, and this is that move for the rest of
+衣装部屋 (the wardrobe room) already makes for the outfit, and this is that move for the rest of
 the notebook, with her deciding which parts need it.
 """
 from __future__ import annotations

@@ -1782,11 +1782,13 @@ def _packed_person_card(muse_id: str, index: int, *, locale: str, seed: str,
     different mouths. They are cheap — three cards is a few hundred tokens —
     and without them the pack is one narrator wearing three name tags.
 
-    `shared_field` is the 欄ごとの会議 (2026-09-14): the speakers in this pack all
+    `shared_field` marks a field corner — 欄ごとの会議, one meeting per ledger
+    field (2026-09-14): the speakers in this pack all
     own the SAME ledger field, so "you are the only seat that writes it" is a lie
     here — say instead that the slot is shared and the group closes with one
     value. The specialty rides along, because in a bundled corner the difference
-    between 色彩設計 and 線画 is exactly what has to survive the packing.
+    between 色彩設計 (colour design) and 線画 (line art) is exactly what has to
+    survive the packing.
     """
     mid = resolve_member(muse_id)
     if mid not in MUSES:

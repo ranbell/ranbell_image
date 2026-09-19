@@ -91,10 +91,11 @@ def _duet_session(**over):
 
 # ── finish_session queues one job per actor in a duet ───────────────────────
 def diaries(spooler):
-    """spool された**日記のジョブだけ**。
+    """**Only the diary jobs** that were spooled.
 
-    総数で縛ると、撮影の後ろで走る別のジョブ（お出かけの生成など）が増える
-    たびに落ちる ―― 実際に6件が落ちた。数えたいのは日記なので、日記で数える。
+    Pinning the total count fails every time another job running behind the shoot
+    is added (generating an outing, say) — six tests really did fail. What is to be
+    counted is diaries, so count diaries.
     """
     return [c for c in spooler.calls
             if c["title"] == "generate_actress_diary"]

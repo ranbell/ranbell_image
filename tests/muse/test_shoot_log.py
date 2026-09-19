@@ -1,13 +1,15 @@
 """What the log records, and what the diary is given — both measured short.
 
-Three defects found by reading a real 73-line 主演撮り session off the server:
+Three defects found by reading a real 73-line lead shoot (主演撮り) off the
+server:
 
 1. Eight test shots, eight timeline entries, and not one line in the chat —
-   only 制作スタッフ had a seat to say it. Read back, the log showed four
-   「承認を受け付けました」 and no sign a board had ever been asked for.
-2. 「beat が書き取れませんでした」 was said 44 seconds before the fold pass
-   wrote that very beat. The studio apologised for something the turn went on
-   to get right.
+   only the studio crew (制作スタッフ) had a seat to say it. Read back, the log
+   showed four 「承認を受け付けました」 ("the approval has been accepted") and no
+   sign a board had ever been asked for.
+2. 「beat が書き取れませんでした」 ("the beat could not be written down") was said
+   44 seconds before the fold pass wrote that very beat. The studio apologised for
+   something the turn went on to get right.
 3. Four ③ presses, four finished photos, one of them in her diary. `shoot` is
    one take and each press replaced the last.
 """

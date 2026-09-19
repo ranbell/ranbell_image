@@ -614,7 +614,7 @@ class ComfyUIClient:
 
     @staticmethod
     def new_client_id() -> str:
-        """一回の描画ぶんの clientId。"""
+        """A clientId for one render."""
         return str(uuid.uuid4())
 
     async def stream_progress(

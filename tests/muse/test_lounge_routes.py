@@ -1,9 +1,9 @@
-"""楽屋の入口が、classic 退役のあとも同じ URL で答えること。
+"""The green room's entrance still answers on the same URLs after classic retired.
 
-`tests/muse/test_api_routes.py` は classic の `muse.api` を土台にしていたので
-`private/muse_classic/tests/` へ退いた。けれど楽屋の6本は**生きている** ——
-`muse/lounge_api.py` が同じ URL で出している（[[project-muse-circle-must-stay]]）。
-退役で落ちたらすぐ分かるように、いちばん短い一本だけ残す。
+`tests/muse/test_api_routes.py` was built on classic's `muse.api`, so it went back
+into `private/muse_classic/tests/`. But the green room's six routes are **alive** —
+`muse/lounge_api.py` serves them at the same URLs. So that a retirement taking them
+down is noticed at once, the shortest of them is kept here.
 """
 from __future__ import annotations
 

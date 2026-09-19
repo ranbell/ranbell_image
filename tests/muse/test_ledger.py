@@ -62,11 +62,12 @@ def test_merge_support_keeps_authority_first():
 
 
 def test_wd14_is_gone_from_refine():
-    """**WD14 は外した（2026-09-09）。** 総監督「やっぱり以前検討した通り、
-    不要な単語が大量に検出されるため、機能を削除して」。
+    """**WD14 was taken out (2026-09-09).** The Showrunner: "as we considered before,
+    it detects a great many unnecessary words, so remove the feature."
 
-    classic 側の推薦（`muse.service._suggest_tags`）は残る —— あちらは欄ごとに
-    引いて彼女に渡し、彼女が落とす形で、実測で 5/5 きれいだった。
+    Classic's recommendation (`muse.service._suggest_tags`) stays — that one looks
+    up per field and hands the result to her to drop what she does not want, and it
+    measured 5/5 clean.
     """
     import inspect
 
@@ -193,7 +194,8 @@ def test_w_muse_does_not_mix_clothes_or_hair():
 
 
 def test_assemble_without_support_ignores_a_raw_tag_bag():
-    """支えのタグを渡さない限り、袋の語は勝手に入らない。"""
+    """Unless supporting tags are handed over, words from the bag do not get in by
+    themselves."""
     session = {
         "character": {"identity_tags": ["1girl"], "character_id": "x"},
         "inputs": {"framing": "auto", "style": ""},

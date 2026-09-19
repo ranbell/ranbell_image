@@ -142,11 +142,12 @@ def board_file(tmp_path):
 
 
 def test_every_crew_is_a_working_studio():
-    """班は味で違うべきで、機能の有無で違うべきではない。
+    """Crews should differ in taste, not in which features they have.
 
-    5班に構成席が無く、台帳（MUST APPEAR）も PLACE/HOUR/LIGHT の決めも丸ごと
-    欠けていた。速さのための小さい班（trio/quartet）は、会話をパックにした時点で
-    「席数がコール数に効かない」ので理由を失った。
+    Five crews had no composition seat and were missing the ledger (MUST APPEAR)
+    and the PLACE/HOUR/LIGHT decisions entirely. The small crews meant for speed
+    (trio/quartet) lost their reason once the conversation was packed — from then
+    on the number of seats does not drive the number of calls.
     """
     from app.muse import crew
     assert set(crew.PRESETS) == {

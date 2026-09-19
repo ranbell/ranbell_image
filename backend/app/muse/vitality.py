@@ -100,7 +100,7 @@ def bump_shot_compile(session: dict[str, Any]) -> bool:
 
 
 def again_that_feel_hint(session: dict[str, Any]) -> str:
-    """Last sticky recap / memory line for『またあの感じ』."""
+    """Last sticky recap / memory line for 『またあの感じ』 ("that feeling again")."""
     for m in list(session.get("memories") or [])[:1]:
         if str(m).strip():
             return str(m).strip()[:240]

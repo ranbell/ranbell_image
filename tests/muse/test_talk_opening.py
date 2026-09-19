@@ -48,10 +48,12 @@ def test_ban_and_filter_tags():
 
 
 def test_again_feel_is_not_refines_business():
-    """**「またあの感じ」は Refine では拾わない。**（2026-09-10）
+    """**「またあの感じ」 ("that feeling again") is not picked up in Refine.**
+    (2026-09-10)
 
-    総監督「前回の内容からの提案は削除して時間短縮」。`vitality` 側の関数は
-    classic Muse が使うので残っている —— 消したのは Refine からの呼び出し。
+    The Showrunner: "remove the proposal drawn from last time, to save time". The
+    function on the `vitality` side stays because classic Muse uses it — what was
+    deleted is Refine's call to it.
     """
     session = new_session()
     session["memories"] = ["屋上の風が冷たかった"]

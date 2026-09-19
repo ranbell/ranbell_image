@@ -1,10 +1,10 @@
-"""`backend` を import path に入れる。
+"""Put `backend` on the import path.
 
-このスイートのテストは `from app.muse import …` と直に書いてある。
-他のスイートは各ファイルの頭で `sys.path.insert` しているが、ここは無いので
-そのままでは 11 本すべてが収集時に落ちる（`ModuleNotFoundError: app`）。
+The tests in this suite write `from app.muse import …` directly. Other suites do a
+`sys.path.insert` at the top of each file; these do not, so as they stand all
+eleven fail at collection (`ModuleNotFoundError: app`).
 
-**作者のファイルには触らず、入口を一つ置く。**
+**Rather than touching the author's files, one entrance is placed here.**
 """
 import sys
 from pathlib import Path

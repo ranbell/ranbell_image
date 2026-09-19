@@ -2124,7 +2124,8 @@ async def run_invoke_session_finalize(
     ollama,
     session_manager,
 ) -> dict:
-    """EMBEDDING lane. 全 invoke 生成画像に AI pipeline を一括適用後、各 spirit の alignment を submit。"""
+    """EMBEDDING lane. Applies the AI pipeline to every invoke-generated image in one
+    pass, then submits each spirit's alignment."""
     from ..ai.pipeline import run_ai_pipeline
     from ..spooler.models import JobLane
 
