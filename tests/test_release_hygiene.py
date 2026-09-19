@@ -30,28 +30,28 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 
-#: 配り物に出してはいけない語。**なぜ駄目かを一緒に置く** —— 消すときに
-#: 迷わないように。
+#: The words that must not ship. **The reason is kept beside each** — so there is no
+#: hesitation when removing one.
 FORBIDDEN: tuple[tuple[str, str], ...] = (
-    # ② 総監督の画像モデル（環境固有）
+    # 2. the Showrunner's image models (specific to this environment)
     (r"nyaIris", "総監督の画像モデル名"),
     (r"novaAnima", "総監督の画像モデル名"),
     (r"PPPAnima", "総監督の画像モデル名"),
     (r"JANIMA", "総監督の画像モデル名"),
-    # ③ 非検閲版モデルの素性
+    # 3. the identity of uncensored models
     (r"uncensored", "非検閲版モデルの素性"),
     (r"非検閲", "非検閲版モデルの素性"),
     (r"abliterat", "非検閲版モデルの素性"),
     (r"heretic", "非検閲版モデルの素性"),
     (r"fredrezones", "模型の配布元"),
     (r"jikepjikep", "模型の配布元"),
-    # ① 個人情報
+    # 1. personal details
     (r"192\.168\.\d+\.\d+", "手元のネットワーク"),
     (r"/home/[a-z]", "手元のパス"),
     (r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.(?:com|org|net|jp)", "メールアドレス"),
 )
 
-#: 語そのものを並べているこのファイルは、当然ひっかかる。
+#: This file lists the words themselves, so of course it trips the scan.
 SELF = "tests/test_release_hygiene.py"
 
 

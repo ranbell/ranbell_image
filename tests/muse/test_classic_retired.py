@@ -59,7 +59,7 @@ def test_there_is_one_studio_and_it_answers_under_api_muse():
     from app.main import app
 
     src = Path("backend/app/main.py").read_text(encoding="utf-8")
-    # classic の router も、畳む前の名前も、もう出てこない
+    # Neither classic's router nor the pre-fold names appear any more
     assert "muse_refine_router" not in src
     assert "from .muse_refine" not in src
     assert "muse_lounge_router" in src
@@ -81,8 +81,8 @@ def test_the_two_routers_under_api_muse_do_not_collide():
         assert path.startswith("/api/muse/"), path
 
 
-#: classic だけが出していた経路。**`/api/muse/sessions` は入れない** ——
-#: あれは畳んだ撮影室が正しく出している（2026-09-12）。
+#: The routes only classic served. **`/api/muse/sessions` is not among them** — the
+#: folded studio serves that one correctly (2026-09-12).
 @pytest.mark.parametrize("path", [
     "/api/muse/report", "/api/muse/steps", "/api/muse/roster",
 ])
@@ -103,7 +103,8 @@ def test_the_lounge_router_does_not_drag_the_turn_engine_in():
     imported = {
         a.name for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) for a in n.names
     }
-    # 撮影室（`service`）と手帖（`notebook`）は引かない。引いたら退役の意味がない。
+    # The studio (`service`) and the notebook (`notebook`) are not imported. Importing
+    # them would defeat the retirement.
     for engine in ("service", "notebook", "brief", "facets", "chain", "crew"):
         assert engine not in imported, engine
     assert imported <= {
@@ -113,11 +114,13 @@ def test_the_lounge_router_does_not_drag_the_turn_engine_in():
     }, imported
 
 
-#: `private/muse_classic/` へ退いたもの。`backend/app/` の側からは、もう引けない。
+#: What retired into `private/muse_classic/`. It can no longer be imported from
+#: `backend/app/`.
 #:
-#: **`service` / `api` / `pipeline_view` は一覧から外した。** 撮影室を `muse` に
-#: 畳んだとき（2026-09-12）、同じ名前が**撮影室自身のモジュール**として戻ってきた
-#: ので、名前で見分けられなくなった。残っているのは classic にしか無かった三つ。
+#: **`service`, `api` and `pipeline_view` were taken off the list.** When the studio
+#: was folded into `muse` (2026-09-12) those same names came back as **the studio's
+#: own modules**, so they can no longer be told apart by name. What remains is the
+#: three that only classic ever had.
 RETIRED = ("schema", "report", "harvest")
 
 

@@ -84,7 +84,7 @@ async def test_asking_for_a_test_shot_draws_a_new_seed_every_time(rig):
     session = await service.start_board(rig.db, rig.request, _session())
     assert session["board"]["seed"] == 0
 
-    # 一枚撮れて種が決まり、もう一度押すと、また 0 から引き直す
+    # One frame is taken and the seed is settled; pressing again draws afresh from 0
     await session_db.attach_board_image(
         rig.db, session["session_id"], "sha-a", {"seed": 111, "job": "p1"},
     )
@@ -109,7 +109,8 @@ async def test_the_seed_the_test_shot_used_is_written_back_to_its_own_field(rig)
     assert board["seed"] == 4242
     assert board["images"][0]["seed"] == 4242
 
-    # batch の二枚目は同じ種（添字で絵が分かれる）。上書きして増やさない。
+    # The second frame of a batch shares the seed (the index separates the pictures).
+    # Nothing is overwritten or added.
     await session_db.attach_board_image(
         rig.db, session["session_id"], "sha-b", {"seed": 4242, "job": "p1"},
     )
@@ -162,9 +163,10 @@ def test_zero_means_draw_again_all_the_way_down():
         code = "\n".join(l.split("#", 1)[0] for l in src.splitlines())
         assert 'or 0) or None' in code, fn.__name__
 
-    # `app.jobs.render` は**ファイルから読む**。兄弟のディレクトリが収集中に
-    # `app.*` を差し替えるので、import して `inspect.getsource` に渡すと
-    # 影武者に当たって落ちる（通しで走らせて踏んだ）。
+    # `app.jobs.render` is **read from the file**. A sibling directory replaces
+    # `app.*` during collection, so importing it and passing it to
+    # `inspect.getsource` hits the stand-in and fails (found running the whole
+    # suite).
     render_src = Path("backend/app/jobs/render.py").read_text(encoding="utf-8")
     body = render_src[render_src.index("async def run_render("):]
     assert "if seed is None:" in body

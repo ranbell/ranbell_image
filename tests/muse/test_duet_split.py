@@ -35,7 +35,7 @@ def _session(*, partner: bool):
     }
 
 
-# ── 条文 ────────────────────────────────────────────────────────────────
+# ── The contract ────────────────────────────────────────────────────────
 def test_the_duet_contract_asks_for_labels():
     got = persona.actress_system(
         _session(partner=True), locale="ja", ledger={}, now="",
@@ -43,7 +43,7 @@ def test_the_duet_contract_asks_for_labels():
     assert "W-MUSE" in got
     assert "`A:` or `B:`" in got
     assert "only ONE of them mutters" in got
-    # 一人称を取り違えないよう、名指しで結びつけている
+    # Tied by name so the first person is not mixed up
     assert "私" in got and "アタシ" in got
 
 
@@ -60,11 +60,11 @@ def test_a_solo_shoot_never_sees_any_of_it():
 def test_the_gate_is_the_partner_not_the_mode():
     """Gate on `mode` and solo shoots turn into duets too (85 of 109 live sessions)."""
     s = _session(partner=False)
-    s["mode"] = "duet"           # 実機はこうなっている
+    s["mode"] = "duet"           # this is how it is live
     assert "W-MUSE" not in persona.actress_system(s, locale="ja", ledger={}, now="")
 
 
-# ── 分けるところ ────────────────────────────────────────────────────────
+# ── Where they are split ────────────────────────────────────────────────
 def _publish(say: str, aside: str = "", *, partner: bool = True):
     s = _session(partner=partner)
     talk.publish_actress_turn(
@@ -82,7 +82,7 @@ def test_labelled_lines_become_two_rows():
     assert says[1]["name"] == "倉田 あさひ" and says[1]["meta"]["speaker"] == "B"
     assert says[0]["meta"]["speaker_id"] == "a"
     assert says[1]["meta"]["speaker_id"] == "b"
-    # 本文に相手の台詞が混ざっていないこと
+    # The other person's lines are not mixed into the body
     assert "アタシ" not in says[0]["text"]
     assert "準備できました" not in says[1]["text"]
 

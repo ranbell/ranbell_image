@@ -369,7 +369,7 @@ def test_sane_prose_passes_through_empty():
     assert identity.sane_prose(None) == ""
 
 
-# ── 二人を名前で結ぶ ────────────────────────────────────────────────
+# ── Tying the two of them to their names ────────────────────────────
 MIO = {
     "name": "Mio Kagami",
     "identity_tags": ["silver_hair", "bob_cut", "blue_eyes", "flat_chest", "slim"],
@@ -465,10 +465,10 @@ def test_a_garment_lands_on_the_girl_who_is_wearing_it():
     )
     assert "Mio is silver_hair, bob_cut, blue_eyes, flat_chest, slim, professional_blouse," in out
     assert "Sumire is blonde_hair, long_hair, green_eyes, medium_breasts, linen_apron," in out
-    # 動かしただけ。画全体の側に二度出てはいけない。
+    # Only moved. It must not appear twice on the whole-picture side.
     assert out.count("professional_blouse") == 1
     assert out.count("linen_apron") == 1
-    # 場所と光は誰のものでもないので、そのまま下に残る。
+    # The place and the light belong to nobody, so they stay below as they are.
     assert out.rsplit("\n", 1)[-1].startswith("indoors, window_light")
 
 
@@ -499,7 +499,7 @@ def test_a_quoted_text_tag_reaches_the_sampler_as_written():
     assert 'text "OPEN"' in out
 
 
-# ── 髪型と、髪の様子 ────────────────────────────────────────────────
+# ── The hairstyle, and the state of the hair ────────────────────────
 def test_every_hair_word_is_either_a_cut_or_a_description():
     """Add a word to `axis_hair` and this test fails until it declares which it
     is."""
@@ -595,7 +595,7 @@ def test_edge_underscores_from_json_never_reach_the_sampler():
     """
     assert identity.clamp_weight("_anime_illustration") == "anime_illustration"
     assert identity.clamp_weight("_solo") == "solo"
-    # 全部が `_` の語は空になり、袋から落ちる
+    # A word that is all `_` becomes empty and falls out of the bag
     assert identity.clamp_weight("__") == ""
     got = identity.clamp_weights("_anime_illustration, sitting, __, straw_hat")
     assert got == "anime_illustration, sitting, straw_hat"
@@ -658,10 +658,10 @@ def test_a_solo_shoot_never_sends_her_name_to_the_sampler():
         "a wide shot at her, who sits hunched.")
     assert f("Light falls across Mio's shoulders.", mio) == (
         "Light falls across her shoulders.")
-    # 姓名まとめての形。分けて見るだけだと `She her` になる。
+    # The full-name form. Matched only in parts it becomes `She her`.
     assert f("Mio Kagami stands at the rail.", mio) == "She stands at the rail."
     assert f("各務 みお sits by the window.", mio) == "She sits by the window."
-    # 名前を含む別の語は巻き込まない。
+    # Another word containing the name is not caught up in it.
     assert f("A medium shot. Miori waves.", mio) == "A medium shot. Miori waves."
 
 
@@ -773,7 +773,7 @@ def test_static_traits_and_actions_live_on_different_lines():
     dynamic = next(l for l in out.splitlines() if l.startswith("Subaru: "))
     assert "navy_hair" in static and "sitting" not in static
     assert "sitting" in dynamic and "navy_hair" not in dynamic
-    # 位置＝優先度。動的な枠は場面より前。
+    # Position is priority. The dynamic slots come before the scene.
     body = out.splitlines()
     assert body.index(dynamic) < next(
         i for i, l in enumerate(body) if l.startswith("poolside"))

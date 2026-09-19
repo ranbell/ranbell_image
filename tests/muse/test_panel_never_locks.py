@@ -70,7 +70,7 @@ def test_the_lock_is_still_the_three_flags():
     assert m.group(1).strip() == "busy.value || renderLocked.value || speaking.value"
 
 
-# ── 流れている表示が巻き戻らないこと（2026-09-12）───────────────────────
+# ── The streaming display never rewinds (2026-09-12) ────────────────────
 def test_a_finished_seat_is_kept_on_screen():
     """The Showrunner: "it is as if a reset runs each time a role speaks — it keeps
     rewinding".
@@ -82,12 +82,12 @@ def test_a_finished_seat_is_kept_on_screen():
     """
     handler = SRC[SRC.index("if (data.type === 'muse_speaking')"):]
     handler = handler[: handler.index("return\n    }")]
-    # 名前を替える前に畳む（畳む中身は `foldLive`）
+    # Fold before changing the name (the folding itself is `foldLive`)
     assert handler.index("foldLive()") < handler.index("liveName.value =")
 
     fold = SRC[SRC.index("function foldLive()"):]
     fold = fold[: fold.index("\n}\n") + 2]
-    # 空にする前に積む
+    # Stack it before emptying
     assert fold.index("liveDone.value = [") < fold.index("liveSay.value = ''")
     assert "if (liveSay.value.trim())" in fold
 
@@ -119,7 +119,8 @@ def test_the_swap_has_no_double_showing_window(fn):
     body = _body(fn)
     post = body.index("await api(")
     tail = body[post:]
-    # 区切りは実際の `} finally {` だけ。説明文の「finally」に当たらないように。
+    # The separator is an actual `} finally {` only — so it does not match the word
+    # "finally" in prose.
     cut = tail.index("} finally {") if "} finally {" in tail else len(tail)
     assert "stopSpeaking()" in tail[:cut], f"{fn}: POST の直後に畳んでいない"
 
@@ -134,7 +135,7 @@ def test_the_kept_lines_look_like_the_real_ones():
     assert "done.lead ? '🌸' : '🎬'" in block
 
 
-# ── かな漢字変換の途中で送らない ──────────────────────────────────────────
+# ── Nothing is sent mid-IME-composition ─────────────────────────────────────
 
 def test_enter_is_a_newline_not_a_send():
     """**Enter is not send.** (2026-09-13)

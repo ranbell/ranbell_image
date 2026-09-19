@@ -29,7 +29,7 @@ def test_the_same_number_as_the_clerk():
     session = {"inputs": {}, "_runtime_cfg": {"ollama_num_ctx": 16384}}
     assert refine_num_ctx(session) == 16384
     assert muse_service._num_ctx({}, {"ollama_num_ctx": 16384}) == 16384
-    # セッション側の指定が勝つのも同じ
+    # A session-level setting winning is the same
     assert refine_num_ctx({"inputs": {"num_ctx": 8192},
                            "_runtime_cfg": {"ollama_num_ctx": 16384}}) == 8192
     assert muse_service._num_ctx({"num_ctx": 8192},
@@ -48,7 +48,8 @@ def test_every_llm_call_carries_a_context_length():
     seen = 0
     for path in sorted(PKG.glob("*.py")):
         if path.name == "chain.py":
-            continue  # 門の実装。受けて渡す側なので呼び出しの形には写らない
+            continue  # the gate's implementation: it receives and forwards, so it
+                      # does not appear in the shape of a call
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
@@ -56,10 +57,10 @@ def test_every_llm_call_carries_a_context_length():
             fn = node.func
             if not isinstance(fn, ast.Attribute):
                 continue
-            # **classic の `chain` 経由も数える。** スタジオ撮り（班）は
-            # `chain._call` / `chain.run_banter` を通るので、`generate_` だけ
-            # 見ていると素通りする（2026-09-12 に気づいた穴）。あちらは
-            # `options` ではなく `num_ctx=` という名前で受ける。
+            # **Calls through classic's `chain` are counted too.** A studio shoot
+            # (with a crew) goes through `chain._call` / `chain.run_banter`, so
+            # watching only `generate_` lets it pass (a hole noticed on 2026-09-12).
+            # That side receives it as `num_ctx=` rather than in `options`.
             via_chain = fn.attr in ("_call", "_call_seeing", "run_banter")
             if not (fn.attr.startswith("generate_") or via_chain):
                 continue

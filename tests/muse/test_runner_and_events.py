@@ -63,12 +63,13 @@ def test_negative_carries_only_the_box_and_the_refusals():
     neg = runtime.negative_for(session)
     tokens = {t.strip() for t in neg.split(",") if t.strip()}
     assert tokens == {"bad quality", "bad anatomy", "cleaning_rag"}
-    # 体型ロックの反対側も、年齢語も入らない。
+    # Neither the opposite of the body lock nor any age word gets in.
     for gone in ("loli", "old", "child", "mature_female", "petite",
                  "large_breasts", "flat_chest", "muscular", "curvy"):
         assert gone not in tokens
 
-    # 守りはポジティブ側が持つ：ロックと矛盾する語は positive に入らない。
+    # The guard belongs to the positive side: a word contradicting the lock never
+    # enters the positive.
     positive = identity.assemble_positive(
         ["1girl", "medium_breasts", "slim"],
         "1girl, large_breasts, loli, park, standing",
@@ -98,10 +99,10 @@ def test_the_chosen_look_rules_its_opposite_out():
     refused.
     """
     from app.muse import crew
-    # **班が開いているセッションでだけ、班の画風を取る（2026-09-13）。**
-    # 門は `mode` ではなく `crew_room.has_crew` —— `mode == "duet"` で分けていた
-    # ときは、Refine の全セッションが `duet` なので**永久に閉じていた**
-    # （6プリセットとも `anime illustration` になっていた）。
+    # **The crew's look is taken only on a session with a crew open (2026-09-13).**
+    # The gate is `crew_room.has_crew`, not `mode` — split on `mode == "duet"`, every
+    # Refine session is `duet`, so it was **closed for ever** (all six presets came
+    # out as `anime illustration`).
     flat = {
         "mode": "duet", "crew_open": True,
         "inputs": {"crew_preset": "flat", "negative_prompt": "bad quality",
@@ -110,7 +111,7 @@ def test_the_chosen_look_rules_its_opposite_out():
     }
     neg = {t.strip() for t in runtime.negative_for(flat).split(",") if t.strip()}
     assert "soft_shading" in neg and "realistic" in neg
-    assert "cel_shading" not in neg          # 頼んだほうは打ち消さない
+    assert "cel_shading" not in neg          # what was asked for is not negated
 
     real = {"mode": "duet", "crew_open": True,
             "inputs": {"crew_preset": "photoreal",
@@ -120,7 +121,7 @@ def test_the_chosen_look_rules_its_opposite_out():
     assert "cel_shading" in neg2 and "flat_color" in neg2
     assert "realistic" not in neg2
 
-    # 中立の班は何も打ち消さない
+    # A neutral crew negates nothing
     plain = {"mode": "", "inputs": {"crew_preset": "standard"}, "banned": []}
     assert crew.look_negative(runtime.style_for(plain)) == []
 

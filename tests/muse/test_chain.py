@@ -284,12 +284,13 @@ def test_the_first_duty_block_is_gone_and_the_partner_guard_survived():
     text = chain.SCRIPTER_WEAVE_SYSTEM
     assert "FIRST DUTY" not in text
     assert chain.WEAVE_BLOCKS["body"] == ""
-    # 測れないものは捨てない。
+    # What cannot be measured is not thrown away.
     assert "Never leave one of them as a prop" in text
     assert "Never leave one of them as a prop" in chain.WEAVE_BLOCKS["partner"]
-    # 視線の規則（入れ替え）は別の段落なので残っている —— 実測で効いている。
+    # The gaze rule (the swap) is a separate paragraph and survives — measurement
+    # shows it biting.
     assert "The gaze is FRAME's" in text
-    # 5,075 → 3,894字。
+    # 5,075 -> 3,894 characters.
     assert len(text) < 4200
 
 
@@ -310,10 +311,11 @@ def test_the_weave_contract_is_built_from_named_blocks():
     from app.muse import chain
 
     assert chain.build_weave_system() == chain.SCRIPTER_WEAVE_SYSTEM
-    # 積み木を全部つなぐと、既定と同じもの。取りこぼしも重複も無い。
+    # Join every brick and it is the default exactly. Nothing missed, nothing
+    # duplicated.
     assert set(chain.WEAVE_BUILD_DEFAULT) == set(chain.WEAVE_BLOCKS)
     assert len(chain.WEAVE_BUILD_DEFAULT) == len(chain.WEAVE_BLOCKS)
-    # 一本落とせば、その字数ぶんだけ短くなる。
+    # Drop one and it gets shorter by exactly that many characters.
     without = chain.build_weave_system(
         [k for k in chain.WEAVE_BUILD_DEFAULT if k != "amount"],
     )

@@ -33,7 +33,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 from app.muse import assemble, crew_room as C
 
 
-# ── 絵に渡す散文 ────────────────────────────────────────────────────────
+# ── The prose handed to the picture ─────────────────────────────────────
 
 def test_a_long_paragraph_stops_at_a_full_stop():
     long = "She stands at the counter in a heavy knit cardigan. " * 20
@@ -59,13 +59,13 @@ def test_the_prose_path_uses_the_sentence_trim():
     assert "text[:900]" not in src
 
 
-# ── 席の CRAFT 行 ───────────────────────────────────────────────────────
+# ── A seat's CRAFT line ─────────────────────────────────────────────────
 
 def test_a_long_craft_line_is_cut_between_tags():
     clause = ", ".join(f"tag_number_{i}" for i in range(40))
     out = C._clip_craft(clause)
     assert len(out) <= C.CRAFT_MAX
-    # **半分の語を台帳に入れない**
+    # **Half a word never enters the ledger**
     assert all(t.strip().startswith("tag_number_") and t.strip()[11:].isdigit()
                for t in out.split(",") if t.strip()), out[-40:]
 
@@ -74,7 +74,7 @@ def test_a_short_craft_line_is_untouched():
     assert C._clip_craft("rim_light, backlighting | 逆光") == "rim_light, backlighting | 逆光"
 
 
-# ── 枠で切られたら、記録に残す ──────────────────────────────────────────
+# ── When the window cuts it, that is recorded ───────────────────────────
 
 def test_the_client_can_report_how_the_generation_ended():
     from app.ai import ollama as O
@@ -82,7 +82,7 @@ def test_the_client_can_report_how_the_generation_ended():
     src = inspect.getsource(O.OllamaClient._generate_stream)
     assert "done_reason" in src, "終わり方を読んでいない"
     assert '"type": "done"' in src
-    # 既定では流さない（Inspire と job runner はイベントを画面へ転送している）
+    # Not emitted by default (Inspire and the job runner forward events to the screen)
     assert "with_done: bool = False" in inspect.getsource(O.OllamaClient)
 
 
@@ -96,7 +96,8 @@ def test_the_seats_and_the_lead_watch_the_window():
         assert "cut_by_the_window" in inspect.getsource(mod._watch_the_window)
 
 
-# ── 切り方は一本（2026-09-18・総監督「文字数制限があるかどうか調べて」）──────
+# ── One way of cutting (2026-09-18, the Showrunner: "find out whether there is a
+# character limit") ──────────────────────────────────────────────────────────
 
 def test_every_long_cut_goes_through_the_same_door():
     """**Leave no raw slices.** The caps are needed; there is one way to cut.
@@ -130,7 +131,7 @@ def test_the_trim_lives_in_one_place():
 
     assert A._trim_to_a_sentence("x" * 2000, 900) == identity.trim_to_a_sentence("x" * 2000, 900)
     assert identity.trim_to_a_sentence("短い文。", 900) == "短い文。"
-    # 日本語の句点でも止まる
+    # It stops on a Japanese full stop too
     long_ja = "彼女はカウンターに立っている。" * 100
     out = identity.trim_to_a_sentence(long_ja, 900)
     assert len(out) <= 900 and out.endswith("。")

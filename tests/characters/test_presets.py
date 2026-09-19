@@ -181,12 +181,13 @@ def test_summary_row_is_light():
     row = preset_summary(PRESETS[0])
     assert set(row) == {
         "id", "preset_key", "slug", "name", "name_ja", "title", "title_ja",
-        # `charm` は d019e7e で意図して足したもの ―― charm 行が常に日本語
-        # 固定だったのをロケール対応にした残り。日本語だけ持っていた頃の名残
-        # ではない
+        # `charm` was added deliberately in d019e7e — what remains of making the
+        # charm line locale-aware after it had always been fixed Japanese. Not a
+        # leftover from when it was Japanese only
         "summary", "summary_ja", "charm", "charm_ja",
-        # **全員が成人。** 一覧の行にも年齢と仕事を出す —— 未成年と取られる
-        # 余地を、シートの文章だけでなくデータの側でも塞ぐ
+        # **Everyone is an adult.** The age and the occupation appear on the listing
+        # row as well — the room to be taken as a minor is closed on the data side,
+        # not only in the sheet's prose
         "age", "occupation", "occupation_ja",
         "gender", "subject_tag", "traits", "tag_count", "board", "gallery",
         "hair_color", "eye_color", "user_created", "diary_unread_count",
@@ -706,7 +707,7 @@ def test_every_colour_on_the_roster_has_a_swatch():
     assert not unpaintable, f"no swatch for {sorted(unpaintable)}"
 
 
-# ── 点の id にできない文字列 ─────────────────────────────────────────────────
+# ── A string that cannot be a point id ──────────────────────────────────────
 
 class _QdrantThatOnlyHoldsUuids:
     """A stand-in for Qdrant. **Only a UUID or an integer can be a point id.**"""
@@ -722,7 +723,7 @@ class _QdrantThatOnlyHoldsUuids:
 
         for point_id in ids:
             if not str(point_id).isdigit():
-                uuid.UUID(str(point_id))   # 形が悪ければここで ValueError
+                uuid.UUID(str(point_id))   # a malformed one raises ValueError here
         return [SimpleNamespace(id=i, payload=self.rows[i]) for i in ids if i in self.rows]
 
 

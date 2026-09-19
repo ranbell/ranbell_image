@@ -28,16 +28,18 @@ import pytest
 PKG = Path(__file__).resolve().parents[2] / "backend" / "app" / "muse"
 
 
-#: 模型を叩く口。`ollama.generate_*` の直呼びだけでなく、**classic の
-#: `chain` 経由**も数える —— スタジオ撮り（班）は `chain._call` を通るので、
-#: `generate_` だけ見ていると素通りする（2026-09-12 に気づいた穴）。
+#: The mouths that hit the model. Not only direct `ollama.generate_*` calls but also
+#: **calls through classic's `chain`** — a studio shoot (with a crew) goes through
+#: `chain._call`, so watching only `generate_` lets it pass (a hole noticed on
+#: 2026-09-12).
 _VIA_CHAIN = {"_call", "_call_seeing"}
 
 
 def _generate_calls():
     for path in sorted(PKG.glob("*.py")):
         if path.name == "chain.py":
-            continue  # 門の実装。受けて渡す側なので呼び出しの形には写らない
+            continue  # the gate's implementation: it receives and forwards, so it
+                      # does not appear in the shape of a call
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
@@ -107,7 +109,7 @@ def test_the_door_itself_demands_both_knobs():
         assert p.kind is p.KEYWORD_ONLY, f"{knob} は名前で渡させる"
         if knob == "think":
             assert p.default is inspect.Parameter.empty, "think に既定を持たせない"
-    # 受けたものをそのまま下へ渡していること（勝手に捨てていない）
+    # What it receives is handed straight on (never quietly dropped)
     src = ast.parse(inspect.getsource(chain._call))
     text = ast.unparse(src)
     assert "think=think" in text

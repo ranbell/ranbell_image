@@ -147,19 +147,22 @@ def test_the_contract_lets_her_decide_when_she_is_asked_to():
     """
     from app.muse import crew
 
-    # **条文は英語へ戻した（2026-09-04）。** もともと英語で、最近まるごと
-    # 日本語にしたものだった。総監督「英文のほうが誤解釈されにくい」。
-    # 判定する語だけ差し替える —— 上の理由はそのまま効いている。
+    # **The contract was put back into English (2026-09-04).** It was English
+    # originally and had recently been turned wholly into Japanese. The Showrunner:
+    # "English is less likely to be misread". Only the words checked for are swapped —
+    # the reasoning above still holds.
     import re
 
     contract = re.sub(r"\s+", " ", crew.production_contract())
     assert "Not choosing is not an answer" in contract
-    # **迷いは禁じない。** 彼女らしさはそこにあるので、消すと別人になる。
+    # **Hesitation is not forbidden.** It is part of who she is; remove it and she is
+    # somebody else.
     assert "One line of hesitation at most" in contract
-    # **訊かれた範囲で。** ポーズを訊かれて撮影ごと動かさない。
+    # **Within what was asked.** Asked about a pose, she does not move the whole
+    # shoot.
     assert "Within what was asked" in contract
-    # 決められない理由はたいてい「間違えたらどうしよう」。
+    # The reason she cannot decide is usually "what if I get it wrong".
     assert "Whatever you decide, he can change it later" in contract
-    # 断る権利（五条）は残っている —— 選ぶ権利はその隣であって、代わりでは
-    # ない。
+    # The right to refuse (article five) is still there — the right to choose stands
+    # beside it, not in its place.
     assert "you may step down" in contract
