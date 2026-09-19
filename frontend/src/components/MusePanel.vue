@@ -199,6 +199,11 @@ const workflowFamily = computed(() => {
   return String(hit?.family || 'anima')
 })
 const familyRow = computed(() => catalog.value?.image_families?.[workflowFamily.value] || null)
+// What the chosen workflow renders at on its own, when Muse writes no canvas.
+const workflowCanvas = computed(() => {
+  const caps = catalog.value?.comfyui?.workflow_caps || []
+  return caps.find(c => c?.name === (inputs.value.workflow || ''))?.canvas || null
+})
 
 // The same rule the render uses (`runtime.render_settings`): a knob still at the
 // shipped default is the family's to fill in; a number he typed is his.
@@ -1697,7 +1702,8 @@ function isStruckRow(row) {
                   {{ t('muse.familyCfgFromWorkflow') }}
                 </span>
                 <span v-if="familyRow.canvas === 'workflow'" class="text-gray-500">
-                  {{ t('muse.familySizeFromWorkflow') }}
+                  {{ t('muse.familySizeFromWorkflow') }}<template v-if="workflowCanvas">
+                    （{{ workflowCanvas.width }}×{{ workflowCanvas.height }}）</template>
                 </span>
                 <span v-if="!familyRow.negative" class="text-gray-500">
                   {{ t('muse.familyNoNegative') }}
@@ -1738,7 +1744,7 @@ function isStruckRow(row) {
                     type="number" min="256" max="2048" step="8"
                     class="w-full rounded border border-gray-700 bg-gray-900 px-2 py-1.5"
                     :value="canvasValue('width')"
-                    :placeholder="t('muse.familySizeFromWorkflow')"
+                    :placeholder="String(workflowCanvas?.width || t('muse.familySizeFromWorkflow'))"
                     @change="patchInputs({ width: Number($event.target.value) })"
                   >
                 </label>
@@ -1748,7 +1754,7 @@ function isStruckRow(row) {
                     type="number" min="256" max="2048" step="8"
                     class="w-full rounded border border-gray-700 bg-gray-900 px-2 py-1.5"
                     :value="canvasValue('height')"
-                    :placeholder="t('muse.familySizeFromWorkflow')"
+                    :placeholder="String(workflowCanvas?.height || t('muse.familySizeFromWorkflow'))"
                     @change="patchInputs({ height: Number($event.target.value) })"
                   >
                 </label>

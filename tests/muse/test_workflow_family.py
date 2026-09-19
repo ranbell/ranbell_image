@@ -57,20 +57,36 @@ def test_a_marker_in_the_graph_beats_the_name():
     assert family.resolve_family("krea2_flux.json", unknown) == "krea2"
 
 
-def test_anima_is_read_from_the_defaults_never_copied():
-    """**The anti-regression pin.** If these drifted apart, every existing shoot
-    would quietly change the day a family was resolved for it."""
+def test_animas_steps_are_read_from_the_defaults_never_copied():
+    """20 and 30 earned their numbers on the 30-case pack. They stay where they
+    were validated, and this file reads them rather than restating them."""
     row = family.settings_for("anima")
     assert row["draft_steps"] == DRAFT_DEFAULTS["draft_steps"]
-    assert row["draft_cfg"] == DRAFT_DEFAULTS["draft_cfg"]
     assert row["final_steps"] == REFINE_DEFAULTS["final_steps"]
-    assert row["final_cfg"] == REFINE_DEFAULTS["final_cfg"]
     assert row["negative"] is True
 
     inputs = dict(ALL_DEFAULTS)
+    assert render_settings(inputs, draft=True, family="anima")["steps"] == 20
+    assert render_settings(inputs, draft=False, family="anima")["steps"] == 30
+
+
+def test_anima_leaves_cfg_and_canvas_to_the_workflow_too():
+    """**(2026-09-20)** The Showrunner: "cfg differs a great deal between image
+    models, so I want to use what is baked into the workflow", and the session
+    should follow the workflow's resolution — Muse's own size is for the pictures
+    in the roster.
+
+    So neither key is sent, and `patch_workflow` writes neither.
+    """
+    inputs = dict(ALL_DEFAULTS)
     for draft in (True, False):
-        assert render_settings(inputs, draft=draft, family="anima") == \
-            render_settings(inputs, draft=draft)
+        got = render_settings(inputs, draft=draft, family="anima")
+        assert "cfg" not in got
+        assert "width" not in got and "height" not in got
+
+    # The validated numbers are still on record as where an override starts.
+    assert DRAFT_DEFAULTS["draft_cfg"] == 4.0
+    assert REFINE_DEFAULTS["final_cfg"] == 4.5
 
 
 def test_krea2_asks_for_four_and_eight_and_leaves_cfg_alone():
@@ -97,9 +113,9 @@ def test_krea2_keeps_the_workflows_own_canvas():
     draft = render_settings(inputs, draft=True, family="krea2")
     assert "width" not in draft and "height" not in draft
 
-    # Anima keeps naming the canvas — its graphs build from a smaller latent.
+    # Anima is the same since 2026-09-20 — the session follows the graph.
     anima = render_settings(inputs, draft=True, family="anima")
-    assert (anima["width"], anima["height"]) == (inputs["width"], inputs["height"])
+    assert "width" not in anima and "height" not in anima
 
 
 def test_a_size_he_typed_beats_the_workflows_own():

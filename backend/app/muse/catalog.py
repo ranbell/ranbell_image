@@ -74,6 +74,10 @@ async def build_muse_catalog(
                     cap["has_openpose"] = bool(info.get("has_openpose"))
                     cap["can_inject_image"] = bool(info.get("can_inject_image"))
                     cap["family"] = family.resolve_family(name, wf)
+                    # What the graph renders at on its own — the panel shows this
+                    # where a family leaves the canvas to the workflow, so the
+                    # size is visible without opening ComfyUI.
+                    cap["canvas"] = info.get("canvas")
                 except Exception:
                     pass
                 workflow_caps.append(cap)

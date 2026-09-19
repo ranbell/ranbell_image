@@ -473,6 +473,49 @@ class ComfyUIClient:
                     queue.append(str(v[0]))
         return None
 
+    @classmethod
+    def _read_node_int_field(cls, wf: dict, node_id: str, key: str) -> int | None:
+        """The value a node's int field holds, following one wire when it is one.
+
+        The mirror of `_patch_node_int_field`, for saying what a graph is set to
+        without changing it — a workflow whose canvas Muse leaves alone still has
+        to be able to say what that canvas is.
+        """
+        node = (wf or {}).get(node_id)
+        if not isinstance(node, dict):
+            return None
+        cur = (node.get("inputs") or {}).get(key)
+        if isinstance(cur, bool):
+            return None
+        if isinstance(cur, (int, float)):
+            return int(cur)
+        if isinstance(cur, list) and len(cur) >= 1:
+            up = (wf or {}).get(str(cur[0]))
+            if isinstance(up, dict):
+                for field in ("value", "int", key):
+                    val = (up.get("inputs") or {}).get(field)
+                    if isinstance(val, (int, float)) and not isinstance(val, bool):
+                        return int(val)
+        return None
+
+    def workflow_canvas(self, workflow: dict) -> dict | None:
+        """The size the graph itself is set to render, or None when unreadable.
+
+        Read from the latent that feeds the sampler, the same node
+        `patch_workflow` would write to — so what is reported is what would run
+        if Muse wrote nothing.
+        """
+        latent_ids = self._find_latent_nodes_via_ksampler(workflow or {}) or [
+            k for k, v in (workflow or {}).items()
+            if isinstance(v, dict) and v.get("class_type") in self._LATENT_NODE_TYPES
+        ]
+        for lid in latent_ids:
+            width = self._read_node_int_field(workflow, lid, "width")
+            height = self._read_node_int_field(workflow, lid, "height")
+            if width and height:
+                return {"width": width, "height": height}
+        return None
+
     def inspect_workflow(self, workflow: dict) -> dict:
         """Detect OpenPose / ControlNet lineage and a safe LoadImage injection point.
 
@@ -514,6 +557,8 @@ class ComfyUIClient:
             "pose_nodes": pose_nodes,
             "controlnet_nodes": controlnet_nodes,
             "load_image_nodes": load_image_nodes,
+            # What the graph renders at when nobody writes a canvas into it.
+            "canvas": self.workflow_canvas(workflow or {}),
         }
 
     def patch_load_image_nodes(self, workflow: dict, image_name: str) -> tuple[dict, int]:

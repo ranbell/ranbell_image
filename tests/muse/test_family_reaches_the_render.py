@@ -84,20 +84,25 @@ async def test_a_krea2_workflow_renders_at_four_and_eight_with_no_negative(rende
 
 
 @pytest.mark.asyncio
-async def test_an_anima_workflow_renders_exactly_as_before(render):
-    """The pin. Nothing about an existing shoot moves."""
+async def test_an_anima_workflow_keeps_its_steps_and_its_negative(render):
+    """Anima's 20/30 and its negative are the half that did not change.
+
+    Its cfg and its canvas are the workflow's own since 2026-09-20 — sent as
+    nothing, so `patch_workflow` writes neither.
+    """
     db = _Db(_session("API_Anima_Hakushi_Fast.json"))
     comfy = MagicMock()
 
     await _board(db, comfy)
     kw = render.await_args.kwargs
-    assert (kw["steps"], kw["cfg"]) == (20, 4.0)
-    assert (kw["width"], kw["height"]) == (896, 1152)
+    assert kw["steps"] == 20
+    assert "cfg" not in kw and "width" not in kw and "height" not in kw
     assert "straw_hat" in kw["negative"]
 
     await _shoot(db, comfy)
     kw = render.await_args.kwargs
-    assert (kw["steps"], kw["cfg"]) == (30, 4.5)
+    assert kw["steps"] == 30
+    assert "cfg" not in kw
     assert "straw_hat" in kw["negative"]
 
 
@@ -107,7 +112,7 @@ async def test_a_workflow_that_says_nothing_is_anima(render):
     db = _Db(_session("my_workflow.json"))
     await _board(db, MagicMock())
     kw = render.await_args.kwargs
-    assert (kw["steps"], kw["cfg"]) == (20, 4.0)
+    assert kw["steps"] == 20 and "cfg" not in kw
 
 
 @pytest.mark.asyncio

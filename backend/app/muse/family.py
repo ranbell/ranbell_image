@@ -12,9 +12,10 @@ what cfg to ask for (**`None` means leave the workflow's own value alone**),
 whether a negative prompt is sent at all, and **who decides the size of the
 picture** — Muse's canvas, or the resolution the graph was saved at.
 
-**Anima's numbers are read from `defaults.py`, never copied.** That is what makes
-"nothing changes for existing shoots" structural rather than a promise: resolving
-an untouched session to `anima` gives back exactly what it gives back today.
+**Anima's steps are read from `defaults.py`, never copied** — 20 and 30 are the
+numbers that pack of 30 test cases was validated at. Its cfg and its canvas are
+the workflow's own (2026-09-20): those differ far more between checkpoints than
+between stages, and the graph already carries the answer its author chose.
 
 Resolution order is **marker → filename → anima**:
 
@@ -53,13 +54,21 @@ FAMILIES: dict[str, dict[str, Any]] = {
         "label": "Anima",
         # Read, not retyped: `defaults.py` is where these earned their numbers.
         "draft_steps": int(DRAFT_DEFAULTS["draft_steps"]),      # 20
-        "draft_cfg": float(DRAFT_DEFAULTS["draft_cfg"]),        # 4.0
         "final_steps": int(REFINE_DEFAULTS["final_steps"]),     # 30
-        "final_cfg": float(REFINE_DEFAULTS["final_cfg"]),       # 4.5
+        # **cfg belongs to the workflow (2026-09-20).** The Showrunner: "cfg
+        # differs a great deal between image models, so I want to use what is
+        # baked into the workflow." Muse used to write 4.0/4.5 into every graph —
+        # the numbers `defaults.py` validated on one checkpoint, sent to all of
+        # them. `defaults.DRAFT_DEFAULTS["draft_cfg"]` stays as the value an
+        # explicit override starts from.
+        "draft_cfg": None,
+        "final_cfg": None,
         "negative": True,
-        # Muse names the canvas. The Anima graphs build a picture in two passes
-        # from a smaller latent, so the size Muse asks for is the size it wants.
-        "canvas": CANVAS_MUSE,
+        # **The canvas belongs to the workflow too.** His call: the session
+        # renders at whatever the graph was saved at, and Muse's own size is kept
+        # for the pictures in the roster (`characters/board.SLOT_SIZE`), which are
+        # the ones that have to match each other.
+        "canvas": CANVAS_WORKFLOW,
     },
     FAMILY_KREA2: {
         "label": "krea2",
