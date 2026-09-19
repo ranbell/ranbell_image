@@ -70,9 +70,10 @@ from .ctx import refine_num_ctx
 
 logger = logging.getLogger(__name__)
 
-#: 席の CRAFT slot → 台帳の欄。`crew.CRAFT_SLOTS` が席→slot を持っているので、
-#: ここは slot→欄 の一段だけ。**一つの欄を複数の席が見てよい**（演出と振付は
-#: どちらも体、レイアウトと撮影はどちらも構図）—— classic もそうだった。
+#: A seat's CRAFT slot -> a ledger field. `crew.CRAFT_SLOTS` holds seat -> slot, so
+#: this is only the slot -> field step. **Several seats may look at one field**
+#: (staging and choreography are both the body; layout and camera are both the
+#: composition) — classic was the same.
 SLOT_FIELD: dict[str, str] = {
     "BODY": "beat",
     "SHAPE": "frame",
@@ -87,48 +88,61 @@ SLOT_FIELD: dict[str, str] = {
     "FINISH": "look",
 }
 
-#: 開幕の三席と、その順番。classic の `OPENING_ROLES` / `OPENING_SEQUENCE` と同じ。
-#: **衣装が先に着せ、撮影が着せた姿を切り、主演が最後に演じる** —— 開幕で服に
-#: 持ち主が居ないと、空の台帳に最初に書く席が服まで書いてしまう（classic の実測）。
+#: The three opening seats and their order — the same as classic's `OPENING_ROLES` /
+#: `OPENING_SEQUENCE`. **Wardrobe dresses her first, the camera frames what she is
+#: wearing, and the lead performs last** — with nobody owning the clothes at the
+#: opening, whichever seat writes into the empty ledger first writes the clothes too
+#: (measured in classic).
 OPENING_SEQUENCE: tuple[str, ...] = ("wardrobe", "lens", "actress")
 
-#: ノートのターンでペンを持たない席。classic の `NOTE_MUTED` と同じ。
-#: 監査と密度上げの仕事は、手帖が正本になった時点で別の段に移っている。
+#: The seats that hold no pen on a notebook turn — the same as classic's
+#: `NOTE_MUTED`. The auditing and density work moved to another stage once the
+#: notebook became the record of truth.
 MUTED: frozenset[str] = frozenset(
     getattr(crew, "NOTE_MUTED", None) or getattr(crew, "BANTER_ONLY", ())
 )
 
 _CRAFT_LINE_RE = re.compile(r"(?im)^CRAFT\s*:\s*(.+?)\s*$")
 
-#: 席の出力書式。**classic の条文の末尾を上書きする。**（2026-09-11）
+#: The seat's output format. **It overrides the tail of classic's contract.**
+#: (2026-09-11)
 #:
-#: `crew.system_prompt_for` は職能文（「TAGS と SCENE は書くな、君の CRAFT slot は
-#: LIGHT だ」）のすぐ後ろに classic の `OUTPUT`（SAY / TAGS / SCENE の三ブロック）
-#: を足す。条文の中で矛盾していて、**最後に読んだ側が勝つ** —— 実機で衣装の席が
-#: TAGS を35語並べて返してきた（`CRAFT:` は一行も無し）。
+#: `crew.system_prompt_for` adds classic's `OUTPUT` (the three blocks SAY / TAGS /
+#: SCENE) directly after the job description ("do not write TAGS or SCENE; your
+#: CRAFT slot is LIGHT"). The contract contradicts itself, and **whichever was read
+#: last wins** — live, the wardrobe seat came back with 35 words of TAGS and not one
+#: line of `CRAFT:`.
 #:
-#: 手帖が正本の studio では、この矛盾は classic 側の別の経路で解けていた。
-#: Refine は自分の書式を**いちばん後ろに**足して解く。女優の条文（`REFINE_OUTPUT`）
-#: と W撮りの `w_output_block` でもう二度使っている手。
-#: **席の出力の形。ここが唯一の形式**（前の形式を打ち消す一行から始まる）。
+#: In the studio where the notebook is the record of truth, this contradiction was
+#: resolved by another road on classic's side. Refine resolves it by adding its own
+#: format **right at the end** — a trick already used twice, in the actress's
+#: contract (`REFINE_OUTPUT`) and in the duet's `w_output_block`.
+#: **The shape of a seat's output. This is the one format** (it opens with a line
+#: cancelling any format above).
 #:
-#: 言語と声の規則は `crew.OUTPUT` にあったが、あちらは classic の三ブロック
-#: （SAY/TAGS/SCENE）向けで、席は TAGS も SCENE も書かない。打ち消される側を
-#: 毎席 2,812字送っていたので外し、**効いていた二行だけこちらへ引き取った**
-#: （2026-09-13）。`crew.OUTPUT` は女優の前置き（一人撮りの正本）で今も現役。
-#: **席の口調を保つ段。**（2026-09-13）
+#: The rules for language and voice lived in `crew.OUTPUT`, which is written for
+#: classic's three blocks (SAY/TAGS/SCENE) while a seat writes neither TAGS nor
+#: SCENE. The cancelled side was being sent to every seat at 2,812 characters, so it
+#: was removed and **only the two lines that were biting were taken over here**
+#: (2026-09-13). `crew.OUTPUT` is still in service in the actress's preamble (the
+#: record of truth for a solo shoot).
+#: **The block that keeps each seat's voice.** (2026-09-13)
 #:
-#: 総監督「Muse Classic 時代にあった、スタッフ別の口調がなくなって均一化した気が
-#: します」。数えたら本当だった —— 席の発言の **46% が「総監督、」で始まり、
-#: 42% が同じ4文字で切り出していた**。原因は前日 `crew.OUTPUT` を席から外した
-#: とき、その中の SAY の段（魅せる指示）が一緒に落ちたこと。
+#: The Showrunner: "the per-crew way of speaking that Muse Classic had seems to have
+#: gone and flattened out". Counted, it was true — **46% of the seats' lines opened
+#: with 「総監督、」 ("Showrunner,") and 42% began with the same four characters**.
+#: The cause was that removing `crew.OUTPUT` from the seats the day before took its
+#: SAY block (the instruction to make it engaging) with it.
 #:
-#: 実測（台・同じ材料・n=2）:
+#: Measured (the rig, same material, n=2):
 #:
-#:     いまの条文    総監督で開く 46%  同じ4字 42%  語の重なり 3.2%  1周 117.5s
-#:     この段を戻す   総監督で開く  8%  同じ4字 21%  語の重なり 0.4%  1周 118.3s
+#:     as it was      opens on "Showrunner" 46%  same 4 chars 42%
+#:                    word overlap 3.2%  one round 117.5s
+#:     block restored opens on "Showrunner"  8%  same 4 chars 21%
+#:                    word overlap 0.4%  one round 118.3s
 #:
-#: **時間は変わらない**（+0.7%）。前日の削り（-19%）は損なわない。
+#: **The time does not change** (+0.7%). The previous day's cut (-19%) is not
+#: undone.
 SEAT_VOICE = """
 YOUR SAY IS ENTERTAINMENT AS MUCH AS CRAFT — captivate the Showrunner.
 - Charm first: warmth, playfulness, a little tease, a vivid image in words.
@@ -158,11 +172,12 @@ Omit the whole CRAFT line when your slot should not move this turn.
 """.strip()
 
 
-#: 束ねた回（欄ごとの会議）の出力の形。**一席の `SEAT_OUTPUT` と同じ約束** ——
-#: 最後に読んだ形式が勝つので、前置きの末尾に置く。
+#: The output shape for a bundled turn (a field corner). **The same promise as a
+#: single seat's `SEAT_OUTPUT`** — the format read last wins, so it goes at the end
+#: of the preamble.
 #:
-#: 違いは二つだけ: 席の数だけ `SPEAKER:` + `SAY:` の組を出すことと、
-#: **CRAFT は最後に一行だけ**（欄の結論）であること。
+#: There are only two differences: one `SPEAKER:` + `SAY:` pair per seat, and
+#: **CRAFT only once, at the end** (the field's conclusion).
 GROUP_OUTPUT = """
 OUTPUT FORMAT — this REPLACES any format above. Nothing else in the reply:
 
@@ -184,7 +199,8 @@ CRAFT: <danbooru tags> | <short prose>
 """.strip()
 
 
-#: 班が開いているセッションの印。**総監督が明示的に開けたときだけ立つ。**
+#: The mark on a session that has a crew open. **It is raised only when the
+#: Showrunner opened it explicitly.**
 TABLE_OPEN = "crew_open"
 
 
@@ -245,7 +261,7 @@ def opening_seats(cast: list[str]) -> list[str]:
     return sorted(seats, key=lambda m: rank.get(crew.role_of(m) or "", 99))
 
 
-#: CRAFT 行の上限。**語の途中では切らない。**（2026-09-18）
+#: The cap on a CRAFT line. **Never cut mid-word.** (2026-09-18)
 CRAFT_MAX = 280
 
 
@@ -308,8 +324,8 @@ def pick_reactor(session: dict[str, Any], cast: list[str], *,
         return None
     if mode == "light" and crew.role_of(current) != "actress" and index % 2 == 0:
         return None
-    # 主演には固定の取り分を渡す —— 前席が総取りすると、18席の撮影で彼女の
-    # 台詞が三行しか残らなかった（classic の実測）。
+    # The lead gets a fixed share — with the seats before her taking everything,
+    # an 18-seat shoot left her only three lines (measured in classic).
     lead = _in_role(cast, "actress")
     if lead and lead != current and index % 4 == 1:
         return lead
@@ -367,12 +383,15 @@ def seat_name(session: dict[str, Any], muse_id: str) -> str:
     return role
 
 
-#: 班が置いた語の控え（`session[CREW_WORDS][欄] = [語, …]`）。（2026-09-14）
+#: A record of the words the crew placed (`session[CREW_WORDS][field] = [word, …]`).
+#: (2026-09-14)
 #:
-#: **誰の語かを覚えておくためだけの帳面。** 欄の会議は「今はこうなっている、
-#: どう変えるか」を決めるので、結論は欄の**全体**になる。そのとき総監督の言葉まで
-#: 書き換えてしまっては困るので、班は**自分が置いた語だけ**言い直せる、とする。
-#: 印の無い古いセッションは全語を総監督のものとして扱う（消えない側に倒す）。
+#: **A ledger kept only to remember whose words are whose.** A field corner decides
+#: "this is how it stands; how shall we change it", so its conclusion is **the whole
+#: field**. Since rewriting the Showrunner's words in the process would be wrong,
+#: the crew may restate **only the words it placed itself**. An older session with
+#: no record has all its words treated as the Showrunner's (erring toward not
+#: erasing).
 CREW_WORDS = "crew_words"
 
 
@@ -617,7 +636,8 @@ async def _seat_turn(ollama, session: dict[str, Any], muse_id: str, *,
 
 _SPEAKER_RE = re.compile(r"(?im)^[ \t>*_#-]*SPEAKER\s*:\s*(.+?)\s*$")
 
-#: 行頭に付く飾り。模型は `**SPEAKER: …**` や `- SPEAKER:` と書くことがある。
+#: Decoration at the start of a line. The model sometimes writes
+#: `**SPEAKER: …**` or `- SPEAKER:`.
 _DECOR = " \t*_#>-"
 
 
@@ -638,9 +658,10 @@ def _match_speaker(token: str, seats: list[str],
     """
     raw = str(token or "").strip().strip("`*_ 「」【】")
     low = raw.lower()
-    # **区切りの揺れを均す（2026-09-18）。** 実機で模型が `cut-out:sukima` と
-    # 書き、id（`cutout:sukima`）に当たらず「まだ喋っていない席の先頭」へ
-    # 落ちた —— たまたま正解だったが、席順の運に預けている形だった。
+    # **Normalise the separators (2026-09-18).** Live, the model wrote
+    # `cut-out:sukima`, which did not match the id (`cutout:sukima`) and fell
+    # through to "the first seat that has not spoken yet" — right by luck, but a
+    # shape that trusts the seating order.
     flat = re.sub(r"[\s_\-]+", "", low)
     for mid in seats:
         mid_low = mid.lower()
@@ -692,7 +713,8 @@ def split_packed(raw: str, seats: list[str]) -> tuple[list[tuple[str, str]], str
             used.append(mid)
             rows.append((mid, say))
     else:
-        # **形式を守らなかった回も落とさない。** 丸ごと先頭の席の発言にする。
+        # **A turn that broke the format is not dropped either.** The whole thing
+        # becomes the first seat's line.
         say = identity.sanitize_muse_say(body, locale="ja")
         if say.strip() and seats:
             rows = [(seats[0], say)]
@@ -729,9 +751,10 @@ def _packed_stream(session: dict[str, Any], seats: list[str]):
             logger.debug("[muse] packed stream emit failed", exc_info=True)
 
     def _switch(token: str) -> None:
-        # **`used` を持って渡す（2026-09-16）。** 空で呼んでいたので、名前が
-        # 当たらないと毎回 `seats[0]` に落ち、**二人目の言葉が一人目の吹き出しに
-        # 積まれていた**（総監督「Muse同士の会話が混ざる」）。
+        # **Pass `used` through (2026-09-16).** It was called empty, so a name
+        # that did not match fell to `seats[0]` every time and **the second
+        # person's words piled into the first person's bubble** (the Showrunner:
+        # "the Muses' conversations get mixed up").
         mid, hit = _match_speaker(token, seats, st["used"])
         if mid:
             st["used"].append(mid)
@@ -741,13 +764,13 @@ def _packed_stream(session: dict[str, Any], seats: list[str]):
                 "name": seat_name(session, mid),
             })
         if not hit:
-            # 黙って間違えない —— 当たらなかった名札は記録に残す。
+            # Never wrong silently — a name tag that did not match is recorded.
             debug_mod.note(session, "corner_speaker_miss",
                            detail=f"{token.strip()[:40]!r} → {mid}")
 
     def _feed(text: str) -> None:
         for ch in str(text or ""):
-            if st["id"] is not None:          # `SPEAKER: …` の行を読んでいる
+            if st["id"] is not None:          # reading a `SPEAKER: …` line
                 if ch == "\n":
                     _switch(st["id"])
                     st["id"] = None
@@ -757,9 +780,10 @@ def _packed_stream(session: dict[str, Any], seats: list[str]):
                 continue
             if st["bol"]:
                 cand = st["hold"] + ch
-                # **飾りを許す（2026-09-16）。** `**SPEAKER: …**` と書かれると
-                # 行頭が `*` で始まるので欄名に育たず、ラベルごと前の席の吹き出しへ
-                # 流れていた。`_SAY_OPEN_RE` が昔から許しているのと同じ飾り。
+                # **Allow the decoration (2026-09-16).** Written as
+                # `**SPEAKER: …**` the line starts with `*`, so it never grew into a
+                # field name and flowed, label and all, into the previous seat's
+                # bubble. The same decoration `_SAY_OPEN_RE` has always allowed.
                 bare = cand.strip(_DECOR).lower()
                 if (not bare and len(cand) <= len(_DECOR)) or (bare and word.startswith(bare)):
                     st["hold"] = cand
@@ -845,13 +869,16 @@ async def run_table(db, ollama, session: dict[str, Any], *,
     cast = cast_of(session)
     if not cast:
         return []
-    # **会話のターンに主演の席は置かない（2026-09-16）。** 総監督「会話が Muse と
-    # 班で混ざる」。実機の1ターンで彼女は **席 → やじ → 本人の台詞 → 内心 → 確認**
-    # と4〜5回出ていた。席としての彼女は**欄を持たない**ので台帳には何も書かず、
-    # それでいて `seat_actress` は一周でいちばん重い（24〜28秒）。
+    # **The lead has no seat on a conversation turn (2026-09-16).** The Showrunner:
+    # "the conversation gets mixed up between Muse and the crew". In one live turn
+    # she appeared four or five times — **seat -> banter -> her own line -> mutter ->
+    # confirmation**. As a seat she **owns no field**, so she writes nothing into the
+    # ledger, and `seat_actress` is still the heaviest stop on the round (24-28
+    # seconds).
     #
-    # **開幕には残す** —— 衣装 → 撮影 → 主演で当たりを付ける段は彼女の仕事。
-    # やじ役・横やり役としての出番もそのまま（`pick_reactor` が取り分を渡す）。
+    # **She stays in the opening** — the wardrobe -> camera -> lead pass that sets
+    # the first marks is her job. Her turns as the one who reacts or cuts in are
+    # unchanged too (`pick_reactor` hands her a share).
     seats = (opening_seats(cast) if opening
              else writing_seats(cast, without=("actress",)))
     if not seats:
@@ -874,8 +901,9 @@ async def run_table(db, ollama, session: dict[str, Any], *,
                     ),
                 )
             except Exception:
-                # **一席が黙っても撮影は続く。** 班は18人居るので、一人の失敗で
-                # ターンごと落とす理由がない。記録だけ残して次の席へ。
+                # **The shoot goes on when one seat falls silent.** There are 18
+                # on the crew, so there is no reason for one failure to drop the
+                # whole turn. Record it and move to the next seat.
                 logger.warning("[muse] seat %s said nothing", muse_id, exc_info=True)
                 debug_mod.note(session, "seat_failed", detail=muse_id)
                 continue
@@ -899,14 +927,16 @@ async def run_table(db, ollama, session: dict[str, Any], *,
             debug_mod.stage(session, f"corner_{field}", t0)
             rows, craft = split_packed(raw, group)
             if len(rows) < len(group):
-                # **黙って人数が減ったことにしない。** 形式を守らなかった回は
-                # 台詞が畳まれるので、記録に残して後から数えられるようにする。
+                # **The headcount does not silently shrink.** On a turn that broke
+                # the format the lines get folded together, so it is recorded and
+                # can be counted afterwards.
                 debug_mod.note(
                     session, "corner_thin",
                     detail=f"{field}: {len(rows)}/{len(group)}席",
                 )
 
-        # 発言を積む。**欄の結論は一つ**なので、craft は閉めの一人に付ける。
+        # Stack the lines. **A field has one conclusion**, so the craft goes on
+        # whoever closes.
         spoke: list[tuple[str, str]] = []
         for i, (muse_id, say) in enumerate(rows):
             last = i == len(rows) - 1
@@ -926,7 +956,8 @@ async def run_table(db, ollama, session: dict[str, Any], *,
         if not spoke:
             continue
 
-        # やじは**会議ごとに一度**（束ねた中では席どうしが既に react している）。
+        # Banter happens **once per corner** (inside a bundle the seats are already
+        # reacting to each other).
         closer, closing_say = spoke[-1]
         before, previous = previous, closer
         if not str(closing_say).strip():
@@ -978,34 +1009,40 @@ def craft_tags(craft: str) -> str:
     What is wanted here is **material for the ledger** only.
     """
     left = str(craft or "").split("|", 1)[0]
-    # **手帖の欄名が頭に付いてくる（2026-09-11 実測）。** 席の職能文は
-    # `BEAT` `WEARING` `ATMOSPHERE` といった手帖のラベルを名指しで説明して
-    # いるので、模型がそれを CRAFT の頭に写す:
+    # **The notebook's field name comes attached to the front (measured
+    # 2026-09-11).** A seat's job description explains the notebook's labels by name
+    # — `BEAT`, `WEARING`, `ATMOSPHERE` — so the model copies one onto the front of
+    # CRAFT:
     #
     #     CRAFT: BEAT: standing still, eyes towards the light | …
-    #     CRAFT: ATMOSPHERE: | …        ← 中身が無いことすらある
+    #     CRAFT: ATMOSPHERE: | …        <- sometimes with no content at all
     #
-    # 台帳に `wearing: "BEAT: standing still…"` と `bg: "ATMOSPHERE:"` が
-    # 着いた。条文でも禁じたが、**届く手前でも落とす** —— 模型の行儀に
-    # 台帳の綺麗さを預けない。
-    # 剥がし方は台帳と同じ一本（`ledger.strip_field_label`）。二つ持つと必ずずれる。
+    # The ledger ended up with `wearing: "BEAT: standing still…"` and
+    # `bg: "ATMOSPHERE:"`. The contract forbids it as well, and **it is dropped
+    # before arrival too** — the tidiness of the ledger is not entrusted to the
+    # model's manners.
+    # The stripping is the ledger's own one function (`ledger.strip_field_label`).
+    # Keep two and they will drift apart.
     left = ledger_mod.strip_field_label(left)
     return " ".join(left.split()).strip(" ,")
 
 
-#: **班が作り直してよい欄。**（2026-09-14）
+#: **The fields the crew may rebuild.** (2026-09-14)
 #:
-#: 総監督「美術や色彩などでいい提案しているのに、それらがプロンプトに乗ってこない
-#: のはやっぱりもったいない」。席は台帳に触れず、材料を台本係へ渡す。その台本係は
-#: 監督の一行にある欄しか直さないので、**名指しされなかった欄の craft は構造的に
-#: どこにも着地しない**（台帳25本で `look` 88%・`atmosphere` 76% が空のまま）。
+#: The Showrunner: "the art and colour seats make good proposals and it really is a
+#: waste that they never reach the prompt". The seats do not touch the ledger; they
+#: hand material to the writer. That writer fixes only the fields named in the
+#: director's line, so **the craft for any unnamed field structurally lands nowhere**
+#: (across 25 ledgers, `look` was empty in 88% and `atmosphere` in 76%).
 #:
-#: **姿勢・表情・服は入れない。** あちらは一つの体の掃除（`ledger.one_body`）が
-#: 効いている場所で、班の言葉は `craft_block` 経由で台本係に渡る。
+#: **Pose, expression and clothes are not included.** Those are where the one-body
+#: cleanup (`ledger.one_body`) is at work, and the crew's words reach the writer
+#: through `craft_block`.
 CREW_FIELDS: tuple[str, ...] = ("bg", "light", "frame", "atmosphere", "look")
 
-#: 会議が出せる結論の語数と、欄ぜんぶの上限。
-#: **結論は欄の全体**なので、班の語は毎ターン置き換わる（増え続けない）。
+#: How many words a corner's conclusion may hold, and the cap across all fields.
+#: **A conclusion is the whole field**, so the crew's words are replaced each turn
+#: rather than growing.
 FIELD_CONCLUSION_MAX = 6
 FIELD_CAP = 12
 
@@ -1090,7 +1127,8 @@ def field_land(
     cur = {**ledger_mod.blank(), **(ledger or {})}
     said = crew_words_of(session)
 
-    # 欄ごとの結論を集める。**一欄一つ**だが、形式が崩れた回のために席順で畳む。
+    # Collect each field's conclusion. **One per field**, folded in seat order for
+    # turns where the format broke.
     agreed: dict[str, list[str]] = {}
     for row in floor:
         field = str(row.get("field") or "")
@@ -1105,17 +1143,19 @@ def field_land(
     for field, tags in agreed.items():
         have = [t.strip() for t in str(cur.get(field) or "").split(",") if t.strip()]
         mine = {t.lower() for t in said.get(field, [])}
-        keep = [t for t in have if t.lower() not in mine]      # 総監督の言葉
+        keep = [t for t in have if t.lower() not in mine]      # the Showrunner's words
         fresh: list[str] = []
         for tag in talk.filter_banned_tags(session, tags, ledger=cur):
             if len(fresh) >= FIELD_CONCLUSION_MAX or len(keep) + len(fresh) >= FIELD_CAP:
                 break
-            # **同じものを二度言わない**（語の境目＋語の重なりで見る）。
+            # **Nothing is said twice** (matched on word boundaries plus word
+            # overlap).
             if any(_too_close(tag, t) for t in keep + fresh):
                 continue
             fresh.append(tag)
         value = ", ".join(keep + fresh)
-        # 空にはしない（欄を消すのは班の仕事ではない）。変わらないなら黙っている。
+        # Never emptied (erasing a field is not the crew's job). Unchanged means
+        # nothing is said.
         if not value or value == ", ".join(have):
             continue
         patch[field] = value
@@ -1146,10 +1186,11 @@ def craft_block(floor: list[dict[str, Any]]) -> str:
         "it.** Keep what the director already put in the field and fold the "
         "seat's detail in beside it — a wardrobe note about fabric never "
         "removes the garment, a gaffer note never removes the director's hour. "
-        # **積み上げではない（2026-09-12）。** 同じ欄を複数の席が見るので、
-        # 「横に足せ」だけだと言い換えと矛盾が積もる（実機で beat が 13語に
-        # なり、体重が二箇所・腰が二方向になった）。足せるのは**まだ言って
-        # いないこと**だけ、と明示する。
+        # **Not an accumulation (2026-09-12).** Several seats look at the same
+        # field, so "just append" piles up paraphrases and contradictions (live,
+        # `beat` reached 13 words with the weight in two places and the hips facing
+        # two ways). It states explicitly that only **what has not been said yet**
+        # may be added.
         "FOLD IN ONLY WHAT IS NOT THERE YET: when a seat says in other words "
         "something the field already says, or says the opposite of it, the "
         "field keeps what it has. Never let the same part of the body, or the "
@@ -1157,8 +1198,9 @@ def craft_block(floor: list[dict[str, Any]]) -> str:
     ]
     for field in ledger_mod.LEDGER_KEYS:
         if field in by_field:
-            # 一欄一行。席の名前も落とす —— 誰が言ったかは会話欄に出ている。
-            # ここに書くと、名前まで欄に写す（実機で踏んだ）。
+            # One line per field. The seat's name is dropped too — who said it is
+            # visible in the conversation. Written here, the name gets copied into
+            # the field as well (hit live).
             seen: list[str] = []
             for tags in by_field[field]:
                 for t in (x.strip() for x in tags.split(",")):
