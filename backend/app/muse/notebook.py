@@ -20,37 +20,43 @@ from ..tags import catalog as tag_catalog
 SHOT_KEYS = (
     "atmosphere",
     "scene",
-    # 彼女以外に画面に写っているもの。背後の建物、周りのエキストラ、置かれた
-    # 小道具。**現場ではこれを BG と呼ぶ**（Background の略で、無線に乗る）。
+    # What is in frame besides her: the building behind, the extras around, the
+    # props that have been placed. **On set this is called BG** (short for
+    # background, and it goes out over the radio).
     #
-    # 無かった間、監督が「後ろにあの建物」「周りに他のレイヤーさん」と何度
-    # 言っても、置き場が無いので絵から消えていた。実撮影（コミケ）では監督が
-    # 場所を4回言い、撮影3本のうち2本に建物も人混みも入らなかった。
+    # While it did not exist, however often the director said 「後ろにあの建物」
+    # ("that building behind her") or 「周りに他のレイヤーさん」 ("other cosplayers
+    # around"), it had nowhere to go and vanished from the picture. In a real shoot
+    # (Comiket) the director named the place four times and two of the three takes
+    # had neither the building nor the crowd.
     #
-    # 名前は測って決めた。7本 × 10回で `set` `backdrop` `scenery` はどれも
-    # 届かず、`BG` だけが届いた（44% → 68%）。`backdrop` はこのライブラリに
-    # 1枚も無い語で、`set_dressing` も `extras` も `mob` も 0 枚。
-    # **現場で実際に使われている語だけが通った。**
+    # The name was decided by measurement. Over 7 cases x 10 runs, `set`, `backdrop`
+    # and `scenery` all failed to land and only `BG` did (44% -> 68%). `backdrop`
+    # does not appear on a single image in this library, and `set_dressing`,
+    # `extras` and `mob` are all zero. **Only the word actually used on set got
+    # through.**
     "bg",
     # Where the light comes from and how hard it is. Its own field because it is
     # its own decision: the crewed studio has a seat that owns exposure and a
-    # PLAN line that owns the intent, and 主演撮り had neither — 「逆光にして」
+    # PLAN line that owns the intent, and the lead shoot (主演撮り) had neither —
+    # 「逆光にして」 ("make it backlit")
     # could only land inside scene or atmosphere, both of which are rewritten
     # for other reasons, so it was gone again a turn later.
     "light",
     "frame",
     "wearing",
     "beat",
-    # **顔には置き場が無かった。** 係の条文が「顔は beat に入れろ」と言って
-    # いたので、身体が動かないターンでは表情がどこにも書かれない ——
-    # 総監督（2026-08-29）「intent/note に表情がないので beat が反応しない
-    # 限り無表情」。実データでも、手帖の `smiling warmly` はタグに落ちず、
-    # 逆に手帖に無い `calm_expression` が weave から出ていた。
+    # **The face had nowhere to go.** The clerk's contract said "put the face into
+    # beat", so on a turn where the body does not move the expression was written
+    # nowhere — the Showrunner (2026-08-29): "there is no expression in intent/note,
+    # so unless beat reacts she is expressionless". In real data, the notebook's
+    # `smiling warmly` never became a tag, while a `calm_expression` that was not in
+    # the notebook came out of weave.
     #
-    # 欄名は測って決めた（`BG` と同じやり方・5回×5件）。`FACE` /
-    # `EXPRESSION` / `MOOD_FACE` はどれも 15/15 で、余計な書き込みも 0/10 ——
-    # **背景のときと違って差が出ない**ので、班（`facets`）が既に使っている
-    # `expression` に揃える。
+    # The field name was decided by measurement (the same way as `BG`, 5 runs x 5
+    # cases). `FACE`, `EXPRESSION` and `MOOD_FACE` were all 15/15 with 0/10 stray
+    # writes — **unlike the background case, no difference shows**, so it matches
+    # `expression`, which the crew (`facets`) already uses.
     "expression",
     "wearing_b",
     "beat_b",
@@ -60,12 +66,13 @@ SHOT_KEYS = (
 META_KEYS = ("vibe", "standing")
 
 _ALL_KEYS = SHOT_KEYS + META_KEYS
-# 撮影1本ぶんが残る長さ。12 だと実撮影の前半が消えていた —— コミケの回は
-# 監督の発言が 21 ターンあったのに直近12件しか残らず、「場所がいつ入ったか」
-# を追えなかった（言い直しや fold を含めると 1 撮影で 50 件前後になる）。
+# Long enough to hold one whole shoot. At 12 the first half of a real shoot
+# disappeared — the Comiket session had 21 turns of the director's lines and only
+# the last 12 were kept, so "when did the place go in" could not be traced
+# (restatements and folds included, one shoot runs to about 50 entries).
 #
-# 計器パネルの表示は 12 のまま（`MusePanel.vue`）。**直近が見たい画面と、
-# 後から追う記録では要る長さが違う。**
+# The instrument panel still shows 12 (`MusePanel.vue`). **A screen that wants the
+# most recent and a record to trace back through need different lengths.**
 REWRITE_LOG_MAX = 60
 _REWRITE_FIELDS = SHOT_KEYS + ("vibe",)
 
@@ -118,24 +125,25 @@ def has_shot(nb: dict[str, Any]) -> bool:
     ))
 
 
-# ── 欄の契約 ────────────────────────────────────────────────────────────
-# **ノートに触る全員が、同じ一つの定義を読む。** 8/19 に測って分かったことは、
-# 定義が無かったのではなく **3通りに割れていて、一番正確なものが誰にも見えて
-# いなかった** ということだった:
+# ── The field contracts ─────────────────────────────────────────────────
+# **Everyone who touches the notebook reads the same single definition.** What the
+# measurement on 08-19 showed was not that a definition was missing but that **it
+# was split three ways and the most accurate one was visible to nobody**:
 #
-#   彼女 (DUET_TALK_OUTPUT)     FRAME: <camera / gaze>
-#   compile (SCRIPTER_SYSTEM)   frame names ONE crop      ← 視線の記述が無い
-#   写真読み (STILL_READ)       FRAME: camera and gaze
-#   言い直し (_RESTATE_FIELDS)  …Crop plus gaze. Not where you are looking;
-#                               that is the frame.        ← 正確。だが restate
-#                                                            のターンでしか出ない
+#   her (DUET_TALK_OUTPUT)        FRAME: <camera / gaze>
+#   compile (SCRIPTER_SYSTEM)     frame names ONE crop    <- says nothing about gaze
+#   photo read (STILL_READ)       FRAME: camera and gaze
+#   restate (_RESTATE_FIELDS)     …Crop plus gaze. Not where you are looking;
+#                                 that is the frame.      <- accurate, but only ever
+#                                                            seen on a restate turn
 #
-# ノートを毎ターン書いているのは compile で、そこには視線の帰属が書かれて
-# いなかった。だから「カメラ見て」が frame に入り、beat の `looking at cake`
-# は残り、weave は具体的なほう（beat）を採った。総監督は3回言い直した。
+# What writes the notebook every turn is compile, and gaze ownership was not written
+# there. So 「カメラ見て」 ("look at the camera") went into frame, beat kept its
+# `looking at cake`, and weave took the more concrete of the two (beat). The
+# Showrunner said it again three times.
 #
-# 直し方は新しい規則を足すことではない。**一番正確な版を唯一の出典にして、
-# 読む側にも書く側にも同じものを見せる。**
+# The fix is not to add a new rule. **Make the most accurate version the one source,
+# and show the same thing to the readers and the writers alike.**
 FIELD_CONTRACTS: dict[str, str] = {
     "atmosphere": (
         "the mood, and only the mood. No clock, no weather-as-hour, no "
@@ -162,26 +170,32 @@ FIELD_CONTRACTS: dict[str, str] = {
         "looking straight into the lens'. ONE crop — zoom/close/upper OR "
         "wide/full-body, never both `wide_shot` and `close_up` in the same "
         "frame — plus the gaze. Nothing about her hands or her clothes.\n"
-        # 実撮影（ブランコ・2026-08-21）で、監督が「カメラを少し上から」と
-        # 言ったターンを compile は `high-angle` と正しく書き、その直後の
-        # 言い直しが `low-angle` に化けさせた。理由の欄にはこう残っていた:
+        # In a real shoot (the swing, 2026-08-21), on the turn where the director
+        # said 「カメラを少し上から」 ("the camera a little from above") compile
+        # correctly wrote `high-angle`, and the restatement immediately after turned
+        # it into `low-angle`. The reason field held this:
         #
-        #   「カメラが高い位置にあるんですね」という理解と…指示通りの構図
-        #   （被写体を見上げるアングル）に彼女が合わせようとしていることを読み取った
+        #   an understanding of "so the camera is up high" and … a reading that she
+        #   is trying to match the composition as instructed (an angle looking up at
+        #   the subject)
         #
-        # **カメラの位置は正しく分かっていて、語だけが逆。** 監督は次のターンで
-        # 「from above っていうんだよ。ローアングルじゃないよ」と訂正している。
+        # **The camera position was understood correctly and only the word was
+        # inverted.** On the next turn the director corrected it: "it is called from
+        # above. It is not a low angle."
         #
-        # 直すとき、最初は「カメラの高さと視線は逆になる」と説明を書いた。
-        # 8回中5回しか保たず、会話に彼女の「上目遣いすぎかな？」が入ると 0/8。
-        # 本人の弁:「`she looks UP into it` という記述が、逆にノイズになっている。
-        # **Up/Down という単語が視覚的フックになっている**以上、徹底的に排除する」。
+        # The first fix was to explain that the camera height and the gaze run
+        # opposite ways. That held only 5 times in 8, and 0/8 once her 「上目遣いす
+        # ぎかな？」 ("is this too much of an upward glance?") entered the
+        # conversation. In its own words: "the description `she looks UP into it` is
+        # itself the noise. As long as **the words up and down are visual hooks**,
+        # remove them thoroughly."
         #
-        #   視線も書く（up/down を含む）      0/8
-        #   位置だけに絞る                    7/8   ← これ
-        #   位置だけ＋「逆を向くことが多い」    0/8
+        #   gaze written too (up/down included)      0/8
+        #   position only                            7/8   <- this one
+        #   position only + "they often run opposite" 0/8
         #
-        # **取り違えを説明しようとすると、説明に使う語が取り違えの材料になる。**
+        # **Try to explain the mix-up and the words used to explain it become the
+        # material for the mix-up.**
         "  The angle word names where the camera stands, never where she "
         "looks. Camera above her: `high_angle`. Camera below her: "
         "`low_angle`. Her eyes have no vote in it."
@@ -196,10 +210,10 @@ FIELD_CONTRACTS: dict[str, str] = {
         "NOT where she is looking: that is the frame. NOT her face: that is "
         "expression."
     ),
-    # **顔には置き場が無かった。** 係の条文が「顔は beat に入れろ」と言って
-    # いたので、身体が動かないターンでは表情がどこにも書かれない。実データ
-    # でも、手帖の `smiling warmly` はタグに落ちず、逆に手帖に無い
-    # `calm_expression` が weave から出ていた。
+    # **The face had nowhere to go.** The clerk's contract said "put the face into
+    # beat", so on a turn where the body does not move the expression was written
+    # nowhere. In real data, the notebook's `smiling warmly` never became a tag,
+    # while a `calm_expression` that was not in the notebook came out of weave.
     "expression": (
         "her face — the mouth, the eyes, the brows. A mood she plays goes here, "
         "not in atmosphere: that one is the picture's mood, this one is hers."
@@ -357,8 +371,8 @@ _SHOT_FIELD_CAPS: dict[str, int] = {
 
 # Gaze used to be scrubbed out of BEAT here with a keyword regex. It is a rule
 # in SCRIPTER_SYSTEM now: the scripter reads the conversation and writes the
-# frame as one camera story. A word list cannot tell "見上げる" the pose from
-# "見上げる" the lens, and every phrase it missed shipped anyway.
+# frame as one camera story. A word list cannot tell "見上げる" ("look up") the pose
+# from "見上げる" the lens, and every phrase it missed shipped anyway.
 
 _TOKEN_RE = re.compile(r"[a-z][a-z0-9_]{2,}")
 
@@ -908,15 +922,18 @@ def reconcile_wardrobe_tags(
         side_a, side_b = _without(side_a), _without(side_b)
 
     tags = drop_garments_not_in_wearing(tags, wearing=wearing, wearing_b=wearing_b)
-    # **二人いるときは、側ごとに見る。** `_missing_wearing_items` の
-    # 「もうある」判定は語のかぶりで見るので、みおが `light_blue_dress` を着て
-    # いると、すみれの `pale blue dress` は `dress`／`blue` が既出という理由で
-    # 「足りている」と判定される —— **二着目は絶対に戻らない。**
+    # **With two people, look at each side separately.** `_missing_wearing_items`
+    # decides "already there" by word overlap, so while Mio wears a
+    # `light_blue_dress`, Sumire's `pale blue dress` is judged "already covered"
+    # because `dress` and `blue` have appeared — **the second outfit can never come
+    # back.**
     #
-    # 実測（`94b4fc9f`・2026-08-28）: 総監督が「すみれちゃんは黒のカクテル
-    # ドレス」と言った次のテイクで、すみれの行が
+    # Measured (`94b4fc9f`, 2026-08-28): on the take after the Showrunner said
+    # 「すみれちゃんは黒のカクテルドレス」 ("Sumire in a black cocktail dress"),
+    # Sumire's line came out as
     # `Sumire is blonde_hair, braid, long_hair, green_eyes, medium_breasts, slim,`
-    # ——**服がひとつも無い**まま出た。これは一度直してあった不具合で、旧
+    # — **with no clothing at all**. This was a defect that had been fixed once;
+    # the old
     # `_missing_wearing_tags`'s docstring records that "clothes forgotten for the
     # partner alone never come back". Moving it here dropped that lesson.
     if partner and (side_a.strip() or side_b.strip()):
@@ -1002,16 +1019,18 @@ def garment_aliases(tags: str, wearing: str) -> set[str]:
     return out
 
 
-# 手帖が「レンズを見ている」と言っている形。視線は frame のものだと
-# `FIELD_CONTRACTS` が明言しているのに、その所有権がタグに効いていなかった。
+# The shapes in which the notebook says she is looking into the lens.
+# `FIELD_CONTRACTS` states plainly that the gaze belongs to frame, and that
+# ownership was not reaching the tags.
 _EYES_ON_LENS_RE = re.compile(
     r"(?i)looking_?at_?viewer|into the lens|at the lens|at the camera|"
     r"eye contact|カメラ目線|レンズを見|こっちを見"
 )
 
-# 一つに絞ってよい枠だけ。**時刻（`time_of_day`）と部屋は入れない** ——
-# `night, twilight, evening` のような重ねは weave が意図して書くことがあり、
-# どれを残すかを間違えると光が変わる。ここは狭く始める。
+# Only the slots that may be narrowed to one. **The hour (`time_of_day`) and the
+# room are not included** — an overlay such as `night, twilight, evening` is
+# something weave writes on purpose, and choosing the wrong one to keep changes the
+# light. Start narrow here.
 _ONE_ONLY_SLOTS = (
     "camera_distance", "camera_pitch", "camera_side",
     "gaze_target", "gaze_pitch", "eyes", "posture",
@@ -1048,7 +1067,7 @@ def drop_tags_that_fight_the_notebook(
     eyes_on_lens = bool(_EYES_ON_LENS_RE.search(frame or ""))
 
     kept: list[str] = []
-    taken: dict[str, str] = {}          # slot -> 残した bare tag
+    taken: dict[str, str] = {}          # slot -> the bare tag that was kept
     for part in str(tags or "").split(","):
         tok = part.strip()
         if not tok:
@@ -1062,7 +1081,8 @@ def drop_tags_that_fight_the_notebook(
             if first is None:
                 taken[slot] = key
             elif key != first:
-                # 手帖が名指ししているほうが勝つ。していなければ先に来たほう
+                # Whichever the notebook names wins; failing that, whichever
+                # came first
                 mine, theirs = key.replace("_", " "), first.replace("_", " ")
                 if mine in said and theirs not in said:
                     kept = [k for k in kept if bare_tag(k) != first]
@@ -1073,7 +1093,7 @@ def drop_tags_that_fight_the_notebook(
     return ", ".join(kept)
 
 
-#: 人ごとの箱の中身。**手帖の欄と一対一**。
+#: What goes in each person's box. **One to one with the notebook's fields.**
 PERSON_BOX_FIELDS = ("wearing", "beat", "face")
 
 
@@ -1210,17 +1230,19 @@ def fight_craft_scene(
     body = str(scene or "").strip()
     if not body:
         return ""
-    # **手帖のどこかにある語は許す。** `bench` も `desk` も `window` も
-    # カタログでは「場所」だが、`beat` や `bg` が名指ししていれば正しい語。
+    # **A word found anywhere in the notebook is allowed.** `bench`, `desk` and
+    # `window` are all "places" in the catalogue, but if `beat` or `bg` names one it
+    # is the right word.
     licensed: set[str] = set()
     for key in SHOT_KEYS:
         text = str((nb or {}).get(key) or "")
         licensed |= wearing_tokens(text)
         for word in re.findall(r"[A-Za-z][A-Za-z0-9_-]{2,}", text):
             licensed.add(word.lower())
-            # **結合語を割る。** 手帖は `oversized_hoodie` と持ち、散文は
-            # `hoodie` と書く。割らないと**同じ服なのに未許可**になり、
-            # 実データ13本のうち9本で服の文が落ちた。
+            # **Split compound words.** The notebook holds `oversized_hoodie`
+            # while the prose writes `hoodie`. Without splitting, **the same garment
+            # counts as unauthorised**, and in real data the clothing sentence was
+            # dropped in 9 of 13 cases.
             for part in re.split(r"[_-]+", word.lower()):
                 if len(part) >= 3:
                     licensed.add(part)
@@ -1234,9 +1256,10 @@ def fight_craft_scene(
             return True
         return any(key.endswith(s) for s in tag_catalog.CLOTHING_SUFFIXES)
 
-    # **原文の区切りをそのまま返す。** 文で割って空白でつなぎ直すと、段落の
-    # 改行が空白に潰れる —— 二人の撮影では、その改行が二人の描写を分けている。
-    # 落とすときだけ切り取る。
+    # **Return the original separators as they are.** Splitting into sentences and
+    # rejoining with spaces flattens a paragraph break into a space — and in a
+    # two-person shoot that break is what separates the two descriptions. Cut only
+    # where something is dropped.
     pieces = re.split(r"((?<=[.!?])\s+)", body)
     kept: list[str] = []
     for i in range(0, len(pieces), 2):
@@ -1248,7 +1271,8 @@ def fight_craft_scene(
             if (w in gone) or (_owned_axis(w) and w not in licensed)
         ]
         if bad:
-            # 落とした事実は `craft_route` の段8に残る（散文の語数が動く）。
+            # The fact of the drop survives in stage 8 of `craft_route` (the
+            # prose word count moves).
             continue
         kept.append(sentence + sep)
     return "".join(kept).strip()
@@ -1372,9 +1396,10 @@ def record_rewrite(
     return entry
 
 
-#: **値に紛れた `unchanged` を落とす。** 条文は名指しで禁じているのに、実機で
-#: `beat: sitting, unchanged, hands on the desk` が出た（2026-09-06）。欄まるごと
-#: なら「変更なし」として既に扱われるが、**句の一つとして混ざると絵に流れる。**
+#: **Drop an `unchanged` that has crept into a value.** The contract forbids it by
+#: name and live it still produced `beat: sitting, unchanged, hands on the desk`
+#: (2026-09-06). A whole field of it is already handled as "no change", but **mixed
+#: in as one phrase it flows into the picture.**
 _NOT_A_VALUE = frozenset({
     "unchanged", "none", "(none)", "empty", "(empty)", "n/a", "-", "--",
     "same", "no change", "as before",
@@ -1404,12 +1429,14 @@ def apply_patch(nb: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
         val = coerce_plain_phrase(raw)
         if val.startswith(("{", "[")):
             continue
-        # 別の欄のラベルが混ざっていたら、そこで切る。`cut_at_label` は下で
-        # 定義している（ラベルの出典 `_label_alternation` の隣に置きたいので）。
+        # If another field's label has crept in, cut there. `cut_at_label` is
+        # defined below (to sit beside `_label_alternation`, where the labels come
+        # from).
         if val:
             val = cut_at_label(val)
-        # **句に紛れた「変更なし」を落とす。** 欄まるごとなら上で弾かれるが、
-        # 実機で `beat: sitting, unchanged, hands on the desk` が絵まで流れた。
+        # **Drop a "no change" that has crept in as a phrase.** A whole field of it
+        # is rejected above, but live, `beat: sitting, unchanged, hands on the desk`
+        # flowed all the way into the picture.
         if val:
             val = drop_non_values(val)
         if key in ("wearing", "wearing_b") and val:
@@ -1449,7 +1476,8 @@ def apply_patch(nb: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
             changed = True
     # Taking something off, said as the one garment rather than as the whole
     # finished outfit. Restating five remaining items verbatim is the work the
-    # scripter was measured failing to do —「コート脱いで」came back with the
+    # scripter was measured failing to do — 「コート脱いで」 ("take the coat off")
+    # came back with the
     # frame rewritten and WEARING untouched, on every removal turn — while the
     # one word it has to produce here is one it already produces. The
     # subtraction is ours; only an unambiguous name is applied, and an ask that
@@ -1488,7 +1516,8 @@ POSE_CARD_KEYS = ("beat", "beat_b")
 # showrunner says so.
 #
 # `open` used to be here too — a field for the room's proposals, waiting on
-# 「それでいこう」. Across 390 live sessions it never once held a proposal; the
+# 「それでいこう」 ("let us go with that"). Across 390 live sessions it never once
+# held a proposal; the
 # 50 non-empty ones held parser debris (`$$OPEN$$`, `clear_open: true`,
 # `false`, `_none_`), which then went back into the scripter prompt and onto
 # the panel. A channel the showrunner cannot name is a channel nobody uses.
@@ -1496,8 +1525,8 @@ POSE_CARD_KEYS = ("beat", "beat_b")
 FOLD_PATCH_KEYS = ("beat", "beat_b")
 
 
-# 折り込みが何を足したかの控え。SHOT_KEYS ではない —— 画の一部ではなく、
-# 帳簿。`shot_snapshot` にも `render` にも出ない。
+# A record of what the fold added. Not a SHOT_KEY — it is bookkeeping, not part of
+# the picture. It appears in neither `shot_snapshot` nor `render`.
 FOLD_UNDO_KEY = "fold_undo"
 
 
@@ -1601,7 +1630,8 @@ def absorb_muse_card(
 
 
 # `promote_open` used to fold an affirmed proposal into the shot here, guessing
-# from a noun list (持|手に|花|缶|傘|…) whether the thing was handheld (→ BEAT)
+# from a noun list (持|手に|花|缶|傘|… — hold / in hand / flower / can / umbrella /
+# …) whether the thing was handheld (-> BEAT)
 # or worn (→ WEARING). The scripter reads the conversation now, sees the
 # affirmation itself, and writes the absolute value into the right section.
 
@@ -1620,10 +1650,10 @@ def migrate(session: dict[str, Any]) -> dict[str, Any]:
     craft = session.get("craft") or {}
     scene = str(craft.get("scene") or "").strip()
     if digest:
-        # **語の途中で切らない（2026-09-18）。** 隣（1419行）は既に
-        # `_cap_phrase` で語の切れ目を守っているのに、ここだけ生のスライス
-        # だった —— 実機 `32cc5fab` の `notebook.scene` が
-        # 「…the consoles and the concen」で終わっていた。
+        # **Never cut mid-word (2026-09-18).** Its neighbour (line 1419) already
+        # keeps to word boundaries through `_cap_phrase`, and only this was a raw
+        # slice — live, `32cc5fab`'s `notebook.scene` ended on "…the consoles and
+        # the concen".
         nb["scene"] = _cap_phrase(digest, max_chars=800)
         nb["vibe"] = _cap_phrase(digest, max_chars=400)
     if scene and not nb.get("scene"):
@@ -1679,18 +1709,22 @@ _FIELD_RE = re.compile(
     r"(?im)^[\s>*_-]*(" + _label_alternation() + r")\s*[:：]\s*(.*)$"
 )
 
-# **ラベルは、行頭でなくても境界。** `_FIELD_RE` は行頭しか見ないので、名前が
-# 一つ前に挟まっただけで境界でなくなる。手帖は自分の頁を `各務 みお WEARING:`
-# と名前を頭に付けて書く（`render`）ので、それが読み返されると後続が丸ごと
-# 直前の欄に積まれた。実測では frame が頁の残り全部を飲んでいた:
+# **A label is a boundary even away from the start of a line.** `_FIELD_RE` looks
+# only at the start of a line, so one name slipped in front stops it being a
+# boundary. The notebook writes its own page with the name in front —
+# `各務 みお WEARING:` (`render`) — so when that was read back, everything after it
+# piled into the previous field. Measured, `frame` was swallowing the rest of the
+# page:
 #
 #   frame: medium shot, looking straight into lens 各務 みお WEARING: blue
 #          sleeveless gown, earrings 各務 みお BEAT: sitting, … 平岡 すみれ WEARING_B
 #
-# 大文字だけを見る。手帖が書き出す形がそれで、英語の地の文には出ない綴り。
+# Upper case only. That is the shape the notebook writes, and a spelling that does
+# not occur in ordinary English prose.
 _LABEL_RUN_RE = re.compile(r"\b(?:" + _label_alternation() + r")\s*[:：]")
-# 切ったあと末尾に残る名前。欄は短い英語の句（`coerce_plain_phrase`）なので、
-# 末尾の非 ASCII の連なりは名前の残骸とみなしてよい。
+# The name left at the tail after cutting. A field is a short English phrase
+# (`coerce_plain_phrase`), so a run of non-ASCII at the end can be taken as the
+# remains of a name.
 _TRAILING_NAME_RE = re.compile(r"[\s,、，:：]*(?:[^\x00-\x7F]+\s*)+$")
 
 
@@ -1708,7 +1742,8 @@ def cut_at_label(text: str) -> str:
     return _TRAILING_NAME_RE.sub("", body[:found.start()]).strip()
 
 
-# 理由は一行。長い説明はノートを汚すだけで、読む側の役に立たない。
+# One line for the reason. A long explanation only dirties the notebook and helps
+# nobody reading it.
 WHY_MAX_CHARS = 180
 
 VALID_INTENTS = frozenset({"casual", "shot", "mixed", "recall"})
@@ -1738,30 +1773,32 @@ SCRIPTER_FORMAT_SCHEMA: dict[str, Any] = {
         "tags_a": {"type": "string"},
         "tags_b": {"type": "string"},
         "craft_scene": {"type": "string"},
-        # `why` はここに置いてはいけない。**理由の枠が仕事の枠を食う。**
-        # 8/19 に実測（`private/muse/crew_lab/why_regression.py`）:
+        # `why` must not go here. **The reason's slot eats the work's slot.**
+        # Measured on 08-19 (`private/muse/crew_lab/why_regression.py`):
         #
-        #     why あり  欄を書いた 0/9
-        #     why なし  欄を書いた 9/9
+        #     with why     wrote the field 0/9
+        #     without why  wrote the field 9/9
         #
-        # 出てきたのはこういう応答だった:
+        # What came back looked like this:
         #
         #     {"intent":"shot",
         #      "why":{"beat":"「ベンチに座って」という指示に基づき
         #             posture stem を sitting に設定。"}}
         #
-        # beat を sitting にしたと**説明して、beat を書いていない**。仕事を
-        # 記述することが仕事の代わりになっている。言い方を強めた条件
-        # （「値が仕事、理由はその註」）でも 0/9 で、**言葉では直らない**。
-        # 枠があること自体が原因。
+        # It **explains** that it set beat to sitting **and does not write beat**.
+        # Describing the work has taken the place of the work. A stronger wording
+        # ("the value is the work, the reason is a note on it") still gave 0/9 —
+        # **words do not fix this.** The cause is the slot's existence.
         #
-        # 理由はラベル形式の `WHY_*` と言い直し（`parse_restate`）で採る。
-        # そちらは値と同じ行の並びに出るので、置き換えが起きない。
+        # Reasons are taken from the label-form `WHY_*` and from restatements
+        # (`parse_restate`). Those appear in the same run of lines as the values, so
+        # no substitution happens.
         #
-        # `propose` は別物。**欄に書けない物の置き場**であって、欄の代わりに
-        # 書ける物ではないので、仕事を食う関係にない。決まっていない物を
-        # 思いついたときの行き場が無いと、モデルはそれを beat に押し込む
-        # （t21「おいしそう？」で手にパンを持たせた）。
+        # `propose` is a different thing. It is **a place for what cannot go in a
+        # field**, not something writable instead of a field, so it is not in
+        # competition with the work. With nowhere to put something undecided that
+        # occurred to it, the model pushes it into beat instead (t21 「おいしそう？」
+        # — "does it look good?" — put bread into her hands).
         "propose": {"type": "string"},
     },
     "required": ["intent"],
@@ -1771,21 +1808,25 @@ SCRIPTER_FORMAT_SCHEMA: dict[str, Any] = {
 _PARTNER_ONLY = ("wearing_b", "beat_b", "expression_b")
 
 
-#: 出力の鍵はあるのに、compile の契約が**一言も説明していない**欄。
+#: A field that has an output key while compile's contract **does not explain it in
+#: a single word**.
 #:
-#: 総監督（2026-08-31）「場所が `scene` で拾われず、**守ること**でホールド
-#: されています」。「あそこへ行こう」と場所を移す一行が `scene` ではなく
-#: `standing`（守りごと —— 撮影ぜんぶに効く常設の指示）に入っていた。
+#: The Showrunner (2026-08-31): "the place is not picked up by `scene` — it is being
+#: held under **standing orders**". A line moving the place — 「あそこへ行こう」
+#: ("let us go over there") — had gone into `standing` (the standing orders, which
+#: apply to the whole shoot) rather than `scene`.
 #:
-#: 契約 3,019字に STANDING の説明は無い。**説明の無い鍵は、行き場に困った値
-#: の捨て場になる。** これは記録済みの事故と同じ形で、`_PARTNER_ONLY` を
-#: ソロで外した理由がそれだった —— 「二つの置き場があると、そこへ書ける。
-#: 鍵を消せば書けない」。
+#: In 3,019 characters of contract there is no explanation of STANDING. **A key with
+#: no explanation becomes the dumping ground for a value with nowhere to go.** This
+#: is the same shape as an accident already on record, and it is why `_PARTNER_ONLY`
+#: was removed for solo shoots — "with two places to write, it writes there. Remove
+#: the key and it cannot."
 #:
-#: 常設の指示は制作スタッフの router（`chain.run_route`）が書く。あちらは
-#: 「STANDING: <one rule for the whole session, or the word none>」と条文で
-#: 説明があり、`session["standing"]` から手帖へ渡る道も別にある
-#: （`sync_crew_notebook`）。**compile が書く道だけを閉じる。**
+#: Standing orders are written by the studio crew's router (`chain.run_route`).
+#: There they are explained in the contract as "STANDING: <one rule for the whole
+#: session, or the word none>", and there is a separate road from
+#: `session["standing"]` to the notebook (`sync_crew_notebook`). **Only compile's
+#: road is closed.**
 _NOT_THE_COMPILES: tuple[str, ...] = ("standing",)
 
 
@@ -1851,10 +1892,11 @@ def weave_refusal(tags: str, scene: str) -> str:
             for k in (SCRIPTER_FORMAT_SCHEMA.get("properties") or {})}
 
     def _echoes(value: str) -> bool:
-        # **丸ごと欄名だけ**、または `__tags` のように**先頭にアンダースコア**の
-        # ついた欄名。鍵名との一致だけでは広すぎる —— `scene` `light` `frame`
-        # `beat` `standing` はどれも絵の語として正しく、`standing` を欄名と
-        # 見なした版は既存の試験を一本落とした。本物のタグは `_` では始まらない。
+        # **The whole value being a field name**, or a field name with **a leading
+        # underscore** such as `__tags`. Matching key names alone is too wide —
+        # `scene`, `light`, `frame`, `beat` and `standing` are all legitimate
+        # picture words, and a version that treated `standing` as a field name
+        # failed an existing test. A real tag never starts with `_`.
         if str(value or "").strip().lower() in keys:
             return True
         for part in str(value or "").replace(".", ",").split(","):
@@ -1991,9 +2033,10 @@ def parse_scripter_json(raw: str) -> dict[str, Any] | None:
         if x.strip() and x.strip().lower() not in ("none", "なし", "-", "")
     }
     patch: dict[str, Any] = {}
-    # 欄の名前は `SHOT_KEYS` が唯一の出典。ここにベタ書きしていたせいで、
-    # 欄を増やす実験のたびに3箇所（ここ・`_FIELD_RE`・`SCRIPTER_BASE`）を
-    # 別々に直す必要があった。契約を1箇所にまとめたときと同じ形の重複。
+    # `SHOT_KEYS` is the one source for the field names. Writing them out here
+    # meant that every experiment adding a field needed three places fixed
+    # separately (here, `_FIELD_RE` and `SCRIPTER_BASE`) — the same duplication as
+    # before the contracts were gathered into one place.
     for key in SHOT_KEYS + ("vibe",):
         if key in unchanged:
             continue
@@ -2076,9 +2119,10 @@ def parse_scripter_labelled(raw: str) -> dict[str, Any]:
         if x.strip() and x.strip().lower() not in ("none", "なし", "-")
     }
 
-    # `SHOT_KEYS` が唯一の出典。ここに書き忘れると値が黙って捨てられる —
-    # `wearing_drop` が実際にそうなっていて、ラベル形式で答えたターン（画像が
-    # 付く回と、JSON パースが落ちた回の全部）で脱衣が床に落ちていた。
+    # `SHOT_KEYS` is the one source. Forget something here and the value is
+    # silently thrown away — which is what happened to `wearing_drop`: on turns
+    # answered in label form (every turn with an image, and every turn where the
+    # JSON parse failed) the undressing fell on the floor.
     key_map = {k: k.upper() for k in SHOT_KEYS}
     key_map["wearing_drop"] = "WEARING_DROP"
     key_map["vibe"] = "VIBE"
