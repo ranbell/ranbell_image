@@ -130,13 +130,14 @@ def test_the_prose_check_drops_sentences_not_the_whole_prose():
     )
     assert notebook.fight_craft_scene(nb, good) == good
 
-    # 外した服を名指しする文だけ落ちる。前後の文は残る。
+    # Only the sentence naming the removed garment is dropped. The sentences around
+    # it survive.
     with_hat = good + " She slowly lowers a straw hat toward her hands."
     out = notebook.fight_craft_scene(nb, with_hat, struck={"straw_hat", "hat"})
     assert "straw hat" not in out
     assert "book open in her lap" in out and "denim skirt" in out
 
-    # 手帖と無関係な場所を名乗る文も落ちる。
+    # A sentence naming a place the notebook knows nothing about is dropped too.
     out = notebook.fight_craft_scene(nb, good + " She stands on a neon rooftop.")
     assert "rooftop" not in out and "book open in her lap" in out
 
@@ -180,7 +181,7 @@ def test_an_unchanged_marker_never_reaches_the_picture():
         model="m", num_ctx=1024))
     assert got == {"scene": "the school gate"}
 
-    # 丸ごと合図なら、いままでどおり何も書かない。
+    # A value that is nothing but the signal writes nothing, as before.
     assert asyncio.run(chain.read_per_person(
         _Ollama('{"各務 みお": "unchanged"}'),
         kind="scene", note="いい感じ。", name_a="各務 みお", name_b="",
@@ -215,7 +216,7 @@ def test_the_camera_box_reaches_the_picture():
     })
     wide = notebook.frame_wide_phrases(nb)
     assert "focus on Mio" in wide
-    # カメラが先。場所より前に置く。
+    # The camera comes first, before the place.
     assert wide.index("medium shot") < wide.index("a park bench")
 
 
@@ -279,17 +280,19 @@ def test_a_person_is_never_background():
     from app.muse import chain
 
     bg = chain._PER_PERSON["bg"][2]
-    # **名指しではなく種類で断つ。** 「すばるちゃんは背景で」には効いていたが、
-    # 「**二人を小さく捉えて**、木々を多めに」——カメラと背景が同じ一行に
-    # 入った回——で 4/5 が `two people, park trees` を書いた（実機
-    # `98ab63a5`・2026-09-02）。名前を挙げる言い方だけを塞いでいた。
+    # **Cut by kind, not by name.** It worked on 「すばるちゃんは背景で」 ("put
+    # Subaru in the background"), and on 「**二人を小さく捉えて**、木々を多めに」
+    # ("catch the two of them small, with plenty of trees") — a turn where the camera
+    # and the background arrived on one line — 4 of 5 wrote `two people, park trees`
+    # (live `98ab63a5`, 2026-09-02). Only the phrasing that names someone was being
+    # closed.
     #
-    # 実測（5件×5回）で、人が入るのは全件 0/5。「木々を多めに」は
-    # `many trees` だけを書く。
+    # Measured (5 cases x 5 runs), people got in 0/5 in every case. 「木々を多めに」
+    # ("plenty of trees") writes `many trees` and nothing else.
     assert "Never write a person here" in bg
     assert "two people" in bg, "言い換えを列挙しないと `two people` が通る"
     assert "FRAME" in bg, "行き先を言わないと、どこへ書けばよいか分からない"
-    # 本当の背景の仕事は残っている。
+    # The real background work is still there.
     assert "buildings behind her" in bg or "what ELSE is in the picture" in bg
 
 
@@ -328,12 +331,12 @@ def test_each_person_is_written_as_one_run():
         style="anime_coloring", framing="auto", scene="They share the bench.",
     )
     rows = [l for l in out.splitlines() if l.startswith(("Mio", "Subaru"))]
-    # みおの二行が続き、そのあとすばるの二行。**交互にしない。**
+    # Mio's two lines run together, then Subaru's two. **Never alternating.**
     assert rows[0].startswith("Mio is ")
     assert rows[1].startswith("Mio: ")
     assert rows[2].startswith("Subaru is ")
     assert rows[3].startswith("Subaru: ")
-    # 体つきは自分の行にだけ。
+    # The build appears only on its own person's line.
     assert "flat_chest" in rows[0] and "flat_chest" not in rows[2]
     assert "large_breasts" in rows[2] and "large_breasts" not in rows[0]
 
@@ -349,7 +352,7 @@ def test_the_compile_is_told_a_person_is_never_background():
 
     built = chain.build_scripter_system()
     assert "never a person" in built
-    # 係のほうにも同じ境目があること（言い方は `715b2b2` で種類ベースに変えた）。
+    # The clerk has the same boundary (the wording moved to kind-based in `715b2b2`).
     assert "Never write a person here" in chain._PER_PERSON["bg"][2]
 
 
@@ -379,13 +382,15 @@ def test_a_japanese_name_never_leaves_the_clerk():
             {"name": "Subaru Asakura", "name_ja": "朝倉 すばる"}]
     assert latin_names_in("finger poking みお's cheek", cast) == (
         "finger poking Mio's cheek")
-    # 姓だけ・名だけでも差し替える —— 実機に出たのは「みお」だった。
+    # Surname alone and given name alone are replaced too — what appeared live was
+    # 「みお」.
     assert latin_names_in("leaning toward 各務 みお, looking at 朝倉 すばる", cast) == (
         "leaning toward Mio, looking at Subaru")
-    # 名前が無い文は触らない。
+    # A sentence with no name is not touched.
     plain = "sitting on a bench, hands in lap"
     assert latin_names_in(plain, cast) == plain
-    # 相方がいなければ何もしない（ラテン表記が揃わない回も含む）。
+    # With no partner it does nothing (including turns where the Latin spellings do
+    # not line up).
     assert latin_names_in("finger poking みお's cheek", None) == (
         "finger poking みお's cheek")
 

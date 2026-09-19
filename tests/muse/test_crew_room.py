@@ -33,7 +33,7 @@ def _session(*, crew_preset: str = "standard", **kw):
     return s
 
 
-# ── 門 ──────────────────────────────────────────────────────────────────
+# ── The gate ────────────────────────────────────────────────────────────
 def test_a_plain_session_has_no_crew():
     """**A session that chose nothing has no seats at all.** (2026-09-13)
 
@@ -41,13 +41,13 @@ def test_a_plain_session_has_no_crew():
     opening.
     """
     bare = service.new_session({"locale": "ja", "model": "m"})
-    assert bare["inputs"].get("crew_preset") == ""          # 既定は空
-    assert C.cast_of(bare) == []                            # 席が組めない
+    assert bare["inputs"].get("crew_preset") == ""          # the default is empty
+    assert C.cast_of(bare) == []                            # no seats can be formed
     assert C.has_crew(bare) is False
 
-    chosen = _session()                                     # 班を選んだだけ
-    assert C.cast_of(chosen)                                # 席は組める
-    assert C.has_crew(chosen) is False                      # 開くまでは回らない
+    chosen = _session()                                     # a crew merely chosen
+    assert C.cast_of(chosen)                                # the seats can be formed
+    assert C.has_crew(chosen) is False                      # nothing runs until it is opened
 
 
 def test_the_table_opens_only_when_it_is_opened():
@@ -70,7 +70,7 @@ def test_the_chat_turn_asks_the_gate_not_the_mode():
     assert "is_duet" not in src
 
 
-# ── 席 ──────────────────────────────────────────────────────────────────
+# ── The seats ───────────────────────────────────────────────────────────
 def test_all_eighteen_roles_are_kept():
     """The Showrunner: "keep all 18 roles"."""
     s = _session()
@@ -85,7 +85,7 @@ def test_five_seats_have_no_pen():
     pens = {crew.role_of(m) for m in C.writing_seats(cast)}
     for muted in ("continuity", "gate", "finisher", "grade", "hook"):
         assert muted not in pens, muted
-    assert "plan" not in pens          # 構成は別経路
+    assert "plan" not in pens          # composition takes another road
     assert len(pens) == 12
 
 
@@ -111,7 +111,7 @@ def test_two_seats_may_share_a_field():
     assert C.SLOT_FIELD["SHAPE"] == C.SLOT_FIELD["OPTICS"] == "frame"
 
 
-# ── 席の返事 ────────────────────────────────────────────────────────────
+# ── The seats' replies ──────────────────────────────────────────────────
 def test_the_craft_line_is_split_off():
     say, craft = C.split_craft(
         "うん、逆光でいきましょう。\nCRAFT: backlighting, rim_light | low sun"
@@ -133,7 +133,7 @@ def test_omit_words_count_as_no_craft():
         assert craft == "", word
 
 
-# ── writer への材料 ─────────────────────────────────────────────────────
+# ── The material for the writer ─────────────────────────────────────────
 def test_only_the_tag_half_reaches_the_ledger():
     """The prose half of `CRAFT: <tags> | <prose>` never reaches the ledger.
 
@@ -155,10 +155,10 @@ def test_the_craft_is_grouped_by_field_not_interleaved():
         {"name": "振付", "role": "spine", "field": "beat", "craft": "leaning, sitting | elbows"},
         {"name": "やじ", "role": "hook", "field": "", "craft": ""},
     ])
-    assert got.index("beat:") < got.index("light:")        # 台帳の欄順
-    assert "beat: sitting, leaning" in got                 # 同じ欄は一行に畳む
-    assert "low sun" not in got                            # 散文側は渡さない
-    assert "やじ" not in got                               # craft の無い発言は入らない
+    assert got.index("beat:") < got.index("light:")        # the ledger's field order
+    assert "beat: sitting, leaning" in got                 # one field folds into one line
+    assert "low sun" not in got                            # the prose side is not handed over
+    assert "やじ" not in got                               # a line with no craft does not get in
 
 
 def test_a_field_never_repeats_a_tag():
@@ -174,7 +174,7 @@ def test_the_seat_format_overrides_the_classic_one():
     last."""
     assert "REPLACES any format above" in C.SEAT_OUTPUT
     assert "CRAFT:" in C.SEAT_OUTPUT
-    # TAGS は**禁止として**だけ出てくる（求めてはいない）
+    # TAGS appear **only as a prohibition** (they are not asked for)
     assert "Never write a TAGS: or SCENE: block" in C.SEAT_OUTPUT
     import inspect
     src = inspect.getsource(C._seat_turn)
@@ -198,7 +198,7 @@ def test_the_writer_only_hears_the_crew_when_there_is_one():
     assert 'if str(crew_craft or "").strip() else ""' in src
 
 
-# ── 手帖の欄名が漏れてくる（実機 2026-09-11）─────────────────────────────
+# ── The notebook's field name leaks through (live, 2026-09-11) ──────────
 def test_a_notebook_label_never_reaches_the_ledger():
     """A seat's specialty text explains `BEAT` and `WEARING` by name, so the model
     copies them.
@@ -214,8 +214,8 @@ def test_a_notebook_label_never_reaches_the_ledger():
     """
     assert C.craft_tags("BEAT: standing still, eyes towards the light | 重心") \
         == "standing still, eyes towards the light"
-    assert C.craft_tags("WEARING: BEAT: sitting | x") == "sitting"   # 重なっても剥がす
-    assert C.craft_tags("ATMOSPHERE:") == ""                          # 空ラベルは消える
+    assert C.craft_tags("WEARING: BEAT: sitting | x") == "sitting"   # stripped even when stacked
+    assert C.craft_tags("ATMOSPHERE:") == ""                          # an empty label disappears
     assert C.craft_tags("ATMOSPHERE: | dusty air") == ""
 
 
@@ -248,9 +248,9 @@ def test_the_ledger_door_strips_labels_whoever_knocked():
 
     got = L.normalize_patch({"wearing": "BEAT: standing by the railing", "bg": "ATMOSPHERE:"})
     assert got["wearing"] == "standing by the railing"
-    assert got["bg"] == ""                                  # 空は scrub が捨てる
+    assert got["bg"] == ""                                  # scrub throws the empty one away
 
-    # 女優の CARD 経由でも同じ
+    # The same through the actress's CARD
     card = L.normalize_patch(persona.card_to_patch("WEARING: BEAT: standing, silhouette"))
     assert card["wearing"] == "standing, silhouette"
 
@@ -271,7 +271,7 @@ def test_there_is_only_one_label_stripper():
     assert "ledger_mod.strip_field_label" in inspect.getsource(C.craft_tags)
 
 
-# ── 画面の配線 ──────────────────────────────────────────────────────────
+# ── The screen's wiring ─────────────────────────────────────────────────
 def test_the_panel_is_told_whether_the_table_is_open():
     """Which button shows is decided by two fields of the public view."""
     s = _session()
@@ -313,11 +313,12 @@ def test_the_mode_is_chosen_before_the_session_opens():
     panel = __import__("pathlib").Path(
         "frontend/src/components/MusePanel.vue"
     ).read_text(encoding="utf-8")
-    # 文言はテンプレートリテラル経由（`t(\`museRefine.${m.k}\`)`）なので鍵で見る
+    # The text goes through a template literal (`t(\`museRefine.${m.k}\`)`), so it is
+    # checked by key
     assert "k: 'modeSolo'" in panel and "k: 'modeStudio'" in panel
-    # 開始ボタンが扉を振り分ける
+    # The start button decides which door
     assert "shootMode.value === 'studio' && !tableOpen.value ? 'table' : 'open'" in panel
-    # 開いたあとは選び直せない
+    # Once open, it cannot be chosen again
     assert ':disabled="chatLocked || opened"' in panel
 
 
@@ -349,7 +350,7 @@ def test_the_seats_stream_too():
     assert "on_token=_stream_to(session, muse_id)" in inspect.getsource(C._banter_turn)
 
 
-# ── 班の画風が絵に届くこと（2026-09-13） ──────────────────────────────────
+# ── The crew's look reaches the picture (2026-09-13) ────────────────────
 
 def test_the_crew_look_reaches_the_picture_only_when_the_table_is_open():
     """**The gate is whether a crew actually exists.** (2026-09-13)
@@ -374,7 +375,7 @@ def test_the_crew_look_reaches_the_picture_only_when_the_table_is_open():
     assert "semi-realistic" in looks["photoreal"], looks["photoreal"]
     assert "flat" in looks["flat"], looks["flat"]
 
-    # 一人撮りは据え置き —— 班が居ないセッションは中立のまま
+    # The solo shoot is unchanged — a session with no crew stays neutral
     assert runtime.style_for(_session(crew_preset="photoreal")) == crew.NEUTRAL_LOOK
 
 
@@ -394,5 +395,5 @@ def test_the_seat_keeps_its_own_way_of_opening():
     assert "ENTERTAINMENT" in C.SEAT_VOICE
     src = inspect.getsource(C._seat_turn)
     assert "SEAT_VOICE" in src and "SEAT_OUTPUT" in src, "席に届いていない"
-    # 女優の前置き（一人撮りの正本）には足さない
+    # Not added to the actress's preamble (the record of truth for a solo shoot)
     assert C.SEAT_VOICE not in crew.actress_system_prompt({"name": "Mio"})

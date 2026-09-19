@@ -66,25 +66,27 @@ def test_packed_prompt_carries_each_person_card():
         assert crew.MUSES[mid]["voice_ja"] in prompt
         assert crew.MUSES[mid]["line_ja"] in prompt
         assert crew._pick_say_example(mid, "sess-1") in prompt
-    # 反応の契約（名指し・エコー禁止・主演に向けて話す）
+    # The reaction contract (name them, no echoing, speak to the lead)
     assert "names the person before them" in prompt
     assert "echo is not a reaction" in prompt
     assert "花" in prompt
 
 
-# ── CREW LOOK: 専門席の仕事が weave まで届く ────────────────────────────────
+# ── CREW LOOK: a specialist seat's craft reaches weave ──────────────────────
 def test_craft_slots_have_one_owner_each():
     from app.muse import crew
     assert crew.craft_slot("gaffer:gyakkou") == "LIGHT"
     assert crew.craft_slot("lens:pinto") == "OPTICS"
-    # 服そのものはノートの WEARING（所有者は台本）。衣装席は生地だけ。
+    # The clothes themselves are the notebook's WEARING (owned by the writer). The
+    # wardrobe seat owns only the cloth.
     assert crew.craft_slot("wardrobe:shiwa") == "CLOTH"
-    # ポーズはノートの BEAT が正本。演出/振付は BODY スロットで weave まで届ける
-    # （talk group で口は一人なので同じ鍵を共有してよい）。
+    # The pose's record of truth is the notebook's BEAT. Staging and choreography
+    # reach weave through the BODY slot (in a talk group there is one mouth, so they
+    # may share the same key).
     assert crew.craft_slot("beat:ichibyou") == "BODY"
     assert crew.craft_slot("spine:bane") == "BODY"
     owned = list(crew.CRAFT_SLOTS.values())
-    # BODY だけ beat+spine で共有。他は一人一枠。
+    # Only BODY is shared, by beat+spine. Everything else is one slot per person.
     assert owned.count("BODY") == 2
     assert len(set(owned)) == len(owned) - 1
 
@@ -96,35 +98,35 @@ def test_light_is_its_own_field_end_to_end():
     nb = notebook.of(session)
     notebook.apply_patch(nb, {"scene": "a classroom at dusk", "light": "backlit, hard rim"})
     assert nb["light"] == "backlit, hard rim"
-    # 別のフィールドを書き換えても光は残る
+    # Rewriting another field leaves the light in place
     notebook.apply_patch(nb, {"beat": "standing"})
     assert nb["light"] == "backlit, hard rim"
-    # ノートの表示にも出るので、台本も主演も読める
+    # It shows in the notebook's rendering too, so the writer and the lead can read it
     assert "LIGHT:" in notebook.render(nb)
-    # 台本の出力（ラベル / JSON どちらでも）から取り込める
+    # It can be taken in from the writer's output (label form or JSON)
     assert notebook.parse_scripter(
         "INTENT: shot\nLIGHT: one lantern at floor level"
     )["patch"]["light"] == "one lantern at floor level"
 
 
-# ── struck は「いま写っているもの」を締め出してはいけない ──────────────────
+# ── `struck` must not shut out what is in the picture now ──────────────────
 def test_struck_never_holds_what_the_shot_now_says():
     """She can sit down again after standing up. `struck` is not an append-only
     graveyard."""
     session = {"mode": "", "inputs": {"locale": "ja"}, "notebook": notebook.blank()}
     nb = notebook.of(session)
     notebook.apply_patch(nb, {"beat": "sitting on the bench", "wearing": "sailor uniform, straw hat"})
-    # 立ち上がる → sitting が struck に入る
+    # She stands up -> sitting goes into struck
     notebook.record_struck_tokens(session, prev="sitting on the bench", new="standing", min_len=4)
     notebook.apply_patch(nb, {"beat": "standing, holding the hem"})
     assert "sitting" in notebook.struck_tokens(session)
-    # 帽子を取る → straw_hat も struck
+    # The hat comes off -> straw_hat is struck too
     notebook.record_struck_from_wearing(
         session, prev_wearing="sailor uniform, straw hat", new_wearing="sailor uniform",
     )
     notebook.apply_patch(nb, {"wearing": "sailor uniform"})
     assert "straw_hat" in notebook.struck_tokens(session)
-    # また座らせたら、sitting は締め出しから外れる（帽子は外れたまま）
+    # Sat down again, sitting leaves the shut-out list (the hat stays out)
     notebook.apply_patch(nb, {"beat": "sitting on the floor"})
     live = notebook.struck_tokens(session)
     assert "sitting" not in live
@@ -162,18 +164,18 @@ def test_removed_garment_is_not_put_back_by_coverage():
     assert "straw_hat" not in tags
 
 
-# ── ルックの明示指定・strike の誤爆・提案の経路 ─────────────────────────────
+# ── A named look, a misfiring strike, and the road for proposals ───────────
 def test_named_look_beats_the_room_average():
     """The average of 16 seats always lands on a safe middle. Name it and the
     Showrunner decides."""
     from app.muse import crew
     cast = crew.resolve_crew(preset="standard")
-    assert crew.base_style_for(cast, "", "") == "anime illustration"  # 平均の実測値
+    assert crew.base_style_for(cast, "", "") == "anime illustration"  # the measured average
     assert crew.base_style_for(cast, "", "vivid") == "vivid anime illustration"
     assert crew.base_style_for(cast, "", "flat") == "flat anime cel shading"
-    # 総監督が文で書いたものより、名指しのルックが強い。
+    # A named look beats what the Showrunner wrote in prose.
     assert crew.base_style_for(cast, "水彩っぽく", "flat") == "flat anime cel shading"
-    # 知らない名前は無視して従来どおり。
+    # An unknown name is ignored and it behaves as before.
     assert crew.base_style_for(cast, "水彩っぽく", "nonsense") == "水彩っぽく"
 
 
