@@ -1480,10 +1480,11 @@ watch(() => props.jobs?.find(j => j.title === 'backup')?.state, (state) => {
                   </p>
                 </div>
                 <!--
-                  **Muse の既定（2026-09-13）。** 総監督「使用する llm・画像モデルも
-                  空にして、実行前に選択するように。管理画面でデフォルト決めていたら、
-                  そのデフォルト値を使用して開始できるように」。空なら Muse の画面が
-                  選ばせる（一覧の先頭を勝手に当てない）。
+                  **Muse's defaults (2026-09-13).** The Showrunner: "empty the llm
+                  and image model too, so they are chosen before running. If a
+                  default is set in the admin screen, it should be possible to start
+                  from that default." Empty, and Muse's screen asks to choose (the
+                  first of the list is never applied on its own).
                 -->
                 <div>
                   <label class="text-xs text-gray-500 flex items-center gap-1.5 mb-1">

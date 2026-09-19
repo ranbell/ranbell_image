@@ -290,7 +290,7 @@ function _startSim() {
     _sim.alphaTarget(0.15).restart()
     // Lit as soon as she's pressed, not just clicked — a drag needs to show
     // the network the whole time it is being dragged, and staying lit after
-    // release is the "維持" the Showrunner asked for.
+    // release is the 「維持」 ("keep it as it is") the Showrunner asked for.
     if (!e.shiftKey) {
       _prevHighlightedId = highlightedId.value
       highlightedId.value = node.id

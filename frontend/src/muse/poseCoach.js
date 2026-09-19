@@ -1,6 +1,7 @@
 /**
  * Pose coaching: logical pose/camera model → Danbooru-ish tags + JA instruction.
- * Reverse of the tag→preset path — human sets the look, LLM gets "こうしてね".
+ * Reverse of the tag->preset path — a human sets the look and the LLM is handed
+ * 「こうしてね」 ("do it like this").
  */
 
 const POSTURE_JA = {

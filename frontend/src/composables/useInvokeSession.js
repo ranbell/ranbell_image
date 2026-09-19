@@ -91,7 +91,7 @@ const invokeFrontierTags = ref([])    // [{name}] preview from /frontier/preview
 // Heat: global LLM temperature multiplier over each spirit's native temperature
 const invokeHeat = ref(1.0)           // 0.6–1.3
 
-// Wildness (乱れ度): widens stranger/lunatic vocab pools (1–3)
+// Wildness: widens stranger/lunatic vocab pools (1-3)
 const invokeWildness = ref(1)
 
 // Emotion register: target emotion dimension ('' = off)

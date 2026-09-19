@@ -30,7 +30,8 @@ const loungeThreads = computed(() => {
   )
   return [...rows].sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0))
 })
-// お出かけは撮影の話ではないので、撮影後のひとことと同じ流れに混ぜない
+// An outing is not shoot talk, so it is not mixed into the same flow as the
+// after-the-shoot lines
 const outingThreads = computed(() => {
   const rows = threads.value.filter(th => th.kind === 'outing')
   return [...rows].sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0))
@@ -218,8 +219,9 @@ watch(tab, () => ensureSelected())
                   class="w-8 h-8 rounded-lg object-cover ring-1 ring-pink-200"
                   alt=""
                 />
-                <!-- 写真が無い投稿は、書いた人の顔を出す。顔が無い子もいるので
-                     どちらも無ければ何も置かない（枠だけ残ると崩れて見える） -->
+                <!-- A post with no photo shows the writer's face. Some characters
+                     have no face either, and with neither, nothing is placed (an
+                     empty frame alone looks broken). -->
                 <img
                   v-else-if="th.face"
                   :src="thumb(th.face)"

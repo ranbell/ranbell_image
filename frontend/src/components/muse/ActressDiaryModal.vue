@@ -15,7 +15,7 @@ const emit = defineEmits(['close', 'diary-read', 'toast'])
 const { t, locale } = useI18n()
 
 const diaries = ref([])
-// 書いた本人の顔。名前の横に出す（払い出しに載ってくる）
+// The face of whoever wrote it, shown beside the name (it comes with the payload)
 const face = ref('')
 const loading = ref(false)
 const selectedDiary = ref(null)
@@ -258,7 +258,7 @@ watch(() => props.show, async (val) => {
       <!-- Left Sidebar: Diary List -->
       <aside class="w-full md:w-80 border-b md:border-b-0 md:border-r border-pink-200/60 dark:border-pink-800/40 p-4 flex flex-col gap-3 shrink-0 bg-pink-100/40 dark:bg-pink-950/30">
         <div class="flex items-center gap-2 px-1 py-1">
-          <!-- 顔があれば顔、無ければこれまでどおり本のかたち -->
+          <!-- The face when there is one; otherwise the book shape, as before -->
           <img
             v-if="face"
             :src="thumb(face)"

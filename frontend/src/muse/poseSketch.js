@@ -341,7 +341,7 @@ export function figureJoints(pose, { partner = false, interact = '' } = {}) {
   if (gaze === 'looking_up') head = pt(head.x, head.y - 2)
   if (gaze === 'looking_down') head = pt(head.x, head.y + 2)
   if (gaze === 'looking_up' && p !== 'lying') {
-    // tiny tip-back for cute "見上げ"
+    // tiny tip-back for a cute 「見上げ」 ("looking up")
     neck = pt(neck.x, neck.y + 1)
   }
 

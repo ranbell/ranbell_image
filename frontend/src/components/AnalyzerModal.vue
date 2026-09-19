@@ -1139,7 +1139,7 @@ async function runTagTaxonomy() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const { job_id } = await res.json()
     tagTaxonomyJobId.value = job_id
-    // tagTaxonomyLoading は下の watch で完了/失敗時に解除
+    // tagTaxonomyLoading is released by the watch below, on completion or failure
   } catch (e) {
     console.error('Tag taxonomy error:', e)
     tagTaxonomyLoading.value = false

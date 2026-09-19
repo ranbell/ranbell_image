@@ -48,7 +48,7 @@ async function checkUnreadDiaries() {
 
 // The gallery card's unread badge is a snapshot taken when the list loaded —
 // reading an entry here never told it to update, so the badge (and the
-// 未読のみ filter) kept counting entries that had already been read.
+// 未読のみ, "unread only" filter) kept counting entries that had already been read.
 async function onDiaryRead() {
   await checkUnreadDiaries()
   emit('changed')
@@ -88,7 +88,8 @@ const dislikes = computed(() => preset.value?.preferences?.dislikes || [])
 const palette = computed(() => preset.value?.preferences?.favorite_colors || [])
 const appearance = computed(() => preset.value?.appearance || {})
 const identity = computed(() => detail.value?.character?.identity_tags || [])
-// The draw buttons name what they produce — "全身" or "バストアップ" — because
+// The draw buttons name what they produce — 「全身」 ("full body") or 「バストアップ」
+// ("bust-up") — because
 // the header's button used to say "draw with her" and did not draw anything.
 const slotName = computed(() => t(`characters.${bigSlot.value}`))
 

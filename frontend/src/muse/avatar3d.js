@@ -286,7 +286,8 @@ export function placeSetOverviewCamera(viewCam, model, shot, { duo = false } = {
   // Midpoint bias toward the subject so she stays large, but shot cam stays visible.
   const focus = subject.clone().lerp(shotPos, 0.28)
 
-  // Overview opposite-ish the shot camera, elevated — "撮影現場" diagram angle.
+  // Overview opposite-ish the shot camera, elevated — the 「撮影現場」 ("the set")
+  // diagram angle.
   const away = subject.clone().sub(shotPos)
   away.y = 0
   if (away.lengthSq() < 1e-4) away.set(0, 0, 1)
@@ -1713,7 +1714,7 @@ export async function createAvatarStage(container, {
     },
     /**
      * Capture a JPEG still for direction chat (base64, no data: prefix).
-     * Defaults to shot-camera framing with gizmos hidden — "この絵".
+     * Defaults to shot-camera framing with gizmos hidden — 「この絵」 ("this picture").
      */
     captureFrame({ mode = 'shot', quality = 0.82 } = {}) {
       const model = coachMode && coachModel ? coachModel : activeModel()

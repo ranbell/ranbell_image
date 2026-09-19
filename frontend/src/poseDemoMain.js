@@ -23,7 +23,8 @@ try {
   stage.setCoachMode(true)
   stage.setDuoSpacing(0.5)
   // Do NOT auto-snap on load — that freezes software WebGL for seconds.
-  // User clicks「膝にスナップ」then nudges with floor rings.
+  // The user clicks 「膝にスナップ」 ("snap to the knee") and then nudges with the
+  // floor rings.
   stage.setViewMode('overview')
   window.__avatarStage = stage
 
