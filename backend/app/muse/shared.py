@@ -1223,12 +1223,16 @@ async def run_generate_actress_diary_job(
 
     fields: dict[str, str] = {}
     stray_seen = ""
+    kana_seen = ""
+    asked_again: list[str] = []
     for attempt, ask in enumerate(_DIARY_ASKS):
         raise_if_cancelled = getattr(cancel, "raise_if_set", None)
         if raise_if_cancelled is not None:
             raise_if_cancelled()
         if stray_seen:
             ask = _DIARY_ASK_STRAY.format(stray=stray_seen)
+        elif kana_seen:
+            ask = _DIARY_ASK_KANA.format(where=kana_seen)
         try:
             raw_resp = await chain._call(
                 ollama, system=system, prompt=ask,
@@ -1250,17 +1254,35 @@ async def run_generate_actress_diary_job(
         # do not clear it. **On the last attempt it is kept as it is**: one stray
         # character costs less than having no diary.
         stray = diary_mod.stray_script(fields.get("content_ja") or "")
+        # **A page with no kanji is asked for again (2026-09-19).** The wording of
+        # the language rule was what tipped it (measured 7/20 -> 0/20 once
+        # rewritten), and this is the net under that wording: the body runs 17-29%
+        # kanji on every healthy page, and the one the Showrunner saw was 0.3%.
+        # Like the stray script, **the last attempt keeps whatever came back** — a
+        # kana page is still her day, and no page at all is the worse loss.
+        kana = diary_mod.kana_only(
+            fields.get("content_ja") or "", fields.get("summary_ja") or "",
+        )
         last = attempt >= len(_DIARY_ASKS) - 1
-        if fields.get("content_ja") and (not stray or last):
+        if fields.get("content_ja") and (not (stray or kana) or last):
             if stray:
                 logger.warning(
                     "[muse] a stray script stayed in her diary: %r", stray,
                 )
+            if kana:
+                logger.warning("[muse] her diary stayed kana-only (%s)", kana)
+                asked_again.append(f"kana_stayed:{kana}")
             break
         if stray:
             stray_seen = stray
+            asked_again.append(f"stray:{stray}")
             logger.info("[muse] stray script %r (attempt %d), asking again",
                         stray, attempt + 1)
+        elif kana:
+            kana_seen = kana
+            asked_again.append(f"kana:{kana}")
+            logger.info("[muse] the %s came back with no kanji (attempt %d), "
+                        "asking again", kana, attempt + 1)
         else:
             # One retry, with the contract restated. The diary is a background
             # job on a model that is already resident, so trying twice is cheap
@@ -1275,7 +1297,7 @@ async def run_generate_actress_diary_job(
         # scaffolding printed in her handwriting is not.
         await _record_diary_result(
             db, sid, character_id=character_id, status="failed",
-            error="unreadable diary output",
+            error="unreadable diary output", asked_again=asked_again,
         )
         return {"status": "failed", "reason": "unreadable diary output"}
 
@@ -1314,6 +1336,7 @@ async def run_generate_actress_diary_job(
     await presets_db.add_preset_diary(db, character_id, diary_entry)
     chemistry_pair = await _record_diary_result(
         db, sid, character_id=character_id, status="ok", diary_id=diary_entry["id"],
+        asked_again=asked_again,
     )
     if chemistry_pair and spooler is not None:
         (char_a_id, diary_a_id), (char_b_id, diary_b_id) = chemistry_pair
@@ -1346,6 +1369,16 @@ _DIARY_ASKS: tuple[str, ...] = (
 #: How to ask when another writing system has crept in. **A different errand, so a
 #: different way of asking.** Told only "it could not be read", the writer has no way
 #: to know what to fix.
+#: How to ask when the Japanese came back with no kanji in it. **The page, not the
+#: rule.** Saying "use kanji" alone produced a page that sprinkled them; asking for
+#: the way she would actually write it is what the contract asks for everywhere else.
+_DIARY_ASK_KANA = (
+    "さっきの日記の日本語が、ひらがなばかりになっていました（{where}）。"
+    "同じ日記をもう一度、**漢字かな交じりの、ふつうの日本語**で書いてください。"
+    "20歳の女性がその日の夜に書く日記の文字づかいで、漢字を減らさないこと。"
+    "分かち書き（語のあいだに空白）もしないこと。"
+    "見出しは SUMMARY_JA / SUMMARY_EN / CONTENT_JA / CONTENT_EN の4つだけ。"
+)
 _DIARY_ASK_STRAY = (
     "さっきの日記に、日本語ではない文字が混ざっていました（{stray}）。"
     "同じ日記をもう一度書いてください。**`SUMMARY_JA` と `CONTENT_JA` は、"
@@ -1592,7 +1625,8 @@ def _report(reporter, progress: float, message: str) -> None:
     except Exception:
         logger.debug("[muse] diary reporter failed", exc_info=True)
 async def _record_diary_result(
-    db, session_id: str, *, character_id: str, status: str, diary_id: str = "", error: str = "",
+    db, session_id: str, *, character_id: str, status: str, diary_id: str = "",
+    error: str = "", asked_again: list[str] | None = None,
 ) -> list[tuple[str, str]] | None:
     """Write one actor's outcome back onto the session and tell the panel.
 
@@ -1624,6 +1658,11 @@ async def _record_diary_result(
     entries = dict(diary.get("entries") or {})
     entries[character_id] = {
         "status": status, "diary_id": diary_id, "error": error, "at": time.time(),
+        # **Why she was asked twice stays on the session (2026-09-19).** A live
+        # diary came back as kana from end to end and the log held nothing at all,
+        # so finding out what had happened meant re-deriving it from the stored
+        # pages. Each rewrite this job asked for is named here.
+        **({"asked_again": list(asked_again)} if asked_again else {}),
     }
     diary["entries"] = entries
     statuses = [str(e.get("status") or "") for e in entries.values()]

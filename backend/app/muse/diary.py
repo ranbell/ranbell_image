@@ -393,3 +393,49 @@ def stray_script(text: str) -> str:
     """
     hits = _STRAY_SCRIPT_RE.findall(str(text or ""))
     return "".join(dict.fromkeys(hits))
+
+
+# ── Kana all the way down ───────────────────────────────────────────────────
+#
+# **A page with no kanji in it is not how she writes.** (2026-09-19)
+#
+# The Showrunner: "the diary is in hiragana only, and the Japanese is strange".
+# Live (`0d5ac337`) a whole entry came back as kana with spaces between the words —
+# 「あした、あさ、もし、あしたも　いい　かぜが　ふいたら」 — and both that day's
+# summaries had no kanji at all.
+#
+# It is measurable. Across the 16 stored diaries the body runs **17-29% kanji**;
+# the broken one was 0.3%. The trigger is the English photo description in the
+# preamble plus the old wording of the language rule (7 of 20 runs; 0 of 20 once
+# the rule was rewritten). The rule is fixed — this is the net under it, because a
+# wording that measures 0/20 is not a wording that can never tip.
+#
+# The thresholds sit far below anything seen from a healthy page: a body under 8%
+# (against a floor of 17%) and a summary of some length with not one kanji.
+_KANJI_RE = re.compile(r"[一-鿿]")
+#: Below this, the body is not ordinary Japanese. Healthy pages measure 17-29%.
+KANJI_FLOOR = 0.08
+#: A summary shorter than this may honestly have no kanji in it.
+SUMMARY_MIN_LEN = 12
+
+
+def kanji_ratio(text: str) -> float:
+    """How much of the prose is kanji. 0.0 for an empty string."""
+    body = str(text or "")
+    return len(_KANJI_RE.findall(body)) / len(body) if body else 0.0
+
+
+def kana_only(content_ja: str = "", summary_ja: str = "") -> str:
+    """Which field came back without kanji — `"content"`, `"summary"` or `""`.
+
+    The body is checked first: it is the page, and a kana body is the failure the
+    Showrunner saw. A summary with no kanji at all is the milder form of the same
+    tipping, and it is what showed on both of that session's entries.
+    """
+    body = str(content_ja or "").strip()
+    if body and kanji_ratio(body) < KANJI_FLOOR:
+        return "content"
+    head = str(summary_ja or "").strip()
+    if len(head) >= SUMMARY_MIN_LEN and not _KANJI_RE.search(head):
+        return "summary"
+    return ""

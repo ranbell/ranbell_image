@@ -703,8 +703,15 @@ def test_the_japanese_page_is_closed_to_other_scripts():
     d = muse_crew.actress_diary_prompt(
         {"name_ja": "各務 みお", "name": "Mio", "personality": {}},
     )
-    assert "ひらがな・カタカナ・常用漢字だけ" in d
     assert "ハングル" in d
+    # **Never "write it in these scripts" (2026-09-19).** The rule used to read
+    # 「ひらがな・カタカナ・常用漢字だけで書くこと」, which says "Japanese scripts
+    # only" and reads just as well as "write it in kana". With an English photo
+    # description in the preamble it tipped — `SUMMARY_JA` came back with no kanji
+    # in 7 of 20 runs, and one live page (`0d5ac337`) was kana from end to end.
+    # Rewritten to ask for ordinary Japanese: 0 of 20.
+    assert "漢字かな交じり" in d
+    assert "ひらがな・カタカナ・常用漢字だけ" not in d
 
 
 def test_a_stray_script_is_seen_but_prose_is_never_repaired():

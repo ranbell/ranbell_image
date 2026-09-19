@@ -2552,7 +2552,22 @@ def actress_diary_prompt(
     appearance = character.get("appearance") or p.get("appearance") or {}
     if not isinstance(appearance, dict):
         appearance = {}
-    voice_ja = str(character.get("voice_ja") or appearance.get("voice") or "").strip()
+    # **Her voice in her own language (2026-09-19).** No character preset has a
+    # `voice_ja` — all 30 carry an English `appearance.voice`, and several of those
+    # end mid-sentence (c029's is "…and does"). So the one line in this Japanese
+    # preamble that described how she speaks was an English fragment, while the
+    # Japanese material the conversation prompts already use — `first_person_ja`
+    # and `talk_quirks` — was never handed over (`_voice_block`).
+    quirks_ja = _voice_field(character, "talk_quirks")
+    first_ja = _voice_field(character, "first_person_ja")
+    voice_ja = str(character.get("voice_ja") or "").strip()
+    if not voice_ja and (quirks_ja or first_ja):
+        voice_ja = " ".join(x for x in (
+            f"一人称は「{first_ja}」。" if first_ja else "",
+            quirks_ja.replace("\n", " "),
+        ) if x).strip()
+    if not voice_ja:
+        voice_ja = str(appearance.get("voice") or "").strip()
 
     return "\n\n".join([
         f"あなたは女優『{name_ja}』本人です。誰にも見せない自分だけの【秘密の非公開日記】を執筆しています。",
@@ -2630,11 +2645,19 @@ def actress_diary_prompt(
         # strong for that concept in the training data" surface mid-Japanese. Kanji,
         # being shared with Chinese, is especially prone to it. **Close each field
         # to one language.**
+        # **Say what to write, not which scripts are allowed (2026-09-19).** The old
+        # wording — "write `CONTENT_JA` and `SUMMARY_JA` in hiragana, katakana and
+        # common kanji only" — meant "Japanese scripts only", and reads just as well
+        # as "write it in kana". With an English photo description in the preamble it
+        # tipped: measured, `SUMMARY_JA` came back with no kanji at all in 7 of 20
+        # runs, and one live diary (`0d5ac337`) was kana from end to end. The same
+        # material with this wording: 0 of 20. The window was never the cause (1,455
+        # + 851 tokens against 32,768, `done_reason: stop`).
         "5. 多言語表示 (i18n) 対応のため、日本語版と英語版の両方を執筆すること"
         "（英語版も彼女の雰囲気を活かした自然な英語で表現）。"
-        "**`CONTENT_JA:` と `SUMMARY_JA:` は、ひらがな・カタカナ・常用漢字だけで"
-        "書くこと。** 中国語だけの漢字、ハングル、その他の文字体系を一字も"
-        "混ぜないこと。英語は `*_EN:` の欄にだけ書く。",
+        "**`CONTENT_JA:` と `SUMMARY_JA:` は、漢字かな交じりの、ふつうの日本語で"
+        "書くこと（漢字を減らさない）。** 混ぜてはいけないのは、ハングル・"
+        "キリル文字・中国語だけの漢字です。英語は `*_EN:` の欄にだけ書く。",
         "6. 出力は下の4つの見出しだけを、この順番で使うこと。JSON にはしない。"
         "見出し以外の解説文・コードフェンス・箇条書き記号は一切出力しない。"
         "本文には改行も「」も自由に使ってよい（見出し行以外は本文として扱われる）:",
@@ -3445,8 +3468,14 @@ you are shown is an old take and is not the shot; the parts above it are.
 
 
 def _voice_field(character: dict[str, Any], key: str, default: str = "") -> str:
-    """Read a dialogue field from top-level or personality (presets put both)."""
-    p = character.get("personality") or {}
+    """Read a dialogue field from top-level or personality (presets put both).
+
+    A raw preset row keeps `personality` as a **trait list**, not a map — the diary
+    prompt is documented to accept one, and reading it as a map raised
+    `AttributeError` there the moment this function was used from it.
+    """
+    p = character.get("personality")
+    p = p if isinstance(p, dict) else {}
     raw = character.get(key)
     if raw is None or raw == "" or raw == []:
         raw = p.get(key)
