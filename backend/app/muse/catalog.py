@@ -112,17 +112,18 @@ async def build_muse_catalog(
         logger.warning("[muse.catalog] presets count failed: %s", exc)
 
     admin_vlm = (cfg.get("vlm_model") or "").strip()
-    # **管理画面が決めた既定だけを「既定」と呼ぶ（2026-09-13）。**
+    # **Only what the admin screen decided is called a default (2026-09-13).**
     #
-    # 総監督「使用する llm・画像モデルも空にして、実行前に選択するように。
-    # 管理画面でデフォルト決めていたら、そのデフォルト値を使用して開始できるように」。
-    # `suggested_*` は**一覧の先頭**を当てていたので、画面はそれを既定として使い、
-    # 総監督が選ばないまま撮影が始まっていた。先頭当ては残す（外の呼び元が読む）が、
-    # 画面が見るのは下の `admin_defaults` のほうにする。
+    # The Showrunner: "empty the llm and image model too, so they are chosen before
+    # running. If a default is set in the admin screen, it should be possible to
+    # start from that default." `suggested_*` was picking **the first of the list**,
+    # so the screen used that as the default and shoots began without the Showrunner
+    # choosing. The first-of-list pick stays (outside callers read it), and the
+    # screen now reads `admin_defaults` below instead.
     admin_model = (cfg.get("muse_model") or "").strip() or admin_vlm
     admin_workflow = (cfg.get("muse_workflow") or "").strip()
     if admin_workflow and workflows and admin_workflow not in workflows:
-        admin_workflow = ""      # 消えたワークフローを既定にしない
+        admin_workflow = ""      # a workflow that has gone is not a default
     suggested_model = admin_model or (vision[0] if vision else (models[0] if models else ""))
     suggested_workflow = admin_workflow or (workflows[0] if workflows else "")
 
@@ -143,7 +144,7 @@ async def build_muse_catalog(
         "characters": {"count": character_count},
         "locales": ["ja", "en"],
         "admin_defaults": {
-            # 画面はここだけを見る。**空なら選ばせる。**
+            # The screen reads only this. **Empty means it asks to choose.**
             "muse_model": admin_model,
             "muse_workflow": admin_workflow,
             "vlm_model": admin_vlm,

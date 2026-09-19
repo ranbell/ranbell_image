@@ -177,13 +177,13 @@ def extract_lettering(text: str) -> tuple[list[str], str]:
             r"(?:(?:the\s+)?(?:text|word|words|label|sign|banner|title)\s+)?"
             r"['\"「]([^'\"」\n]+)['\"」]"
         ),
-        # Japanese 「X」を看板/文字に
+        # Japanese: 「X」を看板/文字に ("put X on a sign / as lettering")
         re.compile(
             r"['\"「『]([^'\"」』\n]{1,40})['\"」』]\s*(?:という|との|と|の)?\s*"
             r"(?:文字|テキスト|タイトル|文章|ラベル|キャプション)?\s*を?\s*"
             r"(?:に|で)?\s*(?:入れ|描画|追加|表示|書い|記載)"
         ),
-        # 看板/ボードに「X」
+        # 看板/ボードに「X」 ("X on a sign / a board")
         re.compile(
             r"(?i)(?:textboard|sign|banner|label|board|ボード|看板|テキストボード)\s*"
             r"(?:に|へ|で)?\s*['\"「『]([^'\"」』\n]{1,40})['\"」』]"

@@ -304,8 +304,9 @@ def _classify_hint_tag(tag: str) -> str | None:
         return "pose"
     if tag in _ACCESSORY_EXACT:
         return "accessories"
-    # scene カテゴリは character hints に含めない — slogan から axis decomposer が自由に生成すべきで
-    # ここで先入れすると特定キーワードが全スピリットに固着する
+    # The scene category is not included in the character hints — the axis
+    # decomposer should generate freely from the slogan, and seeding it here sticks
+    # particular keywords to every spirit
     return None
 
 
@@ -390,7 +391,7 @@ async def get_recent_adopted_tags(db, days: int = 7, limit: int = 200) -> dict[s
     return freq
 
 
-# ── Pro mode: お題ドリブン WD14 タグ取得 ────────────────────────────────────
+# ── Pro mode: topic-driven WD14 tag retrieval ───────────────────────────────
 
 _PRO_SECTION_ORDER = ("character", "background", "props", "action", "mood", "camera")
 
@@ -629,7 +630,7 @@ async def expand_pro_prompt(
     return _fallback
 
 
-# ── Pro mode: axis_tag_hints の VLM 精査 (将来用) ────────────────────────────
+# ── Pro mode: VLM scrutiny of axis_tag_hints (for future use) ───────────────
 
 async def refine_axis_tag_hints(
     raw_hints: list[str],
@@ -647,7 +648,7 @@ async def refine_axis_tag_hints(
     if not raw_hints or not ollama:
         return raw_hints
 
-    # 軸サマリー（プロンプトに収める）
+    # The axis summary (to fit into the prompt)
     axis_lines: list[str] = []
     for k in ("subject", "character_detail", "action", "scene",
               "mood", "lighting", "style", "accessories", "palette"):
@@ -657,7 +658,7 @@ async def refine_axis_tag_hints(
         if v:
             axis_lines.append(f"  {k}: {v}")
 
-    # Pro セクション（空でない場合のみ）
+    # The Pro section (only when it is not empty)
     section_lines: list[str] = []
     if pro_sections:
         for sect in ("character", "background", "props", "action"):

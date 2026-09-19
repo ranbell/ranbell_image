@@ -16,7 +16,7 @@ _THINK_BLOCK_RE = re.compile(r"<think>[\s\S]*?</think>", re.IGNORECASE)
 # llama.cpp's detokenizer — the engine behind newer Ollama builds — falls back
 # to `<0xNN>` hex notation when it cannot assemble a multi-byte UTF-8
 # character, and that notation leaks straight through as text instead of the
-# character it stands for (every non-ASCII character is at risk: 「蹂躙」→
+# character it stands for (every non-ASCII character is at risk: 「蹂躙」 ->
 # 「蹂<0xE8><0xBA><0x99>」). The real fix is upstream (an Ollama/engine
 # version), so this is a best-effort repair: reassemble a run of tokens into
 # the bytes they encode and decode as UTF-8; a run that isn't valid UTF-8 is
@@ -248,13 +248,15 @@ class OllamaClient:
                         yield event
                     for event in _fallback():
                         yield event
-                    # **枠に当たって止まったことを、黙って捨てない。**（2026-09-18）
+                    # **Hitting the window and stopping is not thrown away
+                    # silently.** (2026-09-18)
                     #
-                    # 総監督「prompt のオーバフローで文字が切れる場合がある」。
-                    # 枠（`num_ctx`）は前置きと出力の合計なので、前置きが長い回は
-                    # **書いている途中で打ち切られる**。Ollama は最後の一行で
-                    # `done_reason: "length"` と言っているのに、ここで読み捨てて
-                    # いたため、アプリからは「短い返事」と見分けが付かなかった。
+                    # The Showrunner: "there are cases where the prompt overflows and
+                    # the text is cut off". The window (`num_ctx`) is the preamble
+                    # plus the output, so a turn with a long preamble is **cut off
+                    # mid-sentence**. Ollama says `done_reason: "length"` on its last
+                    # line, and that was being read and discarded here, so from the
+                    # app it was indistinguishable from a short reply.
                     reason = str(data.get("done_reason") or "")
                     if reason == "length":
                         logger.warning(

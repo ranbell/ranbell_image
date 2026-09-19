@@ -32,15 +32,16 @@ class InputsPatch(BaseModel):
     theme: str | None = None
     character_id: str | None = None
     partner_preset: str | None = None
-    # **撮影班のプリセット（2026-09-13 に欠けていたのを足した）。**
+    # **The crew preset (the missing field was added on 2026-09-13).**
     #
-    # 画面には前から選択が出ていた（`muse.crewPreset`）が、ここに欄が無いので
-    # pydantic が黙って捨てていた —— `{"crew_preset": "photoreal"}` が `{}` に
-    # なり、**スタジオ撮りは常に `standard` の18席**で回っていた。総監督
-    # 「photorealistic, vivid, flat などがうまく機能することを祈っています」。
+    # The screen had offered the choice for a long time (`muse.crewPreset`), and with
+    # no field here pydantic silently threw it away — `{"crew_preset": "photoreal"}`
+    # became `{}` and **every studio shoot ran on `standard`'s 18 seats**. The
+    # Showrunner: "I hope photorealistic, vivid, flat and the rest work well.
     crew_preset: str | None = None
-    #: やじ（off / light / full）。これも画面には前から出ていて、受け取る欄が
-    #: 無かった —— 呼び出し回数の半分はやじなので、**速さの手が一つ塞がっていた**。
+    #: Banter (off / light / full). This too had long been on the screen with no
+    #: field to receive it — half the calls are banter, so **one lever on speed was
+    #: blocked**.
     banter_mode: str | None = None
     workflow: str | None = None
     model: str | None = None

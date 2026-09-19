@@ -29,9 +29,10 @@ from .api.analyzer import router as analyzer_router
 from .api.alignment import router as alignment_router
 from .api.invoke import router as invoke_router
 from .characters.api import router as characters_router
-# **Muse Classic は退役した（2026-09-12）。** 撮影室は Muse Refine 一つ。
-# 楽屋と手帖だけは classic のルーターに同居していたので、そこだけ独立させた
-# （URL は `/api/muse/lounge/...` のまま —— 画面がそう叩いている）。
+# **Muse Classic retired (2026-09-12).** There is one studio, Muse Refine. Only the
+# green room and the notebook shared classic's router, so those were made
+# independent (the URLs stay `/api/muse/lounge/...` — that is how the screen calls
+# them).
 from .muse.lounge_api import router as muse_lounge_router
 
 

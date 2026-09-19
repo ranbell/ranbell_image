@@ -64,15 +64,16 @@ LLM_DEFAULTS: dict[str, object] = {
     # the unload, so pinning the model defeats it. Turn this off only for a card
     # big enough to hold a checkpoint and the model at the same time.
     "unload_vlm": True,
-    # **シンプルモード。** on にすると、会話のたびに状況を整理して前回の
-    # プロンプトを直すだけになる（compile も欄ごとの係も weave も通らない）。
-    # 既定は off —— 今の経路と並べて比べられる状態を残すため。
+    # **Simple mode.** Switched on, each turn only tidies up the situation and fixes
+    # the previous prompt (no compile, no per-field clerks, no weave). The default is
+    # off, so it stays comparable side by side with the current road.
     "simple": False,
     # Cast preset for the table-read crew (see muse.crew.PRESETS).
     #
-    # **既定は空（2026-09-13）。** 総監督「スタジオ撮りのデフォルトは空にして、
-    # 選択しないとスタジオ撮影できないようにして」。班は顔ぶれで絵も速さも変わる
-    # （`standard` 18席 / `flat` 12席）ので、黙って一つを当てない。
+    # **The default is empty (2026-09-13).** The Showrunner: "make the studio
+    # shoot's default empty, so a studio shoot cannot start without choosing". Who is
+    # on the crew changes both the picture and the speed (`standard` 18 seats,
+    # `flat` 12), so none is applied silently.
     "crew_preset": "",
     # Banter between craft passes. light = Ollama-friendly (fewer side calls);
     # full = previous speaker + occasional heckler; off = craft only.

@@ -54,7 +54,8 @@ FACETS: tuple[tuple[str, str], ...] = (
 )
 
 # The three character-bound parts, duplicated for the second Muse in a W-Muse
-# (主演撮り・二人) session. `place`/`hour`/`light`/`props`/`camera` stay single
+# (a two-person lead shoot, 主演撮り) session. `place`/`hour`/`light`/`props`/
+# `camera` stay single
 # — one room, one lens, one shared moment — so they are not duplicated: two
 # people looking at each other is one `camera` fact, not two. Kept apart from
 # `FACETS` rather than merged into it so a solo session's shape (and every

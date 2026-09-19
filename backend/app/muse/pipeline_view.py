@@ -12,8 +12,9 @@ from typing import Any
 
 from . import ledger as ledger_mod
 
-#: 外に出る識別子（画面と外部の採点が読む）。**`v1` のまま名前だけ直さない** ——
-#: 畳んだのはパッケージの名前で、観測の形は一字も変えていない（2026-09-12）。
+#: The identifier that goes outside (read by the screen and by external scoring).
+#: **It stays `v1`; the name is not tidied** — what was folded is the package name,
+#: and the shape of the observation did not change by a character (2026-09-12).
 PIPELINE_SCHEMA = "muse_refine.pipeline.v1"
 
 _STAGE_IDS = (
@@ -75,11 +76,12 @@ def _divergences(session: dict[str, Any]) -> list[dict[str, str]]:
     led = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
     craft = session.get("craft") or {}
     board = session.get("board") or {}
-    # **会話中のプロンプトは一手ぶん古い（2026-09-10）。** 会話のターンでは
-    # 散文とタグの組み上げを撮る時まで待つ（`assemble.touch_craft`）ので、
-    # 監督がいま動かした欄は、まだ `craft.prompt` に載っていなくて当たり前。
-    # ここで「missing」と言うと、毎ターン嘘の警告が並ぶ。撮る直前に組み直され、
-    # `stale` が下りてから比べる。
+    # **Mid-conversation the prompt is one move old (2026-09-10).** On a
+    # conversation turn, building the prose and tags waits until the shot
+    # (`assemble.touch_craft`), so a field the director has just moved is naturally
+    # not in `craft.prompt` yet. Saying "missing" here lines up false warnings every
+    # turn. The comparison happens after the rebuild just before the shot, once
+    # `stale` has come down.
     prompt = "" if craft.get("stale") else str(craft.get("prompt") or "")
     board_prompt = str(board.get("prompt") or "")
     prompt_tok = _tokens(prompt)

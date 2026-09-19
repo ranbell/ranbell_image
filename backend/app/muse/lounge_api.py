@@ -49,7 +49,8 @@ async def _faces(request: Request) -> dict[str, str]:
             if sha:
                 out[str(p.get("id") or "")] = sha
     except Exception:
-        pass                      # 顔が出ないだけ。楽屋は読めるほうが大事
+        pass                      # only the face is missing; being able to read the
+                                  # green room matters more
     return out
 
 
@@ -90,9 +91,9 @@ async def handpost_list(request: Request, pinned_only: bool = False):
     """Read-only list. Pages are written by habit jobs — not by the showrunner."""
     from . import handpost_db
     pages = await handpost_db.list_pages(_db(request), pinned_only=pinned_only)
-    # **既に保存された頁も、ここで切る。** 書く側は直したが、壊れたまま
-    # 残っている頁は新しいものが来るまで表示され続ける（実測 4頁中2頁）。
-    # 保存し直しはしない —— 読むたびに整えるだけで足りる。
+    # **Pages already saved are cut here too.** The writing side was fixed, but a
+    # page left broken keeps being displayed until a new one arrives (measured, 2
+    # pages in 4). Nothing is saved again — tidying on each read is enough.
     for page in pages:
         if not isinstance(page, dict):
             continue

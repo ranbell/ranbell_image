@@ -105,8 +105,8 @@ async def run_render(
         append_negative=True,
     )
 
-    # **この描画だけの clientId。** 一つを共有していたので、やり直しで
-    # 二本目が同じ id で繋がり、ComfyUI が古いほうを落としていた。
+    # **A clientId for this render alone.** They used to share one, so on a retake a
+    # second connection came in on the same id and ComfyUI dropped the older one.
     client_id = comfy.new_client_id()
     prompt_id = await comfy.queue_prompt(
         patched, preview=preview is not None, client_id=client_id,

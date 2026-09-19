@@ -12,9 +12,10 @@ _TOPIC_STOP = frozenset({
 })
 
 
-# Compact bilingual bridges for お題 gating (substring match is otherwise JA≠EN).
-# Single-kanji keys (雨/駅/星/海/夜/朝) are included — regex chunks are 2+ only,
-# so topic_anchor_groups also substring-scans these keys in the raw お題.
+# Compact bilingual bridges for topic (お題) gating — a substring match is otherwise
+# JA != EN. Single-kanji keys (雨/駅/星/海/夜/朝 — rain / station / star / sea /
+# night / morning) are included: regex chunks are 2+ characters only, so
+# topic_anchor_groups also substring-scans these keys in the raw topic.
 _TOPIC_JA_EN_ALIASES: dict[str, tuple[str, ...]] = {
     "カフェ": ("cafe", "coffee", "barista"),
     "珈琲": ("coffee", "cafe"),
@@ -124,7 +125,8 @@ def topic_anchor_groups(
         t = _normalize_topic_token(tok)
         if not t or t in seen_seeds or t in _TOPIC_STOP:
             return
-        # Allow 1-char seeds only when they are known alias keys (雨/駅/星…).
+        # Allow 1-char seeds only when they are known alias keys (雨/駅/星 — rain /
+        # station / star …).
         if len(t) < 2 and t not in _TOPIC_JA_EN_ALIASES:
             return
         seen_seeds.add(t)
@@ -137,7 +139,8 @@ def topic_anchor_groups(
     for m in _TOPIC_KATA_RE.finditer(text):
         _add_seed(m.group(0))
 
-    # Substring scan for alias keys (covers 1-kanji and mixed verbs like 働く).
+    # Substring scan for alias keys (covers single kanji and mixed verbs such as
+    # 働く, "to work").
     for key in sorted(_TOPIC_JA_EN_ALIASES.keys(), key=len, reverse=True):
         if key in text or key.lower() in text_l:
             _add_seed(key)

@@ -41,7 +41,7 @@ class SummonRequest(BaseModel):
     camera_angle: str = ""  # e.g. "from_above", "dutch_angle"
     # Locale
     locale: str = "en"      # 'en' | 'ja' — controls monologue language
-    pro_topic: str = ""              # Pro mode natural language topic (お題テキスト直送)
+    pro_topic: str = ""              # Pro mode natural language topic (sent as it is)
     pro_sections: dict[str, str] = {}  # character / background / props / action seed hints
     # Rebel spirit control
     rebel_inversion: bool = True  # False = rebel aims for beautiful image without axis inversion
@@ -51,7 +51,7 @@ class SummonRequest(BaseModel):
     frontier_mode: bool = False
     # Global LLM temperature multiplier applied on top of each spirit's native temperature
     heat: float = 1.0  # 0.6–1.3
-    # 乱れ度 1–3: widens stranger/lunatic vocab pools (2: wider band + 3 wild tags, 3: + rare tag)
+    # Wildness 1-3: widens stranger/lunatic vocab pools (2: wider band + 3 wild tags, 3: + rare tag)
     wildness: int = 1
     # Target emotion dimension ('' | loneliness | nostalgia | ... — see emotion_tagger.EMOTION_DIMENSIONS)
     emotion: str = ""

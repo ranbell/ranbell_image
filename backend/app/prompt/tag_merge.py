@@ -245,7 +245,7 @@ def _build_weighted_wd14_context(
         }
 
         if weight <= 0:
-            continue  # weight=0 の画像はコンテキストに含めない
+            continue  # an image with weight=0 is left out of the context
 
         pct = round(weight * 100)
         lines: list[str] = []

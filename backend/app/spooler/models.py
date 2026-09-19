@@ -56,7 +56,8 @@ class Job:
     result: Any = None
     error: str | None = None
     meta: dict = field(default_factory=dict)
-    #: 資源が落ちていて待たせた回数。**失敗ではない** —— 戻して待つたびに増える
+    #: How many times it waited because a resource was down. **Not a failure** — it
+    #: rises each time the job goes back on the queue
     requeues: int = 0
 
     _cancel_event: asyncio.Event = field(default_factory=asyncio.Event)

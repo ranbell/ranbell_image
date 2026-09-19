@@ -33,10 +33,11 @@ _defaults = {
     # ConfigBody but not here, so every save read back empty.
     "cluster_common_tags": [],
     "ollama_num_ctx":          16384,
-    # Muse の既定（2026-09-13）。総監督「使用する llm・画像モデルも空にして、
-    # 実行前に選択するように。管理画面でデフォルト決めていたら、そのデフォルト値を
-    # 使用して開始できるように」。**空なら画面が選ばせる** —— 勝手に一覧の先頭を
-    # 当てない（`muse_model` が空のときは `vlm_model` を見る）。
+    # Muse's defaults (2026-09-13). The Showrunner: "empty the llm and image model
+    # too, so they are chosen before running. If a default is set in the admin
+    # screen, it should be possible to start from that default." **Empty means the
+    # screen asks to choose** — the first of the list is never applied on its own
+    # (when `muse_model` is empty, `vlm_model` is consulted).
     "muse_model":    "",
     "muse_workflow": "",
     "frozenset_classification": True,

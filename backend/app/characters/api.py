@@ -279,8 +279,9 @@ async def list_character_diaries(character_id: str, request: Request):
         raise HTTPException(404, "character not found")
     diaries = await presets_db.get_preset_diaries(request.app.state.db, character_id)
     diaries.sort(key=lambda d: d.get("timestamp") or 0.0, reverse=True)
-    # 書いた本人の顔。日記は一人ぶんなので一度引けば足りる —— 画面側は
-    # `thumb(sha)` を既に持っているので、sha が届けば名前の横に出せる。
+    # The face of whoever wrote it. A diary belongs to one person, so one lookup is
+    # enough — the screen already has `thumb(sha)`, so given the sha it can show the
+    # face beside the name.
     return {"diaries": diaries,
             "face": str((preset.get("board") or {}).get("portrait") or "")}
 
@@ -298,7 +299,8 @@ async def find_character_diary_by_image(character_id: str, image_id: str, reques
 
 
 # Studio lines that were the machine talking to itself: a list of tag names
-# after 外しました / 片付けました. They are not written into chat any more, but
+# after 外しました / 片付けました ("taken off" / "cleared away"). They are not
+# written into chat any more, but
 # every session shot before that still carries them, and a log is read by a
 # person.
 _MACHINE_LINE_RE = re.compile(r"^[（(](?:外しました|戻しました|.*が片付けました)")

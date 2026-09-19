@@ -54,8 +54,9 @@ def prepare_vitality_flags(session: dict[str, Any], *, user_line: str = "") -> N
     )
     vitality.bump_talk_turn(session)
     session["w_b_leads"] = vitality.should_b_lead(session, partner=partner)
-    # **「またあの感じ」は Refine では拾わない（2026-09-10）。** 総監督
-    # 「前回の内容からの提案は削除して時間短縮」。classic Muse には残っている。
+    # **「またあの感じ」 ("that feeling again") is not picked up in Refine
+    # (2026-09-10).** The Showrunner: "remove the proposal drawn from last time, to
+    # save time". It remains in classic Muse.
 
 
 def note_picture_compile(session: dict[str, Any]) -> None:
@@ -261,10 +262,11 @@ def publish_actress_turn(
             "speaker_id": lead_cid or None,
         })
     else:
-        # **無言の吹き出しを出さない（2026-09-10）。** 総監督「処理に失敗して
-        # 無言になってますね」。台詞が空でも行だけ積んでいたので、画面には
-        # 名前と空の吹き出しが残っていた。内心（ASIDE）は別の行として出るので、
-        # ここは黙って見送り、**何が起きたかは記録に残す。**
+        # **No silent bubble (2026-09-10).** The Showrunner: "the processing failed
+        # and it has gone silent". The row was stacked even with an empty line, so
+        # the screen was left with a name and an empty bubble. The mutter (ASIDE)
+        # comes out as its own row, so this one is quietly let go — and **what
+        # happened goes into the record.**
         raw = str(actress.get("raw") or "")
         logger.warning("[muse] actress turn produced no SAY: %r", raw[:200])
         try:
@@ -374,7 +376,8 @@ _ATM_LOOK_RULES: tuple[tuple[re.Pattern[str], dict[str, str]], ...] = (
      {"look": "sci-fi illustration, neon accents, sleek tech"}),
     (re.compile(r"(レトロ|昭和|90年代|90s\s*anime|retro\s*anime)", re.I),
      {"look": "1990s anime style, retro anime screencap, soft film grain"}),
-    # Atmosphere / mood (emo) — avoid bare 恋 / 癒 that fire on banter
+    # Atmosphere / mood (emo) — avoid a bare 恋 ("love") or 癒 ("soothing") that
+    # fire on banter
     (re.compile(r"(エモ|切ない|寂しい|物憂|哀愁|melanchol|wistful|bittersweet|泣きそう)", re.I),
      {"atmosphere": "wistful, melancholic, tender ache, soft focus, emotional"}),
     (re.compile(r"(ほのぼの|あったかい空気|優しい空気|癒し系|癒やされる空気|cozy|warm\s*and\s*gentle)", re.I),
