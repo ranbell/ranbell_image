@@ -44,7 +44,7 @@ def _floor(*pairs):
             for i, (field, craft) in enumerate(pairs)]
 
 
-# ── 束ねること ──────────────────────────────────────────────────────────
+# ── Bundling them ───────────────────────────────────────────────────────
 
 def test_the_seats_that_share_a_field_sit_down_together():
     """standard's twelve seats become **nine corners** — the three contested fields are
@@ -78,7 +78,7 @@ def test_the_order_follows_the_seat_who_sits_first():
     assert groups[0][1] == ["palette:itten", "ink:ipponsen"]
 
 
-# ── 告知すること ────────────────────────────────────────────────────────
+# ── Announcing the current value ────────────────────────────────────────
 
 def test_the_meeting_opens_with_what_the_ledger_says_now():
     """The Showrunner: "announce what the ledger currently is, then talk about how it
@@ -138,7 +138,8 @@ def test_the_corner_is_told_the_slot_is_shared():
     assert "you are the only seat that writes it" not in sysmsg
     assert "SHARE with the other speakers" in sysmsg
     assert "ONE value for `look`" in sysmsg
-    # 口調は人物カードで保つ（束ねても「一人の語り手が名札を付け替える」にしない）
+    # The voices are held by the person cards (bundled, it must not become one
+    # narrator swapping name tags)
     assert "口調 (JA):" in sysmsg and sysmsg.count("VOICE (EN):") == 2
 
 
@@ -147,7 +148,7 @@ def test_the_output_contract_asks_for_one_craft_at_the_end():
     assert "REPLACES any format above" in C.GROUP_OUTPUT
 
 
-# ── 返事を解くこと ──────────────────────────────────────────────────────
+# ── Unpicking the reply ─────────────────────────────────────────────────
 
 def test_the_packed_reply_splits_into_voices_and_one_conclusion():
     raw = (
@@ -214,7 +215,7 @@ def test_the_stream_follows_whoever_is_speaking():
         assert "SPEAKER" not in text
 
 
-# ── 着地 ────────────────────────────────────────────────────────────────
+# ── Landing ─────────────────────────────────────────────────────────────
 
 def test_the_conclusion_becomes_the_whole_field():
     """**The conclusion is the whole field.** It does not add, so nothing piles up."""
@@ -362,7 +363,7 @@ def test_no_crew_no_landing():
     assert C.field_land(_session(), [], ledger=L.blank(), taken=set()) == ({}, {})
 
 
-# ── 一周の組み立て ──────────────────────────────────────────────────────
+# ── How one round is put together ───────────────────────────────────────
 
 def test_the_turn_asks_the_crew_after_the_director():
     """**Order matters.** The director's patch is applied first, then the landing (the
@@ -432,11 +433,12 @@ def test_one_call_per_field_instead_of_one_per_seat():
 
     assert len(calls) == 8, calls
     assert sum(1 for kind, _ in calls if kind == "corner") == 3
-    # **主演は一周に居ない（2026-09-16）** —— 彼女の言葉はターンの最後に届く。
+    # **The lead is not in the round (2026-09-16)** — her words arrive at the end of
+    # the turn.
     spoke = {m for _, ids in calls for m in ids}
     assert not any(crew.role_of(m) == "actress" for m in spoke), spoke
 
-    # 会議の結論は**閉めの一人**に付く（欄に二つ着地しない）
+    # A corner's conclusion goes on **whoever closes** (a field never receives two)
     look = [r for r in floor if r["field"] == "look"]
     assert [r["craft"] for r in look] == ["", "agreed_one, agreed_two | 会議の結論"]
     assert [crew.role_of(r["muse_id"]) for r in look] == ["palette", "ink"]
@@ -470,7 +472,7 @@ def test_two_different_accents_still_both_get_through():
     assert C._too_close("depth_of_field", "shallow_depth_of_field") is True
 
 
-# ── 綻び五件（2026-09-16）──────────────────────────────────────────────
+# ── The five defects (2026-09-16) ──────────────────────────────────────
 
 def test_the_lead_is_dressed_at_the_studio_door_too():
     """**The lead is dressed at the studio door too.** (2026-09-16)
@@ -506,7 +508,7 @@ def test_the_seat_wears_its_nickname_on_the_name_tag():
     s = _session(character={"name_ja": "各務 みお"})
     assert C.seat_name(s, "palette:itten") == "一点（色彩設計）"
     assert C.seat_name(s, "beat:ichibyou") == "一秒（演出）"
-    # 主演はキャストした本人の名前のまま
+    # The lead keeps the name she was cast under
     cast = [m for m in crew.resolve_crew(preset="standard")
             if crew.role_of(m) == "actress"][0]
     assert C.seat_name(s, cast) == "各務 みお"
@@ -576,7 +578,7 @@ def test_an_unknown_name_walks_the_seats_instead_of_piling_on_the_first():
     got = {k: "".join(v) for k, v in seen.items()}
     assert "一人目。" in got["palette:itten"]
     assert "二人目。" in got["ink:ipponsen"], "二人目が一人目に積まれている"
-    # 黙って間違えない
+    # Never wrong silently
     notes = [n for n in (session.get("refine_log") or [])
              if n.get("kind") == "corner_speaker_miss"]
     assert len(notes) == 2, notes

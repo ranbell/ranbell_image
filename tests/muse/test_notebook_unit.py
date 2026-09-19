@@ -137,7 +137,8 @@ def test_framing_from_phrase_last_match_wins():
 
 # ── taking something off ───────────────────────────────────────────────────
 # Measured live: every removal turn came back with the frame rewritten and
-# WEARING untouched — 「コート脱いで」left the coat on for three more turns and
+# WEARING untouched — 「コート脱いで」 ("take the coat off") left the coat on for
+# three more turns and
 # said nothing. Restating the five remaining garments verbatim is the work the
 # scripter does not do; naming the one that came off is work it already does.
 def test_taking_a_garment_off_subtracts_it():
@@ -210,8 +211,8 @@ def test_the_clerk_reads_a_closed_list():
         "wearing", "beat", "frame"}
     assert chain.parse_classified_fields("none") == set()
     # Anything outside the list is not a field, however confidently said.
-    # （`expression` は 2026-08-30 に欄になった。閉じた一覧であること自体は
-    #   変わらないので、例を欄でない語に差し替えた）
+    # (`expression` became a field on 2026-08-30. That this is a closed list has not
+    #  changed, so the example was swapped for a word that is not a field)
     assert chain.parse_classified_fields("mood, vibes, feeling") == set()
     assert chain.parse_classified_fields("expression") == {"expression"}
     assert chain.parse_classified_fields("") == set()
@@ -237,7 +238,7 @@ def test_the_clerk_names_one_kind_of_turn():
     assert chain.parse_classified_intent("unclear") == ""
 
 
-# ── ラベルは、行頭でなくても境界 ──────────────────────────────────
+# ── A label is a boundary even away from the start of a line ─────
 def test_a_field_never_swallows_the_next_field():
     """Measured (2026-08-25): `frame` was swallowing the rest of the notebook
     page."""
@@ -260,7 +261,7 @@ def test_an_ordinary_value_passes_through_untouched():
         assert notebook.cut_at_label(plain) == plain
 
 
-# ── 一つの服に、一つの名前 ────────────────────────────────────────
+# ── One garment, one name ───────────────────────────────────────
 def test_the_weave_renaming_a_gown_a_dress_is_one_garment_not_three():
     gone = notebook.garment_aliases(
         "gown, blue_dress, sleeveless_dress, earrings, sitting, blue_sky",
@@ -282,7 +283,7 @@ def test_only_clothing_is_read_as_a_rename():
     )
 
 
-# ── 折り込みは、そのターンのもの ──────────────────────────────────
+# ── A fold belongs to its own turn ──────────────────────────────
 def _folded(beat_before: str, card: str) -> dict:
     nb = notebook.blank()
     notebook.apply_patch(nb, {"beat": beat_before})
@@ -300,7 +301,7 @@ def test_her_gesture_reaches_the_take_and_then_lets_go():
 
     assert notebook.undo_fold(nb) == ["beat"]
     assert nb["beat"] == "sitting, hands on her knees"
-    # 総監督が置いた姿勢は残る。
+    # The posture the Showrunner placed survives.
     assert "sitting" in nb["beat"]
 
 
@@ -325,9 +326,9 @@ def test_a_fold_that_changed_nothing_leaves_nothing_to_let_go():
     assert notebook.undo_fold(nb) == []
 
 
-# ── 織ったタグを、正本と突き合わせる ──────────────────────────────
-# 実測（`42b55492` / 2026-08-26）。手帖は「レンズを見ている」と言い、地の文も
-# 「eyes wide and glassy」と書いているのに、タグは `closed_eyes` だった。
+# ── The woven tags are checked against the record of truth ──────
+# Measured (`42b55492`, 2026-08-26). The notebook said she was looking into the lens
+# and the prose said "eyes wide and glassy", and the tags still held `closed_eyes`.
 LENS = "close-up, looking straight into the lens"
 BEAT = "standing, clutching the hem of her dress with trembling fingers"
 BEAT_B = "standing closely together, leaning into one another with blissful faces"
@@ -417,9 +418,9 @@ def test_the_compile_cannot_write_a_field_its_contract_never_explains():
     for partner in (False, True):
         keys = notebook.scripter_format_schema(partner)["properties"]
         assert "standing" not in keys
-    # 元のスキーマには残す —— 制作スタッフの router は条文で説明したうえで
-    # 書く（`STANDING: <one rule for the whole session…>`）。閉じたのは
-    # compile が書く道だけ。
+    # It stays in the original schema — the studio crew's router explains it in the
+    # contract and then writes it (`STANDING: <one rule for the whole session…>`).
+    # What was closed is only compile's road.
     assert "standing" in notebook.SCRIPTER_FORMAT_SCHEMA["properties"]
     assert "STANDING" in chain.route_system()
 

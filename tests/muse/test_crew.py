@@ -76,12 +76,13 @@ def test_the_seat_prompt_is_voice_plus_specialty_and_nothing_classic():
     text = crew.system_prompt_for("beat")
     assert "SAY:" not in text, "出力の形は SEAT_OUTPUT が最後に言う"
     assert crew.OUTPUT not in text and crew.CARRY not in text
-    # 声と職能は残っている
+    # The voice and the job description survive
     assert "演出" in text and "一秒" in text
     assert "口調 (JA)" in text
     assert "EXAMPLE SAY" in text
     assert "conversation" in text.lower() or "RECENT TABLE TALK" in text
-    # 席ぶんの条文（拒否したものを名指ししない／相対指定の禁止）は残す
+    # The seat's share of the contract stays (do not name what was refused; no
+    # relative amounts)
     assert "Do NOT name it" in text
     assert "NO RELATIVE ADJUSTMENTS" in text
     assert len(crew.MUSES["beat:ichibyou"]["say_examples"]) >= 3
@@ -459,7 +460,7 @@ def test_wardrobe_owns_the_locked_costume_and_reads_the_theme():
         assert "CLOTH" in text or "WEARING" in text, mid
         low = text.lower()
         assert "do not write" in low and "tags" in low, mid
-    # Opening / 衣装部屋 still appends the COSTUME block elsewhere.
+    # Opening / 衣装部屋 (the wardrobe room) still appends the COSTUME block elsewhere.
     assert "SILHOUETTE:" in crew.WARDROBE_COSTUME_TAIL
     # Every seat is told the outfit lives only in COSTUME, Wardrobe's alone.
     assert "lives ONLY in the COSTUME block" in crew.CARRY
@@ -493,7 +494,7 @@ def test_the_ledger_is_a_ceiling_not_a_quota():
     assert "AT MOST twelve" in text
     assert "a ceiling, never a quota" in text
     assert "Ten or more" not in text
-    # ゴミは「荒れている場面」だけのもの、と明示されていること。
+    # It says plainly that litter belongs only to a scene that is meant to be rough.
     assert "Litter and debris" in text
     assert "about neglect" in text
 
@@ -512,12 +513,13 @@ def test_the_look_reaches_the_sampler_as_words_it_knows():
     assert identity.style_tags("vivid anime illustration") == [
         "anime_coloring", "vivid_colors", "saturated",
     ]
-    # 構図の接尾も語を持つ
+    # The composition suffixes carry words too
     assert "dutch_angle" in crew.look_tags("anime illustration, experimental composition")
     assert "rule_of_thirds" in crew.look_tags("anime illustration, classic composition")
-    # 総監督が自分で書いた style は従来どおり（表に無いものは分解するだけ）
+    # A style the Showrunner wrote himself behaves as before (anything not in the
+    # table is only decomposed)
     assert identity.style_tags("水彩っぽく, やわらかい") == ["水彩っぽく", "やわらかい"]
-    # 9セル全部に語がある
+    # All nine cells have words
     for phrase in crew._BASE_LOOK.values():
         assert crew.look_tags(phrase), phrase
 
@@ -539,14 +541,15 @@ def test_the_weave_is_told_the_look_governs_the_whole_bag():
     # Look colours word choice; it must not licence air-padding over the beat.
     assert "THE LOOK IS HOW YOU WRITE, NOT WHAT YOU PAD WITH" in chain.SCRIPTER_WEAVE_SYSTEM
     assert "ROOM LEANING" in chain.SCRIPTER_WEAVE_SYSTEM
-    # 「FIRST DUTY —— 身体と顔」（1,257字）は落とした。実測で、**言わない
-    # ほうが身体も顔も書けている**（30本×5回を三周・2026-08-31）:
+    # "FIRST DUTY — body and face" (1,257 characters) was dropped. Measured, **both
+    # the body and the face are written better for not saying it** (30 cases x 5
+    # runs, three rounds, 2026-08-31):
     #
-    #     そのまま     26/30  語数 50
-    #     丸ごと落とす  30/30  語数 62   ← 6試験すべて 5/5
+    #     as it was       26/30  words 50
+    #     dropped whole   30/30  words 62   <- all six tests 5/5
     #
-    # 身体が先に来る割合は 28/30 → 27/30 で変わらない —— 言わなくても守られ
-    # ている。守りは `partner` へ移した（下の試験が見張る）。
+    # The rate at which the body comes first is 28/30 -> 27/30, unchanged — it holds
+    # without being said. The guard moved to `partner` (watched by the test below).
     assert "FIRST DUTY" not in chain.SCRIPTER_WEAVE_SYSTEM
     assert "no floor" in chain.SCRIPTER_WEAVE_SYSTEM.lower()
 
@@ -558,7 +561,7 @@ def test_every_seat_that_writes_tags_is_told_how_to_write_lettering():
     ):
         assert "WORDS IN THE PICTURE" in frame
         assert 'text "' in frame
-        # 既定は「書かない」。頼まれた時だけ。
+        # The default is not to write it. Only when asked.
         assert "There is no lettering by default" in frame
 
 

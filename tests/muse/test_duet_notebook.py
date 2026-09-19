@@ -170,7 +170,8 @@ class NotebookOllama(FakeOllama):
                 # Match on the current instruction only. The prompt also carries the
                 # conversation now, so matching the whole thing would let an earlier
                 # turn's keyword answer a later turn. Longest keyword wins within
-                # that line so "また煽って、カーディガン" does not match a bare "煽って".
+                # that line so 「また煽って、カーディガン」 ("low angle again, and the
+                # cardigan") does not match a bare 「煽って」 ("low angle").
                 note = _current_note(prompt_s)
                 hits = [k for k in self.scripts if k in note]
                 fold_keys = [k for k in self.scripts if "FOLD" in k]
@@ -258,8 +259,8 @@ def test_the_partner_gets_her_own_forgotten_dress_back():
         partner=True,
     )
     assert "black_cocktail_dress" in out
-    assert "black_cocktail_dress" in side_b      # 彼女の側に付く
-    assert "black_cocktail_dress" not in side_a  # 主演には付かない
+    assert "black_cocktail_dress" in side_b      # it goes on her side
+    assert "black_cocktail_dress" not in side_a  # not on the lead
 
 
 def test_the_lead_still_gets_hers_back_on_a_solo():
@@ -325,11 +326,11 @@ def test_the_wardrobe_clerk_maps_names_to_the_two_fields():
     got = _ask('{"各務 みお": "red sweater, jeans", "平岡 すみれ": "unchanged"}')
     assert got == {"wearing": "red sweater, jeans"}
 
-    # 両方
+    # Both
     got = _ask('{"各務 みお": "red sweater", "平岡 すみれ": "white blouse"}')
     assert got == {"wearing": "red sweater", "wearing_b": "white blouse"}
 
-    # 読めない返しは何も書かない —— 空を書いて服を消さない
+    # An unreadable reply writes nothing — it never writes empty and erases clothes
     assert _ask("すみません、わかりません") == {}
     assert _ask('{"だれか": "x"}') == {}
 
@@ -359,7 +360,7 @@ def test_the_pose_clerk_uses_the_same_road():
         name_a="各務 みお", name_b="平岡 すみれ", model="m", num_ctx=1024))
     assert got == {"beat": "sitting on a bench",
                    "beat_b": "standing behind her"}
-    # 欄の組が服とぶつからないこと
+    # The set of fields does not collide with the clothes
     assert chain._PER_PERSON["beat"][0] == ("beat", "beat_b")
     assert chain._PER_PERSON["wearing"][0] == ("wearing", "wearing_b")
 
@@ -400,14 +401,15 @@ def test_the_wardrobe_clerk_also_works_alone():
         oc, note="その帽子、ちょっと違うかも。", name_a="各務 みお", name_b="",
         wearing="straw hat, oversized hoodie, denim skirt, sneakers",
         model="m", num_ctx=1024))
-    # 帽子だけが落ちて、残りはそのまま —— 「全部言う」条文の効き目。
+    # Only the hat is dropped and the rest stays — the "say all of it" contract at
+    # work.
     assert got == {"wearing": "oversized hoodie, denim skirt, sneakers"}
-    # 相方の欄には触らない。
+    # The partner's fields are not touched.
     assert "wearing_b" not in got
-    # 一人ぶんの問いに、いない相方の名前を出さない。
+    # A solo question does not name a partner who is not there.
     assert "平岡" not in oc.prompts[0]
 
-    # 読めない返しは何も書かない —— 空を書いて服を消さない。
+    # An unreadable reply writes nothing — it never writes empty and erases clothes.
     assert asyncio.run(chain.read_wardrobe(
         _Ollama("すみません、わかりません"), note="x",
         name_a="各務 みお", name_b="", model="m", num_ctx=1024)) == {}
@@ -429,11 +431,11 @@ def test_every_field_clerk_that_runs_alone_has_been_measured():
 
     for kind in ("wearing", "beat", "scene"):
         assert chain._PER_PERSON[kind][2], f"{kind} に一人ぶんの条文が無い"
-    # 場所は二人で共有するので、名前で分ける問いにならない —— 二人ぶんの
-    # 条文は持たない。
+    # The place is shared by both, so there is no question that splits it by name —
+    # it has no two-person contract.
     assert chain._PER_PERSON["scene"][1] == ""
     assert chain._PER_PERSON["beat"][1] != ""
-    # 読めなければ何も書かない（`None` でも落ちない）。
+    # Unreadable means nothing is written (a `None` does not break it).
     assert asyncio.run(chain.read_per_person(
         None, kind="scene", note="", name_a="各務 みお", name_b="",
         model="m", num_ctx=1024)) == {}

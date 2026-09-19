@@ -33,7 +33,7 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "backend"))
 
-#: `main.py` に直に生えている口（ルータ経由ではない）。
+#: The endpoints grown directly on `main.py` (not through a router).
 DIRECT = ("/api/health", "/api/token")
 
 
@@ -73,11 +73,12 @@ def _matches(url: str, served: set[str]) -> bool:
     return False
 
 
-#: 画面が `${変数}` で口そのものを組む所。経路名が実行時に決まるので、
-#: 文字列からは当てられない。**中身は別の試験が見ている**。
+#: Where the screen builds the endpoint itself with `${a variable}`. The path is
+#: decided at runtime, so it cannot be matched from the string. **Another test
+#: watches the contents.**
 BUILT_AT_RUNTIME = {
-    "/api/invoke/{x}",              # useInvokeSession: evolve / breed などを変数で
-    "/api/muse/sessions/{x}/{x}",   # MusePanel: open|table, board|approve を変数で
+    "/api/invoke/{x}",              # useInvokeSession: evolve / breed and so on, by variable
+    "/api/muse/sessions/{x}/{x}",   # MusePanel: open|table, board|approve, by variable
 }
 
 
@@ -95,12 +96,12 @@ def test_every_url_the_screen_calls_is_served():
 
 
 @pytest.mark.parametrize("url", [
-    # 管理画面の背骨。消えると「押しても何も起きない」になる
+    # The admin screen's backbone. Gone, pressing a button does nothing
     "/api/admin/stats", "/api/admin/config", "/api/admin/schema/status",
     "/api/admin/backup/status", "/api/admin/vectors/rebuild",
     "/api/admin/character-compat/matrix",
     "/api/characters/erase-memory", "/api/characters/sync-muse",
-    # Muse の背骨
+    # Muse's backbone
     "/api/muse/catalog", "/api/muse/sessions", "/api/muse/lounge/threads",
     "/api/muse/handpost",
 ])
@@ -117,7 +118,7 @@ def test_the_retired_studio_has_no_door_left():
         assert gone not in served, gone
 
 
-# ── 画面が送る欄を、裏が受け取れること ────────────────────────────────────
+# ── The backend can receive the fields the screen sends ──────────────────
 
 def test_every_input_the_screen_patches_is_accepted():
     """**The URL can exist and the field still be dropped in silence.**
@@ -161,7 +162,7 @@ def test_every_input_the_screen_reads_is_returned():
 
     panel = (ROOT / "frontend/src/components/MusePanel.vue").read_text(encoding="utf-8")
     read = set(re.findall(r"inputs\.([A-Za-z_]\w*)", panel))
-    read -= {"value"}          # `$event.target.value` の誤検出
+    read -= {"value"}          # a false positive from `$event.target.value`
 
     session = new_session({})
     session["inputs"] = {**session["inputs"],

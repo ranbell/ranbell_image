@@ -16,8 +16,9 @@ from __future__ import annotations
 from app.muse import identity
 from app.muse import assemble, ledger as L
 
-#: 主演／相方がどちら側か。**直書きしない** —— `identity.LEAD_SIDE` を替えたら
-#: 試験もそのまま追従する（総監督が左右を入れ替えたときに壊れないため）。
+#: Which side the lead and the partner are on. **Never written out here** — change
+#: `identity.LEAD_SIDE` and the tests follow (so nothing breaks when the Showrunner
+#: swaps left and right).
 LEAD_EN = identity.side_of(lead=True)[0]
 PART_EN = identity.side_of(lead=False)[0]
 
@@ -43,8 +44,8 @@ def _line(prompt: str, who: str) -> str:
 
 
 def test_two_in_frame_get_a_side_each():
-    # 最終形は `anima.format_for_anima` が下線を空白に戻すので、絵に渡るのは
-    # `on the right` のような自然文になる。
+    # In the final form `anima.format_for_anima` turns the underscores back into
+    # spaces, so what reaches the picture is natural text such as `on the right`.
     got = assemble.assemble_prompt(_session(partner=True), BASE)
     assert LEAD_EN in _line(got, "Mio")
     assert PART_EN in _line(got, "Asahi")
@@ -70,14 +71,15 @@ def test_the_director_wins_when_he_named_a_side():
     **either** of them."""
     led = {**BASE, "beat_b": "standing on the right, holding menu"}
     got = assemble.assemble_prompt(_session(partner=True), led)
-    # 監督の言葉（`standing on the right`）はそのまま残る。既定が**足されない**
-    # ことを見る —— 誰の行も、こちらが入れた立ち位置で始まっていないこと。
+    # The director's words (`standing on the right`) survive as they are. What is
+    # checked is that the default is **not added** — no line begins with a position
+    # we put there.
     for who in ("Mio", "Asahi"):
         line = _line(got, who)
         assert not line.startswith(f"{who}: {LEAD_EN}"), line
         assert not line.startswith(f"{who}: {PART_EN}"), line
-    assert "on the right" in _line(got, "Asahi")   # 監督の言葉は生きている
-    assert "left" not in got                        # 反対側は生えていない
+    assert "on the right" in _line(got, "Asahi")   # the director's words are alive
+    assert "left" not in got                        # the other side has not grown
 
 
 def test_japanese_side_words_count_too():
@@ -90,7 +92,7 @@ def test_japanese_side_words_count_too():
 
 def test_the_prose_says_who_is_where():
     got = assemble.scene_prose(BASE, partner=True, name_a="Mio", name_b="Asahi")
-    # 左→右の順で読ませるので、左にいるほうが先に出る。
+    # It is read left to right, so whoever is on the left comes first.
     left_name, right_name = (
         ("Asahi", "Mio") if identity.LEAD_SIDE == "right" else ("Mio", "Asahi")
     )
@@ -108,9 +110,9 @@ def test_the_pair_lives_in_one_place():
     """**The picture and the diary read the same source of truth.** Held separately,
     changing one makes them disagree."""
     assert identity.LEAD_SIDE in identity.SIDE_WORDS
-    # 主演と相方は必ず反対側
+    # The lead and the partner are always on opposite sides
     assert identity.side_of(lead=True) != identity.side_of(lead=False)
-    # 日記側（`_which_one_is_me`）も同じ関数を読んでいる
+    # The diary side (`_which_one_is_me`) reads the same function
     import inspect
 
     from app.muse import shared as muse_service
