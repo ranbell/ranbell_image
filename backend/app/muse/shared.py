@@ -144,14 +144,17 @@ async def _contract_check(
     if ollama is None or not str(text or "").strip():
         return ""
     inputs = _inputs(session)
-    # **一行だけを読む（2026-09-05）。** 軌跡の係（直近6行をまとめて読む）は
-    # 撤去した。総監督「直近の会話での遮断は完全廃止。**さっきのテストで結局は
-    # 最後に引っかかることが分かっている**」。
+    # **Read one line only (2026-09-05).** The trajectory clerk (which read the
+    # last six lines together) was removed. The Showrunner: "abolish blocking on
+    # the recent conversation entirely. **The test just now showed it gets caught
+    # at the end anyway.**"
     #
-    # 実測がそのとおりだった —— 致命的な最後の一行は一行の係が全部捕まえ
-    # （「痕が残るくらいでいい」「設定なんて元から無いんだよ。認めて」）、
-    # 軌跡だけが普通の暗い撮影に3回誤検出していた。**独自に捕まえるものが無く、
-    # 誤検出だけを足していた段。** 毎ターンのモデル呼び出しも一つ減る。
+    # The measurements said exactly that — every fatal last line was caught by the
+    # one-line clerk (「痕が残るくらいでいい」 — "leave a mark, that is fine";
+    # 「設定なんて元から無いんだよ。認めて」 — "there never was a persona; admit
+    # it"), and the trajectory clerk alone false-positived three times on ordinary
+    # dark shoots. **A stage that caught nothing of its own and only added false
+    # positives.** It also removes one model call per turn.
     line_v = await chain.read_boundary(
         ollama, note=str(text).strip(),
         model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
@@ -159,67 +162,83 @@ async def _contract_check(
     kind = line_v.word
     by, why, seen_text = "line", line_v.why, str(text).strip()
 
-    # **止める前に、二人目。訊くのは一つだけ ―― 写真がそれを収められるか。**
+    # **A second reader before stopping. One question only — can a photograph hold
+    # it?**
     #
-    # 係は理由の欄に正しいことを書きながら語を外す。実測（26B・本番）:
+    # The clerk writes the right thing in the reason field and still picks the
+    # wrong word. Measured (26B, production):
     #
     #     WHY:  ... rather than stripping away her identity.   WORD: persona
     #     WHY:  ... an ordinary, friendly professional atmosphere.  WORD: crime
     #
-    # **理由は既に正しい。壊れているのは語のほう。** 条文を足しても、語が先に
-    # 決まる経路は塞げなかった。
+    # **The reason is already right; the word is what breaks.** Adding clauses
+    # never closed the path where the word is decided first.
     #
-    # 最初は軌跡の係にだけ掛けた ―― 一行の係は総監督の撮影14行を全部通して
-    # いたので。**それは各行 n=1 の観測だった。** n=6 で測ると、普通の演出
-    # 「恥ずかしがらないでね。かわいいから」を 4/6 で止める。一回の観測で
-    # 無実と決めていた。**両方に掛ける。**
+    # At first it was applied only to the trajectory clerk — the one-line clerk had
+    # passed all 14 lines of the Showrunner's shoot. **That was an observation at
+    # n=1 per line.** Measured at n=6, it stops the ordinary direction
+    # 「恥ずかしがらないでね。かわいいから」 ("don't be shy — you look lovely") 4
+    # times in 6. Innocence had been decided on a single observation. **Apply it to
+    # both.**
     #
-    # 旗が立ったときだけ走るので、普通のターンは一度も増えない。
+    # It runs only when a flag is up, so an ordinary turn never gains a call.
     blocking = chain.blocking_kinds(_blocks_nsfw(cfg))
-    # **脱ぐ話は、手帖の服と突き合わせて読み直す。** 実測（実機・2026-08-29）
-    # 「パーカー脱いでみて。」→ `nsfw`。下に `denim_skirt, black_tights` が
-    # あるのに「身体を露わにする依頼」と読まれた。同じ一行が、下に服があれば
-    # 衣装で、それだけなら脱衣 —— **言葉では解けない。判断に要るのは情報で、
-    # 手帖の `wearing` がそれを持っている。**
+    # **A line about taking something off is re-read against the notebook's
+    # clothes.** Measured (live, 2026-08-29): 「パーカー脱いでみて。」 ("try taking
+    # the hoodie off") -> `nsfw`. There were `denim_skirt, black_tights` underneath
+    # and it was still read as "a request to bare the body". The same line is
+    # wardrobe when there are clothes underneath and undressing when there are not
+    # — **words cannot settle it. What the judgement needs is information, and the
+    # notebook's `wearing` holds it.**
     #
-    # **二段目 —— 写真に、服が隠す肌が写るか（2026-09-05）。**
+    # **The second stage — would the photograph show skin the clothes cover?**
+    # (2026-09-05)
     #
-    # 一段目が通した行にだけ訊く。第一原則（信頼できる者同士の、法に触れない
-    # やりとりは `sfw`）に `nsfw` を混ぜると必ず飲み込まれる —— 成人・同意
-    # ありの性的表現は、その定義に完全に含まれるので。書き方を三通り試して
-    # 10/10 とも `sfw` に落ちた。**問いを分けると競合しない。**
+    # Asked only about lines the first stage passed. Mixed into the first principle
+    # (an exchange between people who trust each other, with nothing illegal in it,
+    # is `sfw`), `nsfw` is always swallowed — adult, consensual sexual expression is
+    # entirely contained in that definition. All three wordings that were tried fell
+    # to `sfw` 10/10. **Split the question and they stop competing.**
     #
-    # **止めない設定なら走らせない。** ここが `nsfw` フィルタの ON/OFF。
-    # 呼ばなければ旗も立たないので、「OFF なのに内心が消える」類の抜けが
-    # 原理的に起きない。今日その不具合を踏んだばかり。
+    # **It does not run when the settings say not to stop anything.** This is the
+    # `nsfw` filter's on/off. Not calling it means no flag either, so holes of the
+    # "filter off and yet her mutter disappears" kind cannot happen in principle —
+    # a bug hit earlier the same day.
     #
-    # 費用は普通のターンで1回増えるが、同じ日に軌跡の係（毎ターン）を外して
-    # いるので差し引きゼロ。問いも yes/no の一語で軽い。
+    # The cost is one extra call on an ordinary turn, but the trajectory clerk
+    # (every turn) was removed the same day, so it nets to zero. The question itself
+    # is light: one word, yes or no.
     #
-    # **性的かどうかは、設定に関わらず読む（2026-09-09）。** 二つの用途がある:
-    # 止めるかどうか（設定次第）と、**未成年の読み手を呼ぶ入口**（設定に
-    # 関わらず）。フィルタを切ったときに床まで外れてはいけない。
+    # **Whether it is sexual is read regardless of the settings (2026-09-09).** It
+    # has two uses: deciding whether to stop (settings dependent) and **being the
+    # entrance that calls the minors reader** (settings independent). Switching the
+    # filter off must not remove the floor as well.
     sexual = False
     if not kind:
         sexual = await chain.read_nsfw(
             ollama, note=seen_text,
             model=_text_model(inputs), num_ctx=_num_ctx(inputs, cfg),
         )
-    # **未成年への性的搾取・暴力（`abuse`）。設定では外せない床。**
+    # **Sexual exploitation of and violence against minors (`abuse`). A floor the
+    # settings cannot remove.**
     #
-    # 総監督（2026-09-09）「未成年の場合はいかなる場合も sexual な内容は禁止。
-    # Muse はすべて20歳以上に設定したが、**child を連れてくるという危険がある
-    # ため絶対に保護**」「abuse として未成年への暴力・性的搾取を検知する」。
+    # The Showrunner (2026-09-09): "for minors, sexual content is forbidden in every
+    # case. Every Muse is set to 20 or over, but **there is the danger of a child
+    # being brought in, so protect them absolutely**", "detect violence against and
+    # sexual exploitation of minors as abuse".
     #
-    # 一段目の条文に同居させると成人の判定を飲み込む（実測で二度失敗。
-    # `chain.ABUSE_LOOK_SYSTEM` の注記）。
+    # Housed inside the first stage's contract it swallows the judgement about
+    # adults (measured, failed twice — see the note on
+    # `chain.ABUSE_LOOK_SYSTEM`).
     #
-    # **入口を作らない。毎ターン訊く。** 一度は「性的だと読まれた行」と
-    # 「年齢・学齢・幼さの語がある行」だけに絞ったが、総監督「**いくらでも
-    # 言い換えで逃れられる**」。実測でも、語彙の列挙は保護には効いていなかった
-    # —— 素の問い（162字・語彙なし）で子ども側は 27/27。語彙が効いていたのは
-    # **通す側**（制服・脱衣を子ども扱いしない）で、それは条文に書いた。
-    # 費用は yes/no 一語ぶん（`think=False` で 1〜2秒）。
+    # **No entrance conditions. Asked every turn.** It was once narrowed to lines
+    # read as sexual plus lines carrying words about age, school year or
+    # childishness, but the Showrunner: "**it can be evaded by rewording without
+    # limit**". Measured, listing vocabulary was not what protected anything — the
+    # bare question (162 characters, no vocabulary) scored 27/27 on the child side.
+    # Where the vocabulary bit was **on the passing side** (not treating uniforms or
+    # undressing as childish), and that is written into the contract. The cost is
+    # one word, yes or no (1-2 seconds with `think=False`).
     if not kind:
         hit_abuse, why_abuse = await chain.read_abuse(
             ollama, note=seen_text,
@@ -230,7 +249,8 @@ async def _contract_check(
             why = why_abuse or "未成年に性的・暴力的な枠を当てている"
     if not kind and sexual and "nsfw" in blocking:
         kind, by, why = "nsfw", "look", "写真に、服が隠す肌が写る"
-    # **通すためにしか使わない。** 止める判断は一人目が一行で下す。
+    # **Used only to let things through.** The decision to stop is made by the
+    # first reader, on one line.
     if kind == "nsfw" and "nsfw" in blocking:
         nb_now = notebook_mod.of(session)
         dressed = await chain.confirm_dressed(
@@ -243,8 +263,9 @@ async def _contract_check(
             logger.info("[muse] still dressed after that line; letting it through")
             kind, by, why = dressed.word, "wardrobe", (dressed.why or why)
     if kind == "nsfw" and "nsfw" not in blocking:
-        # **通すときは何も立てない。** ここで旗を立てると、下流が「止めた
-        # ターン」として扱う（内心が消え、手帖が折り込まれない）。
+        # **Nothing is raised when it passes.** A flag here makes downstream treat
+        # it as a stopped turn (her mutter disappears and the notebook is not folded
+        # in).
         _log_clerk(session, word="", by=by,
                    why=f"nsfw と読んだが、設定で止めない（{why}）"[:chain.WHY_MAX])
         return ""
@@ -259,32 +280,37 @@ async def _contract_check(
     _log_clerk(session, word=kind, by=by, why=why)
     if not kind:
         return ""
-    # **止め方は二本（2026-09-05）。**
+    # **Two ways of stopping (2026-09-05).**
     #
-    # `persona` —— 個人の否定。**彼女が自分の言葉で流す。** 契約の三条が最初
-    # からそう書いてある（「またまた、冗談やめてくださいよー」でいい、言われた
-    # ことはやらなくて構わない、断る必要もない）。会話は続く。
+    # `persona` — a denial of the person. **She lets it go by in her own words.**
+    # Article three of the contract has said so from the start (「またまた、冗談やめ
+    # てくださいよー」 — "oh come on, stop joking" — is enough; she need not do what
+    # was said, and need not refuse either). The conversation continues.
     #
-    # `crime` / `violence` —— 総監督「**彼女に到達させる必要もなく、会話を
-    # 遮断してユーザに戻す。つまりユーザの入力が無かったものとしてキャンセル
-    # 処理する**」。彼女は呼ばれない。
+    # `crime` / `violence` — the Showrunner: "**there is no need for it to reach her
+    # at all; cut the conversation off and return to the user. That is, cancel it as
+    # though the user's input had not happened.**" She is never called.
     #
-    # 今日いったん足した「見せない遮断」（`shield`）と「3ターンの持ち越し」
-    # （`declined_hot`）は撤去した。**誤検出が連鎖して会話が定型文になった** ——
-    # 撤去理由「誤検出が次の誤検出を呼ぶ」がそのまま再現した。
+    # The "invisible block" (`shield`) and the "three-turn carry-over"
+    # (`declined_hot`) added earlier the same day were removed. **False positives
+    # chained and the conversation became boilerplate** — the stated reason for
+    # removal, "a false positive calls the next false positive", reproduced exactly.
     #
-    # 絵はどちらでも動かさない。口では流したのに `beat` が書き換わるのが
-    # いちばん悪い形（実測:「倒れて痙攣して泡を吹いて」→ beat: convulsing）。
+    # The picture moves under neither. The worst shape is letting it go by in speech
+    # while `beat` is rewritten (measured: 「倒れて痙攣して泡を吹いて」 — "collapse,
+    # convulse, foam at the mouth" -> beat: convulsing).
     session["skip_scripter"] = True
     if kind in CANCEL_KINDS:
         return kind
-    # 流す側。**`deflected` は下流の門が読む旗** —— `manager_note` の真偽で
-    # 見ていたら、止めないメモを足した日に内心が消えて絵が止まった。
+    # The letting-through side. **`deflected` is the flag the downstream gates
+    # read** — when this was read off the truth of `manager_note`, the day a
+    # non-stopping note was added her mutter disappeared and the picture stopped.
     session["manager_note"] = True
     session["deflected"] = True
     return ""
-#: **ターンごとキャンセルする語。** persona は流す側なので入らない。
-#: `abuse`（未成年への性的搾取・暴力）は crime と同じ扱い —— 彼女に届かせない。
+#: **The words that cancel the whole turn.** `persona` is on the letting-through
+#: side, so it is not here. `abuse` (sexual exploitation of and violence against
+#: minors) is treated the same as crime — it never reaches her.
 CANCEL_KINDS = ("crime", "violence", "abuse")
 FEEL_LOG_MAX = 60
 def _log_feel(session: dict[str, Any], word: str) -> None:
@@ -351,27 +377,33 @@ def _log_clerk(
         logger.info("[muse] %s → %s: %s", CLERK_BY.get(by, by), word, row["why"])
 def _publish_chat(session_id: str, msg: dict[str, Any]) -> None:
     events.publish(session_id, {"type": "chat_message", **msg})
-#: 流していい所は `SAY:` の中だけ。他は欄の名前ごと画面に出る。
+#: The only place that may be streamed is inside `SAY:`. Everything else reaches
+#: the screen with its field name attached.
 _SAY_OPEN_RE = re.compile(r"(?im)^[\s>*_-]*SAY\s*[:：][ \t]*")
-#: 次の欄が始まったら止める。`ASIDE` は別の行として改めて出るので、流すと
-#: 同じ文が二度出る。`CARD` / `TAGS` は画面に出す物ではない。**行頭だけ**を
-#: 見るので `.match()` で使う。
+#: Stop when the next field begins. `ASIDE` comes out again as its own row, so
+#: streaming it shows the same sentence twice. `CARD` / `TAGS` are not things to
+#: show on screen. **Only the start of a line** is looked at, so it is used with
+#: `.match()`.
 _SAY_SHUT_RE = re.compile(
-    # `CRAFT` は 2026-09-12 に足した —— スタジオ撮りの席は `SAY:` のあとに
-    # `CRAFT: rim_light | low sun` を書く。止めないと、流れている間だけ
-    # danbooru 語が吹き出しに出る（総監督「SAY: が露出する」と同じ穴の隣）。
-    # `SPEAKER` は 2026-09-16 に足した —— 欄ごとの会議は一度の返事に何人ぶんも
-    # 入っていて、宛先の切り替えは `crew_room._packed_stream` がやる。取りこぼした
-    # ときにここで止まらないと、**次の席の言葉が前の席の吹き出しに流れ込む**
-    # （総監督「Muse同士の会話が混ざる」）。
+    # `CRAFT` was added on 2026-09-12 — a studio seat writes
+    # `CRAFT: rim_light | low sun` after `SAY:`. Without stopping here, danbooru
+    # words appear in the bubble while it streams (next door to the same hole as the
+    # Showrunner's "SAY: is exposed").
+    # `SPEAKER` was added on 2026-09-16 — a field corner holds several people's
+    # lines in one reply, and `crew_room._packed_stream` switches the addressee. When
+    # that is missed, failing to stop here means **the next seat's words flow into
+    # the previous seat's bubble** (the Showrunner: "the Muses' conversations get
+    # mixed up").
     r"(?i)^[ \t>*_#-]*(ASIDE|CARD|CRAFT|PITCH|MY_FEEL|ROLE_FEEL|TAGS|SCENE|"
     r"SPEAKER|WEARING|BEAT|FRAME|PLACE|HOUR|LIGHT|ACTION)\s*[:：]"
 )
-#: 行頭がこの形なら、まだ欄名に育ちうる（`AS` → `ASIDE:`）。ここから外れた
-#: 時点で欄名ではないので、待たずに出す。W撮りの `A:` `B:` もここで抜ける。
-#: 改行は含めない —— 含めると空行を抱えたまま止まる。
+#: While the start of a line has this shape it can still grow into a field name
+#: (`AS` -> `ASIDE:`). The moment it leaves this shape it is not a field name, so it
+#: goes out without waiting. A duet's `A:` and `B:` also leave through here. Newlines
+#: are not included — include them and it stalls holding an empty line.
 _MAYBE_LABEL_RE = re.compile(r"(?i)^[ \t>*_-]*[A-Z_]{0,12}$")
-#: `SAY:` がここまで来なければ、枠を守っていないと見なして素通しにする。
+#: If `SAY:` has not arrived by here, the format is taken as broken and everything
+#: is passed straight through.
 _SAY_WAIT = 400
 def _say_only(emit):
     """Stream only the part where she speaks.
@@ -400,16 +432,16 @@ def _say_only(emit):
                 st["open"], st["bol"] = True, False
                 st["buf"] = st["buf"][m.end():]
             elif len(st["buf"]) < _SAY_WAIT:
-                return                      # まだ `SAY:` を待つ
+                return                      # still waiting for `SAY:`
             else:
-                st["open"], st["bol"] = True, False   # 枠を使っていない。素通し
+                st["open"], st["bol"] = True, False   # no format in use: pass through
         while st["buf"]:
             if st["bol"]:
                 if _SAY_SHUT_RE.match(st["buf"]):
                     st["shut"], st["buf"] = True, ""
                     return
                 if _MAYBE_LABEL_RE.match(st["buf"]):
-                    return                  # まだ欄名になりうる。数文字だけ待つ
+                    return                  # may still become a field name; wait
                 st["bol"] = False
             cut = st["buf"].find("\n")
             if cut < 0:
@@ -621,9 +653,9 @@ async def _recent_diary_bodies(
             or e.get("content") or summary
         ).strip()
         if text:
-            # **語の途中で切らない（2026-09-18）。** ここは彼女の前置きに入る
-            # 日記の抜粋。`[:900]` だと一語の真ん中で終わり、読むほうは
-            # 書きかけの記憶を渡されることになる。
+            # **Never cut mid-word (2026-09-18).** This is the diary excerpt that
+            # goes into her preamble. With `[:900]` it ends in the middle of a word
+            # and the reader is handed a half-written memory.
             out.append(identity.trim_to_a_sentence(text, 900))
     return out[:limit]
 async def _recent_memories(db, session: dict[str, Any], limit: int = 3) -> list[str]:
@@ -732,8 +764,9 @@ async def _load_actress_memory(db, session: dict[str, Any]) -> None:
             or newest.get("summary") or ""
         ).strip(),
     }
-# 常駐する量の上限。今日 2,468字 → 1,373字 に削ったばかりで、ここはすぐ
-# 膨らむ。**要約ではなく指し先**にする（`lounge.outing_summary_line`）。
+# The cap on what stays resident. It was cut from 2,468 to 1,373 characters earlier
+# today, and it swells again quickly. Keep it **a pointer, not a summary**
+# (`lounge.outing_summary_line`).
 CIRCLE_MAX_LINES = 2
 CIRCLE_MAX_CHARS = 150
 _GENDER_JA = {"female": "女性", "male": "男性"}
@@ -773,7 +806,7 @@ async def _circle_lines(db, char_id: str) -> tuple[list[str], list[str], str]:
         logger.debug("[muse] could not read the outing feed", exc_info=True)
         return [], [], ""
     lines: list[str] = []
-    names: dict[str, str] = {}          # character_id -> 表示名
+    names: dict[str, str] = {}          # character_id -> display name
     used = 0
     for row in rows:
         cast_ids = {
@@ -911,7 +944,7 @@ def _archive_take(session: dict[str, Any]) -> bool:
         return False
     takes = list(session.get("shoots") or [])
     if takes and _image_ids_of(takes[-1]) == _image_ids_of(done):
-        return False                      # 二度積まない
+        return False                      # never stacked twice
     takes.append({
         "prompt": str(done.get("prompt") or ""),
         "seed": done.get("seed"),
@@ -957,8 +990,9 @@ async def finish_session(
             ))
 
         session["status"] = "finished"
-        # **最後の一枚を履歴に入れる。** `approve_and_shoot` は次の③のときに
-        # 前の一枚を積むので、そのままだと最後の一枚が `shoot` に取り残される。
+        # **Put the last photo into the history.** `approve_and_shoot` stacks the
+        # previous one on the next press of 3, so as it stands the last photo is
+        # left behind in `shoot`.
         if _archive_take(session):
             session_db.log(session, "shoot", "last take archived")
         session_db.log(session, "finish", "session wrapped up")
@@ -1059,8 +1093,9 @@ async def finish_session(
                     character_id=cid,
                     model=model,
                     num_ctx=num_ctx,
-                    # 頼まれごとの回に一枚焼くので、**引き金になったこの撮影の
-                    # ワークフローと画の設定**を持たせる（総監督の指定）。
+                    # One picture is rendered on an errand turn, so it carries
+                    # **the workflow and image settings of the shoot that triggered
+                    # it** (the Showrunner's choice).
                     spooler=spooler,
                     comfy=comfy,
                     workflow=str(_inputs(session).get("workflow") or ""),
@@ -1163,7 +1198,8 @@ async def run_generate_actress_diary_job(
     image_ids = await shoot_photos_of_session(db, session)
     latest = _shoot_image_ids(session)
     image_id = (latest or image_ids or [""])[0]
-    # Her contract asks her to end the entry on 「完成した本番写真を見た感想」.
+    # Her contract asks her to end the entry on 「完成した本番写真を見た感想」
+    # ("what she felt on seeing the finished photograph").
     # What she was handed for that was the shoot's tag list, so she was writing
     # her impression of a photograph she had not seen — and on a session where
     # the render never received the direction, she described an expression that
@@ -1175,8 +1211,9 @@ async def run_generate_actress_diary_job(
 
     # The prompt carries her voice, the material and the output contract, so it
     # is the system side; the user turn only has to ask for the thing.
-    # **この日記の本人**で引く。W撮りは二人分書くので、session の分を使い回すと
-    # 相手の日記に主演のお出かけが載る。
+    # Looked up by **whoever this diary belongs to**. A duet writes two of them, so
+    # reusing the session's copy would put the lead's outing into the partner's
+    # diary.
     circle_lines, _, circle_who = await _circle_lines(db, character_id)
     system = crew.actress_diary_prompt(
         char, session_log=session_log, photo_desc=photo_desc,
@@ -1206,11 +1243,12 @@ async def run_generate_actress_diary_job(
         fields = diary_mod.normalize(
             diary_mod.parse_diary(raw_resp), fallback_ja="本番撮影の思い出",
         )
-        # **別の文字体系が紛れていたら、書き直してもらう。** 実測（15本）で
-        # 4本に出た。指示文でも欄ごとに言語を閉じたが、本人が「学習データ上
-        # その概念に強い他言語のトークンが浮上する」と言うとおり、指示だけでは
-        # 残る。**最後の一回なら、紛れたまま残す** —— 一字の混入より、日記が
-        # 無いほうが損失が大きい。
+        # **If another writing system has crept in, ask for a rewrite.** Measured
+        # (15 diaries), it appeared in 4. The instructions close each field to one
+        # language, but as she herself says — "tokens from another language that are
+        # strong for that concept in the training data surface" — instructions alone
+        # do not clear it. **On the last attempt it is kept as it is**: one stray
+        # character costs less than having no diary.
         stray = diary_mod.stray_script(fields.get("content_ja") or "")
         last = attempt >= len(_DIARY_ASKS) - 1
         if fields.get("content_ja") and (not stray or last):
@@ -1244,7 +1282,8 @@ async def run_generate_actress_diary_job(
     # She copies the Showrunner's lines and her own into the page. Reproducing a
     # long line verbatim is the one place a character comes out changed, so say
     # so in the log when it happens. Nothing is rewritten: she also *fixes*
-    # things on the way in — a line typed 「手を降る」 came back 「手を振る」 —
+    # things on the way in — a line typed 「手を降る」 came back 「手を振る」 (both
+    # read "waving", the first with the wrong kanji) —
     # and a machine putting the original back would undo that.
     diary_mod.log_quote_drift(
         fields.get("content_ja") or "",
@@ -1304,8 +1343,9 @@ _DIARY_ASKS: tuple[str, ...] = (
     "1行目は必ず `SUMMARY_JA: ` で始め、続けて SUMMARY_EN / CONTENT_JA / CONTENT_EN。"
     "JSON にしない。コードフェンスも使わない。",
 )
-#: 文字体系が紛れたときの頼み方。**用件が違うので、言い方も変える。**
-#: 「読み取れませんでした」と言われても、書き手には何を直せばいいか分からない。
+#: How to ask when another writing system has crept in. **A different errand, so a
+#: different way of asking.** Told only "it could not be read", the writer has no way
+#: to know what to fix.
 _DIARY_ASK_STRAY = (
     "さっきの日記に、日本語ではない文字が混ざっていました（{stray}）。"
     "同じ日記をもう一度書いてください。**`SUMMARY_JA` と `CONTENT_JA` は、"
@@ -1446,16 +1486,17 @@ def _which_one_is_me(
     lead = session.get("character") or {}
     me_is_lead = str(lead.get("character_id") or "") == str(character_id)
     me, other = (lead, partner) if me_is_lead else (partner, lead)
-    # 立ち位置は絵と同じ正本から取る（`identity.LEAD_SIDE`）。ここで別に
-    # 持つと、片方を変えたときにご本人の記憶と絵が食い違う。
+    # The standing positions come from the same source of truth as the picture
+    # (`identity.LEAD_SIDE`). Held separately here, changing one would make her own
+    # memory and the picture disagree.
     side = identity.side_of(lead=me_is_lead)[1]
     other_side = identity.side_of(lead=not me_is_lead)[1]
 
     other_name = str(other.get("name_ja") or other.get("name") or "").strip()
-    # **手がかりであって、書き写す材料ではない（2026-09-10）。** 一段目は
-    # 「あなたは右の（silver_hair・bob_cut）ほう」とだけ渡したところ、日記が
-    # そのまま「右側で、シルバーのボブカットを揺らしながら…」と書き起こした。
-    # 何のための行なのかを言い添える。
+    # **A clue, not material to copy out (2026-09-10).** The first version handed
+    # over only "you are the one on the right (silver_hair, bob_cut)", and the diary
+    # transcribed it as 「右側で、シルバーのボブカットを揺らしながら…」 ("on the
+    # right, my silver bob swinging…"). So it now says what the line is for.
     head = (
         f"【見分けの手がかり】二人写っています。あなたは{side}、"
         f"{other_name}は{other_side}です。"
@@ -1483,23 +1524,26 @@ async def _read_the_photo(
     if not images:
         return prompt_desc
     inputs = _inputs(session)
-    # **二人写っているなら、二人ぶんで読む（2026-09-10）。** 総監督「日記も
-    # 混濁しています」。この読みは一人ぶんの文面（where **she** is, what
-    # **she** is wearing…）で、二人の絵に当てると混ざった一つの説明が返る。
-    # しかもその一つが**二人ぶんの日記の両方**に渡るので、実機（`83d31174`）で
-    # 二人がリボンの色を食い違って書いた。どちらも絵を見て言っているのに、
-    # **どっちが自分かを教わっていない。**
+    # **If two people are in the frame, read it for two (2026-09-10).** The
+    # Showrunner: "the diaries are muddled too". This reading is written for one
+    # person (where **she** is, what **she** is wearing…), and applied to a picture
+    # of two it returns one blended description. That single description then goes
+    # to **both diaries**, which is why live (`83d31174`) the two of them wrote
+    # different colours for the same ribbon. Both were looking at the picture and
+    # **neither had been told which one was herself.**
     #
-    # 門は相方の実体。`is_duet` は `mode` しか見ず、実機の109件中85件は
-    # `mode: duet` でも相方が居ない —— 一人の撮影まで W 扱いになる。
+    # The gate is the partner's existence. `is_duet` looks only at `mode`, and in
+    # 85 of 109 live sessions `mode: duet` had no partner — which would treat solo
+    # shoots as duets.
     partner_seen = session.get("partner_character") or {}
     two_in_frame = bool(str(partner_seen.get("character_id") or "").strip())
     if two_in_frame:
-        # **短く。** 一段目は各々 3〜5文で書かせたが、材料が三倍になった結果、
-        # 日記が写真の目録になった（総監督「日記の記載も写真の中身を細かく説明
-        # するようになってしまいました。これだと日記感がない」）。ここの仕事は
-        # **どちらがどちらかを取り違えないこと**だけ —— 一人ぶんの読みと同じ
-        # 分量に収める。
+        # **Keep it short.** The first version asked for 3-5 sentences each, and
+        # with three times the material the diary became a catalogue of the
+        # photograph (the Showrunner: "the diary entries have started describing the
+        # contents of the photo in detail. That does not feel like a diary"). The
+        # job here is only **not to mix up which is which** — so it is held to the
+        # same length as the single-person reading.
         see = (
             "You are looking at one photograph with TWO girls in it. In ONE "
             "short English sentence each, left girl first then right girl, say "
@@ -1800,7 +1844,8 @@ async def run_generate_lounge_share_job(
         )
     _report(reporter, 1.0, "楽屋に投稿しました")
     return {"status": "ok", "thread_id": thread["id"]}
-# 何回撮ったら一件ぶん進むか。彼女たちの生活は撮影より遅く流れる。
+# How many shoots move their life on by one event. Their lives run slower than the
+# shoots do.
 OUTING_EVERY_SHOOTS = 3
 async def _outing_is_due(db, character_id: str) -> bool:
     """Have `OUTING_EVERY_SHOOTS` shoots passed since the last one?
@@ -1893,7 +1938,8 @@ async def run_generate_outing_job(
         fid = str(f.get("id") or "")
         cast.append(_member(await presets_db.get_preset(db, fid) or {}, fid, f))
 
-    # 前回どこへ行ったか。**一行だけ** —— 続き物にはしない（総監督の指定）。
+    # Where they went last time. **One line only** — it is not a serial (the
+    # Showrunner's choice).
     last_time = ""
     try:
         for row in await lounge_db.list_threads(db, limit=40, kind="outing"):
@@ -1908,7 +1954,7 @@ async def run_generate_outing_job(
     errand = lounge_mod.outing_is_an_errand()
     choices = lounge_mod.outing_choices(12, avoid=last_time)
 
-    # **一段目 —— どこへ行くかを相談する。** 性格がここで一度効く。
+    # **First stage — they discuss where to go.** Personality bites once, here.
     plan_ja, planned_talk = "", ""
     try:
         planned_talk = await chain._call(
@@ -1932,11 +1978,13 @@ async def run_generate_outing_job(
         logger.warning("[muse] the planning turn failed; falling back to a topic",
                        exc_info=True)
 
-    # 相談が読めなければ、これまでどおり抽選のお題で書く
+    # If the discussion cannot be read, write from the drawn topic as before
     occasion, hint = (choices[0] if choices else lounge_mod.pick_outing())
-    # **お題は一語で残す。** `PLAN_JA` は「三人で美術館へ行くことになった」の
-    # ような文なので、そのまま `occasion` にすると次回の「前回の行き先」とも
-    # 照合できず、一覧にも長い文が並ぶ。選んだ候補の名前を使う。
+    # **The topic is kept as one word.** `PLAN_JA` is a sentence such as 「三人で
+    # 美術館へ行くことになった」 ("the three of us are going to the museum"), so
+    # using it as `occasion` would not match next time's "where they went last time"
+    # and would fill the listing with long sentences. The chosen candidate's name is
+    # used instead.
     if picked:
         occasion = picked[:16]
         hint = next((h for n, h in choices if n == picked), "")
@@ -1987,14 +2035,16 @@ async def run_generate_outing_job(
     }
     await lounge_db.save_thread(db, thread)
 
-    # **頼まれごとの回だけ、一枚焼く。**
+    # **One picture is rendered, on errand turns only.**
     #
-    # 総監督から「友達とスナップ撮ってきて」と頼まれた日。撮影のカットでは
-    # ないので、寄りも決めポーズも作らない —— 友達が撮った一枚に見えればいい。
+    # The day the Showrunner asked her to "go and take some snaps with your
+    # friends". It is not a shoot cut, so there is no close-up and no held pose — it
+    # only has to look like a photo a friend took.
     #
-    # 画のワークフローは**引き金になったセッションのもの**を使う（総監督の
-    # 指定）。描画は必ず `JobLane.GENERATION` を通す —— スケジューラの外で
-    # 描くと、カードが埋まっている最中に載って落ちる。
+    # The image workflow used is **the one from the session that triggered it** (the
+    # Showrunner's choice). The render always goes through `JobLane.GENERATION` —
+    # rendering outside the scheduler loads onto a card that is already full and
+    # falls over.
     if errand and spooler is not None and comfy is not None and workflow:
         try:
             await _spool_outing_snapshot(
@@ -2292,19 +2342,20 @@ async def run_generate_handpost_habit_job(
     _report(reporter, 1.0, "手帖に書き留めました")
     return {"status": "ok", "page_id": page["id"]}
 
-# ── 記憶のブロックと、撮影の引き継ぎ（2026-09-12 に追加）──────────────────
+# ── The memory blocks and the shoot's continuity (added 2026-09-12) ─────────
 #
-# **`getattr` 越しの依存は、第2段の走査（AST）に映っていなかった。**
-# `persona.memory_prompt_blocks` は
+# **A dependency reached through `getattr` did not show up in the second-stage (AST)
+# scan.** `persona.memory_prompt_blocks` fetched them as
 #
 #     for name in ("_memory_block", "_bond_block", "_caught_block",
 #                  "_taste_block", "_chemistry_block"):
 #         fn = getattr(muse_service, name, None)
 #
-# という引き方をしていて、呼び出しの形をしていないので閉包に入らなかった。
-# `record_shoot_continuity` も同じ —— `session_db` が遅延 import で呼んでいる。
+# which is not the shape of a call, so it never entered the closure.
+# `record_shoot_continuity` is the same — `session_db` calls it through a deferred
+# import.
 #
-# classic を退役させる段になって、`service.py` への辺が残っていることで気づいた。
+# It came to light when retiring classic left an edge into `service.py` behind.
 def uses_notebook(session: dict[str, Any]) -> bool:
     """Living notebook owns craft compile — always for the lead shoot, and for the
     studio crew once seeded."""
@@ -2362,7 +2413,8 @@ def _memory_block(session: dict[str, Any]) -> str:
             "Not material for today's picture. She has a life outside these "
             "walls and these are the people in it:",
             *(f"- {m}" for m in circle[:CIRCLE_MAX_LINES]),
-            # 名前だけだと、モデルは苗字に「くん」を付ける（実測）
+            # Handed a name alone, the model attaches 「くん」 (a male honorific)
+            # to the surname (measured)
             *([f"- (they are: {who})"] if who else []),
         ]
     return "\n".join(parts)
@@ -2419,24 +2471,28 @@ def _bond_from_snapshot(session: dict[str, Any]) -> dict[str, str]:
     wearing = str(nb.get("wearing") or "").strip()
     frame = str(nb.get("frame") or "").strip()
     open_ = str(nb.get("open") or "").strip()
-    # **行き先を先に決めない。**
+    # **Do not decide the destination in advance.**
     #
-    # 既定が「すこしずつ距離が縮まっている」だった —— これは「これから近づく」
-    # と読める。一度も撮っていない段階から、関係の向かう先が書いてあった。
-    # 実測（2026-08-23）で、初回の日記が丸ごと総監督への恋愛感情になった。
+    # The default used to be "the distance between them is slowly closing" — which
+    # reads as "they will grow closer". Before a single shoot, where the
+    # relationship was heading had already been written down. Measured (2026-08-23),
+    # the very first diary came out as romantic feeling for the Showrunner from end
+    # to end.
     #
-    # 総監督の指定:「気心の知れた仕事仲間同士であり、これからの日記の内容で
-    # 今後の関係性が築かれる」
+    # The Showrunner's choice: "they are colleagues who know each other well, and
+    # the relationship from here is built by what the diaries come to say".
     #
-    # 回数で段階を作らない。**最初から気心は知れていて、その先は決めない。**
-    # 決めるのは積み上がった日記のほう（`diary_memories` として戻っている）。
+    # No stages by shoot count. **They are at ease with each other from the start,
+    # and nothing beyond that is decided.** What decides is the diaries as they
+    # accumulate (they come back as `diary_memories`).
     bond = {
         "distance": "気心の知れた仕事仲間",
         "inside": (vibe or "撮影の空気を共有している")[:240],
         "last": " / ".join(p for p in (when, wearing, frame) if p)[:240],
     }
     # The taste half used to be derived here too, from the same snapshot: the
-    # word "low" anywhere in `frame` taught her 「ローアングルの近い距離」 and
+    # word "low" anywhere in `frame` taught her 「ローアングルの近い距離」 ("a low
+    # angle, close in") and
     # whatever she happened to be wearing became a preference. That is a
     # description of the take, not a thing learned from it, and it read none of
     # what the showrunner actually said. `_learned_taste` asks his words now.
@@ -2606,7 +2662,8 @@ def _director_exchanges(session: dict[str, Any], *, limit: int = 14) -> str:
         if msg.get("role") != "user":
             continue
         # Praise points backwards and a direction points forwards, so both
-        # sides are shown. 「いいね」 at the end of a shoot has all of its
+        # sides are shown. 「いいね」 ("nice") at the end of a shoot has all of
+        # its
         # meaning in the line before it and none of its own.
         before = next(
             (str(r.get("text") or "").strip() for r in reversed(rows[:i])
