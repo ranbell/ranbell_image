@@ -1,15 +1,15 @@
-"""シンプルモード —— 会話のたびに状況を整理して、前回のプロンプトを直す。
+"""Simple mode — tidy up the situation each turn and fix the previous prompt.
 
-総監督（2026-09-06）「関数で防ぐというのは理屈は分かるしテストを行って成果は
-出してきたが、**監督の指示がダイレクトにプロンプトに伝わらないのであれば意味が
-ない**」。
+The Showrunner (2026-09-06): "I understand the reasoning behind guarding it with
+functions, and the tests have produced results, but **if the director's instruction
+does not reach the prompt directly, it is meaningless**".
 
-ここで見るのは、書き直す人が何を書くかではなく（それは実機で測る）、
-**こちらが守ると決めた三つ**だけ:
+What is checked here is not what the rewriter writes (that is measured live) but
+only **the three things we decided to hold**:
 
-    1. 識別行を写し直す（髪型を言われたら切り方だけ譲る）
-    2. 打ち消し・禁止を出力から落とす
-    3. 段（compile / 欄ごとの係 / weave / 箱）を踏まない
+    1. the identity line is copied through (a named hairstyle yields only the cut)
+    2. negations and bans are dropped from the output
+    3. no stage is walked (compile / the per-field seats / weave / the boxes)
 """
 from __future__ import annotations
 

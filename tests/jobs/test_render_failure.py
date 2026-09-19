@@ -158,18 +158,18 @@ async def test_a_silent_websocket_gives_up_instead_of_holding_the_lane(monkeypat
 
 
 def test_each_render_gets_its_own_client_id():
-    """描画ごとに clientId を分ける。**一つを共有していた。**
+    """Each render gets its own clientId. **They used to share one.**
 
-    総監督の報告 ――「撮影を『やり直し』で続けると、ComfyUI からの画像
-    ストリーミングに失敗する場合がある」。
+    The Showrunner's report: "when a shoot is continued with 'retake', image
+    streaming from ComfyUI sometimes fails".
 
-    `ComfyClient` は clientId を一個しか持たず、全描画が共有していた。
-    やり直しで前の描画がまだ生きているうちに二本目の websocket が**同じ
-    clientId** で繋がると、ComfyUI 側は古いほうを落とす。
+    `ComfyClient` held a single clientId that every render shared. On a retake,
+    while the previous render is still alive, a second websocket connecting with
+    **the same clientId** makes ComfyUI drop the older one.
 
-    プレビューの取り違えも同じ根。プレビューのフレームは `prompt_id` を
-    持たないので、`stream_progress` は「このクライアントがいま待っている
-    もの」とみなすしかない。**clientId を分ければ、その仮定が本当になる。**
+    Mixed-up previews have the same root. A preview frame carries no `prompt_id`, so
+    `stream_progress` can only take it as "whatever this client is waiting for right
+    now". **Separate the clientIds and that assumption becomes true.**
     """
     import inspect
     from backend.app.jobs import render as render_mod

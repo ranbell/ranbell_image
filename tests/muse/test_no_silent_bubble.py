@@ -1,14 +1,16 @@
-"""**無言の吹き出しを出さない。**（2026-09-10）
+"""**No silent bubble is shown.** (2026-09-10)
 
-総監督「処理に失敗して無言になってますね」。実機（`cdf8d4f7` 23:45:56）で、
-板を見せた回に **ASIDE だけ返って SAY が空**になり、内心は出たのに台詞のほうは
-名前と空の吹き出しだけが残った。
+The Showrunner: "the processing failed and it has gone silent". Live (`cdf8d4f7`
+23:45:56), on a turn where the board was shown, **only ASIDE came back and SAY was
+empty**; the mutter appeared while the line left nothing but a name and an empty
+bubble.
 
-    23:45:56  actress_saw_board  試し撮り 1枚を見せた
-    23:45:56  actress            （空）
+    23:45:56  actress_saw_board  one test shot shown
+    23:45:56  actress            (empty)
 
-一段目の撮り直しは「返事が丸ごと空」だけを見ていた。読めないモデルは黙るが、
-**読めるモデルも書式を落とす**ことがある。見るのは「彼女が喋ったか」。
+The first retry looked only for "the whole reply is empty". A model that cannot
+read goes quiet — but **a model that can read also drops the format** sometimes.
+What is watched is "did she speak".
 """
 from __future__ import annotations
 
@@ -22,7 +24,7 @@ FULL = "SAY: はい、総監督。\nASIDE: （どきどき）\n"
 
 
 class _Ollama:
-    """一度目は書式を落とし、二度目はちゃんと返す。"""
+    """Drops the format the first time and answers properly the second."""
 
     def __init__(self, first: str, second: str = FULL):
         self.replies = [first, second]
@@ -60,7 +62,8 @@ def test_a_good_first_answer_is_not_retried():
 
 
 def test_a_turn_with_no_picture_is_left_alone():
-    """絵を見せていない回は撮り直さない（別の失敗なので勝手に二度叩かない）。"""
+    """A turn with no picture shown is not retried (a different failure, so it is not
+    called twice on its own)."""
     o = _Ollama(NO_LINE)
     out = _turn(o)
     assert o.calls == [False]
@@ -88,7 +91,7 @@ def test_an_empty_line_never_becomes_a_row():
 
 
 def test_the_silence_is_written_down():
-    """黙って落とさない —— 何が起きたかは記録に残す。"""
+    """It does not fail silently — what happened goes into the record."""
     s = _publish("", aside="（どきどき）")
     kinds = [row.get("kind") for row in (s.get("refine_log") or [])]
     assert "actress_said_nothing" in kinds

@@ -1,15 +1,16 @@
-"""**相方にも顔を。**（2026-09-10）
+"""**A face for the partner too.** (2026-09-10)
 
-実機の W撮り（`83d31174`）で、絵に相方の表情が一語も入っていなかった:
+In a live duet shoot (`83d31174`) not one word of the partner's expression reached
+the picture:
 
     Mio: looking at viewer, posing, holding tray, …, bright smile,
-    Asahi: looking at viewer, posing, holding menu, leaning forward, …,   ← 顔無し
+    Asahi: looking at viewer, posing, holding menu, leaning forward, …,   <- no face
 
-台帳に `expression_b` の欄が無く、`_person_box` は B に `expression=""` を渡して
-いた（「主演の顔を B に写さないため」）。欄が無いので**写しようがなかった**。
-classic のノートには最初から `expression_b` がある。
+The ledger had no `expression_b` field, and `_person_box` passed `expression=""` for
+B ("so the lead's face is not copied onto B"). With no field there was **nothing to
+copy**. Classic's notebook has had `expression_b` from the start.
 
-**一人の撮影では見えない。** `PARTNER_KEYS` に入っているので `for_model` が落とす。
+**A solo shoot never sees it.** It is in `PARTNER_KEYS`, so `for_model` drops it.
 """
 from __future__ import annotations
 
@@ -38,7 +39,8 @@ def test_it_is_a_ledger_field_now():
 
 
 def test_a_solo_shoot_never_sees_it():
-    """**一人の会話を壊さない。** 模型に欄そのものを見せない。"""
+    """**The solo conversation does not break.** The model is not shown the field at
+    all."""
     seen = L.for_model(LED, partner=False)
     assert "expression_b" not in seen
     assert "wearing_b" not in seen and "beat_b" not in seen
@@ -68,7 +70,8 @@ def test_the_prose_gives_her_a_face_too():
 
 
 def test_she_owns_both_faces_when_the_scene_moves():
-    """顔は演技の軸。場面が動いた回は、相方の顔も追従できる。"""
+    """The face is the axis of the performance. On a turn where the scene moved, the
+    partner's face can follow."""
     cur = {**L.blank(), "expression": "calm", "expression_b": "calm"}
     got = L.guard_muse_propose(
         {"expression": "soft smile", "expression_b": "wide grin"},

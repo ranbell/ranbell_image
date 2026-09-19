@@ -1,10 +1,11 @@
-"""**この回は喋っただけか、画を動かしたか。**（2026-09-10）
+"""**Did this turn only talk, or did it move the picture?** (2026-09-10)
 
-総監督「会話オンリーか画像プロンプト生成かはアイコンで分かるように」
-「会話部分の情報が多いので、画の更新などの情報は表示しなくていいかな。
-ログで見えるので」。
+The Showrunner: "make it clear from an icon whether it was conversation only or
+image-prompt generation", "there is a lot of conversation, so information such as
+picture updates need not be shown — it is visible in the log".
 
-裏方の行（`ledger_change`）を会話から落とし、代わりに彼女の台詞に印を一つ。
+The backstage row (`ledger_change`) comes out of the chat, and one mark goes on
+her line instead.
 """
 from __future__ import annotations
 
@@ -44,7 +45,7 @@ def test_a_talk_only_turn_marks_it_false():
 
 
 def test_older_rows_are_left_alone():
-    """**古い行には触らない。** 押していない行は画面に何も出さない。"""
+    """**Older rows are not touched.** A row with nothing stamped shows nothing."""
     before = {**L.blank(), "beat": "standing"}
     old = _say_row("前の回")
     session = {
@@ -57,7 +58,8 @@ def test_older_rows_are_left_alone():
 
 
 def test_only_the_spoken_line_gets_the_mark():
-    """内心（banter）や提案（pitch）は喋りの続き。印は台詞に一つだけ。"""
+    """Mutters (banter) and proposals (pitch) are a continuation of the talk. The mark
+    goes on the spoken line alone."""
     before = {**L.blank()}
     session = {
         "refine_ledger": {**L.blank(), "scene": "rooftop"},
@@ -74,7 +76,7 @@ def test_only_the_spoken_line_gets_the_mark():
 
 
 def test_the_change_row_is_gone_from_chat():
-    """`ledger_change` は会話に積まない。記録のほうは残す。"""
+    """`ledger_change` is not stacked into the chat. The record itself stays."""
     session: dict = {"chat": [], "refine_ledger": {}, "rewrite_log": []}
     before = {**L.blank(), "wearing": "sailor uniform"}
     after = {**L.blank(), "wearing": "white shirt"}
@@ -90,6 +92,7 @@ def test_the_change_row_is_gone_from_chat():
 
 
 def test_a_missed_direction_still_speaks_up():
-    """反映できなかった回は、黙って落とさない —— 言い直しの合図。"""
+    """A turn that could not be applied does not fail silently — it is the cue to say it
+    again."""
     src = inspect.getsource(service.chat)
     assert '"kind": "ledger_missed"' in src
