@@ -149,20 +149,23 @@ async def write_patch(
     (`ledger.cast_line`).
     """
     head = WRITER_RETRY if retry else WRITER_SYSTEM
-    # **班が喋った回は、その材料も読む（2026-09-11）。** 席は台帳に直接書かない
-    # ——「書くのは Scripter 一人」という classic の契約をそのまま持ってきていて、
-    # Refine ではその Scripter がここ。欄ごとにまとまって届く（`crew_room.craft_block`）。
-    # 規則も**班が喋った回にだけ**届ける。条文に常設すると、一人撮りの
-    # プロンプトが一字動く（無い箱の説明を読ませることになる）。
+    # **On a turn where the crew spoke, read their material too (2026-09-11).** The
+    # seats never write the ledger directly — classic's contract, "only the Scripter
+    # writes", is carried over as it was, and in Refine that Scripter is here. It
+    # arrives gathered by field (`crew_room.craft_block`). The rule too is delivered
+    # **only on turns where the crew spoke**: kept permanently in the contract, a
+    # solo shoot's prompt moves by a character (it would be reading an explanation
+    # of a box that is not there).
     crew_block = (
         "\n" + crew_craft.strip() + "\n"
         "Those seats are the specialists for their fields. **Fold their detail\n"
         "INTO the field, keeping what is already there** — they shape under the\n"
         "key, they do not replace it. Drop a seat's note only when the\n"
         "director's latest line contradicts her.\n"
-        # **最後に読む語が勝つ（実測・何度も）。** 条文の側（`WRITER_SYSTEM`）に
-        # 「一つの体」を書いても、ここで「横に足せ」が最後に来ると積み上げになる。
-        # 班が喋った回だけ届くので、一人撮りのプロンプトは一字も動かない。
+        # **Whatever is read last wins (measured, many times).** Writing "one body"
+        # into the contract (`WRITER_SYSTEM`) does not help if "just append" arrives
+        # last here — it becomes an accumulation. It is delivered only on turns where
+        # the crew spoke, so a solo shoot's prompt does not move by a character.
         "**A seat that says in other words something the field already says adds\n"
         "NOTHING — keep the field as it is.** One weight, one set of hips, one\n"
         "head, and each object in her hands named once. Two seats describing the\n"
@@ -179,11 +182,12 @@ async def write_patch(
         f"LATEST LINE:\n{user_line.strip()}\n"
     )
     try:
-        # **thinking は明示して切る（2026-09-07）。** 送らないと模型側の
-        # 既定に従い、この一回が 14〜15秒（`think=False` なら 1.1〜1.6秒・
-        # 実測 26B・同じプロンプト n=2）。**出力も薄くなる**（67〜91字 対
-        # 141〜146字）。1ターンに数回叩くので、分単位の待ちになって描画まで
-        # 届かない。Muse は `chain._call` が毎回 `think=False` を送っている。
+        # **Thinking is switched off explicitly (2026-09-07).** Unsent, the
+        # model's own default applies and this one call takes 14-15 seconds (1.1-1.6
+        # with `think=False`; measured, 26B, same prompt, n=2). **The output is
+        # thinner as well** (67-91 characters against 141-146). It is called several
+        # times a turn, so the wait runs into minutes and never reaches the render.
+        # In Muse, `chain._call` sends `think=False` every time.
         raw = await ollama.generate_text(
             prompt, model=model or None, think=False,
             options={"num_ctx": num_ctx} if num_ctx else None,
@@ -342,31 +346,35 @@ async def actress_turn(
         f"DIRECTOR:\n{user_line.strip()}\n"
     )
     try:
-        # **thinking は明示して切る（2026-09-07）。** 送らないと模型側の
-        # 既定に従い、この一回が 14〜15秒（`think=False` なら 1.1〜1.6秒・
-        # 実測 26B・同じプロンプト n=2）。**出力も薄くなる**（67〜91字 対
-        # 141〜146字）。1ターンに数回叩くので、分単位の待ちになって描画まで
-        # 届かない。Muse は `chain._call` が毎回 `think=False` を送っている。
+        # **Thinking is switched off explicitly (2026-09-07).** Unsent, the
+        # model's own default applies and this one call takes 14-15 seconds (1.1-1.6
+        # with `think=False`; measured, 26B, same prompt, n=2). **The output is
+        # thinner as well** (67-91 characters against 141-146). It is called several
+        # times a turn, so the wait runs into minutes and never reaches the render.
+        # In Muse, `chain._call` sends `think=False` every time.
         #
-        # **流す（2026-09-10）。** 総監督「会話がストリーミングされないので、
-        # 待ち時間をやっぱり感じてしまう」。この段は実測 20.3秒で、その 18.1秒
-        # はプロンプトを読む時間。総時間は変わらないが、無言で終わりを待つのと
-        # 途中から文字が出るのとでは待たされ方が違う。classic は既にこうしている。
+        # **Stream it (2026-09-10).** The Showrunner: "the conversation is not
+        # streamed, so the wait really is felt". This stage measures 20.3 seconds,
+        # of which 18.1 is reading the prompt. The total does not change, but
+        # waiting in silence for the end and seeing characters appear partway are
+        # different kinds of waiting. Classic already does this.
         opts = {"num_ctx": num_ctx} if num_ctx else None
         blind = False
-        # **枠で切られたら記録に残す（2026-09-18）。** ここは1ターンでいちばん
-        # 長い前置き（実測 14,000〜18,000字）なので、溢れるとすれば先にここ。
+        # **If the window cuts it, record that (2026-09-18).** This is the longest
+        # preamble in a turn (measured 14,000-18,000 characters), so if anything
+        # overflows it is here first.
         watch = _watch_the_window(sess, "主演")
         raw = await _say(ollama, prompt, model=model, options=opts,
                          on_token=on_token, images=images, on_done=watch)
         out = parse_actress(raw)
-        # **絵を見せた回に黙ったら、絵抜きで一度だけ撮り直す。**
+        # **If she falls silent on a turn with a picture, retry once without it.**
         #
-        # 2026-09-10 の一段目は「返事が丸ごと空」だけを見ていた。実機
-        # （`cdf8d4f7` 23:45:56）で落ちたのはその手前 —— 板を見せた回に
-        # **ASIDE だけ返って SAY が空**で、内心は出たのに台詞が無言の吹き出しに
-        # なった。読めないモデルは黙るが、読めるモデルも**書式を落とす**ことが
-        # ある。見るのは「彼女が喋ったか」であって、返事の長さではない。
+        # The first version (2026-09-10) looked only for "the whole reply is empty".
+        # What failed live (`cdf8d4f7` 23:45:56) was short of that — on a turn with
+        # the board shown, **only ASIDE came back and SAY was empty**, so the mutter
+        # appeared while the line became a silent bubble. A model that cannot read
+        # goes quiet, and a model that can read **drops the format** sometimes. What
+        # is watched is "did she speak", not how long the reply was.
         if images and not str(out.get("say") or "").strip():
             logger.warning(
                 "[muse] %s said nothing for an image turn — "
@@ -376,18 +384,21 @@ async def actress_turn(
             raw = await _say(ollama, prompt, model=model, options=opts,
                              on_token=on_token, images=None, on_done=watch)
             out = parse_actress(raw)
-        # **黙った回は、返ってきたものを残す。** 実機で無言になったとき、
-        # 記録にあったのは「空だった」だけで、模型が何を返したのか分からな
-        # かった。次に起きたときに読めるように、生の返事を持ち帰る。
+        # **On a silent turn, keep what came back.** When it went silent live, the
+        # record held only "it was empty" and there was no way to know what the
+        # model had returned. The raw reply is carried back so the next occurrence
+        # can be read.
         if not str(out.get("say") or "").strip():
             out["raw"] = (raw or "")[:400]
     except Exception as exc:
         logger.exception("[muse] actress failed")
-        # **黙って「……」にしない（2026-09-18）。** ここは例外を拾って placeholder を
-        # 返すので、**プログラムの間違いが「彼女が言葉少なだった回」に化ける**。
-        # 実機で踏んだ: `with_done` を覆い（`LlmGateway`）に足し忘れて `TypeError`
-        # になり、台詞が「……」・段の時間 0.0 秒。台帳も種も正しいので e2e は
-        # 緑のまま通ってしまった。**記録に残れば次は一目で分かる。**
+        # **Never silently become 「……」 (2026-09-18).** This catches exceptions
+        # and returns a placeholder, so **a programming mistake disguises itself as
+        # "a turn where she was short of words"**. Hit live: `with_done` was not
+        # added to the facade (`LlmGateway`), it raised `TypeError`, and her line was
+        # 「……」 with a stage time of 0.0 seconds. The ledger and the seed were both
+        # right, so e2e passed green. **Recorded, the next one is obvious at a
+        # glance.**
         try:
             from . import debug as debug_mod
 
@@ -515,9 +526,10 @@ async def verify_and_repair(
         f"{VERIFY_SYSTEM}\n"
         f"Language for COMMENT: {lang}. Speaker name: {name or 'Muse'}.\n"
         f"{hint}\n"
-        # **声だけでよい（2026-09-10）。** COMMENT を彼女の口で書かせるのが
-        # 目的なので、`ENTERTAINMENT_CRAFT`（どう愛らしく振る舞うか・1,417字）
-        # は判定に要らない。毎ターン約1.5秒を読んでいた。
+        # **Her voice alone is enough (2026-09-10).** The point is to have the
+        # COMMENT written in her mouth, so `ENTERTAINMENT_CRAFT` (how to be charming,
+        # 1,417 characters) is not needed for the judgement. It was about 1.5
+        # seconds of reading every turn.
         f"{voice}\n\n"
         f"{ledger_mod.cast_line(partner=partner, name_a=name, name_b=name_b)}\n\n"
         f"RECENT DIRECTOR LINES:\n{recent.strip() or '(none)'}\n\n"
@@ -529,11 +541,12 @@ async def verify_and_repair(
         f"NOW:\n{now}\n"
     )
     try:
-        # **thinking は明示して切る（2026-09-07）。** 送らないと模型側の
-        # 既定に従い、この一回が 14〜15秒（`think=False` なら 1.1〜1.6秒・
-        # 実測 26B・同じプロンプト n=2）。**出力も薄くなる**（67〜91字 対
-        # 141〜146字）。1ターンに数回叩くので、分単位の待ちになって描画まで
-        # 届かない。Muse は `chain._call` が毎回 `think=False` を送っている。
+        # **Thinking is switched off explicitly (2026-09-07).** Unsent, the
+        # model's own default applies and this one call takes 14-15 seconds (1.1-1.6
+        # with `think=False`; measured, 26B, same prompt, n=2). **The output is
+        # thinner as well** (67-91 characters against 141-146). It is called several
+        # times a turn, so the wait runs into minutes and never reaches the render.
+        # In Muse, `chain._call` sends `think=False` every time.
         raw = await ollama.generate_text(
             prompt, model=model or None, think=False,
             options={"num_ctx": num_ctx} if num_ctx else None,

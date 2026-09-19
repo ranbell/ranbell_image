@@ -11,11 +11,11 @@ _LABEL_RE = re.compile(
 )
 
 _SHARE_TEMPLATES = (
-    "report",      # どこで撮ってどんな感じだったか
-    "praise",      # 監督が良いと言っていたこと
-    "soft_flex",   # 軽く自慢
-    "ask_friend",  # ちょっと相談
-    "vibe",        # 空気・場所のぼやき
+    "report",      # where they shot and what it was like
+    "praise",      # what the director said was good
+    "soft_flex",   # a light boast
+    "ask_friend",  # a small thing to ask about
+    "vibe",        # grumbling about the air, or the place
 )
 
 # What they got up to when there was no camera. Everyday things — the point is
@@ -25,14 +25,16 @@ _SHARE_TEMPLATES = (
 # way of turning up in the picture, which is what
 # `test_production_muse_copy_has_no_situation_specific_anchors` is guarding —
 # and a small moment is better writing than a venue anyway.
-# 一段目（相談）に見せる候補。**行き先ではなく「どんな一日か」**の粒度で
-# 揃える —— 添えた一言が会話の種になるので、その形は崩さない。
+# The candidates shown at the first stage (the discussion). Kept at the grain of
+# **"what kind of day", not a destination** — the line that comes with each one
+# becomes the seed of the conversation, so that shape is preserved.
 #
-# ここから選ばせるが、**話の流れで別のことになってもよい**と伝える。骨組みで
-# あって台本ではない。
+# They choose from here, and are told that **the talk may lead somewhere else**. It
+# is a skeleton, not a script.
 #
-# **日本語だけで書く。** 下書きの段階で `프리마켓` と `river の河川敷` が
-# 紛れた —— 日記で直したのと同じ崩れを、こちらでやった。`_assert_ja` で見る。
+# **Written in Japanese only.** At the draft stage `프리마켓` and `river の河川敷`
+# crept in — the same breakage that was fixed in the diaries, committed here.
+# `_assert_ja` watches it.
 _OUTINGS = (
     ("パンケーキ", "話題の店に並んだら、思ったより待たされた"),
     ("ごはん", "遅い時間に、二人でラーメンを食べた"),
@@ -89,8 +91,9 @@ _OUTINGS = (
 )
 
 
-#: お題 → 画のための場所（英語）。**日本語のお題はタグに向かない。**
-#: 抜けていれば場所を入れないだけ —— 三人が写っていれば写真にはなる。
+#: Topic -> the place for the picture (in English). **A Japanese topic is no good as
+#: a tag.** A missing one simply means no place goes in — with three of them in
+#: frame it is still a photograph.
 _OUTING_PLACE = {
     'パンケーキ': 'cafe',
     'ごはん': 'ramen shop',
@@ -182,10 +185,10 @@ def outing_choices(n: int = 12, *, avoid: str = "") -> tuple[tuple[str, str], ..
     return tuple(random.sample(pool, min(max(1, n), len(pool))))
 
 
-#: 総監督から「友達とスナップ撮ってきて」と頼まれる割合。
+#: How often the Showrunner asks them to "go and take some snaps with your friends".
 #:
-#: **低く保つ。** お出かけは「総監督が居なかった時間」を作るための機能で、
-#: 毎回が頼まれごとになると意味が反転する。四回に一回くらい。
+#: **Kept low.** The outings exist to create hours the Showrunner was not part of,
+#: and if every one were an errand the meaning would invert. About one in four.
 OUTING_ERRAND_CHANCE = 0.25
 
 
@@ -194,7 +197,8 @@ def outing_is_an_errand(rng: random.Random | None = None) -> bool:
     return (rng or random).random() < OUTING_ERRAND_CHANCE
 
 
-#: 月から季節。**同じ「散歩」でも二月と八月では違う話になる。**
+#: Month to season. **The same 「散歩」 ("a walk") is a different story in February
+#: and in August.**
 _SEASON_JA = (
     (12, 2, "冬"), (3, 5, "春"), (6, 8, "夏"), (9, 11, "秋"),
 )
@@ -206,7 +210,7 @@ def season_ja(when: float | None = None) -> str:
     for lo, hi, name in _SEASON_JA:
         if lo <= hi and lo <= month <= hi:
             return name
-        if lo > hi and (month >= lo or month <= hi):   # 12〜2月をまたぐ
+        if lo > hi and (month >= lo or month <= hi):   # wraps December to February
             return name
     return ""
 
@@ -248,13 +252,14 @@ def normalize_outing(
     return out
 
 
-#: スナップの画。**撮影のカットではない**ので、寄りも決めポーズも作らない。
-#: 友達が撮った一枚に見えるだけの語で足りる。
-#: **休みの日の服。** これが無いと、サンプラーが埋める —— 人数が複数・屋外・
-#: 服の指定なし、という並びだと、行き先に関わらず同じ既定へ寄っていた
-#: （総監督の報告・2026-08-29）。季節の一語だけ入れて、あとは決めすぎない。
-#: 季節 → (屋外, 屋内)。**屋内では上着を脱ぐ。** 図書館でマフラーを巻いて
-#: いる絵は、それだけで嘘になる。
+#: The picture for a snap. **Not a shoot cut**, so no close-up and no held pose.
+#: Enough words to look like a photo a friend took is all it needs.
+#: **Clothes for a day off.** Without them the sampler fills them in — several
+#: people, outdoors, no clothing named, and it drifted to the same default whatever
+#: the destination (the Showrunner's report, 2026-08-29). One word for the season
+#: goes in and nothing more is decided.
+#: Season -> (outdoors, indoors). **Indoors the coat comes off.** A picture with a
+#: scarf wrapped on in a library is a lie on that alone.
 _SNAP_WEAR = {
     "春": ("casual clothes, long_sleeves, cardigan",
            "casual clothes, long_sleeves"),
@@ -268,8 +273,9 @@ _SNAP_WEAR = {
 _SNAP_WEAR_DEFAULT = ("casual clothes, street_clothes",
                       "casual clothes, street_clothes")
 
-#: 屋内の行き先。`outdoors` を固定で入れていたので、屋内の行き先でも屋外の
-#: 絵になっていた —— そして屋外＋複数＋服なしが、上の既定を強めていた。
+#: The indoor destinations. `outdoors` used to go in unconditionally, so an indoor
+#: destination still produced an outdoor picture — and outdoors plus several people
+#: plus no clothing was what strengthened the default above.
 _INDOOR_PLACES = frozenset({
     "aquarium", "arcade", "art museum", "bedroom", "bowling alley", "cafe",
     "cafe table", "car at night", "cardboard boxes", "clothing store",
@@ -280,9 +286,10 @@ _INDOOR_PLACES = frozenset({
     "record shop", "stationery shop", "variety store", "window rain",
 })
 
-#: **集合写真にしない。** もとは `standing together, looking at viewer` で、
-#: それは並んでレンズを見る絵 —— 総監督「集合写真みたいになってなんだか変」。
-#: 遊んでいる最中を撮る。毎回同じにならないよう、その日の一つを引く。
+#: **Not a group portrait.** It used to be `standing together, looking at viewer`,
+#: which is a picture of them lined up looking into the lens — the Showrunner: "it
+#: comes out like a group photo, which is somehow odd". Shoot them mid-play. One is
+#: drawn for the day so it is not the same every time.
 _SNAP_MOMENT = (
     "walking together, talking, laughing",
     "leaning in to look at something together, smiling",
@@ -464,11 +471,13 @@ def normalize_pitch(parsed: dict[str, str], *, fallback_ja: str = "") -> dict[st
     return {"text_ja": text_ja, "text_en": text_en}
 
 
-#: 本文の途中から生えた「英語版」を切る。**知らないラベルも境界として扱う。**
+#: Cut off an "English version" that grew out of the middle of the body text. **An
+#: unknown label is treated as a boundary too.**
 #:
-#: モデルが出力例の値（`English body`）を真似て `English body: ...` と書き、
-#: `_LABEL_RE`（大文字の語しか見ない）を通り抜けて日本語の本文に流れ込んだ。
-#: 実測 4頁中2頁。今週これで四度目の同じ形なので、読む側でも受け止める。
+#: The model copied the example value (`English body`), wrote `English body: ...`,
+#: passed through `_LABEL_RE` (which sees only upper-case words) and flowed into the
+#: Japanese body. Measured, 2 pages in 4. This is the fourth time this week for the
+#: same shape, so the reading side catches it as well.
 _TRAILING_EN_RE = re.compile(
     r"(?im)^[ \t]*(english[ _]?(body|version|text)?|en)[ \t]*[:：][ \t]*",
 )
@@ -484,8 +493,9 @@ def split_trailing_english(text: str) -> tuple[str, str]:
 
 
 def normalize_habit(parsed: dict[str, str]) -> dict[str, str]:
-    # **先に切る。** 英語の欄が空のときは日本語で埋める作りなので、切る前に
-    # 埋めると、こぼれた英語を含んだ塊が両方の欄に入る（実測でそうなった）。
+    # **Cut first.** When the English field is empty it is filled from the
+    # Japanese, so filling before cutting puts the block including the spilled
+    # English into both fields (which is what happened, measured).
     title, spilled_title = split_trailing_english(
         parsed.get("TITLE_JA") or parsed.get("TITLE") or "")
     body_ja, spilled_body = split_trailing_english(
