@@ -1,19 +1,22 @@
-"""**二人写っている絵は、二人ぶんで読む。**（2026-09-10）
+"""**A picture with two people is read as two people.** (2026-09-10)
 
-総監督「日記も混濁しています」。実機（`83d31174`）で二人の日記が食い違った:
+The Showrunner: "the diaries are muddled too". Live (`83d31174`) the two diaries
+contradicted each other:
 
-    みおの日記   「ピンクの、あさひさんとは対照的なリボン」「あさひさんは黄色いリボン」
-    あさひの日記 「アタシは赤色のリボン…みおちゃんは金色のリボン」
+    Mio's diary    "a pink ribbon, the opposite of Asahi's", "Asahi's is yellow"
+    Asahi's diary  "mine is the red ribbon… Mio's is gold"
 
-総監督「画像を見てコメントしてるから発明しているわけじゃないですよ」。そのとおりで、
-`_read_the_photo` が本番写真を VLM に読ませている。問題は二つ:
+The Showrunner: "they are commenting on the image, so they are not inventing it".
+Quite so — `_read_the_photo` has a VLM read the final photograph. Two things were
+wrong:
 
-    読ませ方が一人ぶんの文面（where **she** is, what **she** is wearing…）
-    その同じ一つの説明が、二人ぶんの日記の**両方**に渡る
+    it is read with wording for one person (where **she** is, what **she** is
+    wearing…)
+    and that one description is handed to **both** diaries
 
-どちらも絵を見て言っているのに、**どっちが自分かを教わっていない**。
+Both are speaking from the picture, and **neither is told which one she is**.
 
-**一人の撮影は一字も変えない。**
+**Not one character of the solo shoot changes.**
 """
 from __future__ import annotations
 
@@ -29,11 +32,11 @@ PART_JA = identity.side_of(lead=False)[1]
 
 
 def _code(fn) -> str:
-    """コメントと文字列を落とした、実際に走る行だけ。
+    """Only the lines that actually run, with comments and strings removed.
 
-    **自分が書いた説明に引っかからないため** —— `_read_the_photo` の説明文には
-    「`is_duet` は `mode` しか見ず」と書いてあるので、素の `getsource` を
-    検索すると必ず当たる。
+    **So the test does not catch our own prose** — `_read_the_photo`'s docstring
+    says "`is_duet` only looks at `mode`", so searching a raw `getsource` always
+    matches.
     """
     import io, tokenize
     out = []
@@ -51,7 +54,7 @@ DESC = "Two girls in a cafe."
 
 
 def test_one_person_gets_nothing_added():
-    """**一人の撮影を壊さない。** 写真の説明はそのまま。"""
+    """**Do not break the solo shoot.** The photo description is unchanged."""
     s = {"character": dict(A), "partner_character": {}}
     assert muse_service._which_one_is_me(s, "a", DESC) == DESC
 
@@ -73,10 +76,12 @@ def test_the_partner_is_told_the_other_side():
 
 
 def test_the_hint_says_it_is_not_material_to_copy():
-    """総監督「日記の記載も写真の中身を細かく説明するようになってしまいました」。
+    """The Showrunner: "the diary entries have started describing the contents of
+    the photo in detail as well".
 
-    一段目は見分けの語（silver_hair・bob_cut）まで渡していて、日記がそれを
-    そのまま書き起こした。手がかりであることを言い添え、語そのものは渡さない。
+    The first version handed over the telling words (silver_hair, bob_cut) and the
+    diary transcribed them. Say that they are a hint, and do not hand the words
+    themselves over.
     """
     s = {"character": dict(A), "partner_character": dict(B)}
     got = muse_service._which_one_is_me(s, "a", DESC)
@@ -86,7 +91,8 @@ def test_the_hint_says_it_is_not_material_to_copy():
 
 
 def test_the_diary_and_the_picture_agree():
-    """**同じ正本を読む。** 別々に持つと、絵とご本人の記憶が食い違う。"""
+    """**Read the same document of record.** Keep two and the picture and her own
+    memory disagree."""
     from app.muse import assemble, ledger as L
 
     led = {**L.blank(), "wearing": "maid outfit", "beat": "holding tray",
@@ -118,10 +124,11 @@ def test_an_empty_photo_read_is_left_alone():
 
 
 class _Seeing:
-    """絵を渡されたら、その指示文を控えて返す（模型は呼ばない）。
+    """Given a picture, record the instruction text and return (no model is
+    called).
 
-    形は `tests/muse/test_learning.py` の `_SeeingOllama` に合わせる ——
-    この repo の写真読みの試験はこの作法で書かれている。
+    Shaped after `_SeeingOllama` in `tests/muse/test_learning.py` — the photo-reading
+    tests in this repo are written in that manner.
     """
 
     def __init__(self):
@@ -168,7 +175,8 @@ async def test_two_in_frame_are_read_separately(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_one_in_frame_is_read_exactly_as_before(monkeypatch):
-    """**一人の撮影を壊さない。** 文面は改修前と一字も変わらない。"""
+    """**Do not break the solo shoot.** The wording is character for character what
+    it was before the change."""
     monkeypatch.setattr(shared, "images_by_sha", _fake_images)
     seeing = _Seeing()
     await muse_service._read_the_photo(
@@ -185,7 +193,8 @@ async def test_one_in_frame_is_read_exactly_as_before(monkeypatch):
 
 
 def test_the_gate_is_never_the_mode():
-    """`is_duet` は `mode` しか見ない —— 実機は一人の回も `mode: duet`。"""
+    """`is_duet` only looks at `mode` — live, even solo turns carry
+    `mode: duet`."""
     for fn in (muse_service._read_the_photo, muse_service._which_one_is_me):
         assert "is_duet" not in _code(fn), fn.__name__
 

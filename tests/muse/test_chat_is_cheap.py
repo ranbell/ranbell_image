@@ -1,21 +1,23 @@
-"""**会話だけの回に、絵を組み直さない。**（2026-09-10）
+"""**A conversation-only turn does not rebuild the picture.** (2026-09-10)
 
-総監督「撮影に入らないときの会話のみの回答はもっと早くしてほしい」。
+The Showrunner: "when we are not shooting, a conversation-only reply should come
+back faster".
 
-実機の `stage_ms` を読むと、会話だけの一手にこれだけ乗っていた:
+Reading `stage_ms` live, a conversation-only move carried all of this:
 
-    writer                4.45s   台帳を書く（要る）
-    quality_enrich        4.42s   ┐ `rebuild_craft` の中身。どちらも模型
-    prose_densify         6.93s   ┘
-    actress              21.93s   彼女が喋る（要る）
-    assemble_after_propose 9.55s  彼女が表情を足したので、また組み直し
-    verify                6.81s
-    ──────────────────────────── 合計 ≈54秒
+    writer                 4.45s   writes the ledger (needed)
+    quality_enrich         4.42s   ┐ inside `rebuild_craft`; both call a model
+    prose_densify          6.93s   ┘
+    actress               21.93s   she speaks (needed)
+    assemble_after_propose 9.55s   she added an expression, so it builds again
+    verify                 6.81s
+    ───────────────────────────── ≈54s in total
 
-組み上げた散文とタグを使うのは試し撮りと本番だけで、そちらは自前で
-`rebuild_craft` を呼ぶ。**会話の途中で組む理由がない。**
+The assembled prose and tags are used only by the draft and the final shoot, and
+both call `rebuild_craft` themselves. **There is no reason to assemble
+mid-conversation.**
 
-ここで見るのは呼び出しの形だけ（模型は叩かない）。
+What is checked here is only the shape of the calls (no model is touched).
 """
 from __future__ import annotations
 
@@ -25,11 +27,11 @@ from app.muse import assemble, service
 
 
 def _code(fn) -> str:
-    """コメントと文字列を落とした、実際に走る行だけ。
+    """Only the lines that actually run, with comments and strings removed.
 
-    **自分が書いた説明に引っかからないため。** ここの説明文には
-    `rebuild_craft` も `quality_enrich` も出てくるので、素の
-    `inspect.getsource` を検索すると必ず当たってしまう。
+    **So the test does not catch our own prose.** The text here mentions both
+    `rebuild_craft` and `quality_enrich`, so searching a raw `inspect.getsource`
+    always matches.
     """
     import io, tokenize
 
@@ -43,31 +45,32 @@ def _code(fn) -> str:
 
 
 def test_chat_never_rebuilds_the_craft():
-    """`chat` の中に `rebuild_craft` が一つも残っていないこと。"""
+    """That no `rebuild_craft` remains anywhere inside `chat`."""
     code = _code(service.chat)
     assert "rebuild_craft" not in code
     assert "touch_craft" in code
 
 
 def test_the_three_seams_all_use_the_cheap_one():
-    """女優の前・propose の後・自己修復の後 —— 三箇所とも。"""
+    """Before the actress, after the propose, after the self-repair — all three."""
     code = _code(service.chat)
     assert code.count("assemble . touch_craft ( session )") == 3
 
 
 def test_taking_a_picture_still_rebuilds():
-    """試し撮りと本番は、今まで通り組み直してから積む。"""
+    """The draft and the final still rebuild before they queue."""
     for fn in (service.start_board, service.start_shoot):
         assert "rebuild_craft" in _code(fn), fn.__name__
 
 
 def test_the_rebuild_button_still_rebuilds():
-    """「プロンプト再生成」は本物の組み直しのまま。"""
+    """"Regenerate prompt" stays a real rebuild."""
     assert "rebuild_craft" in _code(service.rebuild)
 
 
 def test_touch_craft_uses_no_model():
-    """純関数だけ。`ollama` を受け取らない —— 受け取れないので叩けない。"""
+    """Pure functions only. It does not take `ollama` — it cannot, so it cannot
+    call one."""
     params = list(inspect.signature(assemble.touch_craft).parameters)
     assert params == ["session"]
     code = _code(assemble.touch_craft)
@@ -93,9 +96,9 @@ def test_touch_craft_moves_now_and_flags_stale():
 
 
 def test_rebuild_lowers_the_flag():
-    """撮る直前に組み直したら、もう古くない。
+    """Rebuilt just before the shutter, it is no longer stale.
 
-    実際に組み直して旗を見る（`ollama=None` なので模型は一度も動かない）。
+    It really rebuilds and the flag is read (`ollama=None`, so no model runs).
     """
     import asyncio
 

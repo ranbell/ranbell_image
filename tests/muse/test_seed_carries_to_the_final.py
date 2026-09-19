@@ -1,25 +1,27 @@
-"""**試し撮りは引き直し、本番はその種のまま。**（2026-09-12）
+"""**A draft draws a new seed; the final keeps that seed.** (2026-09-12)
 
-総監督:
+The Showrunner:
 
-    「試し撮り直後の本番は同一シードにして。試し撮りを押すと seed が変わるのは、
-      撮影の際に何枚も写真を取っていいシーンを選び出すのと同じ。試し撮りで
-      いいシーンがあったら、そのシードを変更せず同じプロンプトで高画質の画像を
-      取得するという設計です」
+    "the final right after a draft should use the same seed. The seed changing
+     each time you press draft is the same as taking several photographs on a
+     shoot and picking the good scene. When a draft gives you a good scene, you
+     take the high-quality image with the same prompt and that seed unchanged."
 
-直す前は**両方が引き直し**だった。実機で確かめたところ、試し撮りと本番の両方を
-持つ6セッションすべてで種が違っていた:
+Before the fix **both of them redrew**. Checked live, all six sessions holding
+both a draft and a final had different seeds:
 
-    6b0946fc  試し撮り 3881726702135899670  本番 6812618535693203985
-    d07fa770  試し撮り 13803908969248640288 本番 5777939410761258192
-    （6/6 不一致）
+    6b0946fc  draft 3881726702135899670   final 6812618535693203985
+    d07fa770  draft 13803908969248640288  final 5777939410761258192
+    (6/6 mismatched)
 
-仕掛けは `board["seed"] = 0`（＝引き直して）で頼み、描き終わっても欄へ書き戻さず、
-本番が `board["seed"]` を読んで 0 を受け取り、`runner` が `0 or None` で畳んで
-もう一度引く、という空振りだった。種そのものは昔から一枚ごとの meta にあった。
+The machinery asked with `board["seed"] = 0` (meaning "draw again"), never wrote
+the seed back into the field when the render finished, and the final read
+`board["seed"]`, received 0, and `runner` folded it with `0 or None` and drew
+again — a swing at nothing. The seed itself had always been in each frame's meta.
 
-canvas は試し撮りと本番で同じで、変わるのは steps と cfg だけ（12/4.0 → 30/4.5）。
-だから種を揃えると**OK を出したのと同じ絵の仕上げ版**になる。
+The canvas is the same for a draft and a final; only steps and cfg change
+(12/4.0 → 30/4.5). So matching the seed gives **the finished version of the very
+picture that was approved**.
 """
 from __future__ import annotations
 
@@ -77,7 +79,8 @@ def _session(**over) -> dict[str, Any]:
 
 @pytest.mark.asyncio
 async def test_asking_for_a_test_shot_draws_a_new_seed_every_time(rig):
-    """**0 は「引き直して」。** 選ぶための枚数がここから出てくる。"""
+    """**0 means "draw again".** This is where the frames you choose between come
+    from."""
     session = await service.start_board(rig.db, rig.request, _session())
     assert session["board"]["seed"] == 0
 
@@ -94,7 +97,8 @@ async def test_asking_for_a_test_shot_draws_a_new_seed_every_time(rig):
 
 @pytest.mark.asyncio
 async def test_the_seed_the_test_shot_used_is_written_back_to_its_own_field(rig):
-    """欄が嘘をついていた。描き終わったら、使った種をそこへ上げる。"""
+    """The field was lying. Once the render finishes, the seed it used goes up into
+    it."""
     session = _session(board={"seed": 0, "images": [], "pending": True})
     await session_db.save(rig.db, session)
 
@@ -127,7 +131,8 @@ async def test_the_final_shoot_uses_the_seed_of_the_approved_test_shot(rig):
 
 @pytest.mark.asyncio
 async def test_an_older_row_still_finds_its_seed_in_the_photographs(rig):
-    """欄へ上げる道が無かった頃の行。**種は写真の側に残っている。**"""
+    """A row from when there was no road up into the field. **The seed survives on
+    the photograph side.**"""
     session = _session(
         board={"images": [{"image_id": "a", "seed": 0},
                           {"image_id": "b", "seed": 55555}],
@@ -141,11 +146,12 @@ async def test_an_older_row_still_finds_its_seed_in_the_photographs(rig):
 
 
 def test_zero_means_draw_again_all_the_way_down():
-    """**`0` が `None` に畳まれる繋ぎ。** ここが本番まで通ると黙って別の絵になる。
+    """**The seam where `0` folds into `None`.** Let it through to the final and the
+    picture silently becomes another one.
 
-    `runner` は `int(... or 0) or None` で渡すので、0 は「指定なし」になり
-    `jobs.render` が `random.randint` を引く。試し撮りはそれを望んでいて、
-    本番は望んでいない —— 同じ式が二つの意味を持つので、形で押さえておく。
+    `runner` passes `int(... or 0) or None`, so 0 becomes "unspecified" and
+    `jobs.render` draws with `random.randint`. A draft wants that and a final does
+    not — one expression carrying two meanings, so it is pinned by shape.
     """
     import inspect
 

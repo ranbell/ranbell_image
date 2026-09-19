@@ -1,22 +1,26 @@
-"""**一つの体は一つの答えしか持たない。**（2026-09-12）
+"""**One body holds only one answer.** (2026-09-12)
 
-総監督「beat を磨きましょう」。実機（記録の再現・18席）で `beat` が 13語になり、
-体重が二箇所、腰が二方向、手が三重になっていた:
+The Showrunner: "let's polish beat". Live (replaying a record, 18 seats) `beat`
+grew to 13 words with the weight in two places, the hips in two directions and the
+hands tripled:
 
     weight on right leg       ↔  weight on back foot
     hips jutting out sharply  ↔  hips pushed forward
     hands_clutching_tray_edge ↔  hugging tray ↔ hands gripping tray_edge …
 
-同じ記録の元のセッションは 8語で、**部位ごとに一語ずつ**だった。原因は18席が
-同じ欄に順に書くことと、条文が「横に足せ」と言っていたこと。
+The original session behind that same record had 8 words, **one per body part**.
+The cause was eighteen seats writing into one field in turn, and a contract that
+said "add alongside".
 
-`tags.conflict.SLOTS` は使えない —— あれは danbooru の**正確な語**の表で、ここに
-来るのは自由文。**軸で見る**ことにした（部位＋向き）。落とすのは同じ軸の二つ目
-だけで、反対の答え（矛盾）でも同じ答え（言い換え）でも落とす。**最初の答えが
-勝つ**のは `facets._resolve_self_slot_conflicts` と同じ規則。
+`tags.conflict.SLOTS` cannot be used — that is a table of **exact danbooru
+words**, and what arrives here is free text. So it is read **by axis** (body part
+plus direction). Only the second answer on an axis is dropped, whether it is the
+opposite answer (a contradiction) or the same one (a restatement). **The first
+answer wins**, the same rule as `facets._resolve_self_slot_conflicts`.
 
-取りすぎないことが本番 —— `tags/conflict.py` 冒頭の「取りすぎのほうが高くつく」。
-実機の `beat` 52本に掛けて手が入ったのは6本で、どれも妥当だった。
+Not over-trimming is the real work — see the head of `tags/conflict.py`:
+"over-trimming costs more". Run against 52 live `beat` values, six were touched,
+and every one of them rightly.
 """
 from __future__ import annotations
 
@@ -62,7 +66,7 @@ def test_a_phrase_already_contained_in_another_is_dropped():
 
 
 def test_the_directors_body_survives():
-    """監督は「トレイを抱えつつ、腰に手を当てて、強気な感じで」と言った。"""
+    """The director said: "hold the tray, hand on your hip, and look confident"."""
     kept, _ = L.one_body(BLOATED)
     assert len([t for t in kept.split(",") if t.strip()]) == 8
     for must in ("hands_clutching_tray_edge", "left hand on hip",
@@ -71,17 +75,19 @@ def test_the_directors_body_survives():
 
 
 def test_a_body_that_is_already_one_body_is_untouched():
-    """**取りすぎない。** 人が撮った値には一語も触らない。"""
+    """**Do not over-trim.** Not one word of a value a person shot is touched."""
     kept, dropped = L.one_body(CLEAN)
     assert dropped == []
     assert kept == CLEAN
 
 
 def test_two_hands_hold_two_different_things():
-    """手は二本ある。トレイとカップは**別の物**なので両方立つ。
+    """There are two hands. A tray and a cup are **different objects**, so both
+    stand.
 
-    実機の値（`looking at viewer, posing, holding tray, holding coffee cup`）。
-    物を見ずに「掴み」でまとめた最初の形は、ここでカップを捨てていた。
+    A live value (`looking at viewer, posing, holding tray, holding coffee cup`).
+    The first shape, which grouped by "holding" without looking at the object,
+    threw the cup away here.
     """
     kept, dropped = L.one_body("looking at viewer, posing, holding tray, holding coffee cup")
     assert dropped == []
@@ -103,8 +109,8 @@ def test_letting_go_and_holding_the_same_thing_cannot_both_be_true():
 
 
 def test_the_throw_is_not_eaten():
-    """ボウリングの投球。`releasing ball` は `releasing bowling ball` の言い換え
-    なので落ちるが、**投げる動作そのものは残る**。"""
+    """A bowling delivery. `releasing ball` is a restatement of
+    `releasing bowling ball` and goes, but **the throw itself stays**."""
     kept, dropped = L.one_body(
         "releasing bowling ball, profile view, side view, releasing ball, low angle"
     )
@@ -113,15 +119,17 @@ def test_the_throw_is_not_eaten():
 
 
 def test_a_part_named_without_a_direction_is_never_dropped():
-    """向きの語が無い句には触らない —— `arms_stiff` と `forearms tensed` は
-    どちらも腕の話だが、どちらも体の別のことを言っている。"""
+    """A phrase with no direction word is untouched — `arms_stiff` and
+    `forearms tensed` are both about the arms, and each says something different
+    about the body."""
     kept, dropped = L.one_body("arms_stiff, forearms tensed, elbows flared outward, shoulders hunched")
     assert dropped == []
     assert kept == "arms_stiff, forearms tensed, elbows flared outward, shoulders hunched"
 
 
 def test_the_entrance_folds_the_body_and_says_what_it_dropped():
-    """**入口は `normalize_patch` 一つ。** 席の経路でもカードの経路でも効く。"""
+    """**There is one door: `normalize_patch`.** It bites on the seat road and the
+    card road alike."""
     report: dict[str, list[str]] = {}
     out = L.normalize_patch({"beat": BLOATED, "scene": "cafe open terrace"}, report=report)
     assert out["beat"] == L.one_body(BLOATED)[0]
@@ -137,7 +145,8 @@ def test_the_partner_has_a_body_too():
 
 
 def test_only_the_body_fields_are_folded():
-    """`bg` は物を並べる欄で、同じ軸という考えが無い。掴みの語が混ざっても触らない。"""
+    """`bg` lists objects and has no notion of an axis. Even with a holding word
+    mixed in, it is untouched."""
     out = L.normalize_patch({
         "bg": "hot_coffee, coffee_cup, steam, cheese_cake, crumbs",
         "light": "backlighting, rim_light",
@@ -147,7 +156,8 @@ def test_only_the_body_fields_are_folded():
 
 
 def test_the_contract_tells_the_writer_the_body_is_one():
-    """条文側も直した —— 落とすだけでは毎ターン同じ掃除を払う。"""
+    """The contract was fixed too — dropping alone pays for the same cleanup every
+    turn."""
     from app.muse import crew_room, writer
 
     assert "ONE BODY, ONE INSTANT" in writer.WRITER_SYSTEM
@@ -156,11 +166,12 @@ def test_the_contract_tells_the_writer_the_body_is_one():
 
 
 def test_a_body_that_forgot_to_say_she_is_standing_gets_it_back():
-    """**欄は丸ごと書き直す所なので、書かれなかったものは消える。**
+    """**The field is rewritten whole, so anything not written disappears.**
 
-    台で A/B したとき（2026-09-12）、「一つの体」の条文を足すと矛盾は消えたが、
-    同じ回で `standing` が落ちた —— 台本係が「既に分かっていること」として
-    省いた。条文の言い回しでは戻らなかったので、ここで守る。
+    A/B on the bench (2026-09-12): adding the "one body" clause removed the
+    contradictions and in the same runs `standing` vanished — the writer left it
+    out as "something already known". No wording of the contract brought it back,
+    so it is protected here.
     """
     before = {**L.blank(), "beat": "standing, weight on back foot, hips retracted"}
     out = L.scrub_patch({"beat": "weight on back foot, hips jutting out sharply, hugging tray"}, before)
@@ -168,7 +179,7 @@ def test_a_body_that_forgot_to_say_she_is_standing_gets_it_back():
 
 
 def test_a_body_that_names_its_own_posture_is_left_alone():
-    """「座って」と言われた回を立たせない。"""
+    """A turn told 「座って」 ("sit down") does not get stood up."""
     before = {**L.blank(), "beat": "standing, weight on back foot"}
     out = L.scrub_patch({"beat": "sitting on the floor, legs tucked to the side"}, before)
     assert out["beat"] == "sitting on the floor, legs tucked to the side"
@@ -183,7 +194,8 @@ def test_nothing_is_invented_when_the_old_body_had_no_posture_either():
 
 
 def test_the_posture_words_come_from_the_one_list_we_already_have():
-    """語の表を二つ持たない —— `tags.conflict` の `posture` 槽をそのまま使う。"""
+    """No second word table — `tags.conflict`'s `posture` slot is used as it
+    stands."""
     import inspect
 
     src = inspect.getsource(L._posture_of)
