@@ -1,25 +1,28 @@
-"""**喋った人の顔は、いつも同じ所に出る。**（2026-09-18）
+"""**The face of whoever spoke always appears in the same place.** (2026-09-18)
 
-総監督「Muse が喋ったときのサムネイルが抜けている場合がある」。
+The Showrunner: "sometimes the thumbnail is missing when a Muse speaks".
 
-実機（`0239133f`・standard 18席）で彼女の吹き出しを数えると、**顔が付く行と
-付かない行が混ざっていた**:
+Counting her bubbles live (`0239133f`, standard, 18 seats), **rows with a face and
+rows without were mixed together**:
 
-    kind=say / banter / verify_ok   speaker_id あり  → 顔が出る
-    kind=heckle（やじ）・seat（開幕）  speaker_id なし  → **顔が出ない**
+    kind=say / banter / verify_ok    speaker_id present  → face shows
+    kind=heckle, seat (the opening)  no speaker_id       → **no face**
 
-彼女は班の回で1ターンに2〜3回やじを入れる。同じ人が喋っているのに、**言葉の
-出どころによって顔が消えていた。** 原因は二つ:
+She heckles two or three times a turn in a crewed shoot. The same person is
+speaking, and **her face vanished depending on where the words came from.** Two
+causes:
 
-    ① 確定した行   `faceShaForRow` が「assistant なら主演の顔」を返すので、
-                  班の席にまで顔が付く。それを**吹き出しの種類の許可リスト**で
-                  抑えていて、その一覧に `heckle` が無かった
-    ② 流している間  班の中の彼女は `actress:cast`（席の id）で流れていたので、
-                  画面の「これは主演か」（`liveIsLead`）が偽になっていた
+    ① confirmed rows   `faceShaForRow` returns the lead's face for any assistant
+                       row, which would put a face on crew seats too. That was
+                       held back by **an allow-list of bubble kinds**, and
+                       `heckle` was not on it
+    ② while streaming  inside the crew she streamed under `actress:cast` (the seat
+                       id), so the panel's "is this the lead" (`liveIsLead`) was
+                       false
 
-直し方は一つずつ ——「誰の言葉か」で決める。班の席は `meta.role` を持つので
-顔を持たず、主演の行は種類にかかわらず顔が付く。流し込みの宛先は
-`crew_room.stream_id` が本人の `character_id` に揃える。
+Fixed one at a time — decide by **whose words they are**. A crew seat carries
+`meta.role` and gets no face; the lead's rows get a face whatever their kind. The
+stream address is lined up on her own `character_id` by `crew_room.stream_id`.
 """
 from __future__ import annotations
 
@@ -44,14 +47,15 @@ def test_the_face_is_chosen_by_who_spoke_not_by_the_kind_of_bubble():
 
 
 def test_the_template_no_longer_keeps_a_list_of_allowed_bubbles():
-    """許可リストは**漏れる** —— `heckle` が抜けていたのが今回の症状。"""
+    """An allow-list **leaks** — `heckle` missing from it was this symptom."""
     m = re.search(r'v-if="faceForRow\(row\)([^"]*)"', SRC)
     assert m, "行の顔の出し分けが見つからない"
     assert m.group(1).strip() == "", f"種類の許可リストが残っている: {m.group(1)[:80]}"
 
 
 def test_a_crew_seat_has_no_face():
-    """班の席（演出・照明…）に主演の顔を付けない —— 許可リストの役目はこれだった。"""
+    """No lead's face on a crew seat (staging, lighting…) — that was what the
+    allow-list was for."""
     body = _fn("faceShaForRow")
     i_role = body.index("row?.meta?.role")
     i_lead = body.index("return leadFaceSha.value", i_role)
@@ -61,13 +65,14 @@ def test_a_crew_seat_has_no_face():
 # ── 流している間 ────────────────────────────────────────────────────────
 
 def test_the_folded_bubble_keeps_its_face():
-    """畳んだ吹き出しだけ顔が消えると、喋り続けている間に顔が点滅する。"""
+    """If only folded bubbles lose the face, it blinks while she keeps talking."""
     assert "face: liveIsLead.value ? leadFace.value : ''" in _fn("foldLive")
     assert 'v-if="done.face"' in SRC
 
 
 def test_the_lead_streams_under_her_own_id():
-    """班の中の彼女も、本人の id で流れること（画面の `liveIsLead` がそれで決まる）。"""
+    """Inside the crew she still streams under her own id (that is what the panel's
+    `liveIsLead` reads)."""
     import sys
 
     sys.path.insert(0, str(ROOT / "backend"))
@@ -82,7 +87,7 @@ def test_the_lead_streams_under_her_own_id():
 
 
 def test_every_speaking_signal_goes_through_the_same_door():
-    """`muse_speaking` を出す所は全部 `stream_id` を通ること。"""
+    """Every place that emits `muse_speaking` goes through `stream_id`."""
     import inspect
     import sys
 

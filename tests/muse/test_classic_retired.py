@@ -1,13 +1,13 @@
-"""**Muse Classic を退役させても、楽屋は絶対に残す。**（2026-09-12）
+"""**Retiring Muse Classic never touches the lounge.** (2026-09-12)
 
-総監督のご判断で Muse Refine を正規の Muse にした。撮影室は一つ。classic の
-ターンエンジンと画面は `private/muse_classic/` へ退き、撮影室は
-`backend/app/muse/` に畳んで `/api/muse` から出している。
+At the Showrunner's decision Muse Refine became the Muse. There is one studio.
+Classic's turn engine and panel withdrew to `private/muse_classic/`, and the
+studio folded into `backend/app/muse/`, served from `/api/muse`.
 
-楽屋は据え置き（[[project-muse-circle-must-stay]]）。URL も変えない ——
-画面（`CharacterGallery` / `LoungePanel`）がそう叩いている。撮影室の口も
-`/api/muse` に来たので、**楽屋と同じ屋根の下で経路がぶつからないこと**が
-ここの見どころになった。
+The lounge stays where it is ([[project-muse-circle-must-stay]]). Its URLs do not
+move either — the panel (`CharacterGallery` / `LoungePanel`) calls them. The
+studio's doors moved to `/api/muse` as well, so what matters here is **that the
+routes do not collide under the same roof as the lounge**.
 """
 from __future__ import annotations
 
@@ -41,7 +41,8 @@ def test_the_lounge_is_still_served():
 
 
 def test_the_lounge_urls_did_not_move():
-    """画面が叩いている URL をそのまま出すこと。移すと楽屋が黙って消える。"""
+    """Serve exactly the URLs the panel calls. Move one and the lounge silently
+    disappears."""
     from app.muse import lounge_api
 
     served = _paths(lounge_api.router)
@@ -54,7 +55,7 @@ def test_the_lounge_urls_did_not_move():
 
 
 def test_there_is_one_studio_and_it_answers_under_api_muse():
-    """撮影室は一つ。classic の口は載せず、Refine の口は `muse` に畳んだ。"""
+    """One studio. Classic's doors are not mounted; Refine's folded into `muse`."""
     from app.main import app
 
     src = Path("backend/app/main.py").read_text(encoding="utf-8")
@@ -67,7 +68,8 @@ def test_there_is_one_studio_and_it_answers_under_api_muse():
 
 
 def test_the_two_routers_under_api_muse_do_not_collide():
-    """撮影室と楽屋が同じ接頭辞に並んだ。**同じ経路を二度出したら後が勝つ。**"""
+    """The studio and the lounge now share a prefix. **Serve one route twice and
+    the later one wins.**"""
     from app.muse import lounge_api
     from app.muse import api as studio_api
 
@@ -93,7 +95,8 @@ def test_a_retired_route_is_not_served(path):
 
 
 def test_the_lounge_router_does_not_drag_the_turn_engine_in():
-    """楽屋の口が classic の撮影室を import したら、退役の意味がない。"""
+    """If the lounge's doors imported classic's studio, retiring it would mean
+    nothing."""
     import ast
 
     tree = ast.parse(Path("backend/app/muse/lounge_api.py").read_text(encoding="utf-8"))
@@ -119,12 +122,13 @@ RETIRED = ("schema", "report", "harvest")
 
 
 def test_nothing_living_reaches_for_a_retired_module():
-    """土台が退役したモジュールを引いていないこと。
+    """That the foundations never reach for a retired module.
 
-    **実際に踏んだ。** `facets.write_facet` が `from .service import drop_banned`
-    を関数の中でやっていたので、import では気付かず、その行を通る試験だけが
-    `ModuleNotFoundError` で落ちた。関数の中に隠れた import は AST でしか見えない
-    —— だから行ごとではなく**木で**見る。
+    **Actually hit.** `facets.write_facet` did `from .service import drop_banned`
+    inside the function, so importing the module noticed nothing and only the tests
+    that walked that line failed with `ModuleNotFoundError`. An import hidden
+    inside a function is visible only in the AST — so this reads **the tree**, not
+    the lines.
     """
     import ast
 
@@ -155,11 +159,13 @@ def test_nothing_living_reaches_for_a_retired_module():
 
 
 def test_the_studio_marker_on_the_saved_rows_is_not_tidied_up():
-    """**`STUDIO` の文字列は保存値。名前が古く見えても動かさない。**
+    """**The `STUDIO` string is a stored value. However old the name looks, it does
+    not move.**
 
-    撮影室を `muse_refine` から `muse` に畳んだ（2026-09-12）ときも、この一語は
-    据え置いた —— セッションの行に書いてあり、`_require_studio` が「自分の行か」を
-    これで見分ける。揃えたくなって直すと、**これまでの行が全部開かなくなる**。
+    When the studio folded from `muse_refine` into `muse` (2026-09-12) this one
+    word stayed — it is written into the session rows, and `_require_studio` uses
+    it to tell its own rows apart. Tidy it for consistency and **every existing row
+    stops opening**.
     """
     from app.muse import service
 

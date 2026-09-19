@@ -1,23 +1,25 @@
-"""**切るなら、切れ目で切る。**（2026-09-18）
+"""**If it has to be cut, cut it at a boundary.** (2026-09-18)
 
-総監督「prompt のオーバフローで文字が切れる場合があるようです」。
+The Showrunner: "it looks like text gets cut off by prompt overflow".
 
-まず枠を数えた —— いちばん重い実機セッション（`1b78ac2b`・会話81行）を材料に、
-段ごとの前置きを組み直して Ollama にトークンを数えさせた
-（`private/muse/crew_lab/ctx_overflow.py`）:
+The window was counted first — taking the heaviest live session (`1b78ac2b`, 81
+chat rows), each stage's preamble was rebuilt and Ollama itself counted the tokens
+(`private/muse/crew_lab/ctx_overflow.py`):
 
-    席 lens        2,111tok   出力に残る枠 14,273
-    会議 beat（2席） 2,772tok   出力に残る枠 13,612
-    台本係 writer   1,589tok   出力に残る枠 14,795
-    主演 actress   5,719tok   出力に残る枠 10,665   ← いちばん長い前置きでも 35%
+    seat lens          2,111 tok   window left for output 14,273
+    corner beat (2)    2,772 tok   window left for output 13,612
+    writer             1,589 tok   window left for output 14,795
+    actress            5,719 tok   window left for output 10,665   ← 35% at the
+                                                                     longest
 
-**枠（16,384）は溢れていない。** では何が切っていたか —— コードの中の
-「固定の長さで切る」所だった。いちばん効くのは絵に渡す散文で、実測は
-145〜831字に対して上限 900字（**92% まで来ている**）。超えた回は
-**単語の途中で切れたまま** CLIP に渡る。
+**The window (16,384) is not overflowing.** So what was cutting? The fixed-length
+slices in the code. The one that bites is the prose handed to the picture:
+measured at 145-831 characters against a cap of 900 (**92% of the way there**).
+A turn that exceeds it reaches CLIP **cut in the middle of a word**.
 
-上限は変えない。**どこで切るか**だけ直す。あわせて、枠に当たって止まった回は
-記録に残す（`done_reason: "length"`）—— 黙って短い返事にしない。
+The cap does not change. Only **where the cut falls** does. And a turn stopped by
+the window is recorded (`done_reason: "length"`) — never left to pass as a short
+reply.
 """
 from __future__ import annotations
 
@@ -97,15 +99,17 @@ def test_the_seats_and_the_lead_watch_the_window():
 # ── 切り方は一本（2026-09-18・総監督「文字数制限があるかどうか調べて」）──────
 
 def test_every_long_cut_goes_through_the_same_door():
-    """**生のスライスを残さない。** 上限は要るが、切り方は一つ。
+    """**Leave no raw slices.** The caps are needed; there is one way to cut.
 
-    実機の保存を 18 の上限値で総当たりしたら、**上限ちょうどで止まっている
-    文字列**が二種類あった（どちらも語の途中）:
+    Sweeping the live store against 18 cap values found **strings stopping exactly
+    at a cap**, of two kinds (both mid-word):
 
-        notebook.scene  800字  …the consoles and the concen   （`32cc5fab`・09-17）
-        _recent_memories 900字  彼女の前置きに入る日記の抜粋
+        notebook.scene        800 chars  …the consoles and the concen
+                                         (`32cc5fab`, 09-17)
+        _recent_diary_bodies  900 chars  the diary excerpt in her preamble
 
-    どちらも絵のプロンプトには載らないが、**同じ壊れ方**なので一緒に直す。
+    Neither reaches the picture prompt, but **it is the same break**, so both are
+    fixed together.
     """
     import inspect
 

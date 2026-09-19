@@ -1,18 +1,19 @@
-"""**班が居ない回も、最後まで通ること。**（2026-09-18）
+"""**A turn with no crew must reach the end too.** (2026-09-18)
 
-総監督から実機のログ:
+A live log from the Showrunner:
 
     File "/app/app/muse/service.py", line 945, in chat
         if floor:
     UnboundLocalError: cannot access local variable 'floor'
 
-`floor` は `if crew_room.has_crew(session):` の中でだけ作られていたので、
-**一人撮り・W撮りのターンは会話が 500 で落ちていた**（2026-09-14 の `0019b5b`
-から四日間）。席の試験は 39 本あるのに、**`service.chat` を通す試験が一本も
-無かった** —— だから気づけなかった。
+`floor` was only created inside `if crew_room.has_crew(session):`, so **a solo or
+duet turn 500'd on every conversation** (for four days, from `0019b5b` on
+2026-09-14). There are 39 tests around the seats and **not one that walks
+`service.chat`** — which is why nobody noticed.
 
-ここでは模型と保存だけを差し替えて、**一周を実際に通す**。中身の出来ではなく
-「最後まで行くこと」を見る試験なので、細かい出力には踏み込まない。
+Here only the model and the storage are replaced, and **a whole turn really
+runs**. This test watches that it reaches the end, not how good the output is, so
+it does not reach into the details.
 """
 from __future__ import annotations
 
@@ -31,7 +32,7 @@ from app.muse import writer
 
 @pytest.fixture
 def quiet(monkeypatch):
-    """模型と保存を黙らせる。**`chat` 本体には触らない。**"""
+    """Silence the model and the storage. **`chat` itself is untouched.**"""
     async def _save(db, session, **kw):
         return session
 
@@ -75,7 +76,8 @@ def _session(**kw):
 
 @pytest.mark.asyncio
 async def test_a_solo_turn_reaches_the_end(quiet):
-    """**一人撮り。** 班が居ないので `floor` は空のまま通ること。"""
+    """**Solo shoot.** With no crew, `floor` stays empty and the turn still
+    passes."""
     session = _session()
     out = await service.chat(None, None, session, "夕方の教室で、窓際に座って。")
     assert out is session
@@ -88,7 +90,7 @@ async def test_a_solo_turn_reaches_the_end(quiet):
 
 @pytest.mark.asyncio
 async def test_a_duet_turn_reaches_the_end(quiet):
-    """**W撮り。** こちらも班は居ない。"""
+    """**Duet.** No crew here either."""
     session = _session(partner_character={"character_id": "c2", "name_ja": "都築 あかり"})
     out = await service.chat(None, None, session, "二人で並んで、こっちを見て。")
     assert out["refine_ledger"]["beat"] == "standing"
@@ -96,7 +98,7 @@ async def test_a_duet_turn_reaches_the_end(quiet):
 
 @pytest.mark.asyncio
 async def test_a_studio_turn_reaches_the_end(quiet, monkeypatch):
-    """**スタジオ撮り。** 席が喋る回も同じ道を通ること。"""
+    """**Studio shoot.** A turn where the seats speak takes the same road."""
     async def _table(db, ollama, session, *, director_line, opening=False):
         return [{"muse_id": "gaffer:gyakkou", "role": "gaffer", "name": "逆光（照明）",
                  "field": "light", "say": "逆光で行くよ。",
@@ -115,12 +117,13 @@ async def test_a_studio_turn_reaches_the_end(quiet, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_a_broken_call_leaves_a_trace_instead_of_just_dots(monkeypatch):
-    """**「……」で終わらせない。**（2026-09-18）
+    """**Do not let it end at 「……」.** (2026-09-18)
 
-    `actress_turn` は例外を拾って placeholder（「……」）を返す。おかげで
-    ターンは落ちないが、**プログラムの間違いが「言葉少なだった回」に化ける** ——
-    実機で `TypeError`（覆いへの引数の足し忘れ）がまさにそうなり、台帳も種も
-    正しいので e2e は緑のまま通った。記録に残れば次は一目で分かる。
+    `actress_turn` catches the exception and returns a placeholder (「……」), which
+    keeps the turn from dying and **turns a programming error into "a turn where
+    she was short of words"** — live, a `TypeError` (an argument not forwarded to
+    the gateway) did exactly that, and because the ledger and the seed were right
+    the e2e passed green. Recorded, it is obvious at a glance next time.
     """
     class _Boom:
         async def generate_text_stream(self, *a, **kw):
