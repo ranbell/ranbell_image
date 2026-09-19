@@ -1,0 +1,246 @@
+{
+ "3": {
+  "class_type": "KSampler",
+  "inputs": {
+   "seed": [
+    "82",
+    0
+   ],
+   "steps": [
+    "84",
+    0
+   ],
+   "cfg": [
+    "83",
+    0
+   ],
+   "sampler_name": [
+    "85",
+    0
+   ],
+   "scheduler": [
+    "86",
+    0
+   ],
+   "denoise": 1,
+   "model": [
+    "37",
+    0
+   ],
+   "positive": [
+    "6",
+    0
+   ],
+   "negative": [
+    "77",
+    0
+   ],
+   "latent_image": [
+    "62",
+    0
+   ]
+  },
+  "_meta": {
+   "title": "KSampler"
+  }
+ },
+ "6": {
+  "class_type": "CLIPTextEncode",
+  "inputs": {
+   "text": [
+    "66",
+    0
+   ],
+   "clip": [
+    "38",
+    0
+   ]
+  },
+  "_meta": {
+   "title": "CLIP Text Encode (Positive Prompt)"
+  }
+ },
+ "8": {
+  "class_type": "VAEDecode",
+  "inputs": {
+   "samples": [
+    "3",
+    0
+   ],
+   "vae": [
+    "39",
+    0
+   ]
+  },
+  "_meta": {
+   "title": "VAE Decode"
+  }
+ },
+ "37": {
+  "class_type": "UNETLoader",
+  "inputs": {
+   "unet_name": "<redacted>",
+   "weight_dtype": "default"
+  },
+  "_meta": {
+   "title": "Load Diffusion Model"
+  }
+ },
+ "38": {
+  "class_type": "CLIPLoader",
+  "inputs": {
+   "clip_name": "<redacted>",
+   "type": "<redacted>",
+   "device": "default"
+  },
+  "_meta": {
+   "title": "Load CLIP"
+  }
+ },
+ "39": {
+  "class_type": "VAELoader",
+  "inputs": {
+   "vae_name": "<redacted>"
+  },
+  "_meta": {
+   "title": "Load VAE"
+  }
+ },
+ "60": {
+  "class_type": "ResolutionSelector",
+  "inputs": {
+   "aspect_ratio": "9:16 (Portrait Widescreen)",
+   "megapixels": 2.3,
+   "multiple": 16
+  },
+  "_meta": {
+   "title": "Resolution Selector"
+  }
+ },
+ "62": {
+  "class_type": "EmptyLatentImage",
+  "inputs": {
+   "width": [
+    "80",
+    0
+   ],
+   "height": [
+    "81",
+    0
+   ],
+   "batch_size": 1
+  },
+  "_meta": {
+   "title": "Empty Latent Image"
+  }
+ },
+ "66": {
+  "class_type": "Text Multiline",
+  "inputs": {
+   "text": ""
+  },
+  "_meta": {
+   "title": "Positive Prompt"
+  }
+ },
+ "68": {
+  "class_type": "PreviewImage",
+  "inputs": {
+   "images": [
+    "8",
+    0
+   ]
+  },
+  "_meta": {
+   "title": "Preview Image"
+  }
+ },
+ "77": {
+  "class_type": "ConditioningZeroOut",
+  "inputs": {
+   "conditioning": [
+    "6",
+    0
+   ]
+  },
+  "_meta": {
+   "title": "Conditioning Zero Out"
+  }
+ },
+ "80": {
+  "class_type": "PrimitiveInt",
+  "inputs": {
+   "value": 1284
+  },
+  "_meta": {
+   "title": "Int"
+  }
+ },
+ "81": {
+  "class_type": "PrimitiveInt",
+  "inputs": {
+   "value": 1824
+  },
+  "_meta": {
+   "title": "Int"
+  }
+ },
+ "82": {
+  "class_type": "Seed Generator",
+  "inputs": {
+   "seed": 1036642928190651
+  },
+  "_meta": {
+   "title": "Seed Generator"
+  }
+ },
+ "83": {
+  "class_type": "Cfg Literal",
+  "inputs": {
+   "float": 1
+  },
+  "_meta": {
+   "title": "Cfg Literal"
+  }
+ },
+ "84": {
+  "class_type": "Int Literal",
+  "inputs": {
+   "int": 8
+  },
+  "_meta": {
+   "title": "Steps"
+  }
+ },
+ "85": {
+  "class_type": "Sampler Selector",
+  "inputs": {
+   "sampler_name": "er_sde"
+  },
+  "_meta": {
+   "title": "Sampler Selector"
+  }
+ },
+ "86": {
+  "class_type": "Scheduler Selector",
+  "inputs": {
+   "scheduler": "simple"
+  },
+  "_meta": {
+   "title": "Scheduler Selector"
+  }
+ },
+ "87": {
+  "class_type": "SaveImage",
+  "inputs": {
+   "filename_prefix": "<redacted>",
+   "images": [
+    "8",
+    0
+   ]
+  },
+  "_meta": {
+   "title": "Save Image"
+  }
+ }
+}

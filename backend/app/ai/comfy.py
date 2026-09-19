@@ -278,12 +278,15 @@ class ComfyUIClient:
             if not (auto_pos or auto_neg) else []
         )
 
+        pos_target = None
         if pos_node_id and pos_node_id in wf:
-            wf[pos_node_id]["inputs"]["text"] = positive
+            pos_target = pos_node_id
         elif auto_pos:
-            wf[auto_pos]["inputs"]["text"] = positive
+            pos_target = auto_pos
         elif fallback_clips:
-            wf[fallback_clips[0]]["inputs"]["text"] = positive
+            pos_target = fallback_clips[0]
+        if pos_target:
+            wf[pos_target]["inputs"]["text"] = positive
 
         if negative:
             neg_target = None
@@ -293,6 +296,21 @@ class ComfyUIClient:
                 neg_target = auto_neg
             elif len(fallback_clips) >= 2:
                 neg_target = fallback_clips[1]
+            # **A graph with no negative of its own must not have the positive
+            # overwritten (2026-09-20).** A krea2 workflow zeroes the negative out
+            # (`KSampler.negative` → `ConditioningZeroOut` → the one and only
+            # `CLIPTextEncode`), so tracing the negative wire lands on the node
+            # that has just been given the positive. Measured on the real graph
+            # (`API_Krea2_JANK2.json`): the positive came back as
+            # "1girl, park, smile, bad quality, border". Muse sends no negative
+            # for that family at all, but every other caller still can.
+            if neg_target and neg_target == pos_target:
+                logger.info(
+                    "[comfy] node %s carries the positive and the negative traces "
+                    "back to it (a zeroed-out negative) — the negative is not written",
+                    neg_target,
+                )
+                neg_target = None
             if neg_target:
                 # append_negative extends the workflow's baked negative instead of
                 # replacing it, so caller-supplied tags add to (not wipe) the default.
