@@ -34,11 +34,11 @@ _EVALUATION_BLOCKING_LANES: frozenset[JobLane] = _PRIORITY_TRIGGER_LANES | froze
 _TIER2_MANAGED_LANES: frozenset[JobLane] = frozenset([JobLane.EVALUATION])
 
 
-#: 資源が居ないだけの失敗。**待てば直る**ので、失敗にせず戻す。
-#: ComfyUI が落ちているときに上がってくるのは `httpx.ConnectError`
-#: （メッセージが「All connection attempts failed」）であって
-#: `ResourceUnreachable` ではない —— あちらは health 監視が既に落ちていると
-#: 判っているときだけ。**両方を拾う。**
+#: A failure that is only a missing resource. **Waiting fixes it**, so it goes back
+#: on the queue rather than failing. What comes up when ComfyUI is down is
+#: `httpx.ConnectError` (with the message "All connection attempts failed"), not
+#: `ResourceUnreachable` — that one is raised only when health monitoring already
+#: knows the resource is down. **Both are caught.**
 def _is_unreachable(exc: BaseException) -> bool:
     if isinstance(exc, ResourceUnreachable):
         return True
@@ -50,8 +50,9 @@ def _is_unreachable(exc: BaseException) -> bool:
                             httpx.ReadError, httpx.RemoteProtocolError))
 
 
-#: 何度まで戻すか。**永遠には粘らない** —— 資源が本当に死んでいるなら、
-#: いつかは失敗として見せないと、ジョブが黙って居座り続ける。
+#: How many times it may go back. **It does not hold on for ever** — if the resource
+#: really is dead it has to be shown as a failure eventually, or the job sits there
+#: silently.
 REQUEUE_MAX = 20
 
 
@@ -64,8 +65,8 @@ class JobSpooler:
     ) -> None:
         self._resources = resources
         self._lane_resource = lane_resource
-        #: 資源が落ちているとき、次に試すまでの間。短すぎると復帰前に
-        #: 上限（`REQUEUE_MAX`）を使い切る
+        #: While a resource is down, the wait before the next attempt. Too short and
+        #: the limit (`REQUEUE_MAX`) is spent before it comes back
         self._requeue_delay = requeue_delay
         self._disk_paths: dict[str, str] = {}
         self._disk_caution_pct: int = 75
@@ -272,7 +273,7 @@ class JobSpooler:
         not a cancel — it is **tidying up**.
         """
         if self._registry.get(job_id) is not None:
-            return False          # まだ動いている —— `cancel` の領分
+            return False          # still running — that is `cancel`'s business
         for i, job in enumerate(self._history):
             if job.id == job_id:
                 del self._history[i]
@@ -664,13 +665,13 @@ class JobSpooler:
             except asyncio.CancelledError:
                 job.state = JobState.CANCELLED
             except Exception as exc:
-                # **資源が居ないだけなら、失敗にせず待たせる。** 総監督
-                # 「spooler なので異常時は待機してその後流せるのがやっぱり
-                # 必要」。ComfyUI が落ちて `muse_board` が
-                # `All connection attempts failed` で倒れた場面がこれ。
-                # 復帰は `monitor_remote_resources` が既に検知している ——
-                # **復帰は分かっているのに、落ちている間のジョブを捨てて
-                # いた。**
+                # **A missing resource means waiting, not failing.** The
+                # Showrunner: "it is a spooler, so when something is wrong it really
+                # has to wait and then run afterwards". This is the case where
+                # ComfyUI went down and `muse_board` fell over with
+                # `All connection attempts failed`. The comeback is already noticed
+                # by `monitor_remote_resources` — **we knew it would come back and
+                # were throwing away the jobs from while it was down.**
                 if _is_unreachable(exc) and job.requeues < REQUEUE_MAX:
                     job.requeues += 1
                     job.state = JobState.QUEUED

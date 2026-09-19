@@ -194,7 +194,8 @@ def vitality_extras(session: dict[str, Any], ledger: dict[str, str]) -> str:
     return "\n\n".join(bits)
 
 
-#: classic の女優条文が末尾に持つ出力書式の始まり。ここから後ろを落とす。
+#: Where the output format at the tail of classic's actress contract begins.
+#: Everything from here on is dropped.
 _CLASSIC_OUTPUT_MARK = "OUTPUT FORMAT — labelled blocks, nothing else:"
 
 
@@ -281,8 +282,9 @@ def actress_system(
     partner = session.get("partner_character") or {}
     locale_key = "en" if str(locale).startswith("en") else "ja"
     seed = str(session.get("session_id") or "")
-    # **門はここ一つ。** `muse.service.is_duet` は `mode` しか見ず、実機では
-    # 一人の回も `mode: duet`（全109件中85件が相方なし）。相方の実体で切る。
+    # **One gate, here.** `muse.service.is_duet` looks only at `mode`, and live even
+    # solo turns carry `mode: duet` (85 of 109 sessions had no partner). The gate is
+    # the partner's existence.
     has_partner = bool(partner and str(partner.get("character_id") or "").strip())
     try:
         if has_partner:
@@ -299,16 +301,17 @@ def actress_system(
         logger.exception("[muse] actress prompt failed")
         base = crew._voice_block(char, locale=locale_key)
 
-    # **書式は一つでいい（2026-09-10）。** classic の女優条文は自前の出力書式
-    # （SAY / ASIDE / CARD / PITCH / MY_FEEL）を末尾に持っていて、その上に
-    # `REFINE_OUTPUT` を重ねていた。実測で `OUTPUT FORMAT` が2回、`MY_FEEL`
-    # が4回、`PITCH:` が3回入っていた。
+    # **One format is enough (2026-09-10).** Classic's actress contract carries its
+    # own output format (SAY / ASIDE / CARD / PITCH / MY_FEEL) at its tail, and
+    # `REFINE_OUTPUT` was laid on top of it. Measured, `OUTPUT FORMAT` appeared
+    # twice, `MY_FEEL` four times and `PITCH:` three times.
     #
-    # 入力は 300 tok/s しか出ない（LLM が VRAM に 7.4GB しか載らない）ので、
-    # 3,540字＝約1,180tok＝**毎ターン約4秒**を二度読みに払っていた。
+    # Input runs at only 300 tok/s (the LLM fits just 7.4 GB into VRAM), so 3,540
+    # characters = about 1,180 tokens = **about 4 seconds every turn** was being paid
+    # for reading it twice.
     #
-    # 読む側にも良くない —— 二つの書式が並ぶと、どちらに従うか決めさせる
-    # ことになる。Refine が解釈するのは `REFINE_OUTPUT` のほうだけ。
+    # It is bad for the reader too — two formats side by side make it decide which to
+    # obey. Refine interprets only `REFINE_OUTPUT`.
     base = _without_classic_output(base)
 
     mem = memory_prompt_blocks(session)
@@ -325,17 +328,18 @@ def actress_system(
         base,
         ENTERTAINMENT_CRAFT,
         REFINE_OUTPUT,
-        # 二人のときだけ、SAY / ASIDE の形を W 用に差し替える。**一人のときは
-        # 空文字なので `parts` から落ちて、条文は一字も変わらない。**
+        # Only with two people, the SAY / ASIDE shapes are swapped for the duet
+        # ones. **Solo it is an empty string, so it falls out of `parts` and the
+        # contract does not change by a character.**
         w_output_block(char, partner, locale=locale) if has_partner else "",
         mem,
         vit,
         opening,
-        # **台帳と NOW は一箇所だけ（2026-09-10）。** ここと
-        # `writer.actress_turn` の尾に二度入っていて、実測で 688字を余計に
-        # 読ませていた（≈229tok・約0.8秒／ターン）。実体は writer 側の JSON に
-        # 置く —— そちらは `ledger.for_model` を通っていて、一人のときに
-        # 二人目の欄が出ない始末までできている。
+        # **The ledger and NOW appear in one place only (2026-09-10).** They were in
+        # two — here and at the tail of `writer.actress_turn` — which measured 688
+        # extra characters of reading (≈229 tokens, about 0.8 seconds a turn). The
+        # real one lives in the writer's JSON, which goes through `ledger.for_model`
+        # and already handles not showing the second person's fields when solo.
         "SHOT TRUTH FOR THIS STUDIO (absolute — overrides chat vibes):\n"
         "The LEDGER and NOW below this contract are that truth. "
         "SAY may confirm these in her words. ASIDE must not inventory them. "

@@ -256,11 +256,11 @@ def _stub(en: str, ja: str) -> bool:
     return len(en) < 40 and len(en) < len(ja) * 0.25
 
 
-# ── 引用が書き写しでずれていないか（見るだけ・直さない） ────────────────────
+# ── Has a quotation drifted in the copying? (looked at only, never fixed) ────
 
 _QUOTE_RE = re.compile(r"「([^」]{12,})」")
 _BRACKETS = frozenset("「」『』\"'“”")
-# 引用の中の引用は『』に変わる。これは正しい書き換えで、ずれではない。
+# A quote inside a quote turns into 『』. That is a correct rewrite, not a drift.
 _DRIFT_COVER = 0.80
 _DRIFT_SPAN = 4
 
@@ -305,7 +305,8 @@ def quote_drift(text: str, sources: list[str]) -> list[dict[str, Any]]:
     import difflib
 
     # A line she is copying can be the whole turn or just the 「」 inside it —
-    # 「バイバイ。って手を降るシーンにしよう」 was said inside a longer sentence.
+    # 「バイバイ。って手を降るシーンにしよう」 ("let us make it a scene where she
+    # waves and says bye") was said inside a longer sentence.
     # Both shapes go in the haystack.
     src: list[str] = []
     for line in sources or []:
@@ -356,25 +357,28 @@ def log_quote_drift(text: str, sources: list[str], *, character_id: str = "") ->
     return len(hits)
 
 
-# **日本語の欄に紛れる別の文字体系。** 実測（2026-08-23・15本）で4本に出た:
+# **Another writing system creeping into a Japanese field.** Measured (2026-08-23,
+# 15 diaries), it appeared in 4:
 #
-#     「両手で必니까 顎まで隠しても」        ハングル
-#     「心臓が跳猛的に跳ねて」              中国語の言い回し
+#     「両手で必니까 顎まで隠しても」        hangul
+#     「心臓が跳猛的に跳ねて」              a Chinese turn of phrase
 #
-# 本人の弁 —— 日本語と英語を同じ応答で書かせているので、日本語の生成中に
-# 「学習データ上その概念に強い他言語のトークン」が浮上する。漢字は中国語と
-# 共有しているぶん、特に起きやすい。
+# In her own words: because Japanese and English are written in the same response,
+# "tokens from another language that are strong for that concept in the training
+# data" surface mid-Japanese. Kanji, being shared with Chinese, is especially prone
+# to it.
 #
-# **捕まえられるのは、字で分かるものだけ。** 「跳猛的」は一字ずつ見れば
-# どれも日本語の漢字なので、文字種では判定できない。そこは指示文の側
-# （欄ごとに言語を閉じる）に任せて、ここでは無理をしない。
+# **Only what the characters themselves reveal can be caught.** Every character of
+# 「跳猛的」 is a Japanese kanji taken one at a time, so the script cannot decide it.
+# That is left to the instructions (closing each field to one language) rather than
+# forced here.
 _STRAY_SCRIPT_RE = re.compile(
     "["
-    "ᄀ-ᇿ㄰-㆏가-힯"   # ハングル
-    "Ѐ-ӿ"                             # キリル
-    "฀-๿"                             # タイ
-    "ऀ-ॿ"                             # デーヴァナーガリー
-    "؀-ۿ"                             # アラビア
+    "ᄀ-ᇿ㄰-㆏가-힯"   # hangul
+    "Ѐ-ӿ"                             # cyrillic
+    "฀-๿"                             # thai
+    "ऀ-ॿ"                             # devanagari
+    "؀-ۿ"                             # arabic
     "]"
 )
 

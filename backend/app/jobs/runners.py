@@ -201,10 +201,10 @@ async def run_color_backfill(
                 collection_name=IMAGES_COLLECTION,
                 scroll_filter=qm.Filter(
                     should=[
-                        # avg_saturation が absent（未処理）または < 0（失敗済み）
+                        # avg_saturation is absent (unprocessed) or < 0 (already failed)
                         qm.IsEmptyCondition(is_empty=qm.PayloadField(key="avg_saturation")),
                         qm.FieldCondition(key="avg_saturation", range=qm.Range(lt=0.0)),
-                        # color_lab payload が残っている（color_vector への移行待ち）
+                        # a color_lab payload remains (awaiting migration to color_vector)
                         qm.Filter(must_not=[
                             qm.IsEmptyCondition(is_empty=qm.PayloadField(key="color_lab"))
                         ]),
@@ -243,8 +243,9 @@ async def run_color_backfill(
                 if db.has_color_vector:
                     await db.set_color_vectors_batch(fast_items)
                 await db.delete_payload_keys_batch([s for s, _ in fast_items], ["color_lab"])
-                # avg_saturation が未設定のまま残ると analyzer が pending と誤検知するため、
-                # color_lab から Lab chroma を求めて proxy avg_saturation をセットする。
+                # An unset avg_saturation makes the analyzer misread the image as
+                # pending, so a proxy avg_saturation is set from the Lab chroma
+                # derived from color_lab.
                 async def _set_proxy_sat(sha256: str, lab: list) -> None:
                     if len(lab) >= 3:
                         chroma = math.sqrt(lab[1] ** 2 + lab[2] ** 2)
@@ -820,7 +821,7 @@ async def run_generation(
     )
 
     # submit to ComfyUI
-    # 描画ごとに別の clientId（やり直しで前の socket が落ちるため）
+    # A separate clientId per render (a retake otherwise drops the previous socket)
     client_id = comfy.new_client_id()
     prompt_id = await comfy.queue_prompt(patched, client_id=client_id)
     reporter.update(0.0, "Waiting in ComfyUI queue...")
@@ -1383,7 +1384,7 @@ async def run_refine_prompt(
             tags_positive = _clean_markdown(tags_positive)
             negative = _clean_markdown(negative)
             tags_positive = _ensure_subject_anchor(tags_positive, raw_docs)
-            # Inject WD14 must_unique directly into tag line ("2回" reinforcement).
+            # Inject WD14 must_unique directly into tag line (reinforced twice).
             # Skipped at high divergence — re-anchoring all reference tags would undo the mutation.
             if divergence <= 0.5:
                 tags_positive = _inject_wd14_must_tags(tags_positive, wd14_analysis)
@@ -1667,21 +1668,22 @@ async def run_invoke_axis_decompose(
     pro_prompt_spec: dict | None = None
 
     if pro_prompt:
-        # pro_prompt 指定時: まずビジュアル仕様に展開し、そのスローガンを使用
+        # With pro_prompt: expand into a visual specification first and use its
+        # slogan
         from ..invoke.vocab_bank import expand_pro_prompt, get_topic_tags
         pro_prompt_spec = await expand_pro_prompt(pro_prompt, pro_topic, pro_sections, ollama)
         effective_slogan = pro_prompt_spec["slogan"]
-        # topic_tags は引き続き取得（テーマ整合の WD14 補完用）
+        # topic_tags are still fetched (to supplement WD14 for theme consistency)
         anchor_text = pro_topic or pro_prompt
         topic_tags = await get_topic_tags(db, ollama, anchor_text, pro_sections) if anchor_text else []
     elif pro_topic:
-        # pro_topic のみ: 従来通り topic_tags + slogan を合成
+        # pro_topic only: compose topic_tags + slogan as before
         from ..invoke.vocab_bank import get_topic_tags, synthesize_slogan
         topic_tags = await get_topic_tags(db, ollama, pro_topic, pro_sections)
         effective_slogan = await synthesize_slogan(pro_topic, pro_sections, topic_tags, ollama)
     else:
         topic_tags = []
-        effective_slogan = user_intent  # Light mode: determine_slogan が通常通り実行
+        effective_slogan = user_intent  # Light mode: determine_slogan runs as usual
 
     hint_query = effective_slogan or " ".join(
         _EMOJI_MEANINGS.get(e, e) for e in (emoji_codes or [])
@@ -1754,7 +1756,8 @@ async def run_invoke_axis_decompose(
         pro_sections=pro_sections or {},
         pro_prompt_spec=pro_prompt_spec,
     )
-    # スピリットが元の NL テキストを参照できるよう _user_intent を元お題に上書き
+    # Overwrite _user_intent with the original topic so the spirits can refer to
+    # the original NL text
     axes['_user_intent'] = pro_topic or pro_prompt or user_intent
     if topic_tags:
         axes['_topic_tags'] = topic_tags
@@ -1762,16 +1765,18 @@ async def run_invoke_axis_decompose(
         axes['_story_directive']  = pro_prompt_spec.get("story_directive", "")
         axes['_supplement_tags']  = pro_prompt_spec.get("supplement_tags", [])
     if pro_prompt:
-        axes['_pro_prompt_raw'] = pro_prompt  # ベースタグを生値で保存（スピリットに verbatim 渡し）
+        axes['_pro_prompt_raw'] = pro_prompt  # keep the base tags raw (passed verbatim to the spirits)
 
-    # スピリット別シーン多様性のため N バリアントを生成（Light モードは slogan をトピックとして使用。
-    # 先頭バリアントはベースシーンに近いため faithful は概ね元のシーンを保つ）
+    # Generate N variants for per-spirit scene diversity (Light mode uses the slogan
+    # as the topic; the first variant stays close to the base scene, so faithful
+    # largely keeps the original scene)
     variant_topic = pro_topic or pro_prompt or axes.get('_slogan') or user_intent
     if variant_topic:
         from ..invoke.axis_decomposer import generate_scene_variants
         _session = session_manager.get_session(session_id)
         enabled_count = len(_session.enabled_spirits) if _session else 5
-        # scene_anchor があれば pro_topic に付加してより具体的なベースシーンを渡す
+        # With a scene_anchor, append it to pro_topic to hand over a more concrete
+        # base scene
         if pro_prompt_spec and pro_prompt_spec.get("scene_anchor"):
             variant_topic = f"{variant_topic}\n{pro_prompt_spec['scene_anchor']}"
         scene_variants = await generate_scene_variants(ollama, axes, variant_topic, n=enabled_count)
@@ -1861,20 +1866,20 @@ async def run_invoke_spirit_compose(
             f"use these as Danbooru vocabulary hints; include only those consistent with the scene axes, "
             f"skip any that would over-anchor a specific location): [{', '.join(axis_tag_hints)}]"
         )
-    # BASE TAGS: ユーザー指定の Danbooru タグ — verbatim で全て含める
+    # BASE TAGS: the user's Danbooru tags — all included verbatim
     if axes.get("_pro_prompt_raw"):
         user_msg_parts.append(
             "BASE TAGS (the user's own Danbooru tags — include ALL of these verbatim, unchanged, "
             "as the foundation of your danbooru_tags output. Do NOT omit, rename, or substitute any): "
             f"[{axes['_pro_prompt_raw']}]"
         )
-    # STORY DIRECTIVE: お題 × pro_prompt から生成したナラティブ指令
+    # STORY DIRECTIVE: the narrative directive generated from topic x pro_prompt
     if axes.get("_story_directive"):
         user_msg_parts.append(
             f"STORY DIRECTIVE (narrative context from topic × user prompt — add tags that develop "
             f"this story ON TOP of the BASE TAGS): {axes['_story_directive']}"
         )
-    # SUPPLEMENT TAGS: story 分析から提案された追加タグ
+    # SUPPLEMENT TAGS: the extra tags proposed by the story analysis
     supplement = axes.get("_supplement_tags", [])
     if supplement:
         user_msg_parts.append(
@@ -2043,7 +2048,8 @@ async def run_invoke_image_generate(
     try:
         wf = comfy.load_workflow(workflow_name)
         patched = comfy.patch_workflow(wf, positive.strip(), negative.strip(), "", "", 1, seed=seed)
-        # 描画ごとに別の clientId（やり直しで前の socket が落ちるため）
+        # A separate clientId per render (a retake otherwise drops the previous
+        # socket)
         client_id = comfy.new_client_id()
         prompt_id = await comfy.queue_prompt(patched, client_id=client_id)
     except Exception as e:
@@ -2132,7 +2138,8 @@ async def run_invoke_session_finalize(
     reporter.indeterminate()
     sha256s = list(spirit_sha256s.values())
 
-    # run_ai_pipeline はべき等のため直接呼び出す（処理済み画像はスキップされる）
+    # run_ai_pipeline is idempotent, so it is called directly (processed images are
+    # skipped)
     try:
         task = asyncio.create_task(
             run_ai_pipeline(db, ollama, sha256s, pause_checkpoint=cancel.pause_checkpoint)
@@ -2146,8 +2153,9 @@ async def run_invoke_session_finalize(
 
     reporter.update(0.85, "pipeline done, scoring novelty")
 
-    # Surprise スコア: 最近傍ライブラリ画像との埋め込み距離（セッション兄弟は除外）。
-    # VLM 不要の純ベクトル演算 — lunatic/stranger の逸脱を可視化する。
+    # Surprise score: the embedding distance to the nearest library image (session
+    # siblings excluded). Pure vector arithmetic with no VLM — it makes lunatic's and
+    # stranger's deviation visible.
     session = session_manager.get_session(session_id)
     sibling_set = set(spirit_sha256s.values())
     for spirit_name, sha256 in spirit_sha256s.items():
@@ -2174,7 +2182,8 @@ async def run_invoke_session_finalize(
 
     reporter.update(0.9, "novelty done, submitting alignment")
 
-    # Pipeline 完了後、各 spirit の alignment を EVALUATION ランに submit
+    # Once the pipeline finishes, submit each spirit's alignment onto the EVALUATION
+    # lane
     if session:
         for spirit_name, sha256 in spirit_sha256s.items():
             spirit = session.spirits.get(spirit_name)
