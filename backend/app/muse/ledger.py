@@ -17,9 +17,10 @@ LEDGER_KEYS: tuple[str, ...] = (
     "frame",
     "wearing_b",
     "beat_b",
-    # **相方にも顔を（2026-09-10）。** 総監督のW撮りで、絵に相方の表情が一切
-    # 入っていなかった（`Mio: … bright smile` に対し `Asahi:` は顔無し）。
-    # classic のノートには最初から `expression_b` がある。
+    # **A face for the partner too (2026-09-10).** In the Showrunner's duet shoot
+    # the partner's expression never reached the picture at all (`Mio: … bright
+    # smile` against an `Asahi:` with no face). Classic's notebook has had
+    # `expression_b` from the start.
     "expression_b",
     "lettering",  # short Latin words for Anima text "…" / text_on_image
     "atmosphere",  # mood / air — conversation-driven (wistful, tense, cozy…)
@@ -74,16 +75,18 @@ def blank() -> dict[str, str]:
     return {k: "" for k in LEDGER_KEYS}
 
 
-#: 欄の値の頭に付いてくるラベル。**台帳の値が、欄の名前で始まってはいけない。**
+#: The label that arrives attached to the front of a value. **A ledger value must
+#: never start with a field name.**
 #:
-#: 実機（2026-09-11）で `wearing` にこう着いた:
+#: Live (2026-09-11), this landed in `wearing`:
 #:
 #:     wearing: "BEAT: standing by the railing, silhouette against the sun"
 #:     bg:      "ATMOSPHERE:"
 #:
-#: 出どころは一つではない —— 女優の CARD（`persona.card_to_patch`）も、班の席の
-#: CRAFT も、writer の JSON も、どれもラベルを頭に付けてくることがある。
-#: **入口は `normalize_patch` 一つ**なので、ここで落とす。
+#: It comes from more than one place — the actress's CARD
+#: (`persona.card_to_patch`), the crew seats' CRAFT and the writer's JSON can all
+#: arrive with a label on the front. **There is one entrance, `normalize_patch`**, so
+#: it is dropped here.
 _LABEL_HEAD_RE = re.compile(
     r"^\s*(?:PLACE|HOUR|SCENE|WEARING(?:_B)?|BEAT(?:_B)?|EXPRESSION(?:_B)?|"
     r"FACE(?:_B)?|FRAME|LIGHT|BG|BACKGROUND|ATMOSPHERE|MOOD|LOOK|STYLE|"
@@ -110,33 +113,38 @@ def strip_field_label(value: str) -> str:
     return text.strip()
 
 
-# ── 一つの体は一つの答えしか持たない ────────────────────────────────────────
+# ── One body holds only one answer ──────────────────────────────────────────
 #
-# **18席が同じ欄に順に書くので、言い換えと矛盾が積もる。** 実機（2026-09-12・
-# 「今日もメイドさんで」の再現）で `beat` が 13語になり、こうなっていた:
+# **Eighteen seats write the same field in turn, so paraphrases and contradictions
+# pile up.** Live (2026-09-12, reproducing 「今日もメイドさんで」 — "the maid outfit
+# again today"), `beat` reached 13 words and looked like this:
 #
-#     weight on right leg      ↔  weight on back foot      体重が二箇所
-#     hips jutting out sharply ↔  hips pushed forward      同じことを二度
-#     hands_clutching_tray_edge ↔ hugging tray             同じことを三度
-#     （前ターンでは hands releasing ↔ hands_clutching ↔ hands steadying）
+#     weight on right leg      <-> weight on back foot     the weight in two places
+#     hips jutting out sharply <-> hips pushed forward     the same thing twice
+#     hands_clutching_tray_edge <-> hugging tray           the same thing three times
+#     (on the previous turn: hands releasing <-> hands_clutching <-> hands steadying)
 #
-# 同じ記録の元のセッションは8語で、**部位ごとに一語ずつ**だった
+# The original session behind the same record ran to 8 words, **one per part of the
+# body**
 # （`standing, weight_on_front_foot, one_hand_on_hip, other_arm_holding_tray_at_waist…`）。
 #
-# `tags.conflict.SLOTS` は当たらない —— あれは danbooru の**正確な語**の表で、
-# ここに来るのは自由文（`weight on right leg`）。語の表を増やす話ではない。
+# `tags.conflict.SLOTS` does not match — that is a table of **exact danbooru
+# words**, and what arrives here is free text (`weight on right leg`). This is not
+# about growing a word table.
 #
-# **軸で見る。** 一つの軸（体重・腰の向き・頭の向き・手の掴み）に二つ目の答えが
-# 来たら落とす。反対の答え（矛盾）でも同じ答え（言い換え）でも、どちらも落とす ——
-# 絵にとってはどちらも雑音だから。**最初の答えが勝つ**のは `facets` と同じ規則で、
-# 実測でも監督の一言が先に来ていた（writer は指示を書いてから席の細部を足す）。
+# **Look by axis.** When a second answer arrives on one axis (the weight, the hips'
+# direction, the head's direction, the hands' grip), drop it. Whether it is the
+# opposite answer (a contradiction) or the same one (a paraphrase), both are dropped
+# — to the picture both are noise. **The first answer wins**, the same rule as
+# `facets`, and measured, the director's line did come first (the writer writes the
+# instruction and then adds the seats' detail).
 #
-# 部位を名指ししただけでは落とさない。**手は二本ある** ——
-# `left hand on hip` と `other_arm_holding_tray` は両方立つ。だから軸は
-# 「部位＋向き」で、向きの語が無い句はどの軸にも乗らない
-# （`tags/conflict.py` 冒頭の「取りすぎのほうが高くつく」と同じ判断）。
+# Naming a body part alone is not enough to drop. **There are two hands** —
+# `left hand on hip` and `other_arm_holding_tray` both stand. So an axis is "part
+# plus direction", and a phrase with no direction word rides on no axis at all (the
+# same judgement as "taking too much costs more" at the top of `tags/conflict.py`).
 _BODY_AXES: tuple[tuple[str, tuple[str, ...], dict[str, tuple[str, ...]]], ...] = (
-    # 軸の名前, 部位の語, 向き → その向きを表す語
+    # axis name, the words for the part, direction -> the words for that direction
     ("weight", ("weight", "leaning", "balance"), {
         "front": ("front", "forward", "fore"),
         "back": ("back", "rear", "behind", "heel"),
@@ -157,12 +165,13 @@ _BODY_AXES: tuple[tuple[str, tuple[str, ...], dict[str, tuple[str, ...]]], ...] 
                       "toward the viewer", "turned toward camera", "facing camera"),
         "away": ("away", "aside", "over her shoulder", "to the side"),
     }),
-    # **部位の語を要らない軸。** 掴んでいるのは定義上その手なので、
-    # `hugging tray`（手の字が無い）も同じ軸に乗る。空の組がその印。
+    # **An axis that needs no word for the part.** Whatever is gripping is by
+    # definition the hands, so `hugging tray` (with no word for a hand) rides the
+    # same axis. The empty tuple is the marker for that.
     ("hold", (), {
-        # **支える言い方も掴み（2026-09-12 の実機）。** `right arm holding tray`
-        # と `forearm_supporting_tray` が二重で残った —— `supporting` を
-        # 入れていなかったので軸に乗らなかった。
+        # **Supporting counts as gripping (live, 2026-09-12).**
+        # `right arm holding tray` and `forearm_supporting_tray` both survived —
+        # `supporting` was not listed, so it rode no axis.
         "hold": ("holding", "hold", "clutching", "clutch", "gripping", "grip",
                  "grasping", "grasp", "steadying", "steady", "hugging", "hug",
                  "carrying", "carry", "clasping", "clasp", "supporting",
@@ -173,10 +182,11 @@ _BODY_AXES: tuple[tuple[str, tuple[str, ...], dict[str, tuple[str, ...]]], ...] 
 )
 
 
-#: 掴みの軸で「何を」掴んでいるかを取り出すときに落とす語 —— 動詞・体の部位・
-#: 助詞・様子の形容。残るのが**物**。`holding tray` と `holding coffee cup` は
-#: 別の物なので**両方立つ**（手は二本ある）。`holding tray` と
-#: `holding order_tray` は同じ物なので言い換え。
+#: The words dropped when extracting *what* is being gripped on the grip axis —
+#: verbs, body parts, particles, manner adjectives. What remains is **the object**.
+#: `holding tray` and `holding coffee cup` are different objects, so **both stand**
+#: (there are two hands). `holding tray` and `holding order_tray` are the same
+#: object, so the second is a paraphrase.
 _NOT_THE_OBJECT = frozenset({
     "hand", "hands", "finger", "fingers", "palm", "palms", "arm", "arms",
     "forearm", "forearms", "elbow", "elbows", "knuckle", "knuckles", "wrist",
@@ -240,8 +250,9 @@ def one_body(value: str) -> tuple[str, list[str]]:
             name, _answer, key = axis
             before = seen.setdefault(name, [])
             if name == "hold":
-                # 物が重なっていたら同じ物の話 —— 言い換えでも反対でも落とす。
-                # 物が読めなかった句（`open palms`）は、既にある掴みに合流する。
+                # Overlapping objects means the same object — dropped whether it
+                # is a paraphrase or the opposite. A phrase whose object could not
+                # be read (`open palms`) merges into the grip already there.
                 if any(not key or not k or (key & k) for k in before):
                     dropped.append(phrase)
                     continue
@@ -278,11 +289,13 @@ def normalize_patch(
             continue
         text = strip_field_label(str(val).strip())
         if key in BODY_KEYS and text:
-            # **一つの体に畳む。** 入口はここ一つなので、席の経路でも
-            # カードの経路でも同じように効く（欄名を落とすのと同じ判断）。
+            # **Fold into one body.** There is one entrance here, so it bites the
+            # same on the seats' road and the card's road (the same judgement as
+            # dropping field names).
             text, gone = one_body(text)
             if gone and report is not None:
-                # 黙って捨てない —— 落とした句は呼び元が記録に残せる。
+                # Nothing thrown away silently — the caller can record what was
+                # dropped.
                 report.setdefault(key, []).extend(gone)
         if key == "wearing_drop" and not text:
             continue
@@ -295,9 +308,9 @@ def apply_patch(ledger: dict[str, str], patch: dict[str, str]) -> dict[str, str]
     next_ledger = {**blank(), **{k: str(ledger.get(k) or "") for k in LEDGER_KEYS}}
     drop = str(patch.get("wearing_drop") or "").strip().lower()
     if drop:
-        # **語の境目で照合する（2026-09-09）。** 部分一致だと `shirt` を脱いだ
-        # ときに `skirt` まで消えた（実測・純関数）。`talk.word_hit` が唯一の
-        # 規則で、禁止フィルタと同じものを使う。
+        # **Match on word boundaries (2026-09-09).** On a substring match, taking
+        # off a `shirt` erased a `skirt` as well (measured, pure function).
+        # `talk.word_hit` is the one rule, the same as the ban filter uses.
         from .talk import word_hit
 
         wearing = next_ledger.get("wearing") or ""
@@ -379,7 +392,8 @@ def scrub_patch(
         ):
             continue
         if key in BODY_KEYS and val:
-            # 姿勢を名指し忘れたら前の姿勢を戻す（`keep_the_posture`）。
+            # If the posture was left unnamed, the previous one comes back
+            # (`keep_the_posture`).
             val = keep_the_posture(val, str(cur.get(key) or ""))
         out[key] = val
     return out
@@ -450,7 +464,8 @@ def guard_muse_propose(
             out[key] = text
             continue
         # Performance axis: scene-matched face when director left face alone.
-        # 顔は二つある（W撮り）。欄ごとに、監督がその欄を触ったかで見る。
+        # There are two faces (a duet). Each field is judged on whether the
+        # director touched that field.
         if key in ("expression", "expression_b") and key not in dir_keys and scene_moved:
             if text.lower() != cur_val.lower():
                 out[key] = text
@@ -489,7 +504,7 @@ def chips_for(fields: list[str], *, locale: str = "ja") -> list[dict[str, str]]:
     return chips
 
 
-#: 二人目の欄。一人しかいない撮影では**見せない**。
+#: The second person's fields. On a shoot with one person they are **not shown**.
 PARTNER_KEYS: tuple[str, ...] = ("wearing_b", "beat_b", "expression_b")
 
 #: The posture fields, one per person — what `one_body` is applied to.

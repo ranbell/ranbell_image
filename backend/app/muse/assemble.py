@@ -67,12 +67,14 @@ def ledger_tag_bag(ledger: dict[str, str]) -> list[str]:
     return out
 
 
-# 二人のときの立ち位置は `identity.LEAD_SIDE` が正本。日記に「あなたは○のほう」
-# と渡す側（`muse.service._which_one_is_me`）も同じ値を読む —— 別々に持つと、
-# 絵とご本人の記憶が食い違う。
+# For two people, `identity.LEAD_SIDE` is the record of truth for who stands where.
+# The side that tells the diary "in this photo you are the one on the …"
+# (`muse.service._which_one_is_me`) reads the same value — held separately, the
+# picture and her own memory disagree.
 
-#: 監督が既に立ち位置を言っている回の目印。片方だけ既定を足すと二人とも同じ
-#: 側になるので、**一つでも見つけたら既定を一つも足さない**。
+#: The marker for a turn where the director already named the positions. Adding the
+#: default for one of them alone would put both on the same side, so **find even one
+#: and no default is added at all**.
 _SIDE_NAMED_RE = re.compile(
     r"\b(left|right|leftmost|rightmost|foreground|background|behind|front)\b"
     r"|左|右|奥|手前|後ろ|背後|上段|下段",
@@ -202,17 +204,19 @@ def scene_prose(
         other_line = (
             f"{other}{mark_b} is " + ", ".join(other_bits) + "." if other_bits else ""
         )
-        # **散文も左→右の順で読ませる。** タグの並びと同じ理由 —— 先に出た
-        # ほうが左だと読まれるので、言葉と喧嘩させない。
+        # **The prose is read left to right as well.** The same reason as the tag
+        # order — whoever comes first is read as being on the left, so it must not
+        # fight the words.
         two = [lead_line, other_line]
         if identity.LEAD_SIDE == "right":
             two.reverse()
         parts.extend(x for x in two if x)
-        # **どちらがどちら側かを言う（2026-09-10）。** 総監督「best practice で
-        # 右と左って指示するといいらしい。それぞれがどっちにいるかを決めて、
-        # かき分けてみよう」。監督が既に場所を言っている回は口を出さない。
+        # **Say which of them is on which side (2026-09-10).** The Showrunner:
+        # "best practice apparently says to say right and left. Let us decide which
+        # of them is where and write them apart." On a turn where the director
+        # already named the places, nothing is said.
         if not _sides_named(ledger):
-            # この一文も左→右で読ませる。
+            # This sentence is read left to right too.
             l_name, l_side = (
                 (other, identity.side_of(lead=False)[0])
                 if identity.LEAD_SIDE == "right" else
@@ -266,8 +270,8 @@ def _person_box(
         session, _phrase_to_tags(wearing), ledger={"wearing": wearing},
     )
     pose = _phrase_to_tags(beat)
-    # **立ち位置は先頭に。** `assemble_from_boxes` は箱の中身を並んだ順に
-    # 書き出し、位置＝優先度。後ろに付けると効きが落ちる。
+    # **The position goes first.** `assemble_from_boxes` writes the box's contents
+    # in order, and position is priority. Appended at the end it bites less.
     if side:
         pose.insert(0, side.replace(" ", "_"))
     for t in extra_beat_tags or []:
@@ -334,7 +338,8 @@ def assemble_prompt(
         scene_override if scene_override is not None
         else scene_prose(
             ledger, partner=has_partner, name_a=name_a, name_b=name_b,
-            # 見分けの語は**二人のときだけ**。一人の散文は今までのまま。
+            # The telling-apart words are **for two people only**. Solo prose is
+            # unchanged.
             mark_a=_telling_marks(char) if has_partner else "",
             mark_b=_telling_marks(partner) if has_partner else "",
         )
@@ -348,10 +353,11 @@ def assemble_prompt(
 
     cast = [char]
     lead_extra: list[str] = []
-    # **二人のときだけ、立ち位置を決めて書き分ける（2026-09-10）。** 総監督
-    # 「best practice で右と左って指示するといいらしい」。監督が既に場所を
-    # 言っている回は、そちらが勝つので既定を**一つも**足さない —— 片方だけ
-    # 足すと二人とも同じ側になる。**一人のときは常に空。**
+    # **Only with two people, fix the positions and write them apart
+    # (2026-09-10).** The Showrunner: "best practice apparently says to say right
+    # and left". On a turn where the director already named the places, that wins
+    # and **no** default is added — adding it for one of them would put both on the
+    # same side. **Always empty for a solo shoot.**
     side_a, side_b = ("", "")
     if has_partner and not _sides_named(ledger):
         side_a = identity.side_of(lead=True)[0]
@@ -371,10 +377,11 @@ def assemble_prompt(
         people.append(
             _person_box(
                 session,
-                # **相方にも顔を（2026-09-10）。** ここは長らく空文字だった
-                # ——「主演の顔を B に写さないため」という理由だったが、台帳に
-                # `expression_b` が無かったので、相方は**顔が一語も入らない
-                # まま**撮られていた。欄ができたので、彼女自身の顔を渡す。
+                # **A face for the partner too (2026-09-10).** This was an empty
+                # string for a long time — the reason being "so the lead's face is
+                # not copied onto B" — but with no `expression_b` in the ledger, the
+                # partner was **photographed without a single word of a face**. The
+                # field now exists, so her own face is handed over.
                 wearing=str(ledger.get("wearing_b") or ""),
                 beat=str(ledger.get("beat_b") or ""),
                 expression=str(ledger.get("expression_b") or ""),
@@ -382,18 +389,21 @@ def assemble_prompt(
             ),
         )
 
-    # **読み順と立ち位置を揃える（2026-09-10）。** 総監督「プロンプトはあって
-    # いそうなのに画像は反転していることが多い」。
+    # **Align the reading order with the positions (2026-09-10).** The Showrunner:
+    # "the prompt looks right and yet the image is often mirrored".
     #
-    # 名前の並びそのものが位置の合図になる —— 頭の `2girls, Mio and Asahi,` と
-    # 人ごとの箱の順で「先に出たほうが左」と読まれる。主演を右にした日から、
-    # **並び（Mio が先＝左）と言葉（Mio: on the right）が喧嘩していた**:
+    # The order of the names is itself a signal about position — the leading
+    # `2girls, Mio and Asahi,` and the order of the per-person boxes are read as
+    # "whoever comes first is on the left". Since the day the lead moved to the
+    # right, **the order (Mio first = left) and the words (Mio: on the right) had
+    # been fighting**:
     #
-    #     2girls, Mio and Asahi,          ← 並びは Mio が左と言っている
-    #     Mio: on the right, …            ← 言葉は右と言っている
+    #     2girls, Mio and Asahi,          <- the order says Mio is on the left
+    #     Mio: on the right, …            <- the words say the right
     #
-    # ComfyUI 側に反転はない（実行済みグラフを確認・flip 系ノード無し）。
-    # 喧嘩をやめさせる —— **左にいるほうを先に書く。** どちら側にしても揃う。
+    # There is no mirroring on ComfyUI's side (the executed graph was checked: no
+    # flip nodes). So the fight is ended — **whoever is on the left is written
+    # first.** It lines up whichever side is chosen.
     if has_partner and side_a and side_b:
         left_word = identity.SIDE_WORDS["left"][0]
         if side_b == left_word:
@@ -479,7 +489,8 @@ No (tag:weight). No comma-tag lists. Output the paragraph only.
 """
 
 
-#: 絵に渡す散文の上限。**文の切れ目で止める**（`identity.trim_to_a_sentence`）。
+#: The cap on the prose handed to the picture. **It stops at a sentence boundary**
+#: (`identity.trim_to_a_sentence`).
 PROSE_MAX = 900
 
 
@@ -520,11 +531,12 @@ async def densify_scene_prose(
         f"BASE PROSE:\n{base_prose}\n"
     )
     try:
-        # **thinking は明示して切る（2026-09-07）。** 送らないと模型側の
-        # 既定に従い、この一回が 14〜15秒（`think=False` なら 1.1〜1.6秒・
-        # 実測 26B・同じプロンプト n=2）。**出力も薄くなる**（67〜91字 対
-        # 141〜146字）。1ターンに数回叩くので、分単位の待ちになって描画まで
-        # 届かない。Muse は `chain._call` が毎回 `think=False` を送っている。
+        # **Thinking is switched off explicitly (2026-09-07).** Unsent, the
+        # model's own default applies and this one call takes 14-15 seconds (1.1-1.6
+        # with `think=False`; measured, 26B, same prompt, n=2). **The output is
+        # thinner as well** (67-91 characters against 141-146). It is called several
+        # times a turn, so the wait runs into minutes and never reaches the render.
+        # In Muse, `chain._call` sends `think=False` every time.
         raw = await ollama.generate_text(
             prompt, model=model or None, think=False,
             options={"num_ctx": num_ctx} if num_ctx else None,
@@ -609,11 +621,12 @@ async def quality_enrich(
         f"BASE TAGS:\n{', '.join(base_tags)}\n"
     )
     try:
-        # **thinking は明示して切る（2026-09-07）。** 送らないと模型側の
-        # 既定に従い、この一回が 14〜15秒（`think=False` なら 1.1〜1.6秒・
-        # 実測 26B・同じプロンプト n=2）。**出力も薄くなる**（67〜91字 対
-        # 141〜146字）。1ターンに数回叩くので、分単位の待ちになって描画まで
-        # 届かない。Muse は `chain._call` が毎回 `think=False` を送っている。
+        # **Thinking is switched off explicitly (2026-09-07).** Unsent, the
+        # model's own default applies and this one call takes 14-15 seconds (1.1-1.6
+        # with `think=False`; measured, 26B, same prompt, n=2). **The output is
+        # thinner as well** (67-91 characters against 141-146). It is called several
+        # times a turn, so the wait runs into minutes and never reaches the render.
+        # In Muse, `chain._call` sends `think=False` every time.
         raw = await ollama.generate_text(
             prompt, model=model or None, think=False,
             options={"num_ctx": num_ctx} if num_ctx else None,
@@ -674,10 +687,12 @@ async def rebuild_craft(
         mark_a=_telling_marks(char) if has_partner else "",
         mark_b=_telling_marks(partner) if has_partner else "",
     )
-    # **「観測」は外した（2026-09-10）。** 総監督「観測という機能はあまり有効に
-    # 働かないので削除。キーワードベースでほとんど使われていない」。風・後ろ姿を
-    # 正規表現で拾って散文とタグに足していた仕掛け（`visible_consequence_cues`）
-    # ごと落とした。densify を起こす条件も、その分だけ素直になる。
+    # **"Observation" was removed (2026-09-10).** The Showrunner: "the observation
+    # feature does not work very effectively, so remove it. It is keyword-based and
+    # hardly ever used." The whole contrivance that caught wind and back views by
+    # regular expression and added them to the prose and tags
+    # (`visible_consequence_cues`) went with it. The condition that triggers densify
+    # becomes that much plainer too.
     want_dense = bool(inputs.get("enhance_quality")) or bool(
         (led.get("atmosphere") or "").strip() or (led.get("look") or "").strip()
     )
@@ -717,7 +732,8 @@ async def rebuild_craft(
     # Keep names clear in the panel / debug.
     craft["quality_tags"] = ", ".join(quality_tags)
     craft["support_tags"] = ", ".join(chosen)
-    # 撮る直前に組み直したので、もう古くない（`touch_craft` の旗を降ろす）。
+    # Rebuilt immediately before the shot, so it is no longer stale (lowers
+    # `touch_craft`'s flag).
     craft["stale"] = False
     session["craft"] = craft
     session["refine_ledger"] = led
