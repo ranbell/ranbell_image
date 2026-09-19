@@ -171,7 +171,7 @@ async def test_next_liked_pitch_skips_already_recommended(monkeypatch):
 
 # ── お出かけ ────────────────────────────────────────────────────────────────
 def test_normalize_outing_maps_speakers():
-    """一度の呼び出しで全員ぶん。人数が増えても呼び出しは増えない。"""
+    """One call writes everyone. More people never means more calls."""
     cast = [
         {"character_id": "a", "name_ja": "各務 みお", "name": "Mio"},
         {"character_id": "b", "name_ja": "ゆかり", "name": "Yukari"},
@@ -192,7 +192,8 @@ TURN_2_EN: Next time we go earlier
 
 
 def test_normalize_outing_falls_back_to_cast_order():
-    """話者名が書かれなくても、並びで割り当てる。空にはしない。"""
+    """With no speaker names written, they are assigned by order. Never left
+    empty."""
     cast = [{"character_id": "a", "name_ja": "みお"}, {"character_id": "b", "name_ja": "あおい"}]
     msgs = lounge.normalize_outing(
         lounge.parse_labelled("TURN_1_JA: いこっか\nTURN_2_JA: いこいこ"), cast,
@@ -202,10 +203,11 @@ def test_normalize_outing_falls_back_to_cast_order():
 
 
 def test_outing_summary_line_is_a_pointer_not_a_summary():
-    """彼女の手元に残るのは**指し先**。中身は楽屋のスレッドにある。
+    """What she keeps is **a pointer**. The content lives in the lounge thread.
 
-    総監督:「要約は諸刃の剣。結構消えてしまうので。」690字を45字に縮めると
-    ほとんど捨てたうえで、全部あるかのように読める。いつ・誰と・何を、だけ。
+    The Showrunner: "summaries cut both ways — a lot of it just disappears." Squeeze
+    690 characters into 45 and most is thrown away while it reads as though it were
+    all there. When, with whom, what — nothing else.
     """
     line = lounge.outing_summary_line({
         "when_ja": "この前の日曜", "occasion": "パンケーキ",
@@ -217,7 +219,8 @@ def test_outing_summary_line_is_a_pointer_not_a_summary():
 
 
 def test_the_occasions_are_never_about_work():
-    """撮影・衣装・カメラの語が入っていたら、休みの日の話にならない。"""
+    """With words about shoots, wardrobe or cameras in it, it stops being a day
+    off."""
     blob = " ".join(f"{a} {b}" for a, b in lounge._OUTINGS)
     for word in ("撮影", "カメラ", "レンズ", "衣装", "ポーズ", "スタジオ", "監督"):
         assert word not in blob, word
@@ -228,10 +231,12 @@ from backend.app.muse import shared as muse_service  # noqa: E402
 
 
 def test_the_circle_block_stays_small():
-    """常駐は上限つき。**ここは軽量化の対象にしない代わりに、最初から小さく。**
+    """What is always resident is capped. **This is not a target for later
+    trimming; it is small from the start.**
 
-    2026-08-21 に常駐を 2,468字 → 1,373字 に削ったばかりで、この手の欄は
-    放っておくとすぐ膨らむ。要約ではなく指し先にしてあるのはそのため。
+    The resident prompt was cut from 2,468 to 1,373 characters on 2026-08-21, and
+    fields like this swell the moment they are left alone. That is why it is a
+    pointer and not a summary.
     """
     session = {"circle": [
         "この前の日曜、ゆかりとパンケーキ",
@@ -250,10 +255,11 @@ def test_the_circle_block_stays_small():
 
 @pytest.mark.asyncio
 async def test_a_day_off_only_comes_round_every_few_shoots(monkeypatch):
-    """彼女たちの生活は撮影より遅く流れる。毎回は書かない。
+    """Their lives run slower than the shoots. Not written every time.
 
-    回数は preset の `shoot_count`（既にある・`push_shoot_recap` が進める）と、
-    直近の一件が持つ `shoot_count` の差で見る。**preset に欄を足さない。**
+    The count is the difference between the preset's `shoot_count` (already there,
+    advanced by `push_shoot_recap`) and the `shoot_count` carried by the most
+    recent entry. **No new field on the preset.**
     """
     from backend.app.muse import shared as svc
 
@@ -284,7 +290,7 @@ async def test_a_day_off_only_comes_round_every_few_shoots(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_no_shoots_yet_means_no_day_off(monkeypatch):
-    """撮ったことのない子に、思い出だけ先にある状態を作らない。"""
+    """Never give someone who has never been shot a memory that arrives first."""
     from backend.app.muse import shared as svc
     monkeypatch.setattr(svc.presets_db, "get_preset",
                         lambda db, cid: _async({"shoot_count": 0}))
@@ -300,17 +306,19 @@ def _async(value):
 
 # ── お出かけを二段構えにする ────────────────────────────────────────────────
 def test_there_are_enough_days_to_choose_from():
-    """候補は50件ほど。**12件だと誰が行っても同じ話になる。**"""
+    """About fifty choices. **With twelve, everyone comes back with the same
+    story.**"""
     assert len(lounge._OUTINGS) >= 50
     names = [n for n, _ in lounge._OUTINGS]
     assert len(set(names)) == len(names), "同じお題が二度ある"
 
 
 def test_the_candidate_list_is_japanese():
-    """候補に日本語以外を混ぜない。**自分で三度踏んだので、置いておく。**
+    """Nothing but Japanese in the choices. **Kept because we fell into it three
+    times ourselves.**
 
-    下書きの段階で `프리마켓`（ハングル）、`river の河川敷`、`три`（キリル）が
-    紛れた。日記で直したのと同じ崩れを、こちらの手でやっていた。
+    While drafting, `프리마켓` (Hangul), `river の河川敷` and `три` (Cyrillic) got
+    in — the same corruption that was fixed in the diary, done by our own hand.
     """
     from backend.app.muse.diary import stray_script
     for name, hint in lounge._OUTINGS:
@@ -322,7 +330,8 @@ def test_the_candidate_list_is_japanese():
 
 
 def test_the_last_place_is_not_offered_again():
-    """前回の行き先は候補から外す。**続き物にはしない**（総監督の指定）。"""
+    """Last time's destination is dropped from the choices. **Not a serial** (the
+    Showrunner's instruction)."""
     got = lounge.outing_choices(8, avoid="水族館")
     assert len(got) == 8
     assert all(n != "水族館" for n, _ in got)
@@ -331,7 +340,7 @@ def test_the_last_place_is_not_offered_again():
 
 
 def test_the_season_reaches_the_talk():
-    """同じ「散歩」でも二月と八月では違う話になる。"""
+    """The same "a walk" is a different story in February and in August."""
     import time as _t
     def at(month):
         return lounge.season_ja(_t.mktime((2026, month, 15, 12, 0, 0, 0, 0, -1)))
@@ -340,10 +349,10 @@ def test_the_season_reaches_the_talk():
 
 
 def test_the_errand_stays_rare():
-    """総監督からの頼まれごとは**たまに**。
+    """An errand from the Showrunner comes **occasionally**.
 
-    お出かけは「総監督が居なかった時間」を作るための機能で、毎回が頼まれごとに
-    なると意味が反転する。
+    Outings exist to create time he was not part of; make every one an errand and
+    the meaning inverts.
     """
     import random as _r
     assert lounge.OUTING_ERRAND_CHANCE <= 0.3
@@ -353,7 +362,8 @@ def test_the_errand_stays_rare():
 
 
 def test_faces_reach_every_speaker():
-    """楽屋は話者が変わるので、**発言ごと**に顔が要る。"""
+    """The speaker changes through a lounge thread, so a face is needed **per
+    line**."""
     rows = [{
         "author_character_id": "a",
         "messages": [{"character_id": "a"}, {"character_id": "b"}, "こわれた行"],
@@ -371,7 +381,7 @@ def test_faces_reach_every_speaker():
 
 
 def test_the_snapshot_is_not_a_studio_shot():
-    """スナップは**撮影のカットではない**。寄りも決めポーズも作らない。"""
+    """A snapshot **is not a shot from a shoot**. No close-ups, no held poses."""
     got = lounge.snapshot_prompt(
         [{"subject_tag": "1girl"}] * 3,
         identity_tags=[["silver_hair"], ["black_hair"], ["brown_hair"]],
@@ -389,10 +399,11 @@ def test_the_snapshot_is_not_a_studio_shot():
 
 
 def test_every_day_out_has_somewhere_to_photograph():
-    """52件すべてに、画に入れられる場所がある。
+    """All 52 have a place a picture can hold.
 
-    日本語のお題（「古本屋」）はそのままではタグに向かないので、英語の場所を
-    別に持つ。抜けていれば場所を入れないだけだが、**全部埋めておく**。
+    A Japanese occasion (「古本屋」, "a second-hand bookshop") does not suit a tag
+    as it stands, so an English place is carried alongside. A missing one only
+    means no place is added, but **they are all filled in**.
     """
     missing = [n for n, _ in lounge._OUTINGS if not lounge.outing_place_en(n)]
     assert not missing, missing
@@ -401,17 +412,18 @@ def test_every_day_out_has_somewhere_to_photograph():
 
 # ── 手帖に英語が漏れる ──────────────────────────────────────────────────────
 def test_the_english_half_does_not_land_in_the_japanese_page():
-    """出力例の値を真似た行が、日本語の本文に流れ込んでいた。
+    """A line copying the example value was flowing into the Japanese body.
 
-    本番の手帖 4頁中2頁（総監督が UI で発見）:
+    Two of four pages in production (found by the Showrunner in the UI):
 
         body_ja: 監督は雨の後の静けさ……こだわりますね。
                  English body: The Director loves the stillness after the rain…
 
-    指示の最終行が `BODY_EN: English body` で、**モデルが値ごと真似た**。
-    `_LABEL_RE` は大文字の語しかラベルと見ないので `English body:` は境界に
-    ならず、直前の `BODY_JA` に落ちた。そのうえ `BODY_EN` が空のままなので
-    「英語が無ければ日本語で埋める」が働き、**両方の欄が同じ塊**になった。
+    The last line of the instruction was `BODY_EN: English body`, and **the model
+    copied the value along with it**. `_LABEL_RE` only treats capitalised words as
+    labels, so `English body:` was not a boundary and it fell into the preceding
+    `BODY_JA`. `BODY_EN` then stayed empty, "fill English from Japanese when it is
+    missing" fired, and **both fields became the same lump**.
     """
     raw = (
         "TITLE_JA: 雨上がりの、少し寂しい空気感\n"
@@ -427,7 +439,7 @@ def test_the_english_half_does_not_land_in_the_japanese_page():
 
 
 def test_a_healthy_page_is_left_alone():
-    """壊れていない出力は触らない。"""
+    """Output that is not broken is left alone."""
     raw = ("TITLE_JA: ページの中の静寂\nTITLE_EN: Silence in the Pages\n"
            "BODY_JA: 密やかな暗がりを好むようです。\n"
            "BODY_EN: The Director favors shadowed moments.")
@@ -437,7 +449,8 @@ def test_a_healthy_page_is_left_alone():
 
 
 def test_the_word_english_in_prose_is_not_a_boundary():
-    """本文に `English` と出てきても、ラベルの形でなければ切らない。"""
+    """`English` appearing in the body is not a boundary unless it is shaped like a
+    label."""
     got = lounge.normalize_habit({"BODY_JA": "English の教科書の話をしていた。"})
     assert got["body_ja"] == "English の教科書の話をしていた。"
     ja, spilled = lounge.split_trailing_english("英語版はありません。")
@@ -445,10 +458,12 @@ def test_the_word_english_in_prose_is_not_a_boundary():
 
 
 def test_the_output_contract_does_not_show_an_english_value():
-    """**例の値を英語で書かない。** 書くと、その値ごと真似られる。
+    """**Do not write the example value in English.** Write one and the value
+    itself is copied.
 
-    日記の身体感覚（指先 14/15）でも、`MY_FEEL` の語彙リスト（W撮り 0/10）でも
-    同じことが起きた。**例は「こう書け」ではなく「これを書け」として効く。**
+    The same happened with the diary's bodily sensations (fingertips 14/15) and
+    with the `MY_FEEL` vocabulary list (0/10 in a duet). **An example lands as
+    "write this", not as "write like this".**
     """
     from backend.app.muse import crew as muse_crew
     got = muse_crew.showrunner_habit_prompt(

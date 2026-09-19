@@ -490,7 +490,8 @@ def test_the_wardrobe_split_is_ignored_when_the_names_do_not_hold():
 
 
 def test_a_quoted_text_tag_reaches_the_sampler_as_written():
-    """`text "OPEN"` は看板の文字。大文字も引用符もそのまま通す。"""
+    """`text "OPEN"` is lettering on a sign. Capitals and quotes pass through as
+    written."""
     out = identity.assemble_positive(
         ["silver_hair"], 'handheld_sign, text "OPEN", standing', "A quiet room.",
         subject=["1girl", "solo"],
@@ -500,14 +501,15 @@ def test_a_quoted_text_tag_reaches_the_sampler_as_written():
 
 # ── 髪型と、髪の様子 ────────────────────────────────────────────────
 def test_every_hair_word_is_either_a_cut_or_a_description():
-    """`axis_hair` に語が増えたら、どちらか名乗るまで試験が落ちる。"""
+    """Add a word to `axis_hair` and this test fails until it declares which it
+    is."""
     both = identity.HAIR_CUT_TAGS | identity.HAIR_DESCRIPTION_TAGS
     assert both == identity.HAIR_STYLE_TAGS
     assert not (identity.HAIR_CUT_TAGS & identity.HAIR_DESCRIPTION_TAGS)
 
 
 def test_hair_moving_in_the_wind_does_not_unseat_a_bob():
-    """実測（2026-08-25）: `floating_hair` が立つとボブが消えていた。"""
+    """Measured (2026-08-25): raise `floating_hair` and the bob disappeared."""
     out = _duet_positive([MIO, SUMIRE], tags="floating_hair, standing")
     assert "Mio is silver_hair, bob_cut, blue_eyes, flat_chest, slim," in out
     assert "Sumire is blonde_hair, long_hair, green_eyes, medium_breasts," in out
@@ -523,7 +525,7 @@ def test_a_cut_asked_of_one_girl_leaves_the_other_hers():
 
 
 def test_a_cut_nobody_owns_still_belongs_to_the_picture():
-    """画全体の側に置かれた髪型は、二人ともに掛かる。"""
+    """A hairstyle placed on the picture-wide side applies to both of them."""
     out = _duet_positive([MIO, SUMIRE], tags="ponytail, standing")
     assert "bob_cut" not in out
     assert "long_hair" not in out
@@ -539,7 +541,8 @@ def test_a_description_is_not_a_cut_on_a_solo_shoot_either():
 
 
 def test_the_panel_framing_is_not_added_twice_under_another_spelling():
-    """実測（`42b55492`）: craft の `close-up` と画角の `close_up` が両方焼かれた。"""
+    """Measured (`42b55492`): craft's `close-up` and the crop's `close_up` were
+    both baked in."""
     out = identity.assemble_positive(
         ["silver_hair"], "close-up, standing", "A quiet room.",
         framing="face_closeup", subject=["1girl", "solo"],
@@ -549,7 +552,8 @@ def test_the_panel_framing_is_not_added_twice_under_another_spelling():
 
 
 def test_the_panel_framing_still_lands_beside_a_different_crop_word():
-    """綴り違いだけを見る。**枠で見ると画角が消える** —— 一度そう壊した。"""
+    """Only spelling variants are checked. **Check by slot and the crop
+    disappears** — it was broken that way once."""
     out = identity.assemble_positive(
         ["silver_hair"], "wide_shot, standing", "A classroom.",
         framing="full_body", subject=["1girl", "solo"],
@@ -558,11 +562,12 @@ def test_the_panel_framing_still_lands_beside_a_different_crop_word():
 
 
 def test_a_json_leftover_bracket_never_reaches_the_sampler():
-    """実測（`2acfdbe2`）で `anime_illustration]` が板のプロンプトに載った。
+    """Measured (`2acfdbe2`): `anime_illustration]` reached the board prompt.
 
-    weave が JSON の配列ごと文字列にして返した回。`bare_tag` は正しく
-    `anime_illustration` を返すが、**サンプラーへ行く生の文字**のほうに `]` が
-    残る。`[...]` は強調の構文なので、片割れはその語の重みを変える。
+    A turn where weave returned a whole JSON array as a string. `bare_tag`
+    correctly returns `anime_illustration`, and the `]` survives in **the raw
+    characters headed for the sampler**. `[...]` is emphasis syntax, so one half
+    changes that word's weight.
     """
     assert identity.clamp_weight("anime_illustration]") == "anime_illustration"
     assert identity.clamp_weight("[solo") == "solo"
@@ -574,17 +579,19 @@ def test_a_json_leftover_bracket_never_reaches_the_sampler():
 
 
 def test_balanced_emphasis_is_left_alone():
-    """釣り合っている括弧は総監督か係が書いたもの。触らない。"""
+    """Balanced brackets were written by the Showrunner or a clerk. Untouched."""
     for text in ("(silver_hair:1.2)", "[bokeh]", "(soft)", "((deep))", "plain_tag"):
         assert identity.clamp_weight(text) == text
 
 
 def test_edge_underscores_from_json_never_reach_the_sampler():
-    """`_anime_illustration` / `__` / `_solo` —— weave が配列ごと文字列にした残骸。
+    """`_anime_illustration` / `__` / `_solo` — wreckage from weave stringifying a
+    whole array.
 
-    実測（2026-08-30・`011e3553` ほか）で板のプロンプトに載った。`bare_tag`
-    は比べる用の値からしか落とさないので、サンプラーへ行く生の文字に残る。
-    **本物のタグは `_` で始まらないし、終わらない。**
+    Measured (2026-08-30, `011e3553` among others) they reached the board prompt.
+    `bare_tag` only strips the value used for comparison, so they survive in the
+    raw characters headed for the sampler. **A real tag neither starts nor ends
+    with `_`.**
     """
     assert identity.clamp_weight("_anime_illustration") == "anime_illustration"
     assert identity.clamp_weight("_solo") == "solo"
@@ -595,18 +602,18 @@ def test_edge_underscores_from_json_never_reach_the_sampler():
 
 
 def test_underscores_inside_a_tag_are_left_alone():
-    """中の `_` は danbooru の区切り。縁だけを見る。"""
+    """The `_` inside is danbooru's separator. Only the edges are looked at."""
     for text in ("straw_hat", "black_tights", "looking_at_viewer",
                  "(silver_hair:1.2)", "[bokeh]"):
         assert identity.clamp_weight(text) == text
 
 
 def test_a_tag_with_a_double_underscore_is_broken_beyond_saving():
-    """danbooru のタグに二重アンダースコアは無い。空白は一つの `_` になる。
+    """No danbooru tag has a double underscore; a space becomes one `_`.
 
-    実測で出たもの（2026-08-30）: `__tags` `___craft_scene` `__` `__n/a__`
-    `lra__ anime_illustration`。weave が JSON を壊した回の残骸で、語そのもの
-    が壊れているので助からない。
+    What actually appeared (2026-08-30): `__tags`, `___craft_scene`, `__`,
+    `__n/a__`, `lra__ anime_illustration`. Wreckage from turns where weave broke
+    its JSON — the word itself is broken, so it cannot be saved.
     """
     for junk in ("lra__ anime_illustration", "__n/a__", "__",
                  "__tags", "___craft_scene"):
@@ -618,27 +625,30 @@ def test_a_tag_with_a_double_underscore_is_broken_beyond_saving():
 
 
 def test_a_single_edge_underscore_only_loses_the_underscore():
-    """一重なら語は無事。**落とすのは壊れている語だけ。**"""
+    """A single underscore leaves the word intact. **Only broken words are
+    dropped.**"""
     assert identity.clamp_weight("_anime_illustration") == "anime_illustration"
     assert identity.clamp_weight("_solo") == "solo"
 
 
 def test_a_solo_shoot_never_sends_her_name_to_the_sampler():
-    """人名タグを落とす門はあったが、**散文は素通り**だった。
+    """The gate that drops person-name tags existed; **the prose went straight
+    through**.
 
-    記録の理由（`_scrub_invented_tags`）は「danbooru では人名タグは実在の
-    キャラを指すので、別人の顔を引いてくる」。weave の言い聞かせを 1,257字
-    落としたら（`aefe230`）その穴が露出した。実測（30本パック）:
+    The recorded reason (`_scrub_invented_tags`): in danbooru a person-name tag
+    points at a real character, so it pulls in somebody else's face. Cutting 1,257
+    characters of coaxing out of weave (`aefe230`) exposed the hole. Measured
+    (30-sample pack):
 
-        8/28  散文に名前 1/30
-        刈る前 0/30
-        刈った後 5/30   ← 最終プロンプトにも 5/30
-            「…, crying, tears, Mio sits slumped at the piano, …」
+        08-28  names in prose      1/30
+        before the trim            0/30
+        after the trim             5/30   ← and 5/30 in the final prompt
+            "…, crying, tears, Mio sits slumped at the piano, …"
 
-    実機でも出た（`0e069f17`）:「Mio stands straight with her weight…」
+    It appeared live too (`0e069f17`): "Mio stands straight with her weight…"
 
-    **文頭なら主格、それ以外は目的格。** 素朴に `she` へ替えると
-    「toward the lens at she」になる。
+    **Subject form at the head of a sentence, object form elsewhere.** Naively
+    replacing with `she` gives "toward the lens at she".
     """
     mio = [{"name": "Mio Kagami", "name_ja": "各務 みお"}]
     f = identity.prose_without_cast_names
@@ -656,10 +666,11 @@ def test_a_solo_shoot_never_sends_her_name_to_the_sampler():
 
 
 def test_two_people_keep_their_names_in_the_prose():
-    """**二人の撮影では落とさない。** そこでは名前が仕事をしている。
+    """**Not dropped in a two-person shoot.** There the names are doing work.
 
-    「Mio leans on Sumire's shoulder」から名前を抜くと、誰が誰か分からなく
-    なる。一人のときは何も指しておらず、サンプラーが読む余計な語でしかない。
+    Take them out of "Mio leans on Sumire's shoulder" and nobody knows who is who.
+    In a solo shoot they point at nothing and are just extra words for the sampler
+    to read.
     """
     two = [{"name": "Mio Kagami"}, {"name": "Sumire Hiraoka"}]
     got = identity.prose_without_cast_names("Mio leans on Sumire's shoulder.", two)
@@ -667,7 +678,8 @@ def test_two_people_keep_their_names_in_the_prose():
 
 
 def test_the_name_is_stripped_on_the_way_into_the_prompt():
-    """門は `assemble_positive` に置く —— 板も試し撮りも同じ道を通る。"""
+    """The gate sits in `assemble_positive` — the board and the draft take the same
+    road."""
     out = identity.assemble_positive(
         ["silver_hair"], "standing, rooftop",
         "Mio stands at the rail, her hands loose at her sides.",
@@ -702,17 +714,17 @@ def _pair_notebook():
 
 
 def test_two_people_can_share_a_posture():
-    """**同じ語が両方の行に出てよい。** 二人とも座っているなら二人とも座る。
+    """**The same word may appear on both lines.** If both are sitting, both sit.
 
-    実測（`8c48e8cb`）で、二人とも `beat: sitting` の回に**どちらの行にも
-    姿勢が無かった** —— `assemble_positive` の `placed` が全体で一つなので、
-    同じ語は一人しか持てず、共有の並びへ落ちていた:
+    Measured (`8c48e8cb`), on a turn where both had `beat: sitting` **neither line
+    carried a pose** — `assemble_positive`'s `placed` is global, so only one person
+    may hold a given word and it fell through to the shared run:
 
-        Subaru is …, straight_posture, hands_on_ground,   ← sitting なし
-        Mio is    …, turquoise_one-piece, headphones,     ← sitting なし
-        …, looking_at_viewer, sitting, sitting, …         ← 誰のものでもない
+        Subaru is …, straight_posture, hands_on_ground,   ← no sitting
+        Mio is    …, turquoise_one-piece, headphones,     ← no sitting
+        …, looking_at_viewer, sitting, sitting, …         ← belonging to nobody
 
-    箱から組めば取り合いが起きない。
+    Build from the boxes and there is nothing to fight over.
     """
     from app.muse import notebook
 
@@ -728,7 +740,7 @@ def test_two_people_can_share_a_posture():
 
 
 def test_each_persons_own_action_survives():
-    """相方だけの動作が、相方の行に残る。"""
+    """An action belonging only to the partner stays on the partner's line."""
     from app.muse import notebook
 
     nb = _pair_notebook()
@@ -746,8 +758,8 @@ def test_each_persons_own_action_survives():
 
 
 def test_static_traits_and_actions_live_on_different_lines():
-    """総監督（2026-08-31）「髪型などの静的特性は先頭部でよいが、その他の
-    感情や行動は**別枠にしないといけない**」。
+    """The Showrunner (2026-08-31): "static traits like hair may go up front, but
+    feelings and actions **have to be in their own slot**".
     """
     from app.muse import notebook
 
@@ -768,7 +780,8 @@ def test_static_traits_and_actions_live_on_different_lines():
 
 
 def test_the_notebook_phrase_keeps_all_of_its_words():
-    """句を一語に潰さない。**末尾の名詞が落ちるのが「衣装が変わる」の正体。**"""
+    """A phrase is never crushed into one word. **The noun at the end falling out
+    is what "the outfit keeps changing" really is.**"""
     from app.muse import notebook
 
     box = notebook.mint_person_box(_pair_notebook(), partner=True)[1]
@@ -776,8 +789,9 @@ def test_the_notebook_phrase_keeps_all_of_its_words():
 
 
 def test_a_face_word_is_always_there():
-    """総監督「二人いるときは感情も管理しないと無表情になる。**箱がないと
-    書いてくれない**」。手帖が空でも `atmosphere` から一語引く。
+    """The Showrunner: "with two of them you have to manage the feelings too or
+    they go blank. **They will not write it without a box.**" Even with an empty
+    notebook, one word is taken from `atmosphere`.
     """
     from app.muse import notebook
 

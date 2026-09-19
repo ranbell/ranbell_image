@@ -61,15 +61,17 @@ def test_actress_prompt_pulls_selected_character_personality():
 
 
 def test_the_seat_prompt_is_voice_plus_specialty_and_nothing_classic():
-    """**席の前置きは、声と職能と席ぶんの条文だけ。**（2026-09-13）
+    """**A seat's preamble is voice, specialty and the seat's own clauses — nothing
+    else.** (2026-09-13)
 
-    元は「SAY / TAGS / SCENE の三ブロック」を確かめる試験だった。いまの席は
-    **TAGS も SCENE も書かない**（書くのは台本係一人）ので、あの契約はもう無い。
+    This used to check the three blocks SAY / TAGS / SCENE. A seat today **writes
+    neither TAGS nor SCENE** (one writer does), so that contract is gone.
 
-    毎席 5,900字を送って毎席打ち消していた —— `crew.OUTPUT` は
-    `crew_room.SEAT_OUTPUT` の「this REPLACES any format above」に潰され、
-    `crew.CARRY` は COSTUME ブロックや PLAN という**存在しない機構**に宛てた
-    条文だった。外して 8,792字 → 4,517字（台の実測で 1ターン -46%）。
+    5,900 characters were sent per seat and cancelled per seat — `crew.OUTPUT` was
+    crushed by `crew_room.SEAT_OUTPUT`'s "this REPLACES any format above", and
+    `crew.CARRY` addressed **machinery that does not exist** (the COSTUME block,
+    PLAN). Removing them took 8,792 → 4,517 characters (-46% per turn on the
+    bench).
     """
     text = crew.system_prompt_for("beat")
     assert "SAY:" not in text, "出力の形は SEAT_OUTPUT が最後に言う"
@@ -90,12 +92,13 @@ def test_the_seat_prompt_is_voice_plus_specialty_and_nothing_classic():
 
 
 def _without_comments(src: str) -> str:
-    """`#` から後ろを**その場で空白に潰す**。注釈は出荷される文字列ではない。
+    """**Blank out everything after `#` in place.** A comment is not a string that
+    ships.
 
-    `talk.word_hit` の注釈には「`rooftop` には当たってほしくない」と書いてある ——
-    語の境目で見る理由の記録で、絵に出す言葉ではない。
+    The comment on `talk.word_hit` says it must not match `rooftop` — a record of
+    why word boundaries are used, not words that reach a picture.
 
-    行と桁をずらさずに潰すので、この後で `ast.parse` にかけても通る。
+    Lines and columns are preserved, so the result still parses with `ast.parse`.
     """
     import io
     import tokenize
@@ -118,10 +121,10 @@ def _without_comments(src: str) -> str:
 
 
 def _without_docstrings(src: str) -> str:
-    """docstring を落とす。**模型には渡らない。**
+    """Drop the docstrings. **They never reach a model.**
 
-    `talk.word_hit` の docstring は「`shirt` は `skirt` に当たってほしくない」
-    という実測の記録で、出荷される台詞ではない。
+    `talk.word_hit`'s docstring records the measurement that `shirt` must not match
+    `skirt`; it is not dialogue that ships.
     """
     import ast
 
@@ -146,14 +149,15 @@ def _without_docstrings(src: str) -> str:
 
 
 def _without_word_tables(src: str) -> str:
-    """`re.compile(...)` の中身を落とす。
+    """Drop what is inside `re.compile(...)`.
 
-    **語の表は台詞ではない。** 画の話かどうかを見分ける `ledger._PICTURE_CUES`
-    には `屋上` と `rooftop` が並んでいるが、これは**出す言葉ではなく探す言葉**。
-    撮影室を `muse` に畳んだとき（2026-09-12）に走査範囲へ入って初めて当たった。
+    **A word table is not dialogue.** `ledger._PICTURE_CUES`, which tells a picture
+    line from a chat line, holds `屋上` next to `rooftop` — **words to look for,
+    not words to emit**. It only started matching when the studio was folded into
+    `muse` (2026-09-12) and came into the scan's range.
 
-    正規表現ごと外す —— ここに台詞を書く道理はないので、線の引き方として
-    ファイル名で免除するより狭い。
+    The whole regex is excluded — there is no reason to write dialogue in one, so
+    as a line to draw it is narrower than exempting by filename.
     """
     import ast
 
@@ -342,7 +346,8 @@ def test_the_roster_groups_people_under_the_job_they_do():
 
 # ── the seats that were doing damage ────────────────────────────────────────
 def test_the_frame_seat_is_gone_and_nothing_still_points_at_it():
-    """「額縁」turned "compose it" into a literal picture frame with a black and
+    """「額縁」 ("picture frame") turned "compose it" into a literal picture frame
+    with a black and
     white border — which is in the negative prompt precisely because nobody
     wants it. The layout job stays; that person does not."""
     assert "cutout:gakubuchi" not in crew.MUSES
@@ -415,7 +420,8 @@ def test_both_colourists_state_a_key_rather_than_a_direction_of_change():
 
 
 def test_the_choreographer_no_longer_optimises_against_standing_still():
-    """The catchphrase was「棒立ちに見えたら負けだ」and that is what the seat
+    """The catchphrase was 「棒立ちに見えたら負けだ」 ("if she looks like she is
+    just standing there, you have lost") and that is what the seat
     optimised: one more degree of lean every round until the hips were above
     the shoulders. Notebook-primary spine proposes BODY via CRAFT — still must
     refuse extreme / stacked tension, and never chase "not standing still".
@@ -476,11 +482,12 @@ def test_only_the_showrunner_can_change_the_locked_costume():
 
 
 def test_the_ledger_is_a_ceiling_not_a_quota():
-    """物の数を決め打ちで求めると、埋め草にゴミが出る。
+    """Ask for a fixed number of objects and the filler comes back as litter.
 
-    実測: 屋上で `empty soda can` / `discarded_chalk` / `empty_plastic_bottle`、
-    波打ち際で `empty_crusty_soda_can`。場所に要る物は4〜6個なのに10個以上を
-    求めていたので、残りが「生活感のあるゴミ」で埋まっていた。
+    Measured: on a rooftop, `empty soda can` / `discarded_chalk` /
+    `empty_plastic_bottle`; at the water's edge, `empty_crusty_soda_can`. A place
+    needs four to six things and ten or more were being asked for, so the rest
+    filled up with "lived-in rubbish".
     """
     text = crew.plan_system_prompt()
     assert "AT MOST twelve" in text
@@ -492,11 +499,11 @@ def test_the_ledger_is_a_ceiling_not_a_quota():
 
 
 def test_the_look_reaches_the_sampler_as_words_it_knows():
-    """班が合意したルックが、絵に届く語になっていること。
+    """That the look the crew agreed on becomes words the picture can receive.
 
-    `style_tags("vivid anime illustration")` は1個の巨大トークン
-    `vivid_anime_illustration` になっていた。どのチェックポイントも学習して
-    いない語で、しかもそれがルックを運ぶ唯一の経路だった。
+    `style_tags("vivid anime illustration")` was producing one huge token,
+    `vivid_anime_illustration` — a word no checkpoint has ever trained on, and the
+    only road carrying the look.
     """
     from app.muse import identity
     assert crew.look_tags("flat anime cel shading") == [
@@ -516,7 +523,7 @@ def test_the_look_reaches_the_sampler_as_words_it_knows():
 
 
 def test_every_shipped_look_is_distinguishable_in_tags():
-    """6班が同じタグ束を吐くなら、それは6つの選択肢ではない。"""
+    """If six crews emit the same bag of tags, they are not six choices."""
     from app.muse import identity
     bags = {
         n: frozenset(identity.style_tags(
@@ -545,7 +552,7 @@ def test_the_weave_is_told_the_look_governs_the_whole_bag():
 
 
 def test_every_seat_that_writes_tags_is_told_how_to_write_lettering():
-    """看板の文字の書き方は、TAGS を書く席すべてに届く。"""
+    """How to write lettering reaches every seat that writes TAGS."""
     for frame in (
         crew.OUTPUT, crew.DUET_OWNS_THE_FRAME, crew.DUET_OWNS_THE_FRAME_SCOPED,
     ):
@@ -556,24 +563,27 @@ def test_every_seat_that_writes_tags_is_told_how_to_write_lettering():
 
 
 def test_the_lettering_rule_carries_no_word_a_shot_could_copy():
-    """例に挙げた語はそのまま撮影に出てくる。引用符の中は雛形だけにする。"""
+    """A word used as an example turns up in the shoot verbatim. Only a template
+    goes inside the quotes."""
     import re
     quoted = re.findall(r'text "([^"]*)"', crew.LETTERING)
     assert quoted == ["<exactly the words they asked for>"], quoted
 
 
 def test_the_weave_is_told_to_call_a_garment_one_name():
-    """gown を dress と言い換えると、二人しかいない画に服が三着になる。"""
+    """Call a gown a dress halfway through and a picture with two people has three
+    garments."""
     from app.muse import chain
     assert "ONE NAME PER GARMENT" in chain.SCRIPTER_WEAVE_SYSTEM
 
 
 def test_the_seat_still_hears_the_rules_that_were_doing_work():
-    """外した 5,900字のうち、**効いていたものは席に残っている**こと。
+    """That of the 5,900 characters removed, **what was doing work is still at the
+    seat**.
 
-    `crew.OUTPUT` の言語・声の規則は `crew_room.SEAT_OUTPUT` へ引き取った。
-    `crew.CARRY` の二つ（拒否したものを名指ししない／相対指定の禁止）は
-    `crew.SEAT_CARRY` として席に残した。
+    `crew.OUTPUT`'s language and voice rules were taken into
+    `crew_room.SEAT_OUTPUT`. Two of `crew.CARRY`'s — never name what was refused,
+    and no relative adjustments — stayed with the seat as `crew.SEAT_CARRY`.
     """
     from app.muse import crew_room
 
@@ -585,7 +595,8 @@ def test_the_seat_still_hears_the_rules_that_were_doing_work():
 
 
 def test_the_actress_keeps_the_classic_contract():
-    """**一人撮りの正本は触らない。** 女優の前置きは今も CARRY と OUTPUT を読む。"""
+    """**The solo shoot's document of record is untouched.** The actress preamble
+    still reads CARRY and OUTPUT."""
     text = crew.actress_system_prompt({"name": "Mio", "name_ja": "みお"})
     assert crew.CARRY in text
     assert crew.OUTPUT in text
