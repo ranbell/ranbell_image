@@ -1,20 +1,24 @@
-"""**画面が叩く口が、裏に実在すること。**（2026-09-13）
+"""**Every door the panel knocks on exists on the back side.** (2026-09-13)
 
-移行を三段重ねた（classic 退役 → `muse` へ改名 → 未使用関数の切り取り）ので、
-総監督のご指示で「管理画面から呼び出す機能が動かなくなっていないか」を確かめる。
+Three migrations were stacked (retiring classic → renaming to `muse` → cutting
+unused functions), so at the Showrunner's instruction we check that "nothing
+called from the admin screen stopped working".
 
-**試験で落ちない壊れ方**がある —— 画面が `/api/muse-refine/…` を叩き続けていても、
-Python の試験は一本も落ちない。誰も踏まないから。実際にそういう壊れ方を
-一度している（`_ollama(request)` という存在しない補助関数で 500）。
+**There is a way to break that no test catches** — the panel can keep calling
+`/api/muse-refine/…` and not one Python test fails, because nothing walks that
+road. It has broken that way once already (a 500 from a helper
+`_ollama(request)` that does not exist).
 
-だから**画面の文字列と、ルータが出す経路を突き合わせる**。いま 134本が通る。
+So **the panel's strings are matched against the routes the routers serve**. 134
+of them pass today.
 
-読み方:
+How to read it:
 
-    画面側   `'/api/…'` `"/api/…"` `` `/api/…` `` の文字列を集め、
-             `${…}` は一つの区間として `{x}` に畳む
-    裏側     `main.py` が繋いでいる15本のルータの `APIRoute`
-             （`/api/health` と `/api/token` は `main` に直付けなので足す）
+    panel side   collect the strings `'/api/…'`, `"/api/…"` and `` `/api/…` ``,
+                 folding `${…}` into a single `{x}` segment
+    back side    the `APIRoute`s of the fifteen routers `main.py` mounts
+                 (`/api/health` and `/api/token` are attached to `main` itself,
+                 so they are added)
 """
 from __future__ import annotations
 
@@ -101,12 +105,12 @@ def test_every_url_the_screen_calls_is_served():
     "/api/muse/handpost",
 ])
 def test_the_named_ones_are_still_there(url: str):
-    """名前で押さえておく口。一覧の照合が緩んでも、ここは落ちる。"""
+    """Doors pinned by name. Even if the listing check loosens, these fail."""
     assert _matches(url, _served()), url
 
 
 def test_the_retired_studio_has_no_door_left():
-    """classic の口も、改名前の `muse-refine` も出していないこと。"""
+    """Neither classic's doors nor the pre-rename `muse-refine` are served."""
     served = _served()
     assert not any(p.startswith("/api/muse-refine") for p in served)
     for gone in ("/api/muse/report", "/api/muse/steps", "/api/muse/roster"):
@@ -116,15 +120,17 @@ def test_the_retired_studio_has_no_door_left():
 # ── 画面が送る欄を、裏が受け取れること ────────────────────────────────────
 
 def test_every_input_the_screen_patches_is_accepted():
-    """**URL が在っても、欄が無ければ黙って捨てられる。**（2026-09-13）
+    """**The URL can exist and the field still be dropped in silence.**
+    (2026-09-13)
 
-    実際に踏んだ: 画面には撮影班のプリセット（`muse.crewPreset`）の選択が
-    前から出ていたのに、`InputsPatch` に `crew_preset` の欄が無かった。
-    pydantic は知らない欄を黙って落とすので、`{"crew_preset": "photoreal"}` が
-    `{}` になり、**スタジオ撮りは常に `standard` の18席**で回っていた
-    （`photoreal` なら13席、`flat` なら12席で済む）。
+    Actually hit: the panel had shown the crew preset selector (`muse.crewPreset`)
+    for some time, and `InputsPatch` had no `crew_preset` field. pydantic drops
+    unknown fields silently, so `{"crew_preset": "photoreal"}` became `{}` and
+    **the studio shoot always ran `standard`'s eighteen seats** (`photoreal` needs
+    thirteen, `flat` twelve).
 
-    URL の照合だけでは見つからない壊れ方なので、**送る欄の名前**も突き合わせる。
+    Matching URLs alone never finds that, so **the names of the fields sent** are
+    matched too.
     """
     from app.muse.api import InputsPatch
 
@@ -140,15 +146,16 @@ def test_every_input_the_screen_patches_is_accepted():
 
 
 def test_every_input_the_screen_reads_is_returned():
-    """**送れても、返らなければ嘘をつく。**（2026-09-13）
+    """**Being able to send it is not enough; if it does not come back, the screen
+    lies.** (2026-09-13)
 
-    昨日 `InputsPatch` に `crew_preset` / `banter_mode` を足して「送れる」ように
-    したが、`service.public_view` は返していなかった。画面は
-    `inputs.crew_preset || 'standard'` を読むので、**選んで保存されても開き直すと
-    `standard` に見える** —— 実機で席数は 18→14→13 と切り替わっていたのに、
-    画面の表示だけが嘘をついていた。
+    `crew_preset` / `banter_mode` were added to `InputsPatch` the day before so
+    they could be sent, and `service.public_view` did not return them. The panel
+    reads `inputs.crew_preset || 'standard'`, so **choosing and saving still shows
+    `standard` after reopening** — live, the seat count really was switching
+    18→14→13 while the display alone told a lie.
 
-    片道（送る）と往復（返る）は別の試験が要る。
+    One way (sending) and the round trip (coming back) need separate tests.
     """
     from app.muse.service import new_session, public_view
 
@@ -166,7 +173,8 @@ def test_every_input_the_screen_reads_is_returned():
 
 
 def test_the_crew_preset_survives_the_round_trip():
-    """選んだ班が、保存されて、返ってくること（席の数も変わること）。"""
+    """The chosen crew is stored and comes back — and the seat count changes with
+    it."""
     from app.muse import crew, crew_room
     from app.muse.api import InputsPatch
     from app.muse.service import new_session, public_view

@@ -1,4 +1,4 @@
-"""Notebook + scripter path for 主演撮り — live craft, no prep gate."""
+"""Notebook + scripter path for the lead shoot — live craft, no prep gate."""
 from __future__ import annotations
 
 import sys
@@ -214,7 +214,8 @@ def test_bond_remembers_the_take_and_says_nothing_about_taste():
     """Bond is memory of the picture. What she LEARNED is a separate question.
 
     The taste card used to be derived from this same snapshot — the word "low"
-    in `frame` taught her 「ローアングルの近い距離」 and the clothes she ended
+    in `frame` taught her 「ローアングルの近い距離」 ("a low angle, close in")
+    and the clothes she ended
     in became a preference. That describes the take, not anything the
     showrunner said about it. See `_learned_taste`.
     """
@@ -238,14 +239,15 @@ def test_bond_remembers_the_take_and_says_nothing_about_taste():
 
 
 def test_the_partner_gets_her_own_forgotten_dress_back():
-    """実測（`94b4fc9f`・2026-08-28）: すみれが服ひとつ無しで出た。
+    """Measured (`94b4fc9f`, 2026-08-28): Sumire came out with no clothes at all.
 
-    「もうある」判定は語のかぶりで見るので、みおが `light_blue_dress` を着て
-    いると、すみれの `black cocktail dress` は `dress` が既出という理由で
-    足りていると判定される —— **二着目が絶対に戻らない。**
+    "Already present" is judged on overlapping words, so with Mio in a
+    `light_blue_dress`, Sumire's `black cocktail dress` counts as covered because
+    `dress` has been seen — **the second garment can never come back.**
 
-    これは一度直してあった不具合。旧 `_missing_wearing_tags` の docstring が
-    「相方だけ忘れた服が戻らない」と記録していた。
+    This was a defect that had been fixed once before. The old
+    `_missing_wearing_tags` docstring recorded it as "clothes forgotten for the
+    partner alone never come back".
     """
     bag = ("anime_illustration, close-up, park, dusk, standing, "
            "light_blue_dress, silk_fabric")
@@ -278,7 +280,8 @@ _BAG = ("light_blue_dress, blue_ribbon, black_cocktail_dress, "
 
 
 def test_both_prompts_say_which_letter_is_which_muse():
-    """第一層 —— 文字と名前を結ぶ一行。相方がいるときだけ出す。"""
+    """The first layer — one line binding the letters to the names. Only when a
+    partner is present."""
     from app.muse.chain import _who_is_who
     assert _who_is_who("Mio", "Sumire", letters=True) == \
         "tags_a is Mio's. tags_b is Sumire's. Never cross them."
@@ -288,15 +291,16 @@ def test_both_prompts_say_which_letter_is_which_muse():
 
 
 def test_the_wardrobe_clerk_maps_names_to_the_two_fields():
-    """**服だけを言うターン。** 総監督（2026-08-29）の案。
+    """**A turn that says nothing but the clothes.** The Showrunner's idea
+    (2026-08-29).
 
-    本番の compile（8,774字）は W で服の欄を取り違える —— 実測 2/20 で、
-    `wearing` が一度も書かれなかった（`ccde3c75`）。同じ問いを小さく絞って
-    **名前で**訊くと 25/25。形が壊れているのではなく、大きな条文の中で
-    埋もれている。
+    The production compile (8,774 characters) mixes up the clothing fields in a
+    duet — 2/20 measured, with `wearing` never written once (`ccde3c75`). Narrow
+    the same question and ask it **by name** and it is 25/25. The shape is not
+    broken; it is buried inside a large contract.
 
-    返りは名前をキーにした JSON。**欄への振り分けはこちらで決める** ——
-    モデルに `_b` という文字を選ばせない。
+    What comes back is JSON keyed by name. **The mapping onto fields is decided
+    here** — the model never picks the characters `_b`.
     """
     import asyncio
 
@@ -331,11 +335,12 @@ def test_the_wardrobe_clerk_maps_names_to_the_two_fields():
 
 
 def test_the_pose_clerk_uses_the_same_road():
-    """姿勢も服とまったく同じ穴だった。
+    """The pose had exactly the same hole as the clothes.
 
-    実測（4件・n=3）で本番の compile は **2/15**、`beat` は一度も書かれず、
-    みおの姿勢まで `beat_b` に入った。名前で訊くと **20/25**（落ちた1件も
-    取り違えではなく、「しゃがんで」を `kneeling` と訳しただけ）。
+    Measured (4 cases, n=3) the production compile scored **2/15**, `beat` was
+    never written once, and even Mio's pose landed in `beat_b`. Asked by name it
+    is **20/25** (and the one that missed was not a mix-up — it rendered
+    「しゃがんで」, "crouch", as `kneeling`).
     """
     import asyncio
 
@@ -360,19 +365,21 @@ def test_the_pose_clerk_uses_the_same_road():
 
 
 def test_the_wardrobe_clerk_also_works_alone():
-    """**一人でも訊く。** 長らく二人のときしか走らなかった係。
+    """**Asked for a solo shoot too.** For a long time this clerk only ran for two.
 
-    総監督（2026-08-30）「キーワードが出てきたら発動ってなってるのでは？
-    文脈を見て**今持っているのは手放したか**の判定がいる」。
+    The Showrunner (2026-08-30): "is it firing on a keyword? It needs to read the
+    context and judge **whether what she has is being given up**."
 
-    実測（9件×5回・`ask_solo_wear.py`。いま着ているのは麦わら帽子ほか5点）:
+    Measured (9 cases × 5 runs, `ask_solo_wear.py`; she is wearing a straw hat and
+    four other things):
 
-        服だけを訊く      45/45
-        本番の compile    36/45
+        asking about clothes alone   45/45
+        the production compile       36/45
 
-    落ちたのは遠回しな外し方だけ —— 「その帽子、ちょっと違うかも」1/5、
-    「帽子、今日は合わないね」0/5。どちらも `_STRIKE_NOTE_RE` にも当たらず、
-    **どこにも引っかからなかった**言い方。
+    What missed were only the indirect removals — 「その帽子、ちょっと違うかも」
+    ("that hat might not be quite right") 1/5, 「帽子、今日は合わないね」 ("the
+    hat does not suit today") 0/5. Neither matched `_STRIKE_NOTE_RE` either —
+    phrasings that **caught on nothing anywhere**.
     """
     import asyncio
 
@@ -407,16 +414,16 @@ def test_the_wardrobe_clerk_also_works_alone():
 
 
 def test_every_field_clerk_that_runs_alone_has_been_measured():
-    """一人ぶんの条文がある欄＝**測ってある**欄。
+    """A field with a solo contract is a field that **has been measured**.
 
-    実測（9件×5回・`ask_field_clerks.py`・2026-08-31）:
+    Measured (9 cases × 5 runs, `ask_field_clerks.py`, 2026-08-31):
 
-        wearing  45/45 対 36/45
-        beat     45/45 対 32/45   ← 「立って。」は compile 1/5
-        scene    45/45 対 24/45   ← 場所を移す一行は compile 0〜1/5
+        wearing  45/45 vs 36/45
+        beat     45/45 vs 32/45   ← 「立って。」 ("stand up") scores 1/5 on compile
+        scene    45/45 vs 24/45   ← a line that moves the place, 0-1/5 on compile
 
-    一人ぶんの条文が空である欄は「まだ測っていない」という意味なので、
-    走らせない。
+    A field whose solo contract is empty means "not measured yet", so it does not
+    run.
     """
     import asyncio
 

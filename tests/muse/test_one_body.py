@@ -191,12 +191,13 @@ def test_the_posture_words_come_from_the_one_list_we_already_have():
 
 
 def test_supporting_a_thing_is_holding_it():
-    """実機（2026-09-12・2回目の再現）で残った二重。
+    """A duplicate left live (2026-09-12, second replay).
 
         right arm holding tray, forearm_supporting_tray
 
-    `supporting` を掴みの語に入れていなかったので軸に乗らなかった。**左手は腰・
-    右手はトレイ**という書き分けは残したまま、トレイの二重だけ落ちること。
+    `supporting` was not among the holding words, so it never sat on an axis. The
+    split of **left hand on the hip, right hand on the tray** must survive; only
+    the doubled tray goes.
     """
     kept, dropped = L.one_body(
         "standing, weight on back leg, left hand on hip, right arm holding tray, "
