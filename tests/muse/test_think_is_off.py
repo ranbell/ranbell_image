@@ -1,20 +1,22 @@
-"""**thinking は明示して切る。**（2026-09-07）
+"""**Thinking is switched off explicitly.** (2026-09-07)
 
-総監督「ollama での画像生成時の streaming で絵が出ないバグがあるので修正して」
-「猛烈に遅いので、踏んでそうですね」。
+The Showrunner: "there is a bug where no picture appears when streaming image
+generation through ollama — please fix it", "it is furiously slow, so you are
+probably hitting it".
 
-実測（26B・同じプロンプト・n=2）:
+Measured (26B, same prompt, n=2):
 
-    think 未指定   14.1 / 15.3 秒   67 / 91 字
-    think=False     1.1 /  1.6 秒  141 / 146 字
+    think unspecified   14.1 / 15.3 s   67 / 91 chars
+    think=False          1.1 /  1.6 s  141 / 146 chars
 
-**10倍遅く、しかも薄い。** 1ターンに数回叩くので分単位の待ちになり、描画まで
-届かない。通しの実測でも、書き上げが 2分で返らなかったのが 2回で 10.4秒に
-なった。CLAUDE.md の一つ目の踏み抜きどころ（非ストリーミング＋既定の
-`num_predict` で thinking が出力枠を食う）そのもの。
+**Ten times slower, and thinner with it.** It is called several times a turn, so
+the wait runs into minutes and never reaches the render. End to end, a write-up
+that had not returned in two minutes came back in 10.4 seconds twice. This is the
+first of CLAUDE.md's pitfalls exactly (non-streaming plus a default `num_predict`
+lets thinking eat the output budget).
 
-Muse は `chain._call` が毎回 `think=False` を送っている。ここはそれを
-**呼び出しの形として**守る —— 新しい呼び出しが増えたときに落ちるように。
+In Muse, `chain._call` sends `think=False` every time. What is pinned here is
+**the shape of the call** — so that a new call site fails this test.
 """
 from __future__ import annotations
 
@@ -64,7 +66,7 @@ def test_every_llm_call_says_think_false():
 
 @pytest.mark.asyncio
 async def test_the_flag_actually_reaches_the_client():
-    """条文ではなく、実際に渡っていること。"""
+    """Not the contract — that it actually arrives."""
     from app.muse import writer
 
     seen = {}
@@ -81,15 +83,17 @@ async def test_the_flag_actually_reaches_the_client():
 
 
 def test_the_door_itself_demands_both_knobs():
-    """**`chain._call` は免除するが、代わりに署名を縛る。**
+    """**`chain._call` is exempt, and its signature is pinned instead.**
 
-    門の内側（`chain.py:_call`）は `think` と `num_ctx` を**受けて渡す**側なので、
-    呼び出しの形で `think=False` / `options=` を探す走査には写らない。素通しに
-    見えるのはそのためで、ここだけは免除する（パッケージを `muse` に畳んだ
-    2026-09-12 に、走査範囲が門の実装まで広がって気づいた）。
+    Inside the gate (`chain.py:_call`) `think` and `num_ctx` are **received and
+    forwarded**, so a scan looking for `think=False` / `options=` at call sites
+    does not see them. That is why it looks like a pass-through, and it is the one
+    exemption (noticed when folding the package into `muse` on 2026-09-12 widened
+    the scan's range to the gate's own implementation).
 
-    免除するぶん、**既定値を持たせない**ことを縛る —— 既定があると、新しい
-    呼び出しが黙って thinking 付き・文脈長なしで通ってしまう。
+    In exchange for the exemption, it is pinned to **carry no defaults** — with a
+    default, a new call would quietly go through with thinking on and no context
+    length.
     """
     import ast
     import inspect

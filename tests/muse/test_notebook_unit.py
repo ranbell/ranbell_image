@@ -13,7 +13,8 @@ def test_an_affirmed_proposal_is_written_as_a_normal_patch():
     """`promote_open` is gone, and so is the `open` field it fed.
 
     Promotion used to decide handheld (→ beat) versus worn (→ wearing) from a
-    noun list — 持|手に|花|缶|傘|ラムネ|氷 — which was wrong for anything the
+    noun list — 持|手に|花|缶|傘|ラムネ|氷 (hold / in hand / flower / can /
+    umbrella / ramune / ice) — which was wrong for anything the
     list did not name. Then `open` itself went: across 390 live sessions it
     never held a proposal, only parser debris. The scripter reads the
     conversation, sees the affirmation, and writes the sections itself.
@@ -238,7 +239,8 @@ def test_the_clerk_names_one_kind_of_turn():
 
 # ── ラベルは、行頭でなくても境界 ──────────────────────────────────
 def test_a_field_never_swallows_the_next_field():
-    """実測（2026-08-25）: frame が手帖の頁の残り全部を飲んでいた。"""
+    """Measured (2026-08-25): `frame` was swallowing the rest of the notebook
+    page."""
     leak = (
         "medium shot, looking straight into lens 各務 みお WEARING: blue "
         "sleeveless gown, earrings 各務 みお BEAT: sitting, hands pressed "
@@ -274,7 +276,7 @@ def test_a_shortened_name_that_keeps_the_head_noun_stays():
 
 
 def test_only_clothing_is_read_as_a_rename():
-    """`blue_sky` は青いガウンの別名ではない。"""
+    """`blue_sky` is not another name for a blue gown."""
     assert "blue_sky" not in notebook.garment_aliases(
         "blue_sky, blue_water, standing", "blue sleeveless gown",
     )
@@ -289,7 +291,7 @@ def _folded(beat_before: str, card: str) -> dict:
 
 
 def test_her_gesture_reaches_the_take_and_then_lets_go():
-    """震えが止まらなかった件。入口は残し、出口を作る。"""
+    """The trembling that would not stop. The way in stays; a way out is added."""
     nb = _folded(
         "sitting, hands on her knees",
         "BEAT: sitting, trembling hands pressed against her chest",
@@ -340,7 +342,8 @@ def _scrub(tags: str, *, frame: str = LENS) -> list[str]:
 
 
 def test_the_eyes_belong_to_the_frame():
-    """手帖がレンズを見ていると言うなら、目を閉じた語は残らない。"""
+    """If the notebook says she is looking into the lens, no closed-eye word
+    survives."""
     kept = _scrub("looking_at_viewer, closed_eyes, eyes_closed, standing")
     assert "closed_eyes" not in kept and "eyes_closed" not in kept
     assert "looking_at_viewer" in kept and "standing" in kept
@@ -352,31 +355,32 @@ def test_a_frame_that_says_nothing_about_the_lens_leaves_the_eyes_alone():
 
 
 def test_one_crop_survives_out_of_three_names_for_it():
-    """`close-up` / `close_up` / `face_focus` が同時に並んでいた。"""
+    """`close-up`, `close_up` and `face_focus` were standing together."""
     kept = _scrub("close-up, close_up, face_focus, standing")
     assert len([t for t in kept if "close" in t or t == "face_focus"]) == 1
 
 
 def test_the_notebook_decides_which_of_two_survives():
-    """手帖が名指ししているほうを残す。先に来たほうではなく。"""
+    """Keep whichever the notebook names — not whichever came first."""
     kept = _scrub("sitting, standing", frame=LENS)
     assert "standing" in kept and "sitting" not in kept
 
 
 def test_the_hour_is_left_alone():
-    """時刻は重ねて書かれることがある。**間違えて削ると光が変わる。**"""
+    """The hour is sometimes written twice over. **Trim it wrongly and the light
+    changes.**"""
     kept = _scrub("night, twilight, evening, standing")
     for t in ("night", "twilight", "evening"):
         assert t in kept
 
 
 def test_two_muses_get_a_letter_beside_the_name():
-    """実測（`61db2bd6`）: 折り込みが `beat_b: standing behind A` と書いた。
+    """Measured (`61db2bd6`): a fold-in wrote `beat_b: standing behind A`.
 
-    見出しは名前なのに欄の名前は `WEARING` / `WEARING_B` という文字なので、
-    モデルは相手を「A」と呼ぶ。`A` はタグにならないので画には出ないが、指示
-    としては汚れ。総監督「最初に `Mio (Actress A)` と書けばいいだけでしょう」。
-    実機で 9回中 0回に落ちた。
+    The headings are names while the field names are the letters `WEARING` /
+    `WEARING_B`, so the model calls the other person "A". `A` is not a tag and
+    never reaches the picture, but as an instruction it is dirt. The Showrunner:
+    "you just have to write `Mio (Actress A)` up front". Live it fell to 0 in 9.
     """
     nb = notebook.blank()
     notebook.apply_patch(nb, {"beat": "standing", "beat_b": "standing"})
@@ -386,7 +390,7 @@ def test_two_muses_get_a_letter_beside_the_name():
 
 
 def test_a_solo_shoot_has_no_letters():
-    """一人しかいないなら、文字を添える相手がいない。"""
+    """With only one person there is nobody to put a letter beside."""
     nb = notebook.blank()
     notebook.apply_patch(nb, {"beat": "standing"})
     block = notebook.render(nb, name_a="各務 みお")
@@ -395,15 +399,17 @@ def test_a_solo_shoot_has_no_letters():
 
 
 def test_the_compile_cannot_write_a_field_its_contract_never_explains():
-    """説明の無い鍵は、行き場に困った値の捨て場になる。
+    """A key with no explanation becomes the dumping ground for a value with
+    nowhere to go.
 
-    総監督（2026-08-31）「場所が `scene` で拾われず、**守ること**でホールド
-    されています」。場所を移す一行が `standing`（守りごと —— 撮影ぜんぶに
-    効く常設の指示）に入っていた。
+    The Showrunner (2026-08-31): "the place is not picked up by `scene` — it is
+    being held under **standing orders**". A line that moves the place had gone
+    into `standing` (the standing orders, which apply to the whole shoot).
 
-    出力スキーマには `standing` の鍵があるのに、compile の契約（3,019字）に
-    STANDING の説明が一行も無い。同じ事故は記録済みで、`wearing_b` をソロの
-    スキーマから外した理由がそれだった —— **鍵を消せば書けない。**
+    The output schema has a `standing` key and compile's contract (3,019
+    characters) does not explain STANDING in a single line. The same accident is
+    on record: it is why `wearing_b` was taken out of the solo schema — **remove
+    the key and it cannot be written.**
     """
     from app.muse import chain
 
@@ -419,9 +425,10 @@ def test_the_compile_cannot_write_a_field_its_contract_never_explains():
 
 
 def test_a_standing_order_still_reaches_the_notebook_from_the_router():
-    """常設の指示の道は塞がない。`session["standing"]` は手帖へ渡る。
+    """The road for standing orders is not closed. `session["standing"]` still
+    reaches the notebook.
 
-    書くのは制作スタッフの router（`chain.run_route`）で、compile ではない。
+    It is written by the studio crew's router (`chain.run_route`), not by compile.
     """
     session = {"session_id": "s", "notebook": notebook.blank(),
                "standing": ["足は絶対に映さない"], "craft": {}}

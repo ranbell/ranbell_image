@@ -253,28 +253,31 @@ def test_an_outfit_line_left_out_is_not_a_parse_failure():
 
 
 def test_the_first_duty_block_is_gone_and_the_partner_guard_survived():
-    """1,257字の「FIRST DUTY —— 身体と顔」を落とした。
+    """The 1,257-character "FIRST DUTY — body and face" block was dropped.
 
-    表情の欄を作った副作用で顔が絵から消え（`231983f`）、そこに一行足して
-    直した。**その一行ごと、段落を丸ごと落としたほうが良かった。**
+    Creating the expression field had the side effect of faces vanishing from the
+    picture (`231983f`), and a line was added there to fix it. **Better to drop
+    the whole paragraph, that line included.**
 
-    実測（30本パック・n=5 を三周・2026-08-31）:
+    Measured (30-case pack, n=5, three rounds, 2026-08-31):
 
-                     合格     崩れ  語数
-        そのまま     26/30     1    50
-        丸ごと落とす  30/30     0    62   ← 6試験すべて 5/5
-        削る（350字） 29/30     0    51   ← 合格は上がるが語数が戻らない
+                        pass     broken  words
+        as it was       26/30      1      50
+        dropped whole   30/30      0      62   ← all six tests 5/5
+        trimmed (350)   29/30      0      51   ← pass rises, word count does not
 
-    削る版が語数を戻せないので、効いていたのは中身ではなく**長さ**。
-    泣きそうな顔の試験（w2）の散文は、落としたほうが良くなった:
+    The trimmed version cannot bring the word count back, so what was biting was
+    not the content but **the length**. The prose for the near-tears test (w2) got
+    better for dropping it:
 
-        そのまま     4/5  46語
-        丸ごと落とす  5/5  62語
-          「Her face is caught in a moment of near-collapse, eyes welling
-           on the verge of tears」
+        as it was      4/5  46 words
+        dropped whole  5/5  62 words
+          "Her face is caught in a moment of near-collapse, eyes welling
+           on the verge of tears"
 
-    **二人の守りだけは数字で落とせない** —— 30本パックは一人の撮影しかなく、
-    「片方を小道具にしない」は一度も試されていない。`partner` へ移した。
+    **Only the two-person guard cannot be dropped on the numbers** — the 30-case
+    pack is all solo shoots, so "do not make one of them a prop" was never tested.
+    It moved to `partner`.
     """
     from app.muse import chain
 
@@ -291,16 +294,18 @@ def test_the_first_duty_block_is_gone_and_the_partner_guard_survived():
 
 
 def test_the_weave_contract_is_built_from_named_blocks():
-    """weave の契約を、compile と同じ**名前付きの積み木**にした。
+    """Weave's contract was made of **named bricks**, the same as compile's.
 
-    compile は 8,281字 52.7% → 2,327字 96%。**weave はまだ一度も刈っていない**
-    （5,075字）。そして実測で、契約が伸びると崩れが増える形がまた出ている:
+    Compile went 8,281 chars / 52.7% → 2,327 chars / 96%. **Weave has never been
+    trimmed once** (5,075 characters). And the measurements show the same shape
+    again — a longer contract breaks more:
 
-        8/28（4,629字）  崩れ 1/30   語数 58   合格 29/29
-        8/31（5,075字）  崩れ 6/30   語数 50   合格 21/24
+        08-28 (4,629 chars)  broken 1/30   words 58   pass 29/29
+        08-31 (5,075 chars)  broken 6/30   words 50   pass 21/24
 
-    刈る前に**一本ずつ落として測れる形**にする。既定の並びは、いままでの
-    本番と一字も違わない（`weave_ablate.py` が段落を落として比べる）。
+    Before trimming, make it **a shape where blocks can be dropped one at a time
+    and measured**. The default order is character for character what production
+    has always sent (`weave_ablate.py` drops paragraphs and compares).
     """
     from app.muse import chain
 
