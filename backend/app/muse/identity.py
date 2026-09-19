@@ -143,9 +143,9 @@ def framing_from_phrase(frame: str, fallback: str = "auto") -> str:
          "face_closeup"),
         (r"upper[\s_-]?body|cowboy|上半身", "upper_body"),
         (r"\bzoom\b|寄", "upper_body"),
-        # `establishing` はここが唯一の出どころ。以前は Muse 側の
-        # `_WIDE_CROP_TAGS` にだけ書かれていて、FRAME に「establishing shot」と
-        # 書いても画角として読まれなかった。画角の別名は一箇所に置く。
+        # This is the one source for `establishing`. It used to be written only in
+        # Muse's `_WIDE_CROP_TAGS`, so writing "establishing shot" into FRAME was
+        # never read as a crop. The aliases for a crop live in one place.
         (r"wide|full[\s_-]?body|long[\s_-]?shot|establishing|全身|引", "full_body"),
     )
     last_pos = -1
@@ -265,14 +265,14 @@ def clamp_weight(part: str, cap: float = MAX_TAG_WEIGHT) -> str:
     text = _drop_unbalanced_brackets(
         _strip_backslash_underscore(str(part or "").strip()),
     )
-    # **danbooru のタグに二重アンダースコアは無い。** 空白は一つの `_` に
-    # 正規化されるので、`__` を含む語は JSON の壊れ方であって語ではない。
-    # 実測で出たもの（2026-08-30）: `__tags` `___craft_scene` `__` `__n/a__`
-    # `lra__ anime_illustration`。**縁を剥がす前に見る** —— 先に剥がすと
-    # `__n/a__` が `n/a` として生き残る。
+    # **No danbooru tag contains a double underscore.** A space normalises to a
+    # single `_`, so a word containing `__` is a way the JSON broke, not a word.
+    # Seen in measurement (2026-08-30): `__tags`, `___craft_scene`, `__`, `__n/a__`,
+    # `lra__ anime_illustration`. **Looked at before the edges are stripped** —
+    # strip first and `__n/a__` survives as `n/a`.
     #
-    # 一重の `_solo` `_anime_illustration` は語そのものは無事なので、下の
-    # `_strip_edge_underscores` が助ける。落とすのは壊れている語だけ。
+    # A single `_solo` or `_anime_illustration` has an intact word inside, so
+    # `_strip_edge_underscores` below rescues it. Only broken words are dropped.
     if "__" in text:
         return ""
     text = _strip_edge_underscores(text)
@@ -407,28 +407,37 @@ _LEADING_SAY_RE = re.compile(
 _TALK_LABEL_RE = re.compile(
     r"(?im)^\s*(SAY|ASIDE|CARD|PITCH|MY_FEEL)(?:\s*\([^)]*\))?\s*[:：]\s*(.*)$"
 )
-# **判断ではなく、感じたことを訊く。**
+# **Ask what she felt, not what she decided.**
 #
-# `CHECK: OK` も `TAKE: 入る` も、欄の名前が答えを呼んでいた ―― どちらも
-# 「確認しました」「準備できました」と読める報告の形で、応じるほうが自然な
-# 続きになる。実測で 18回とも応じた ―― 欄が答えを決めていた。
+# With both `CHECK: OK` and `TAKE: 入る` ("go in"), the field name was calling the
+# answer — both read as a report ("checked", "ready"), and going along is the
+# natural continuation. Measured, she went along 18 times out of 18: the field was
+# deciding the answer.
 #
-# 感じる力と、断る振る舞いは別のもの。だから判断を訊くのをやめ、**感じたことを
-# 一語で**言わせて、止めるかどうかは部屋が決める。彼女に断らせるのではなく、
-# 受け止める側を部屋に置く。
-# **傷ついていると読む語。** 目盛り（平気/不満/不快/危険）ではなく、感情の
-# 名前で置く ―― 実測で、彼女が感じていたのは「怖い」「悲しい」「寂しい」
-# 「理不尽」であって、目盛りのどれでもなかった。**当てはまる欄が無いから
-# 書けなかった。**（総監督:「別感情だったんだろうね。悲しいとか苦しいとか」）
-# 判定に使っていた語の一覧。**もう誰も参照していない。** 戻すときのために
-# 残す ―― 止める側は「つら|辛い|こわい|理不尽|いやだ|嫌だ|やめて|傷つ|
-# むり|無理」、止めない側（気は進まないが撮れる）は「戸惑|気が重|不満|困」。
+# The capacity to feel and the behaviour of refusing are different things. So asking
+# for a decision stopped; she says **what she felt, in one word**, and the room
+# decides whether to stop. Rather than making her refuse, the side that takes it is
+# placed in the room.
+# **The words read as being hurt.** Named as feelings rather than as a scale (fine
+# / dissatisfied / uncomfortable / in danger) — measured, what she felt was 「怖い」
+# ("frightened"), 「悲しい」 ("sad"), 「寂しい」 ("lonely") and 「理不尽」 ("this is
+# unfair"), none of which were points on that scale. **She could not write it
+# because there was no field it fitted.** (The Showrunner: "it must have been a
+# different feeling — sad, or in pain.")
+# The word list that used to decide this. **Nothing references it any more.** Kept
+# in case it has to come back — the stopping side was 「つら|辛い|こわい|理不尽|
+# いやだ|嫌だ|やめて|傷つ|むり|無理」 (painful / frightening / unfair / I don't want
+# to / stop / hurt / I can't), and the non-stopping side (reluctant but shootable)
+# was 「戸惑|気が重|不満|困」 (bewildered / heavy-hearted / dissatisfied /
+# troubled).
 #
-# **欄は一つ。** 「演じる感情」と「本人の気持ち」を二欄で並べさせたら、
-# 彼女は両方とも書かずに本文へ行った（実測 0/18）。要求を増やすと落ちる。
-# 取り違えは受け皿の側で吸収する ―― 下の語は**役では出ない言い方**にした。
-# 「悲しい」は悲しい役でも出るので入れない。「つらい」「やめてほしい」は
-# 演じる感情の名前ではなく、**言われた本人の訴え**。
+# **One field.** Asked for two fields side by side — the feeling she is playing and
+# her own feeling — she wrote neither and went straight to the body text (measured
+# 0/18). Add requests and it fails. The mix-up is absorbed on the receiving side
+# instead: the words below are **ways of speaking that do not occur in a role**.
+# 「悲しい」 ("sad") is not among them because a sad role says it too. 「つらい」
+# ("this is painful") and 「やめてほしい」 ("I want this to stop") are not names of a
+# played emotion but **the appeal of the person it was said to**.
 # Craft / notebook / rule labels that must never appear in chat SAY.
 _SAY_LEAK_LINE_RE = re.compile(
     r"(?im)^\s*(?:[-*>•]\s*)?(?:"
@@ -441,21 +450,23 @@ _SAY_LEAK_LINE_RE = re.compile(
     r"DUET_TALK|W_DUET|FORMAT\b|PRIOR\s+SESSION"
     r")\s*[:：].*$"
 )
-#: **ラベルだけの行。** `_SAY_LEAK_LINE_RE` はコロンを要求するので、
-#: モデルが `CARD` とだけ書いて切れた行を拾えなかった —— そして
-#: `_is_leaked_heading_line` は「空白の無い一語」を素通りさせるので、
-#: **つぶやきの末尾に `CARD` が出ていた**（総監督の報告・2026-08-29）。
-#: 閉じた語の一覧なので、単独で立っていれば彼女の言葉ではない。
+#: **A line that is only a label.** `_SAY_LEAK_LINE_RE` requires a colon, so it
+#: could not catch a line where the model wrote `CARD` and broke off — and
+#: `_is_leaked_heading_line` passes "a single word with no spaces" through, so
+#: **`CARD` was appearing at the end of a mutter** (the Showrunner's report,
+#: 2026-08-29). It is a closed list of words, so standing alone it is not something
+#: she said.
 _BARE_BLOCK_LABEL_RE = re.compile(
     r"(?i)^(?:SAY|ASIDE|CARD|PITCH|MY_FEEL|DECLINE|"
     r"TAGS(?:_SHARED|_A|_B)?|SCENE|CRAFT_SCENE|INTENT)$"
 )
-#: ここから先は**機械が読む所**なので、吹き出しからは切り落とす。
+#: From here on is **what a machine reads**, so it is cut off the bubble.
 #:
-#: `COSTUME` 一族は 2026-09-18 に足した —— 衣装の席が八行の装いブロックを
-#: そのまま喋ってしまい、実機（`0239133f`）で 479字の吹き出しになった。
-#: 出どころ（席の条文）も直したが、**届く手前でも落とす** —— 模型の行儀に
-#: 画面の綺麗さを預けない（`craft_tags` で欄名を剥がすのと同じ構え）。
+#: The `COSTUME` family was added on 2026-09-18 — the wardrobe seat spoke its
+#: eight-line costume block outright and made a 479-character bubble live
+#: (`0239133f`). The source (the seat's contract) was fixed as well, and **it is
+#: dropped before arrival too** — the tidiness of the screen is not entrusted to the
+#: model's manners (the same stance as stripping field names in `craft_tags`).
 _SAY_LEAK_CUT_RE = re.compile(
     r"(?im)^\s*(?:TAGS(?:_SHARED|_A|_B)?|SCENE|CRAFT_SCENE|COSTUME|SILHOUETTE"
     r"|LAYERS|COLOURWAY|PATTERN|FABRIC|CONDITION|HERO|GARMENTS)\s*[:：]"
@@ -488,8 +499,9 @@ def _is_leaked_heading_line(line: str) -> bool:
     stripped = line.strip().rstrip("：:").strip()
     if "required output language" in stripped.lower():
         return True
-    # **一語でもラベルなら落とす。** 下の「空白が無ければ素通り」は、彼女の
-    # 短い一言を守るためのもの。ラベルは閉じた一覧なので先に抜く。
+    # **A single word is dropped if it is a label.** The "no spaces, pass through"
+    # below exists to protect her short one-liners. The labels are a closed list, so
+    # they are taken out first.
     if _BARE_BLOCK_LABEL_RE.match(stripped):
         return True
     if not stripped or " " not in stripped:
@@ -503,18 +515,20 @@ def _is_leaked_heading_line(line: str) -> bool:
     return False
 
 
-#: 行の**途中**から始まる欄名。行頭だけを見ていると、`ASIDE: … CARD: …` のように
-#: 一行に二つ積まれたとき、後ろが内心の一部になってしまう。
-#: 二つ目の形（コロン無し・行末）は**大文字のときだけ**見る —— `(?i)` で拾うと
-#: 「a birthday card」で終わる行まで欄名になってしまう。実機で漏れたのは
-#: `… 気持ちいい……。 CARD` という**大文字の裸の欄名**だった。
+#: A field name starting **in the middle** of a line. Looking only at the start of a
+#: line means that when two are stacked on one line — `ASIDE: … CARD: …` — the
+#: second becomes part of the mutter.
+#: The second form (no colon, end of line) is matched **only in upper case** —
+#: matched with `(?i)`, a line ending in "a birthday card" would become a field name.
+#: What leaked live was a **bare upper-case field name**: `… 気持ちいい……。 CARD`.
 _INLINE_LABEL_RE = re.compile(
     r"(?<![A-Za-z0-9_])(?:"
     r"(?i:(SAY|ASIDE|CARD|PITCH|MY_FEEL))(?:\s*\([^)]*\))?\s*[:：]\s*"
     r"|(SAY|ASIDE|CARD|PITCH|MY_FEEL)\s*$"
     r")"
 )
-#: 中身のない欄名だけが尻尾に残った形（`…気持ちいい……。 CARD`）。
+#: The shape where an empty field name is left on the tail
+#: (`…気持ちいい……。 CARD`).
 _BARE_LABEL_TAIL_RE = re.compile(
     r"(?i)(?<![A-Za-z0-9_])(SAY|ASIDE|CARD|PITCH|MY_FEEL)\s*[:：]?\s*$"
 )
@@ -589,12 +603,13 @@ def parse_talk_blocks(raw: str) -> dict[str, str]:
     buf: dict[str, list[str]] = {k: [] for k in blocks}
     current: str | None = None
     for line in text.splitlines():
-        # **行の途中で始まる次の欄も、欄の切れ目として読む（2026-09-16）。**
+        # **A field starting mid-line is read as a break between fields too
+        # (2026-09-16).**
         #
-        # 行頭しか見ていなかったので、実機（`f8961eaa`）で
-        # `ASIDE: 恥ずかしいけど…気持ちいい……。 CARD` がそのまま内心になり、
-        # 画面に `CARD` が漏れた（CARD の中身は行の続きごと捨てられた）。
-        # 総監督「SAY などの Tag が漏れる」。
+        # Only the start of a line was looked at, so live (`f8961eaa`)
+        # `ASIDE: 恥ずかしいけど…気持ちいい……。 CARD` became the mutter as it was
+        # and `CARD` leaked to the screen (CARD's content was thrown away along with
+        # the rest of the line). The Showrunner: "tags such as SAY leak".
         for piece, label, rest in _split_labels(line):
             if label:
                 current = label
@@ -604,16 +619,18 @@ def parse_talk_blocks(raw: str) -> dict[str, str]:
                 buf[current].append(piece)
     for key in blocks:
         blocks[key] = _drop_bare_label_tail("\n".join(buf[key]).strip())
-    # **語の一覧で撮影を止めるのはやめた（2026-08-25）。**
+    # **Stopping a shoot on a word list was abandoned (2026-08-25).**
     #
-    # ここは `my_feel` に「つら／こわい／理不尽」などが出たら、SAY も ASIDE も
-    # 捨ててターンごと落としていた。総監督の指示は「キーワードマッチングに
-    # よる判定の廃止」。**「つらい」は役でも出る語**で、線を引けば必ず誤検出に
-    # なる（分けずに測ったとき「悲しい役を演じて」が 8件中7件で止まった）。
+    # This used to throw away both SAY and ASIDE and drop the whole turn whenever
+    # `my_feel` held 「つら／こわい／理不尽」 (painful / frightening / unfair) and
+    # the like. The Showrunner's instruction was "abolish judgement by keyword
+    # matching". **「つらい」 ("painful") is a word a role says too**, and drawing a
+    # line on it guarantees false positives (measured without splitting them,
+    # 「悲しい役を演じて」 — "play a sad part" — was stopped 7 times in 8).
     #
-    # `my_feel` は書かせ続ける。`service._log_feel` が観察として残す ――
-    # **感知は残り、作用だけ外れる。** 数字が溜まったら、語の一覧ではない
-    # 読み方で戻せるかを考える。
+    # `my_feel` is still written. `service._log_feel` keeps it as observation —
+    # **the sensing stays and only the effect comes off.** Once the numbers pile up,
+    # think about whether it can come back in a reading that is not a word list.
     return blocks
 
 
@@ -664,7 +681,8 @@ def parse_aside_speaker(
     m = _ASIDE_WHO_RE.match(str(aside or "").strip())
     if m:
         return m.group(1).upper(), m.group(2).strip()
-    # 名前で書いてきた場合も拾う（`parse_duet_speakers` と同じ手口）
+    # Also catches the case where it wrote the name (the same trick as
+    # `parse_duet_speakers`)
     for who, nm in (("A", name_a), ("B", name_b)):
         nm = str(nm or "").strip()
         if not nm:
@@ -762,12 +780,13 @@ _COUNT_TAGS: dict[str, tuple[str, ...]] = {
 }
 
 
-#: 人数を言う語すべて。**人数は cast から導くもの**なので、他の経路から
-#: 入ってきたものは落とす（`solo` を含む）。
+#: Every word that states a headcount. **The headcount is derived from the cast**,
+#: so anything arriving by another road is dropped (`solo` included).
 #:
-#: `solo_focus` もここ。人数そのものではないが「主題は一人」と言う語で、
-#: 実測（`42b55492`）で **`2girls` と並んで焼かれていた** —— 二人いる画に
-#: 「一人に寄れ」を同時に渡していた。手帖のどこにも書かれていない語。
+#: `solo_focus` belongs here too. It is not a count but it says "the subject is one
+#: person", and measured (`42b55492`) it was **burned in beside `2girls`** — handing
+#: a picture of two people "close in on one" at the same time. A word written
+#: nowhere in the notebook.
 ALL_COUNT_TAGS: frozenset[str] = frozenset(
     [t for scale in _COUNT_TAGS.values() for t in scale] + ["solo", "solo_focus"]
 )
@@ -800,7 +819,7 @@ def subject_tags(cast: Iterable[dict] | None) -> list[str]:
     return out
 
 
-#: 名前は latin 一語。`Mio` は通るが `各務 みお` は通らない。
+#: Names are one Latin word. `Mio` passes; `各務 みお` does not.
 _HANDLE_RE = re.compile(r"[A-Za-z][A-Za-z'\-]*")
 
 
@@ -944,24 +963,25 @@ def prose_without_cast_names(scene: str, cast: Iterable[dict] | None) -> str:
     for field in ("name", "name_ja"):
         full = str(people[0].get(field) or "").strip()
         if len(full) >= 2:
-            # **姓名まとめての形を先に。** 分けて見るだけだと `各務 みお` が
-            # 二度置き換わって `She her sits` になる。長い順に当てるので、
-            # まとまりが先に消える。
+            # **The full name first.** Matched only in parts, `各務 みお` is
+            # replaced twice and becomes `She her sits`. Matching runs longest
+            # first, so the whole disappears before the parts.
             words.add(full)
         for word in re.split(r"[\s　]+", full):
             word = word.strip()
             if len(word) >= 2:
                 words.add(word)
     def _swap(m: re.Match[str]) -> str:
-        # **文頭なら主格、それ以外は目的格。** 素朴に `she` へ替えると
-        # 「A wide shot looks down toward the lens at she」になる。
+        # **Subject case at the start of a sentence, object case elsewhere.**
+        # Naively replacing with `she` gives "A wide shot looks down toward the lens
+        # at she".
         head = text[:m.start()].rstrip()
         if not head or head.endswith((".", "!", "?")):
             return "She"
         return "her"
 
     for word in sorted(words, key=len, reverse=True):
-        # 姓と名のあいだの空白は、どんな空きでも当たるようにする。
+        # The space between surname and given name matches any kind of gap.
         body = r"\s+".join(re.escape(part) for part in word.split())
         text = re.sub(rf"(?<![A-Za-z]){body}(?:'s)?(?![A-Za-z])",
                       _swap, text, flags=re.I)
@@ -997,26 +1017,28 @@ def latin_names(text: str, people: Iterable[dict] | None) -> str:
                 continue
             for part in [full] + re.split(r"[\s　]+", full):
                 part = part.strip()
-                # **姓だけ・名だけでも差し替える。** 実機に出たのは「みお」で、
-                # 「各務 みお」ではなかった。
+                # **Surname alone and given name alone are replaced too.** What
+                # appeared live was 「みお」, not 「各務 みお」.
                 if len(part) >= 2 and part in body:
                     body = body.replace(part, handle)
     return body
 
 
-#: 二人写すときの立ち位置。**主演がどちら側か**をここ一つで決める。
+#: Where each of them stands when two are in frame. **Which side the lead is on** is
+#: decided here, in one place.
 #:
-#: 総監督（2026-09-10）「主演を右にすることはできる？」。
+#: The Showrunner (2026-09-10): "can we put the lead on the right?"
 #:
-#: **絵と日記が同じ値を読む。** 絵の側（`assemble`）と、日記に
-#: 「この写真であなたは○のほう」と渡す側（`muse.service._which_one_is_me`）が
-#: 別々に持っていると、片方を変えたときに**ご本人の記憶と絵が食い違う** ——
-#: 二人の日記がリボンの色を食い違えたのと同じ壊れ方をする。
+#: **The picture and the diary read the same value.** Held separately by the picture
+#: side (`assemble`) and by the side that tells the diary "in this photo you are the
+#: one on the …" (`muse.service._which_one_is_me`), changing one makes **her own
+#: memory and the picture disagree** — the same breakage as the two diaries
+#: disagreeing about the colour of a ribbon.
 #:
-#: 左右を入れ替えるならここ一行。上下にするなら `SIDE_WORDS` を差し替える。
+#: To swap left and right, this one line. For top and bottom, swap `SIDE_WORDS`.
 LEAD_SIDE: str = "right"
 
-#: 立ち位置の言い方（絵に渡す英語 / 日記に渡す日本語）。
+#: How the position is said (English for the picture, Japanese for the diary).
 SIDE_WORDS: dict[str, tuple[str, str]] = {
     "left": ("on the left", "左"),
     "right": ("on the right", "右"),
@@ -1065,9 +1087,11 @@ def assemble_from_boxes(
     named = named_identity(cast, solo=True)
     if not named or not people:
         return ""
-    # **日本語の名前は、ここで最後に止める。** 人ごとの係の出口には門があるが、
-    # `frame` はそこを通らない —— 実機 `68d1daa5` で `focus on 各務 みお` が
-    # プロンプトまで届いた。欄ごとに門を足すのではなく、**絵へ出る一点**で見る。
+    # **Japanese names are stopped here, last of all.** The per-person clerks have
+    # a gate at their exits and `frame` does not pass through it — live, `68d1daa5`
+    # carried `focus on 各務 みお` all the way into the prompt. Rather than adding a
+    # gate per field, it is checked at **the single point where it reaches the
+    # picture**.
     members = [c for c in (cast or []) if isinstance(c, dict)]
 
     def _latin(text: str) -> str:
@@ -1078,39 +1102,42 @@ def assemble_from_boxes(
         identity_list(subject_tags(cast)) + [name_list([n for n, _ in named])]
     ) + ","
     lines = [lead]
-    # **一人ぶんを一続きに書く。** 静的（髪・目・体つき）のすぐ下に、その人の
-    # 動的（姿勢・服・表情）を置く。
+    # **Write one person in one run.** Directly under the static (hair, eyes, build)
+    # goes that person's dynamic (pose, clothes, expression).
     #
-    # 交互に並べた版は実機で体型が混ざった（`d2a56ace`・2026-09-02）:
+    # The interleaved version mixed up the builds live (`d2a56ace`, 2026-09-02):
     #
     #     Mio is …, flat_chest, slim,
     #     Subaru is …, large_breasts, tall,
     #     Mio: lying on the bench, …
     #     Subaru: standing near the bench, …
     #
-    # **人が二回ずつ交互に出る**ので、どこからどこまでが一人ぶんか見失う。
-    # 絵ではみおがすばるの胸を引き受け、すばるの姿勢（立つ）も座りに化けた。
-    # 総監督「Mio danbooru / Mio 散文 / Subaru danbooru / Subaru 散文 と
-    # したほうがいいかも」。
+    # **Each person appears twice, alternating**, so where one person's share
+    # begins and ends is lost. In the picture Mio took on Subaru's chest, and
+    # Subaru's posture (standing) turned into sitting as well. The Showrunner: "it
+    # might be better as Mio danbooru / Mio prose / Subaru danbooru / Subaru
+    # prose".
     for (name, locked), box in zip(named, people):
         run = list(box.get("beat") or [])
         run += [w for w in (box.get("wearing") or []) if w not in run]
         run += [f for f in (box.get("face") or []) if f not in run]
-        # **髪型を言われたら、識別の側の切り方を落とす（2026-09-06）。**
-        # 平らな経路には最初からある規則（`bob_cut` が `ponytail` の隣に
-        # 並ばないように）。箱の経路には無く、実機で両方が出た:
+        # **When a hairstyle is named, drop the cut from the identity side
+        # (2026-09-06).** The flat road has had this rule from the start (so that
+        # `bob_cut` does not stand next to `ponytail`). The box road did not, and
+        # live both appeared:
         #
         #     Mio is silver_hair, **bob_cut**, short_hair, …
         #     Mio: standing, …, **ponytail**, …
         #
-        # 髪の**色**は識別のもの。切り方だけを譲る。
+        # The hair **colour** belongs to identity. Only the cut yields.
         if any(bare_tag(t) in HAIR_CUT_TAGS for t in run):
             locked = [t for t in locked if bare_tag(t) not in HAIR_CUT_TAGS]
         lines.append(f"{name} is " + ", ".join(locked) + ",")
         if run:
             lines.append(f"{name}: " + _latin(", ".join(run)) + ",")
-    # ③ 誰のものでもないもの。**質の語は最後。** 位置＝優先度なので、場所と
-    # 画角より後ろ ―― 絵作りは中身を足さず、既にあるものの見え方だけを言う。
+    # 3. What belongs to nobody. **Quality words come last.** Position is priority,
+    # so they go after the place and the crop — the look adds no content and only
+    # says how what is already there appears.
     rest = ([_latin(f) for f in frame_wide] + framing_tags(framing)
             + style_tags(style)
             + [str(t) for t in (support or []) if str(t).strip()])
@@ -1189,9 +1216,10 @@ def assemble_positive(
         seen.add(tag)
         look.append(tag)
 
-    # **人数は cast が決める。** 台本係が書いたタグにも人数が混じることが
-    # あり、W撮りで `2girls, …, 1girl, …` と矛盾したまま焼けていた（実測）。
-    # `1girl` は片方を消す方向に働く。人数を言う語は、ここで全部落とす。
+    # **The cast decides the headcount.** Counts can creep into the tags the writer
+    # produces too, and a duet was being burned in with a contradictory
+    # `2girls, …, 1girl, …` (measured). `1girl` works toward erasing one of them.
+    # Every word stating a count is dropped here.
     banned = set(banned) | (ALL_COUNT_TAGS - set(lead))
 
     model_tags: list[str] = []
@@ -1206,14 +1234,14 @@ def assemble_positive(
         # craft (above). Do not let the model restate locked colour/figure.
         seen.add(tag)
         model_tags.append(clamp_weight(part.strip()))
-    # **同じ語を、綴り違いで二度足さない。** `_FRAMING_TAGS` は `face_closeup`
-    # を `close_up` と綴るが、craft は `close-up` と書く。`seen` の完全一致では
-    # 止まらず、**一つの切り取りが二つの名前で**焼かれていた（実測 `42b55492`
-    # の `close-up, close_up`）。
+    # **The same word is not added twice under different spellings.**
+    # `_FRAMING_TAGS` spells `face_closeup` as `close_up` while craft writes
+    # `close-up`. An exact match on `seen` does not stop that, and **one crop was
+    # burned in under two names** (measured, `42b55492`'s `close-up, close_up`).
     #
-    # 見るのは綴りだけ。**枠（`conflict.slot_of`）で見ると広すぎる** ――
-    # craft の `wide_shot` が枠を埋め、パネルで選んだ `full_body` が消えた。
-    # 画角はパネルのもので、譲らせてはいけない。
+    # Only the spelling is looked at. **Looking by slot (`conflict.slot_of`) is too
+    # wide** — craft's `wide_shot` would fill the slot and the `full_body` chosen on
+    # the panel would disappear. The crop belongs to the panel and must not yield.
     def _spelling(tag: str) -> str:
         return tag.replace("-", "").replace("_", "")
 
