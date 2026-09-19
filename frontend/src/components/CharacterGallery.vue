@@ -47,11 +47,12 @@ const props = defineProps({
   getJobsMap: { type: Function, default: () => () => new Map() },
   // Parked Muse studio session (closed by ✕, still in memory) — show Resume.
   resumeAvailable: { type: Boolean, default: false },
-  // **どの段に出すか。**（2026-09-13）
+  // **Which layer it appears on.** (2026-09-13)
   //
-  // 既定は `--z-panel`（600）。Muse の画面（`--z-panel-muse` 640）の中から
-  // 開くと**裏に出て、押しても何も起きないように見えた** —— 総監督が踏んだ。
-  // 呼ぶ側が `--z-panel-muse-child`（650）を渡せるようにする。
+  // The default is `--z-panel` (600). Opened from inside Muse's panel
+  // (`--z-panel-muse`, 640) it **came out behind it and looked as if pressing did
+  // nothing** — hit by the Showrunner. The caller can now pass
+  // `--z-panel-muse-child` (650).
   layerClass: { type: String, default: 'z-[var(--z-panel)]' },
   resumeName: { type: String, default: '' },
 })

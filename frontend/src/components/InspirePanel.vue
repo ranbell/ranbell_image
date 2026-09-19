@@ -608,7 +608,7 @@ async function copyToClipboard(text) {
   }
 }
 
-// ── テーマ自動展開 ─────────────────────────────────────────────────────────────
+// ── Automatic theme expansion ────────────────────────────────────────────────
 const inversionTheme        = ref('')
 const inversionThemeLoading = ref(false)
 
@@ -638,7 +638,7 @@ async function expandTheme() {
   inversionThemeLoading.value = false
 }
 
-// ── 4セクション WD14 オートコンプリート ───────────────────────────────────────
+// ── WD14 autocomplete for the four sections ──────────────────────────────────
 const INVERSION_SECTIONS = [
   { key: 'character',  icon: '👤', labelKey: 'inspire.sectionCharacter',  phKey: 'inspire.sectionCharacterPh' },
   { key: 'background', icon: '🌄', labelKey: 'inspire.sectionBackground', phKey: 'inspire.sectionBackgroundPh' },
@@ -913,7 +913,7 @@ function simpleMarkdown(text) {
                 <p v-if="inversionChangeTargets.length === 0" class="text-[11px] text-amber-500/70 px-1">
                   ⚠ {{ $t('inspire.inversionSelectRequired') }}
                 </p>
-                <!-- テーマ入力 + 自動展開 -->
+                <!-- Theme input and automatic expansion -->
                 <div class="space-y-1.5 pt-0.5">
                   <p class="text-[10px] text-gray-500 uppercase tracking-wide font-semibold">
                     {{ t('inspire.themeLabel') }}
@@ -933,7 +933,7 @@ function simpleMarkdown(text) {
                     </button>
                   </div>
                 </div>
-                <!-- セクション別ヒント (WD14 AC付き) -->
+                <!-- Per-section hints (with WD14 autocomplete) -->
                 <div class="space-y-1.5 pt-0.5">
                   <p class="text-[10px] text-gray-500 uppercase tracking-wide font-semibold">
                     {{ t('inspire.hintSectionsLabel') }}

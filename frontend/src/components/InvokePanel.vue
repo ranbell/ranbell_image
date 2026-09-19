@@ -519,7 +519,7 @@ onUnmounted(() => {
   Object.values(_iacTimers).forEach(clearTimeout)
 })
 
-// ── Pro mode: テーマ → セクション自動展開 ─────────────────────────────────────
+// ── Pro mode: theme -> automatic section expansion ───────────────────────────
 const _invokeSectionsLoading = ref(false)
 async function expandSections() {
   if (!invokeProTopic.value.trim() || _invokeSectionsLoading.value) return
@@ -623,7 +623,7 @@ function iacKeydown(key, e) {
 
 function iacHide(key) { setTimeout(() => { _iacShowDropdown.value = { ..._iacShowDropdown.value, [key]: false } }, 150) }
 
-// ── Visual Spec タグ採用 ───────────────────────────────────────────────────────
+// ── Adopting Visual Spec tags ────────────────────────────────────────────────
 const personTagSet = computed(() =>
   new Set(invokeProPersonTags.value.split(',').map(t => t.trim()).filter(Boolean))
 )
@@ -951,7 +951,7 @@ function onThumbnailError(event) {
               <!-- ── Pro mode inputs ── -->
               <template v-else>
 
-                <!-- キャラクタータグ -->
+                <!-- Character tags -->
                 <div class="relative">
                   <p class="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-2">{{ t('invoke.proCharTagsLabel') }} <span class="text-gray-700 normal-case font-normal">{{ t('invoke.proCharTagsOptional') }}</span></p>
                   <textarea v-model="invokeProPersonTags"
@@ -974,7 +974,7 @@ function onThumbnailError(event) {
                   <p class="text-[9px] text-gray-700 mt-0.5">{{ t('invoke.proCharTagsHint') }}</p>
                 </div>
 
-                <!-- お題タグ変換 -->
+                <!-- Topic-to-tag conversion -->
                 <div>
                   <p class="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-2">{{ t('invoke.proTopicLabel') }}</p>
                   <div class="flex gap-1.5 items-start">
@@ -1005,7 +1005,7 @@ function onThumbnailError(event) {
                   </p>
                 </div>
 
-                <!-- カテゴリ別セクションヒント -->
+                <!-- Per-category section hints -->
                 <div class="space-y-2">
                   <p class="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">{{ t('invoke.sectionHintsLabel') }}</p>
                   <div v-for="sec in INVOKE_SECTIONS" :key="sec.key" class="relative">
@@ -1145,7 +1145,7 @@ function onThumbnailError(event) {
                 </p>
               </div>
 
-              <!-- ── Wildness (乱れ度) — stranger/lunatic vocab pools (common) ── -->
+              <!-- ── Wildness — stranger/lunatic vocab pools (common) ── -->
               <div v-if="invokeEnabledSpirits.stranger || invokeEnabledSpirits.lunatic">
                 <p class="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1"
                   :title="t('invoke.wildnessTitle')">🌪️ {{ t('invoke.wildnessLabel') }}</p>
@@ -1407,13 +1407,13 @@ function onThumbnailError(event) {
                       <!-- Progress bar while in-flight -->
                       <div v-else-if="['composing','generating','tagging'].includes(invokeSpirits[name]?.status)" class="px-2.5 pb-2.5 mt-auto">
                         <div class="h-1 w-full rounded-full bg-gray-800/80 overflow-hidden">
-                          <!-- Real progress: ComfyUI ステップ中のみ (generating && progress > 0) -->
+                          <!-- Real progress: only during the ComfyUI steps (generating && progress > 0) -->
                           <div v-if="invokeSpirits[name]?.status === 'generating' && (invokeSpirits[name]?.genProgress ?? 0) > 0"
                                :class="SPIRIT_META[name].border.replace('border-','bg-')"
                                class="h-full rounded-full transition-[width] duration-300 ease-out"
                                :style="{ width: (invokeSpirits[name].genProgress * 100) + '%' }"></div>
-                          <!-- Indeterminate: composing / queue待ち / tagging (画像後のAI処理) -->
-                          <!-- tagging 中は w-full + opacity-40 で「画像完了・後処理中」を表現 -->
+                          <!-- Indeterminate: composing / waiting in the queue / tagging (the AI work after the image) -->
+                          <!-- While tagging, w-full + opacity-40 says "image done, post-processing" -->
                           <div v-else
                                :class="[
                                  SPIRIT_META[name].border.replace('border-','bg-'),
@@ -1502,7 +1502,7 @@ function onThumbnailError(event) {
                     </div>
                   </div>
 
-                  <!-- ④ Visual Spec category tags card (emerald) — タグをクリックでキャラタグへ追記 -->
+                  <!-- 4. Visual Spec category tags card (emerald) — click a tag to append it to the character tags -->
                   <div v-if="selectedNarrativeSpirit && (
                       invokeSpirits[selectedNarrativeSpirit]?.hair_tags?.length ||
                       invokeSpirits[selectedNarrativeSpirit]?.clothing_tags?.length ||

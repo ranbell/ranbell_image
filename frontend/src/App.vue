@@ -72,7 +72,8 @@ async function waitForBackend() {
 
 // ── Job stream ────────────────────────────────────────────────────────────────
 const jobsMap = ref(new Map())   // job.id -> job dict
-// 仕事の一覧を毎回作り直さずに渡すための getter（撮影室が進捗を拾う）。
+// A getter so the job list is handed over without being rebuilt every time (the
+// studio picks up the progress).
 function getJobsMap() { return jobsMap.value }
 let _jobEventSource = null
 
@@ -180,7 +181,8 @@ const colorPickLoading = ref(false)
 const colorPickActive = ref(false)          // true when color pick results are displayed
 const modelFacets = ref([])         // [{model, count}, ...] from /api/images/facets
 const modelsExpanded = ref(false)   // show all models vs top 8
-// Which Muse is in the picture. Single-select: 「みおの写真」 is one girl, and
+// Which Muse is in the picture. Single-select: 「みおの写真」 ("a photo of Mio") is
+// one girl, and
 // a union of two casts is not a question anyone has asked for.
 const characterFacets = ref([])     // [{character_id, name, shoot, board, count}]
 const activeCharacter = ref(null)   // character_id | null
@@ -2660,19 +2662,20 @@ function openInspire() { showInspire.value = true }
 const showInvoke = ref(false)
 
 // ── Muse ──────────────────────────────────────────────────────────────────────
-// ヘッダのボタンは撮影室ではなく**名簿**を開く —— 誰と撮るかは、撮影の画面が
-// 現れる前に決まる。名簿で一人選ぶと撮影室が開く（`pickMuseCharacter`）。
+// The header button opens **the roster**, not the studio — who to shoot with is
+// decided before the studio screen appears. Choosing someone in the roster opens the
+// studio (`pickMuseCharacter`).
 //
-// **2026-09-12、Muse Classic を退役させた。** 撮影室は Muse 一つ。
+// **Muse Classic retired on 2026-09-12.** There is one studio: Muse.
 const showMuse = ref(false)
 const showMuseGallery = ref(false)
 const museGalleryWorkflow = ref('')
-// 名簿が決めた相手。開いた一度だけ読まれる（パネル側が自分のセッションと
-// 見比べて、同じなら何もしない）。
+// Whoever the roster chose. Read once on opening (the panel compares it against its
+// own session and does nothing if they match).
 const musePendingCharacterId = ref('')
-// 相性ビューアの「この二人で撮る」から、相方も一緒に来る。
+// From the chemistry viewer's "shoot these two", the partner arrives as well.
 const musePendingPartnerId = ref('')
-// 止めてある撮影。名簿に「撮影中」を出すために持っている。
+// A paused shoot. Held so the roster can show "shooting".
 const museResume = ref({ available: false, name: '', sessionId: '' })
 
 function startDuetPair({ leadId, partnerId }) {
@@ -2703,8 +2706,8 @@ function pickMuseCharacter(id) {
   showMuseGallery.value = false
   musePendingCharacterId.value = id
   musePendingPartnerId.value = ''
-  // パネルは v-if で消さない —— セッションは開け閉めで残るので、
-  // `show` を振っても作り直されない。
+  // The panel is not removed with v-if — a session survives opening and closing, so
+  // toggling `show` does not rebuild it.
   showMuse.value = true
 }
 
@@ -2714,7 +2717,8 @@ function onMuseShow(open) {
     selected.value = null
     return
   }
-  // ✕ を押し間違えたとき、虚無ではなく名簿（「撮影中」つき）に降りる。
+  // If ✕ is pressed by mistake, it lands on the roster (with "shooting" shown)
+  // rather than on nothing.
   if (museResume.value.available) showMuseGallery.value = true
 }
 
@@ -2729,7 +2733,7 @@ function onMuseSessionState(state) {
 function resumeMuseSession() {
   selected.value = null
   showMuseGallery.value = false
-  // 指名を空にすると、止めてあったセッションにそのまま座り直す。
+  // Clearing the choice sits back down in the paused session as it was.
   musePendingCharacterId.value = ''
   musePendingPartnerId.value = ''
   showMuse.value = true

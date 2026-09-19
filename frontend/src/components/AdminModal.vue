@@ -33,8 +33,9 @@ const emit = defineEmits([
 // ── Admin internal state ──────────────────────────────────────────────────────
 const adminTab = ref('diag')
 const ollamaModels = ref([])
-//: ComfyUI のワークフロー一覧。**診断枠を開かなくても要る** —— Muse の既定を
-//: 選ぶ欄がここにあるので、健康診断の応答待ちにしない（2026-09-13）。
+//: ComfyUI's workflow list. **Needed without opening the diagnostics pane** — the
+//: field for choosing Muse's default lives here, so it does not wait on the health
+//: check's reply (2026-09-13).
 const comfyWorkflows = ref([])
 const ollamaVisionModels = ref([])
 // Only warn once we actually know which models have vision; an empty list means
@@ -778,7 +779,7 @@ watch(() => props.jobs?.find(j => j.title === 'backup')?.state, (state) => {
 
         <div class="flex-1 overflow-y-auto px-6 py-4">
 
-          <!-- ── 診断タブ ── -->
+          <!-- ── The diagnostics tab ── -->
           <div v-if="adminTab === 'diag'" class="space-y-4">
             <div class="flex justify-end">
               <button @click="fetchDiagData" :disabled="diagLoading"
@@ -1506,7 +1507,7 @@ watch(() => props.jobs?.find(j => j.title === 'backup')?.state, (state) => {
                     class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500">
                     <option value="">{{ $t('admin.config.museModelEmpty') }}</option>
                     <option v-for="w in comfyWorkflows" :key="w" :value="w">{{ w }}</option>
-                    <!-- 消えたワークフローが既定のままでも、選択が空に化けないように -->
+                    <!-- So the selection does not turn blank when a vanished workflow is still the default -->
                     <option v-if="adminConfig.muse_workflow && !comfyWorkflows.includes(adminConfig.muse_workflow)"
                       :value="adminConfig.muse_workflow">{{ adminConfig.muse_workflow }}（{{ $t('admin.config.museWorkflowGone') }}）</option>
                   </select>
