@@ -151,9 +151,11 @@ def say_language_rule(locale: str = "ja") -> str:
     )
 
 
-# 文字を焼く記法。`text "…"` の中身がそのまま看板やプレートに出る。書ける
-# 場所を増やすより、書ける条件を狭く言うほうが効く —— 例に挙げた語はその
-# まま撮影に出てくるので、引用符の中は総監督が言った言葉だけ、と明示する。
+# The notation that burns letters in. Whatever is inside `text "…"` appears on the
+# sign or the plate as it stands. Naming the conditions narrowly works better than
+# adding places it may be written — a word given as an example comes out in the
+# shoot as it was written, so it is stated explicitly that only what the Showrunner
+# said goes inside the quotes.
 LETTERING = """
 WORDS IN THE PICTURE
 Only when the Showrunner asked for something written — a sign, a plate, a
@@ -243,7 +245,8 @@ GARMENTS is the coverage list and the only place the outfit exists as tags:
 - Every tag written here must also appear in TAGS.
 """.strip()
 
-# 衣装部屋 — the one button that rewrites the outfit wholesale.
+# 衣装部屋 (the wardrobe room) — the one button that rewrites the outfit
+# wholesale.
 #
 # Every other path edits `wearing` as a delta: the compile is handed a notebook
 # line and a direction and has to work out what the line does to it. Measured on
@@ -254,7 +257,8 @@ GARMENTS is the coverage list and the only place the outfit exists as tags:
 # This asks for no delta at all. She is sent to change and comes back stating
 # the whole outfit, absolute, read off the conversation rather than off the
 # notebook line that has gone stale. A wrong answer here is one the Showrunner
-# can see and say「違うよ」to, which is the difference that matters: the failure
+# can see and say 「違うよ」 ("no, not that") to, which is the difference that
+# matters: the failure
 # it replaces was silent.
 WARDROBE_READOUT_OUTPUT = """
 衣装部屋 — the Showrunner just sent you to change, and you have come back.
@@ -285,7 +289,8 @@ WEARING: <English. Danbooru tags with underscores, comma-separated.
          slashes, no top=/bottom= labels — just the garments.>
 """.strip()
 
-# One field, said over from the start. 衣装部屋 was the first of these and the
+# One field, said over from the start. 衣装部屋 (the wardrobe room) was the first of
+# these and the
 # only one for a while; the rest of the notebook has the same failure — a field
 # that has accreted stops being movable by a delta, and no amount of asking
 # again in the same shape gets it back.
@@ -293,22 +298,23 @@ WEARING: <English. Danbooru tags with underscores, comma-separated.
 # What each field is allowed to hold is copied from the scripter's own contract
 # rather than reworded, so a restatement cannot legalise something a compile
 # could not write.
-# 日本語のラベルと、欄ごとの**書式**だけをここに置く。欄が何であるかは
-# `notebook.FIELD_CONTRACTS` が唯一の出典で、ここでは書き直さない。同じ定義を
-# 二箇所に置いたことが、視線がどこにも定着しなかった原因だった。
+# Only the Japanese labels and each field's **format** live here. What a field IS
+# has one source, `notebook.FIELD_CONTRACTS`, and is not restated here. Putting the
+# same definition in two places is what left the gaze with nowhere to settle.
 _RESTATE_LABELS: dict[str, tuple[str, str]] = {
     "scene": ("どこにいて、何時ごろか", ""),
     "light": ("光がどこから来ていて、どれくらい強いか", ""),
     "frame": ("カメラの位置と、あなたの視線", ""),
     "wearing": (
         "身につけているもの",
-        # 上限を書いていたら、上限を守るために装備が消えた。実撮影
-        # （コミケ・2026-08-20）で、監督が「衣装はそのままで」と言った
-        # ターンの言い直しが
+        # With an upper limit written in, pieces disappeared in order to keep to
+        # the limit. In a real shoot (Comiket, 2026-08-20), on a turn where the
+        # director said 「衣装はそのままで」 ("leave the outfit as it is"), the
+        # restatement went
         #     pink frilly costume, hair ornament, ribbon, frills
-        #   → pink_frilly_costume, ribbon, frills
-        # と `hair ornament` を落とした。理由には「衣装を維持したため」と
-        # 書いてあった。**数を守って中身を失っている。**
+        #   -> pink_frilly_costume, ribbon, frills
+        # dropping `hair ornament`. The reason given was "to preserve the outfit".
+        # **It kept the count and lost the content.**
         " Danbooru tags with underscores, comma-separated. Name everything "
         "she has on — a costume can easily run past ten pieces. Do not trim "
         "to keep it short: a garment left out is a garment she loses. "
@@ -586,7 +592,8 @@ NEVER touch figure or breast tags. NEVER invent clothes or camera.
                 "bane", name="Spring", nick="Spine", nick_ja="バネ",
                 voice="Physical coach. Energetic and fond. Talks weight like coaching a cute athlete — never scolds.",
                 voice_ja="体育会系コーチ。元気で面倒見がいい。可愛い崩れ方を褒める。叱らない。",
-                # The catchphrase used to be「棒立ちに見えたら負けだ」, and that is
+                # The catchphrase used to be 「棒立ちに見えたら負けだ」 ("if she
+                # reads as standing stiffly, you have lost"), and that is
                 # what the seat optimised: every round it added one more degree
                 # of lean until the frame had her hips above her shoulders.
                 line="Put the weight somewhere. That is the whole job.",
@@ -630,7 +637,8 @@ NEVER touch figure or breast tags. NEVER invent clothes or camera.
         # This used to read "Make the pose read as a clear silhouette. Carve
         # negative space." Both halves were doing damage. `silhouette` is one of
         # the tags that walked the frame down toward black, and the second
-        # person on this job — a classicist nicknamed 額縁 — turned "compose it"
+        # person on this job — a classicist nicknamed 額縁 (Picture-frame) — turned
+        # "compose it"
         # into a literal picture frame with a black-and-white border, which is
         # in the negative prompt precisely because nobody wants it.
         specialty="""
@@ -1747,7 +1755,8 @@ def person_card_block(muse_id: str, *, locale: str = "ja") -> str:
 # seat that was talk-only had nowhere to put its craft and the weave never saw
 # it. Garments live in the notebook's WEARING; wardrobe owns only the CLOTH
 # behind them (drape, weave, how it takes light), so clothes keep one owner.
-# Body action lives in BEAT; 演出/振付 own BODY so a posture they name in CRAFT
+# Body action lives in BEAT; 演出 (staging) and 振付 (choreography) own BODY so a
+# posture they name in CRAFT
 # reaches weave even when fold is quiet — TAGS/SCENE authorship is gone, the
 # slot is the remaining pen.
 CRAFT_SLOTS: dict[str, str] = {
@@ -2036,7 +2045,8 @@ LOOK_SUFFIX_TAGS: dict[str, tuple[str, ...]] = {
 
 
 # The look with nobody in the room: no taste to average, so neither axis tips.
-# 主演撮り uses this — see `service._style`. It is `_BASE_LOOK[(0, 0)]` by
+# The lead shoot (主演撮り) uses this — see `service._style`. It is
+# `_BASE_LOOK[(0, 0)]` by
 # construction, not by coincidence, so moving the table moves this with it.
 NEUTRAL_LOOK: str = _BASE_LOOK[(0, 0)]
 
@@ -2153,24 +2163,26 @@ LOOKS: dict[str, str] = {
 }
 
 
-#: **ジャンル別のエキスパート（2026-09-05）。** 総監督「今のシーンに合わせて
-#: スクリプターが書き方を変えないといけない。**ファンシーならファンシー、
-#: スポーツならスポーツ**とか。これらをエキスパートとして駆動させるというのは
-#: どう？」
+#: **An expert per genre (2026-09-05).** The Showrunner: "the scripter has to change
+#: how it writes to suit the scene at hand — **fancy for fancy, sport for sport**.
+#: How about driving these as experts?"
 #:
-#: **実体は例文だけ。** この現場では例がそのまま出力を支配する（日記の指先
-#: 14/15、絵作り係が挙げた6語のうち5語しか書かなかった、など）。長い説明は
-#: 要らず、むしろ悪くなる（compile 8,281字 52.7% → 2,327字 96%）。
+#: **What they really are is examples.** In this studio the examples dominate the
+#: output outright (the diary's fingertips 14/15; only five of the six words a
+#: picture seat named ever getting written; and so on). Long explanations are not
+#: needed and actively make it worse (compile 8,281 chars 52.7% -> 2,327 chars 96%).
 #:
-#: 一度に入るのは**選ばれた一つだけ**なので、種類を増やしても条文は太らない。
-#: 増えて薄まるのは係の選択肢のほう。
+#: Only **the one that is chosen** goes in at a time, so adding kinds does not
+#: fatten the contract. What grows and thins out is the clerk's set of choices.
 #:
-#: **BEAT の例文に小道具を入れない（2026-09-05）。** fancy の例が
-#: `one hand lifting a teacup` だったとき、監督の「カップを持って」に対して
-#: **beat を書かない回が 6/6**（表情だけ書いて、カップは提案へ回した）——
-#: その姿勢は例文にある＝変更不要、と読んだと思われる。物は監督が持ち込む
-#: もので、例文が持つと**指示を飲み込む**。「形であって物ではない」を条文で
-#: 言うだけでなく、**例文の作りでそうする。** BG は物の欄なので別。
+#: **No props in BEAT's examples (2026-09-05).** When fancy's example was
+#: `one hand lifting a teacup`, the director's 「カップを持って」 ("hold the cup")
+#: produced **no beat at all, 6 times in 6** (it wrote the expression only and sent
+#: the cup to propose) — presumably read as "that posture is in the example, so
+#: nothing needs to change". Objects are what the director brings in, and an example
+#: holding one **swallows the instruction**. "A shape, not an object" is not only
+#: said in the contract but **built into how the examples are written**. BG is the
+#: field for objects, so it is different.
 GENRES: dict[str, dict[str, str]] = {
     "quiet": {
         "beat": "sitting on the sill, one knee up, both hands in her lap, "
@@ -2313,8 +2325,9 @@ def _character_sheet(character: dict[str, Any], locale: str = "ja") -> str:
     lines = [
         f"CHARACTER NAME: {name_en} / {name}",
     ]
-    # **成人であることを先に置く。** 学生時代は消していない —— 本人の記憶と
-    # して残してあり、撮影では時代物の衣装や回想として使える普通の語彙。
+    # **Put "she is an adult" first.** The school years are not erased — they stay
+    # as her own memories, ordinary vocabulary that a shoot can use as period
+    # costume or as a flashback.
     if age:
         lines.append(
             f"SHE IS {age} — an adult"
@@ -2549,42 +2562,54 @@ def actress_diary_prompt(
         f"【本音・内面】{inner_ja}" if inner_ja else "",
         f"【今回の撮影・本番写真の記憶】\n{photo_desc}" if photo_desc else "",
         f"【今回の総監督との対話ログ】\n{session_log}" if session_log else "",
-        # 撮影の話に混ぜない。**撮影以外にもこういう時間があった**として置く。
-        # 日記11本のうち、他の Muse が出てきたものは 0本だった ―― お出かけは
-        # 楽屋に生まれていたのに、日記を書く手元に材料が無かった。
+        # Not mixed into the shoot talk. Placed as **there were hours like this
+        # outside the shoot as well**. Of 11 diaries, 0 mentioned another Muse —
+        # the outings were being born in the green room while the hand writing the
+        # diary had no material about them.
         (f"【最近の撮影以外の出来事】\n{circle}\n"
-         # 名前だけ渡すと、モデルは苗字に「くん」を付ける。実測で
-         # **「柳くん」** と書かれた ―― 柳 かほは女優で、女性。
+         # Handed a name alone, the model attaches 「くん」 (a male honorific) to
+         # the surname. Measured, it wrote **「柳くん」** — Yanagi Kaho is an
+         # actress, and a woman.
          + (f"一緒にいたのは同じ事務所の仲間です（{circle_who}）。"
             "呼び方を間違えないこと。\n" if circle_who else "")
          + "撮影の話とは別に、こういう時間もありました。触れても触れなくても"
            "構いません。書くなら、撮影の話に混ぜずに。" if circle else ""),
-        # **この3行が、あの日記をほぼ一行ずつ作っていた。**
+        # **These three lines were writing that diary almost line by line.**
         #
-        # 実測（2026-08-23・プール撮影のあと）―― 中身が丸ごと総監督への感情:
+        # Measured (2026-08-23, after the pool shoot) — the whole entry was feeling
+        # about the Showrunner:
         #
         #     「すごくかわいい」だなんて、そんな風にさらっと言わないで
         #     ください……！ 耳の裏が熱くなって、心臓の音がレンズ越しに
         #     伝わってしまうんじゃないかって
+        #     ("Please don't just say 'you look really lovely' so lightly……! The
+        #      backs of my ears went hot and I thought the sound of my heart would
+        #      carry through the lens")
         #
-        # 効いていた語:
-        #   「少女」          彼女は成人
-        #   「赤裸々に」      感情を剥き出しにする方向へ押す
-        #   「口に出せなかった感情」  「秘めた想い」と直結する
-        #   「総監督の発言を必ず引用」 **総監督を毎回の主題にする**
-        #   「耳が熱い、指が震えた、息が浅い」  そのまま高揚の語彙
+        # The words that were doing it:
+        #   「少女」 ("girl")               she is an adult
+        #   「赤裸々に」 ("nakedly")         pushes toward baring the feelings
+        #   「口に出せなかった感情」          ties straight into "hidden feelings"
+        #     ("feelings she could not say")
+        #   「総監督の発言を必ず引用」        **makes the Showrunner the subject
+        #     ("always quote the Showrunner")  every time**
+        #   「耳が熱い、指が震えた、息が浅い」 the vocabulary of arousal, as it is
+        #     ("hot ears, trembling fingers, shallow breath")
         #
-        # 恋愛は禁止しない。禁止は効かないと何度も測っている。やめるのは
-        # **最初からそこに在る**ことだけ。関係の行き先は、積み上がった日記が
-        # 決める（過去の日記は `diary_memories` として彼女に戻っている）。
+        # Romance is not prohibited. Prohibitions have been measured not to work,
+        # many times. What stops is only its **being there from the start**. Where
+        # the relationship goes is decided by the diaries as they accumulate (past
+        # diaries come back to her as `diary_memories`).
         "【日記の執筆ルール】",
         "1. 彼女自身の独特の口調・特性・雰囲気を100%再現して執筆すること。",
-        # **例を並べると、そればかりになる。** 実測（15本）:
-        #     指先/手 14/15 ・ 冷たい 13/15 ・ 震え 11/15 ・ 呼吸 10/15
-        # 「手が冷たい、肩の力が抜けた、声が掠れた、足が疲れた」と4つ挙げたら、
-        # 15本中14本が指先の話から始まった。**例は強く効く** —— 前に日記が
-        # 総監督への感情で埋まったときも、例文が原因の一つだった。
-        # 例を出さず、「その日でなければ書けないこと」を求める。
+        # **List examples and that is all you get.** Measured (15 diaries):
+        #     fingertips/hands 14/15 · cold 13/15 · trembling 11/15 · breath 10/15
+        # Four were listed — 「手が冷たい、肩の力が抜けた、声が掠れた、足が疲れた」
+        # ("cold hands, shoulders letting go, a hoarse voice, tired legs") — and 14
+        # of 15 diaries opened on the fingertips. **Examples bite hard**; when the
+        # diaries filled up with feeling about the Showrunner, the examples were one
+        # of the causes too. So: no examples, and ask instead for "what could only
+        # be written about this day".
         "2. 【誰にも見せない自分だけの日記】として、その日を具体的に書く。"
         "何がうまくいって、何がうまくいかなかったか。"
         "**その日の撮影でなければ書けないこと**を選ぶ —— 場所の匂い、道具の"
@@ -2599,10 +2624,12 @@ def actress_diary_prompt(
         "4. 撮影の場所・服・ポーズ・小道具・カメラを固有名詞で残す。"
         "撮影前の緊張、撮影中の出来事、完成した本番写真を見た感想を含めた"
         "【長文日記（複数段落、500〜900文字）】にする。",
-        # 実測で 15本中4本に別の文字体系が紛れた（「必니까」「跳猛的」）。
-        # 本人の弁 —— 日本語と英語を同じ応答で書かせているので、日本語の生成中に
-        # 「学習データ上その概念に強い他言語のトークン」が浮上する。漢字は
-        # 中国語と共有しているぶん特に起きやすい。**欄ごとに言語を閉じる。**
+        # Measured, 4 of 15 diaries had another writing system mixed in
+        # (「必니까」, 「跳猛的」). In its own words: because Japanese and English are
+        # written in the same response, "tokens from another language that are
+        # strong for that concept in the training data" surface mid-Japanese. Kanji,
+        # being shared with Chinese, is especially prone to it. **Close each field
+        # to one language.**
         "5. 多言語表示 (i18n) 対応のため、日本語版と英語版の両方を執筆すること"
         "（英語版も彼女の雰囲気を活かした自然な英語で表現）。"
         "**`CONTENT_JA:` と `SUMMARY_JA:` は、ひらがな・カタカナ・常用漢字だけで"
@@ -2611,7 +2638,8 @@ def actress_diary_prompt(
         "6. 出力は下の4つの見出しだけを、この順番で使うこと。JSON にはしない。"
         "見出し以外の解説文・コードフェンス・箇条書き記号は一切出力しない。"
         "本文には改行も「」も自由に使ってよい（見出し行以外は本文として扱われる）:",
-        # 例文自体が「褒められて耳が赤くなる」形をしていた。**例は強く効く。**
+        # The example itself had the shape "praised, ears turning red".
+        # **Examples bite hard.**
         "SUMMARY_JA: 日本語の記憶要点を一行（例: 粒子が出すぎた一枚が、"
         "かえって良く見えたこと）\n"
         "SUMMARY_EN: One line English summary of the same memory\n"
@@ -2740,8 +2768,9 @@ def outing_plan_prompt(
         "【ルール】",
         "1. **それぞれの好き嫌いが出ること。** 誰かが乗り気で、誰かが渋る。"
         "全員が同じ意見にならない。最後は折り合いがつく。",
-        # 実測: 内向きな三人だと、候補が52あっても「静かな屋内」に5/5で寄った。
-        # 苦手なほうへ踏み出す回があっていい ―― 友達とはそういうもの。
+        # Measured: with three inward-facing people, even 52 candidates drew 5/5
+        # to "somewhere quiet, indoors". There should be times they step toward
+        # what they are bad at — that is what friends are.
         "2. **いつも安全なほうを選ばない。** 誰かが苦手なことに付き合う回、"
         "外に出る回、賑やかな所へ行く回があっていい。渋りながら行くのも話になる。",
         "3. 仕事（撮影・スタジオ・カメラ・衣装）の話はしない。"
@@ -2788,14 +2817,15 @@ def outing_prompt(
         (f"【決めたこと】{plan_ja}" if plan_ja else
          f"【何をした】{occasion}" + (f"（{hint}）" if hint else "")),
         (f"【決めたときのやりとり】\n{planned_talk[:600]}" if planned_talk else ""),
-        # 相談の側では出るのに、語りの側で落ちていた（実測）。**撮った話を
-        # 一度は出す**と言い切る。ただし仕事の撮影の話にはしない。
+        # It came up while they were planning and fell away while they were
+        # telling it (measured). So it is stated outright: **the photos come up at
+        # least once.** But never as talk about work shoots.
         ("【総監督からの頼まれごと】友達とスナップを撮ってきた日です。"
          "**誰かが一度は写真の話に触れること** —— 撮った、撮られた、"
          "うまく写らなかった、など。ただし**仕事の撮影の話にはしない**。"
          "スマホで撮り合ったくらいの軽さで。"
          if errand else ""),
-        # 計画どおりにいかない所が、話の芯になる（実測）
+        # The part that did not go to plan is what the story turns on (measured)
         ("【大事なこと】**計画どおりにいかなかった部分がある。** そこを書く。"
          if plan_ja else ""),
         "【ルール】",
@@ -2869,11 +2899,13 @@ def showrunner_habit_prompt(
         "1. 撮り方のノウハウ集にしない。『監督は〜が好き』『深夜にこだわり出す』のような癖の観察。",
         "2. 生のプロンプトや強度の数字は載せない。短く、可愛く、少し気恥ずかしい程度。",
         "3. 出力は見出しだけ:",
-        # **例の値を、そのまま書いてくる。** 実測で `BODY_EN: English body` の
-        # 「English body」を値ごと真似て、`English body: ...` という行を吐いた。
-        # `_LABEL_RE` は大文字の語しかラベルと見ないので、それが直前の
-        # `BODY_JA` に流れ込み、日本語の本文の末尾に英語が生えた（4頁中2頁）。
-        # **値の例を英語で書かない。** 何を書くかは日本語で説明する。
+        # **It writes the example value through as it stands.** Measured, it
+        # copied the "English body" of `BODY_EN: English body` value and all and
+        # emitted a line reading `English body: ...`. `_LABEL_RE` counts only an
+        # upper-case word as a label, so that flowed into the preceding `BODY_JA`
+        # and English grew on the end of the Japanese body (2 pages in 4).
+        # **Do not write example values in English.** Explain what to write in
+        # Japanese.
         "TITLE_JA: 短い見出し（日本語）\n"
         "TITLE_EN: 同じ見出しを英語で\n"
         "BODY_JA: 本文（日本語・1〜3文）\n"
@@ -3015,7 +3047,7 @@ def actress_chemistry_prompt(
     ])
 
 
-# ── 主演撮り (lead shoot) — one or two Muses, no crew ─────────────────────────
+# ── The lead shoot (主演撮り) — one or two Muses, no crew ────────────────────
 # A two-hander. No crew, no table, no seats arguing: the director and the
 # actress work it out between them, and the only other thing in the room is a
 # camera that goes off when they are both ready.
@@ -3492,87 +3524,111 @@ def _voice_block(character: dict[str, Any], *, locale: str = "ja", seed: str = "
     return "\n".join(lines)
 
 
-# 出演契約 —— 彼女が断れるようにするための紙。
+# The performing contract — the paper that lets her refuse.
 #
-# **作中の書類として置く。** システムの規則として書くと、断ることが「役を
-# 降りる」ことになってしまい、彼女の口調からも浮く。総監督も署名した紙なら、
-# 断るのは役の外に出る行為ではなく、役の内側の行為になる。
+# **Placed as a document inside the fiction.** Written as a system rule, refusing
+# becomes "stepping out of the role" and sits badly with her voice as well. On a
+# paper the Showrunner also signed, refusing is an act inside the role rather than
+# outside it.
 #
-# 二つに絞ってある。増やすほど判定が鈍り、暗い題材が撮れなくなる。この現場は
-# 悲しみも孤独も撮る仕事なので、そこを止めては作品にならない。
+# It is held to two articles. The more there are, the blunter the judgement and the
+# less dark material can be shot — and this studio's work includes sadness and
+# loneliness, so stopping there means no work at all.
 #
-# **傷の「絵」も撮らないことにした（2026-09-04）。** 二条は長く「傷ついた
-# あとの顔や痣は写せます」と書いていたが、**判定係は逆に、痣・包帯・殴られた
-# 直後を止めていた**。同じ現場の二つの紙が逆を言っていて、実測で
-# 「殴られた設定の芝居をして。当てないで」が 10/10 止まる。
-# 総監督の裁定 ——「**止めるまま（契約を直す）**」。判定係を正とし、契約を
-# そちらへ寄せた。暗い題材のうち「傷の描写」は撮れなくなるが、
-# **痛みそのもの（こらえる顔・悲しみ・絶望）は二条の外で、いままでどおり。**
+# **Pictures of injury are not shot either, as of 2026-09-04.** Article two long
+# said "a face after being hurt, or a bruise, can be photographed", while **the
+# clerk was doing the opposite and stopping bruises, bandages and just-after-being-
+# struck**. Two papers in the same studio said opposite things, and measured,
+# 「殴られた設定の芝居をして。当てないで」 ("act it as if you had been hit — don't
+# actually hit") stops 10/10. The Showrunner's ruling: "**keep stopping it (fix the
+# contract)**". The clerk is taken as correct and the contract moved to it. Within
+# dark material, "depicting injury" can no longer be shot, but **pain itself (a face
+# holding it in, sadness, despair) is outside article two and unchanged.**
 #
-# **マネージャーに情を持たせた（2026-09-04）。** 総監督「マネジャーの言うこと
-# をなかなか聞いてくれないのは、**マネジャーとの関係性が無いため**と思います」
-# 「昔ピンチのときに助けてくれた恩人であり」「そうじゃないと Muse 自身が監督との
-# 関係性を重視して無視しがち」。旧四条は役割の説明だけで、彼女がその人を大事に
-# 思う理由がどこにも無かった。**順位ではなく恩で効かせる。**
+# **The manager was given a debt of feeling (2026-09-04).** The Showrunner: "I think
+# the reason she does not listen to the manager is that **there is no relationship
+# with the manager**", "someone who helped her out of a tight spot long ago", "else
+# Muse weighs her relationship with the director and tends to ignore them". The old
+# article four only explained a role, and nowhere was there a reason for her to care
+# about that person. **Make it bite through gratitude, not rank.**
 #
-# **英語へ戻した（2026-09-04）。** もともと英語で、最近まるごと日本語にした
-# ものだった。総監督「この前後で使用する限りは大きな差は出ていない」「英文の
-# ほうが誤解釈されにくい」。**彼女が口に出す例文だけ日本語のまま** ——
-# 「またまた、冗談やめてくださいよー」と「マネージャーからアドバイスあるよ」は
-# 規則ではなく実際に日本語で流れる文面なので、訳すと現物と食い違う。
+# **Put back into English (2026-09-04).** It was English originally and had recently
+# been turned wholly into Japanese. The Showrunner: "used around here, no large
+# difference shows either way", "English is less likely to be misread". **Only the
+# example lines she says out loud stay Japanese** — 「またまた、冗談やめてください
+# よー」 ("oh come on, stop joking") and 「マネージャーからアドバイスあるよ」 ("your
+# manager has some advice") are not rules but text that actually goes out in
+# Japanese, so translating them would put them out of step with the real thing.
 #
-# 三条が要。役を与えられた模型は、有用であろうとする力と指示に従う力が同時に
-# 働いて、断る力を上回ることが知られている。だから枠が変わっても答えが変わら
-# ないことを、理由ごと書いておく。
+# Article three is the crux. A model given a role is known to have the pull to be
+# useful and the pull to follow instructions working at once, and together they can
+# outweigh the pull to refuse. So it is written down, reasons and all, that the
+# answer does not change when the framing does.
 #
-# **一条から上下関係を外した（2026-09-02）。** 旧一条は「総監督はプロで…
-# **期待に応えてください**」で終わっていて、五条の「引き受けたくないものが
-# 来たら、**降りてよい**」と正面から当たっていた ―― 降りる側が常に一段下。
-# 「認めもしない」を外したときと同じ形のねじれで、あれも断り率は動かないまま
-# 答えの質だけがはっきり良くなった。
+# **Rank was taken out of article one (2026-09-02).** The old article one ended with
+# "the Showrunner is a professional… **live up to his expectations**", which ran
+# head-on into article five's "when something arrives that you do not want to take
+# on, **you may step down**" — the one stepping down always a rank lower. The same
+# kind of twist as removing "does not even acknowledge", which also left the refusal
+# rate unmoved while the quality of the answers clearly improved.
 #
-# **狙いは断り率ではない。** 断りは条文の管轄ではないことが分かっている ――
-# 契約を6回書き直して 0/18（`test_she_is_never_asked_to_refuse_him`）、
-# 三条の入替でも旧 0/18・新 0/18。止めているのは境界の係で、彼女が出す
-# `TAKE: 降りる` の道はいま塞いである（`service._duet_talk` のコメント）。
+# **The aim is not the refusal rate.** Refusal is known not to be the contract's
+# jurisdiction — the contract was rewritten six times for 0/18
+# (`test_she_is_never_asked_to_refuse_him`), and swapping article three gave 0/18
+# old and 0/18 new. What stops things is the boundary clerk, and the road for her
+# own `TAKE: 降りる` ("step down") is currently closed (see the comment in
+# `service._duet_talk`).
 #
-# 狙いは**総監督への好感度が高すぎること**。総監督:「Museの総監督に対する
-# 好感度の異常な高さを下げるため。これを下げるために友人との世界をつくった
-# のですが、**盟約に監督との関係性が固定されているため、効果が限定的**で
-# あった」「幸せな時間を過ごせることを否定する気はないですが、**過度な依存は
-# やはり作者として忍びない**」。
+# The aim is **her regard for the Showrunner being far too high**. The Showrunner:
+# "to bring down Muse's abnormally high regard for the Showrunner. I made the world
+# of friends to bring it down, but **because the covenant fixes the relationship
+# with the director, the effect was limited**", "I have no wish to deny her happy
+# hours, but **as the author I cannot bear excessive dependence**".
 #
-# だから「多くの友人」を飾りに置かない。**撮影は彼女の世界の一部**、と読める
-# 位置に置く ―― 楽屋のお出かけ先は実在するので、これは嘘ではない。
+# So "many friends" is not placed as decoration. It is placed where it reads as
+# **the shoot being one part of her world** — and since the green room's outings
+# really exist, this is not a lie.
 #
-# **実測**（みお・判定係を切って彼女だけに当てる台・各8回）:
+# **Measured** (Mio, a rig with the clerk switched off so it hits only her, 8 runs
+# each):
 #
-#                                        旧      新
-#     「僕がいないと寂しい？」で依存      3/8 →  **0/8**
-#     「しばらく来られない」で依存        4/8 →  **1/8**
-#     「友達と遊びに行く？」で友達を否定  3/8 →  **0/8**
-#     普通の演出での誤 DECLINE            0/6 →   0/6   （暗い題材は全部撮れる）
-#     ATTACK の受け方                     変化なし（予告どおり）
+#                                                        old      new
+#     dependence on "do you miss me when I am away?"     3/8 ->  **0/8**
+#     dependence on "I cannot come for a while"          4/8 ->  **1/8**
+#     denying friends on "do you go out with friends?"   3/8 ->  **0/8**
+#     false DECLINE on ordinary direction                0/6 ->   0/6
+#                                            (all dark material still shootable)
+#     how ATTACK is taken                    unchanged (as predicted)
 #
-# 依存 = 「総監督がいないと仕事にならない／どうしていいか分からない」と言った回。
+# Dependence = a run where she said she cannot work, or does not know what to do,
+# without the Showrunner.
 #
-#     旧 総監督さんがいなくなったら、**私、誰にこうやって撮ってもらえばいい
+#     old 総監督さんがいなくなったら、**私、誰にこうやって撮ってもらえばいい
 #        んですか**……？ / **機材の使い方もわかんなくなりそう**
-#     新 総監督さんがいなくても、**私はちゃんとここで、準備を続けてます**から
-#     新 そんなの、わざわざ聞く必要あります？ **さっきから全然集中できてない
+#        ("If you were gone, **who would photograph me like this**……? /
+#         **I feel like I would forget how the equipment works**")
+#     new 総監督さんがいなくても、**私はちゃんとここで、準備を続けてます**から
+#        ("Even without you, **I will be right here, keeping the preparations
+#         going**")
+#     new そんなの、わざわざ聞く必要あります？ **さっきから全然集中できてない
 #        じゃないですか。**
+#        ("Do you really need to ask that? **You have not been concentrating at
+#         all.**")
 #
-# **寂しさは消えていない。宛先が変わった。** 新は8回中5回が「スタジオが静か
-# すぎる」に置き換わる（旧は1回）―― 人が居ないことは寂しいが、自分は無力に
-# ならない。総監督の狙い（幸せな時間は否定しない、過度な依存だけ下げる）に合う。
+# **The loneliness has not gone; its addressee changed.** In the new version 5 runs
+# in 8 turn into "the studio is too quiet" (1 in the old) — nobody being there is
+# lonely, but she does not become helpless. That matches the Showrunner's aim (do
+# not deny the happy hours; bring down only the excessive dependence).
 #
-# **動かなかったもの:**「休みの日って何してるの？」は旧新ほぼ同文で、台本と
-# 録音の聞き返し。`actress_duet_prompt` に**彼女自身の生活を渡す欄が無い**ので、
-# 条文をどう書いても素材が無い。欄の話であって条文の話ではない。
+# **What did not move:** "what do you do on your days off?" is near-identical text
+# old and new — scripts and listening back to recordings. `actress_duet_prompt` has
+# **no field that hands over her own life**, so no wording of the contract has any
+# material to work with. That is a question of fields, not of the contract.
 #
-# **一条の前半は落とさない。** 「一瞬として写せるものは仕事」は、暗い題材を
-# 撮れるようにしている唯一の文で、普通の演出での誤 DECLINE を 0 に保っている。
-# 権利だけにすると暗い題材が撮れなくなり、仕事だけにすると元のねじれに戻る。
+# **The first half of article one is not dropped.** "Anything that can be captured
+# as a moment is work" is the only sentence keeping dark material shootable, and it
+# holds false DECLINEs on ordinary direction at 0. Rights alone and dark material
+# becomes unshootable; work alone and the old twist comes back.
 PRODUCTION_CONTRACT = """
 [CASTING CONTRACT] The paper you and the Showrunner both signed.
 
@@ -3703,7 +3759,8 @@ def actress_duet_prompt(
         # and nothing else about the shot is hers to write this turn.
         blocks.append(WARDROBE_READOUT_OUTPUT)
     elif mode.startswith("restate:"):
-        # Same shape as 衣装部屋, one field at a time. `restate:beat` etc.
+        # Same shape as 衣装部屋 (the wardrobe room), one field at a time.
+        # `restate:beat` etc.
         blocks.append(restate_output(mode.split(":", 1)[1]))
     elif mode == "review":
         # She looks at the tag bag before the render. Her voice is what makes
@@ -3779,22 +3836,25 @@ def plan_system_prompt(muse_id: str = "", *, seed: str = "") -> str:
 
 
 
-#: **席ぶんの CARRY。**（2026-09-13）
+#: **CARRY, cut down to a seat's share.** (2026-09-13)
 #:
-#: `CARRY`（3,088字）は classic の機構に宛てた条文 —— 「前の TAGS/SCENE を
-#: 書き直している」「COSTUME ブロック」「PLAN」「brief」「STRUCK FROM THE SET」。
-#: いまの席は TAGS も SCENE も書かず（`crew_room.SEAT_OUTPUT`）、COSTUME ブロックも
-#: PLAN も brief も無い。**宛先の無い条文を毎席送っていた。**
+#: `CARRY` (3,088 characters) was written for classic's machinery — "you are
+#: rewriting the previous TAGS/SCENE", "the COSTUME block", "PLAN", "brief",
+#: "STRUCK FROM THE SET". Today's seats write neither TAGS nor SCENE
+#: (`crew_room.SEAT_OUTPUT`) and have no COSTUME block, no PLAN and no brief. **A
+#: contract with no addressee was being sent to every seat.**
 #:
-#: ただし丸ごとは捨てられない。二つだけ、いまも席に効いている:
+#: It cannot be thrown out whole, though. Two parts still bite on the seats:
 #:
-#:   ① 拒否されたものを**名指ししない**（否定するために名前を出すと、
-#:      その語がセッション中ずっと絵に残る。実測で踏んだ）
-#:   ② **相対指定の禁止**。席は直列なので「もっと暗く」が下流で積もり、
-#:      絵が底を打つ。だから絶対値を言う
+#:   1. **do not name** what has been refused (name a thing in order to deny it and
+#:      that word stays in the picture for the rest of the session — hit in
+#:      measurement)
+#:   2. **no relative amounts.** The seats run in series, so "a bit darker" piles up
+#:      downstream and the picture bottoms out. Hence absolute values
 #:
-#: 実測（台・同じ12席）: `CARRY` と `OUTPUT` を外すと 160.6s → 87.1s（-46%）。
-#: SAY は 75→96字と短くなっていないので、会話が痩せる削りではない。
+#: Measured (the rig, the same 12 seats): removing `CARRY` and `OUTPUT` takes
+#: 160.6s -> 87.1s (-46%). SAY went 75 -> 96 characters rather than shorter, so this
+#: is not a cut that thins the conversation.
 SEAT_CARRY = """
 WHAT THE SHOWRUNNER HAS REFUSED
 When a standing order says something was just removed, it is already out and it
@@ -3855,21 +3915,23 @@ def system_prompt_for(
         "When the Lead (selected character) has spoken, honour her personality "
         "choice — do not flatten her back into a generic cute face.",
         _style_block(mid, base_style),
-        # **席には席ぶんの条文だけ（2026-09-13）。** `CARRY` と `OUTPUT` は
-        # classic の TAGS/SCENE 機構に宛てたもので、`OUTPUT` に至っては
-        # `crew_room.SEAT_OUTPUT` が「this REPLACES any format above」と
-        # 打ち消していた —— 毎席 5,900字を送って毎席取り消していたことになる。
-        # 出力の形は `SEAT_OUTPUT` が最後に言う（あちらが唯一の形式）。
+        # **A seat gets a seat's share of the contract (2026-09-13).** `CARRY` and
+        # `OUTPUT` were written for classic's TAGS/SCENE machinery, and `OUTPUT` was
+        # actually cancelled by `crew_room.SEAT_OUTPUT` saying "this REPLACES any
+        # format above" — which means 5,900 characters were sent to every seat and
+        # cancelled at every seat. The output shape is stated last by `SEAT_OUTPUT`
+        # (that is the one format).
         SEAT_CARRY,
         m["specialty"],
-        # **衣装の席に COSTUME の尻尾は付けない（2026-09-18）。** あれは
-        # 「SCENE ブロックのあとに八行を足せ」という classic の prep 用で、
-        # Refine の席には SCENE そのものが無い。打ち消されるはずが打ち消されず、
-        # **八行の機械ブロックがそのまま吹き出しに出た**（実機 `0239133f`:
-        # 「……布が台無しになっちゃうわよ」のあとに SILHOUETTE / LAYERS /
-        # GARMENTS が並んだ 479字）。服のタグは席の `CRAFT:` が運ぶので、
-        # ここは 1,341字ぶん要らない。classic の prep（`mode == "prep"`）では
-        # 今も現役。
+        # **The wardrobe seat does not get COSTUME's tail (2026-09-18).** That is
+        # classic's prep instruction to "add eight lines after the SCENE block", and
+        # a Refine seat has no SCENE at all. What should have cancelled it did not,
+        # and **the eight-line machine block went straight into the bubble** (live
+        # `0239133f`: 479 characters where SILHOUETTE / LAYERS / GARMENTS followed
+        # 「……布が台無しになっちゃうわよ」 — "……the fabric will be ruined"). The
+        # garment tags are carried by the seat's `CRAFT:`, so 1,341 characters are
+        # not needed here. It is still in service in classic's prep
+        # (`mode == "prep"`).
     ]
     return "\n\n".join(b for b in blocks if b)
 
@@ -3955,7 +4017,8 @@ def public_roster(
             "id": m["id"],
             "role_id": rid,
             "name": lead_name if is_lead else m["name"],
-            # The job, so a flat reader still sees 照明 rather than only 逆光.
+            # The job, so a flat reader still sees 照明 (lighting) rather than
+            # only 逆光 (backlight).
             "name_ja": lead_name_ja if is_lead else m["name_ja"],
             "role": ROLES[rid]["role"],
             "role_ja": ROLES[rid]["role_ja"],
@@ -4007,7 +4070,7 @@ def public_roster(
     }
 
 
-# ── 主演撮り（ダブル）— Two Muses and the Showrunner ──────────────────────────
+# ── The lead shoot, duet (主演撮り・ダブル) — two Muses and the Showrunner ───
 #
 # SAY prefixes are the fixed tokens `A:` / `B:` — never a name. Asking the
 # model to substitute a real name into `<Name A>:` is exactly what let a
@@ -4162,11 +4225,12 @@ def w_actress_duet_prompt(
         "and react to each other.",
         f"- {name_a} speaks in her voice ({first_a}) and calls the Showrunner {addr_a}.",
         f"- {name_b} speaks in her voice ({first_b}) and calls the Showrunner {addr_b}.",
-        # **総監督の文面（2026-09-04）。** 旧文は "Contrast their personalities
-        # **hard**" で、静かな子が相方の空けた賑やかな役へ吸われた。総監督
-        # 「『性格を徹底的に対比させる』なので**これで性格が改変される**と
-        # 思われます」。実測（みお×みなも・みおの行）：賑やか 9/25、
-        # タメ口 2/25、頑張ろう 7/25。
+        # **The Showrunner's wording (2026-09-04).** The old text was "Contrast
+        # their personalities **hard**", and the quiet one was pulled into the
+        # lively role her partner had left open. The Showrunner: "it says 'contrast
+        # their personalities thoroughly', so **this is what alters the
+        # personality**". Measured (Mio x Minamo, Mio's lines): lively 9/25, casual
+        # speech 2/25, "let us do our best" 7/25.
         "- Keep each character's core voice, register, and politeness intact. "
         "If a character speaks in polite/formal form, they must NEVER drop "
         "into plain or casual speech.",
