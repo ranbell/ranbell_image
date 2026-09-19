@@ -1,16 +1,17 @@
-"""**二人のとき、会話と内心を分ける。**（2026-09-10）
+"""**With two people, split the talk and the mutters.** (2026-09-10)
 
-総監督「Muse Refine で2人で会話しているときに会話分離ができてないですね。
-Muse Classic を参考に修正お願い」「内心を話すときもどちらかランダムで」
-「みおにたいしてあさひとよんでたりするので」。
+The Showrunner: "when two are talking in Muse Refine the conversation is not being
+separated. Please fix it, taking Muse Classic as the reference", "the mutters too,
+one or the other at random", "it calls Mio Asahi and so on".
 
-実機（`83d31174`）では全25行が主演名義の一行に潰れ、本文に私（みお）とアタシ
-（あさひ）が同居していた。分ける側（`identity.parse_duet_speakers`）は最初から
-呼ばれていて、**接頭辞を書けという指示だけが届いていなかった** —— それは classic
-の出力書式の末尾にしか無く、`_without_classic_output` が落としている。
+Live (`83d31174`) all 25 lines collapsed into one line under the lead's name, with
+私 (Mio's "I") and アタシ (Asahi's "I") sharing a body of text. The splitter
+(`identity.parse_duet_speakers`) had been called from the start — **only the
+instruction to write the prefix never arrived**: it lived at the tail of classic's
+output format, which `_without_classic_output` drops.
 
-**そして一人の会話を壊さないこと。** ここが総監督のいちばんの制約なので、
-solo 側は「入っていないこと」を明示的に測る。
+**And the solo conversation must not break.** That is the Showrunner's first
+constraint, so the solo side is measured explicitly for "none of it is there".
 """
 from __future__ import annotations
 
@@ -47,7 +48,7 @@ def test_the_duet_contract_asks_for_labels():
 
 
 def test_a_solo_shoot_never_sees_any_of_it():
-    """**一人の会話を壊さない。** W の言葉が一つも入らないこと。"""
+    """**The solo conversation does not break.** Not one word of the duet gets in."""
     got = persona.actress_system(
         _session(partner=False), locale="ja", ledger={}, now="",
     )
@@ -57,7 +58,7 @@ def test_a_solo_shoot_never_sees_any_of_it():
 
 
 def test_the_gate_is_the_partner_not_the_mode():
-    """`mode` で切ると一人の撮影まで W になる（実機109件中85件がそれ）。"""
+    """Gate on `mode` and solo shoots turn into duets too (85 of 109 live sessions)."""
     s = _session(partner=False)
     s["mode"] = "duet"           # 実機はこうなっている
     assert "W-MUSE" not in persona.actress_system(s, locale="ja", ledger={}, now="")
@@ -87,7 +88,8 @@ def test_labelled_lines_become_two_rows():
 
 
 def test_the_mutter_belongs_to_whoever_muttered():
-    """内心が `B:` なら、相方の名義で出る（総監督「どちらかランダムで」）。"""
+    """If the mutter is `B:`, it appears under the partner's name (the Showrunner: "one
+    or the other at random")."""
     rows = _publish("A: どうぞ。\nB: はいはい。", aside="B: （……緊張してるのかな）")
     banter = [r for r in rows if (r.get("meta") or {}).get("kind") == "banter"]
     assert len(banter) == 1
@@ -98,7 +100,8 @@ def test_the_mutter_belongs_to_whoever_muttered():
 
 
 def test_an_unlabelled_turn_still_lands_on_the_lead():
-    """守らなかった回でも黙って落ちない —— 今まで通り主演名義の一行。"""
+    """A turn that ignored the format still does not fail silently — one line under the
+    lead's name, as before."""
     rows = _publish("準備できました。")
     says = [r for r in rows if (r.get("meta") or {}).get("kind") == "say"]
     assert len(says) == 1
@@ -106,7 +109,7 @@ def test_an_unlabelled_turn_still_lands_on_the_lead():
 
 
 def test_a_solo_turn_is_never_split():
-    """相方が居ない回に `A:` が来ても、二人に割らない。"""
+    """An `A:` on a turn with no partner is not split into two."""
     rows = _publish("A: ひとりです。", partner=False)
     says = [r for r in rows if (r.get("meta") or {}).get("kind") == "say"]
     assert len(says) == 1

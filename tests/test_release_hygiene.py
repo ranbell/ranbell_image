@@ -1,22 +1,24 @@
-"""**配るものに、この作業場の素性を載せない。**（2026-09-13）
+"""**What ships does not carry this workshop's identity.** (2026-09-13)
 
-総監督のリリース前点検。git に載るコードに
+The Showrunner's pre-release check. That the code that lands in git contains
 
-    ① 個人情報（実名・メール・自宅の IP・手元のパス）
-    ② 総監督が使っている画像モデルの名前
-    ③ 非検閲版モデルの素性
+    1. personal details (real names, email, the home IP, local paths)
+    2. the name of the image model the Showrunner uses
+    3. the identity of uncensored models
 
-が入っていないことを、**読むだけで**確かめる。実際に3箇所あった:
+is verified **by reading alone**. Three places really had it:
 
     tests/api/test_muse_image_filter.py   models=["nyaIris.safetensors"]
-    tests/muse/test_facets.py             docstring に模型の完全な id
-    backend/app/muse/identity.py          コメントに「uncensored 版」と、その理由
+    tests/muse/test_facets.py             a model's full id in a docstring
+    backend/app/muse/identity.py          a comment naming the "uncensored build"
+                                          and why
 
-どれも動作には関わらない飾りだった。**飾りは戻ってきやすい** —— 実測を書き足す
-ときに、つい「どの模型で測ったか」を添える。だから番人を置く。
+None of it affected behaviour; all of it was decoration. **Decoration comes back**
+— writing up a measurement, one naturally adds "which model it was measured on".
+Hence a watchman.
 
-走査は `git ls-files` 基準。**`private/` は入らない**（`.gitignore`）ので、
-台の道具は今までどおり実機の名前を書いてよい。
+The scan is over `git ls-files`. **`private/` is not included** (`.gitignore`), so
+the lab tools may keep writing real machine names as before.
 """
 from __future__ import annotations
 
@@ -82,6 +84,6 @@ def test_nothing_in_git_carries_it(pattern: str, why: str):
 
 
 def test_the_lab_is_out_of_scope():
-    """`private/` は走査に入らない —— 台の道具は実機の名前で書いてよい。"""
+    """`private/` is outside the scan — the lab tools may write real machine names."""
     assert not any(p.startswith("private/") for p in _tracked_text_files())
     assert (ROOT / "private").is_dir(), "台そのものは在る（git 管理外なだけ）"

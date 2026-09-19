@@ -1,9 +1,10 @@
-"""セッションの一覧と、撮影ログへの道。
+"""Listing sessions, and the road to the shoot log.
 
-元は班の講評（`report.py`）の試験だったが、講評ごと
-`private/muse_classic/` へ退いた（2026-09-12）。**残ったのはここの4本** ——
-`session_db.list_recent` の並びとスタジオの仕切り、それに秘密の日記から
-その日の会話ログへ辿る道。どちらも生きている。
+This was originally the test for the crew's review (`report.py`), but the review
+and all retired into `private/muse_classic/` (2026-09-12). **What remains is these
+four** — `session_db.list_recent`'s ordering and the partition between studios,
+plus the road from the secret diary to that day's conversation log. Both are
+alive.
 """
 from __future__ import annotations
 
@@ -60,11 +61,11 @@ async def test_recent_sessions_are_the_newest_not_an_arbitrary_handful():
 
 @pytest.mark.asyncio
 async def test_the_two_studios_do_not_show_up_in_each_others_lists():
-    """**Muse Refine は同じコレクションに座っている（2026-09-07）。**
+    """**Muse Refine sits in the same collection (2026-09-07).**
 
-    絞らないと、classic の一覧から Refine のセッションが開けてしまう ——
-    手帖を持たないセッションを classic の経路が読むことになる。席の成績
-    レポートにも混ざって数字が薄まる。
+    Without a filter, a Refine session can be opened from classic's list — a
+    session with no notebook read by classic's path. It would also mix into the
+    seat scorecards and dilute the numbers.
     """
     from app.muse import session_db
 
@@ -87,10 +88,10 @@ async def test_the_two_studios_do_not_show_up_in_each_others_lists():
 
 
 def test_diary_shoot_log_route_exists():
-    """秘密の日記から、その撮影の会話ログへ辿れること。
+    """The secret diary can lead back to that shoot's conversation log.
 
-    日記は最初から `session_id` を持っていた（"so the entry can lead back to
-    it"）のに、辿る道が無かった。
+    The diary had carried `session_id` from the start ("so the entry can lead back
+    to it") and there was no road to follow it.
     """
     from app.characters import api as characters_api
     paths = [r.path for r in characters_api.router.routes]
@@ -98,7 +99,8 @@ def test_diary_shoot_log_route_exists():
 
 
 def test_machine_lines_are_kept_out_of_the_shoot_log():
-    """タグ名の羅列は人が読むログに出さない（古いセッションにだけ残っている）。"""
+    """Runs of tag names stay out of the log a person reads (they survive only in old
+    sessions)."""
     from app.characters.api import _MACHINE_LINE_RE
     assert _MACHINE_LINE_RE.match("（外しました: sitting、close-up。以降は書き戻されません）")
     assert _MACHINE_LINE_RE.match("（構成「間取り」が片付けました: concrete_blocks）")

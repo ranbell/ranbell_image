@@ -1,16 +1,18 @@
-"""**「missing」が嘘をつかないこと。**（2026-09-10）
+"""**"missing" must not lie.** (2026-09-10)
 
-総監督「テスト中だけど、ずっと missing と出ているけど理由は？」。
+The Showrunner: "I am still testing, but it keeps saying missing — why?"
 
-値は絵にちゃんと入っていた。突き合わせ方が揃っていなかっただけ:
+The values were in the picture all along. Only the comparison was misaligned:
 
-    台帳          casual_clothes      ← writer は danbooru 風に下線で書く
-    craft.prompt  casual clothes      ← `anima.format_for_anima` が最後に
-                                         下線を空白へ戻す
-    重なり        （無し）→ 「in ledger, missing in craft.prompt」
+    ledger        casual_clothes      <- the writer writes danbooru-style, with
+                                         underscores
+    craft.prompt  casual clothes      <- `anima.format_for_anima` turns underscores
+                                         back into spaces at the end
+    overlap       (none) -> "in ledger, missing in craft.prompt"
 
-もう一つ、会話のターンでは `craft.prompt` が**一手ぶん古い**（撮る時まで
-組み直しを待つ `assemble.touch_craft`）。そこで比べると毎ターン嘘が並ぶ。
+And on a conversation turn `craft.prompt` is **one move old** (`assemble.
+touch_craft` waits until the shot to rebuild it). Comparing there lines up lies
+every turn.
 """
 from __future__ import annotations
 
@@ -27,7 +29,8 @@ def _session(led: dict, prompt: str, *, stale: bool = False, board: str = ""):
 
 
 def test_an_underscored_value_counts_as_present():
-    """台帳の `casual_clothes` と絵の `casual clothes` は同じもの。"""
+    """The ledger's `casual_clothes` and the picture's `casual clothes` are the same
+    thing."""
     s = _session({"wearing": "casual_clothes"},
                  "2girls, Mio: casual clothes, big smile,")
     assert P._divergences(s) == []
@@ -40,27 +43,30 @@ def test_a_hyphenated_value_counts_too():
 
 
 def test_an_exact_underscored_match_still_counts():
-    """絵の側が下線のままでも拾う（両方の書き方を返している）。"""
+    """Picked up even when the picture side keeps the underscore (both spellings are
+    returned)."""
     s = _session({"wearing": "maid_outfit"}, "1girl, maid_outfit, cafe")
     assert P._divergences(s) == []
 
 
 def test_a_value_that_really_is_missing_is_still_reported():
-    """**穴は開けない。** 本当に落ちている欄は今まで通り言う。"""
+    """**No hole is opened.** A field that really is missing is still reported."""
     s = _session({"wearing": "sailor uniform"}, "1girl, cardigan, rooftop")
     got = [d["field"] for d in P._divergences(s)]
     assert "wearing" in got
 
 
 def test_a_conversation_turn_is_not_compared_at_all():
-    """会話中は絵が一手ぶん古い。比べても意味がないので黙る。"""
+    """Mid-conversation the picture is one move old. Comparing is meaningless, so it
+    says nothing."""
     s = _session({"wearing": "sailor uniform"}, "1girl, cardigan, rooftop",
                  stale=True)
     assert P._divergences(s) == []
 
 
 def test_the_board_is_still_compared_while_stale():
-    """撮った板は古くならない —— そちらのずれは会話中でも言う。"""
+    """A board that has been shot does not go stale — its divergences are reported even
+    mid-conversation."""
     s = _session({"wearing": "sailor uniform"}, "1girl, cardigan",
                  stale=True, board="1girl, cardigan, rooftop")
     got = [(d["kind"], d["field"]) for d in P._divergences(s)]
