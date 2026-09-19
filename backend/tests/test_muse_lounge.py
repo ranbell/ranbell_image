@@ -169,7 +169,7 @@ async def test_next_liked_pitch_skips_already_recommended(monkeypatch):
     assert none is None
 
 
-# ── お出かけ ────────────────────────────────────────────────────────────────
+# ── The outings ─────────────────────────────────────────────────────────────
 def test_normalize_outing_maps_speakers():
     """One call writes everyone. More people never means more calls."""
     cast = [
@@ -226,7 +226,7 @@ def test_the_occasions_are_never_about_work():
         assert word not in blob, word
 
 
-# ── 彼女の手元に残る分 ──────────────────────────────────────────────────────
+# ── What stays in her own hands ─────────────────────────────────────────────
 from backend.app.muse import shared as muse_service  # noqa: E402
 
 
@@ -270,7 +270,7 @@ async def test_a_day_off_only_comes_round_every_few_shoots(monkeypatch):
     monkeypatch.setattr(svc.lounge_db, "list_threads",
                         lambda db, **kw: _async(list(threads)))
 
-    # 一度も無ければ、まず一件
+    # With none at all, one first
     assert await svc._outing_is_due(None, "mio") is True
 
     threads.append({"kind": "outing", "shoot_count": 13,
@@ -283,7 +283,7 @@ async def test_a_day_off_only_comes_round_every_few_shoots(monkeypatch):
     preset["shoot_count"] = 13 + svc.OUTING_EVERY_SHOOTS
     assert await svc._outing_is_due(None, "mio") is True
 
-    # 他の子の記録では自分の番は進まない
+    # Another character's record does not advance her turn
     threads[0]["cast"] = [{"character_id": "someone-else"}]
     assert await svc._outing_is_due(None, "mio") is True
 
@@ -304,7 +304,7 @@ def _async(value):
     return _run()
 
 
-# ── お出かけを二段構えにする ────────────────────────────────────────────────
+# ── The outings in two stages ───────────────────────────────────────────────
 def test_there_are_enough_days_to_choose_from():
     """About fifty choices. **With twelve, everyone comes back with the same
     story.**"""
@@ -324,7 +324,7 @@ def test_the_candidate_list_is_japanese():
     for name, hint in lounge._OUTINGS:
         assert not stray_script(name), name
         assert not stray_script(hint), hint
-    # 読み込み時にも見ている
+    # Checked at load time too
     with pytest.raises(ValueError):
         lounge._assert_ja((("프리마켓", "ふつうの一日"),))
 
@@ -335,7 +335,7 @@ def test_the_last_place_is_not_offered_again():
     got = lounge.outing_choices(8, avoid="水族館")
     assert len(got) == 8
     assert all(n != "水族館" for n, _ in got)
-    # 全部は見せない —— 52件並べると読み流される
+    # Not all of them are shown — 52 in a row get skimmed past
     assert len(lounge.outing_choices(12)) == 12
 
 
@@ -344,7 +344,7 @@ def test_the_season_reaches_the_talk():
     import time as _t
     def at(month):
         return lounge.season_ja(_t.mktime((2026, month, 15, 12, 0, 0, 0, 0, -1)))
-    assert at(1) == "冬" and at(12) == "冬"      # 年をまたぐ
+    assert at(1) == "冬" and at(12) == "冬"      # it wraps across the year
     assert at(4) == "春" and at(7) == "夏" and at(10) == "秋"
 
 
@@ -375,7 +375,7 @@ def test_faces_reach_every_speaker():
         ["sha-a", "sha-b"]
     assert rows[0]["cast"][0]["face"] == "sha-b"
 
-    # 顔を引いていない子は空のまま（画面側で出し分ける）
+    # A character whose face was not looked up stays empty (the screen decides what to show)
     lounge.stamp_faces(rows, {})
     assert rows[0]["face"] == ""
 
@@ -387,13 +387,13 @@ def test_the_snapshot_is_not_a_studio_shot():
         identity_tags=[["silver_hair"], ["black_hair"], ["brown_hair"]],
         occasion=lounge.outing_place_en("古本屋"),
     )
-    assert got.startswith("3girls")            # 人数は cast から derive
+    assert got.startswith("3girls")            # the count is derived from the cast
     assert "old bookstore" in got
     assert "candid photo" in got and "snapshot" in got
-    # スタジオの語彙は入れない
+    # The studio's vocabulary does not get in
     for studio in ("cowboy_shot", "close-up", "professional lighting", "posing"):
         assert studio not in got
-    # 同じタグを二度並べない
+    # The same tag is not listed twice
     parts = [p.strip() for p in got.split(",")]
     assert len(parts) == len(set(parts))
 
@@ -410,7 +410,7 @@ def test_every_day_out_has_somewhere_to_photograph():
     assert lounge.outing_place_en("知らないお題") == ""
 
 
-# ── 手帖に英語が漏れる ──────────────────────────────────────────────────────
+# ── English leaking into the notebook ───────────────────────────────────────
 def test_the_english_half_does_not_land_in_the_japanese_page():
     """A line copying the example value was flowing into the Japanese body.
 
@@ -434,7 +434,7 @@ def test_the_english_half_does_not_land_in_the_japanese_page():
     got = lounge.normalize_habit(lounge.parse_labelled(raw))
     assert "English" not in got["body_ja"]
     assert got["body_ja"] == "監督は雨の後の静けさにこだわりますね。"
-    # こぼれた英語は捨てずに、空だった英語の欄へ回す
+    # The spilled English is not thrown away but sent to the English field that was empty
     assert got["body_en"].startswith("The Director loves")
 
 

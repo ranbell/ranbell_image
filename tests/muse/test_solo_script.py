@@ -233,7 +233,7 @@ def test_scripter_forbids_empty_shot_and_dual_crop():
     assert "do not patch scene" in fold
 
 
-# ── 欄の契約は一つ ───────────────────────────────────────────────────────
+# ── The field contracts are one ─────────────────────────────────────────
 
 def test_everyone_who_touches_the_notebook_reads_the_same_contract():
     """One definition, handed to every seat that reads or writes the notebook.
@@ -252,39 +252,41 @@ def test_everyone_who_touches_the_notebook_reads_the_same_contract():
     """
     marker = "WHAT EACH PART OF THE NOTEBOOK IS"
     for name in (
-        "SCRIPTER_SYSTEM",          # 旧・比較用に残してある
+        "SCRIPTER_SYSTEM",          # the old one, kept for comparison
         "STILL_READ_SYSTEM",        # writes it from a photo
         "NOTEBOOK_REVIEW_SYSTEM",   # she checks it
     ):
         assert marker in getattr(chain, name), name
-    # compile が実際に読む契約は `SCRIPTER_BLOCKS` の組み立てで、共通ブロック
-    # の見出しは持たない。持っているべきは**中身**のほう。
+    # The contract compile actually reads is the assembly of `SCRIPTER_BLOCKS`, and it
+    # carries no heading from the shared block. What it must carry is **the content**.
     built = chain.build_scripter_system()
     for field in ("ATMOSPHERE", "SCENE", "LIGHT", "FRAME", "WEARING", "BEAT"):
         assert field in built, field
-    # **視線の持ち主が変わった。** かつては FRAME、いまは BEAT ——
-    # 総監督（2026-09-01）「視点は Muse A/B がどこを向いているのかなので、
-    # 自ずと beat に入る。**焦点はカメラワーク**」。
+    # **The gaze changed owner.** It used to be FRAME and is now BEAT — the Showrunner
+    # (2026-09-01): "the gaze is where Muse A/B are looking, so it naturally goes into
+    # beat. **The focus is camerawork**".
     #
-    # 実機（`c9d83e6e`）で「すみれは後ろを向いて、みおはこっち見て」が
-    # `frame` 一本に潰れ、片方が消えていた。**二人は別々の所を見るので、
-    # 共有の一欄では二つの答えを持てない。**
+    # Live (`c9d83e6e`), 「すみれは後ろを向いて、みおはこっち見て」 ("Sumire turn
+    # away, Mio look at me") collapsed into a single `frame` and one of them
+    # disappeared. **Two people look at different things, so one shared field cannot
+    # hold two answers.**
     #
-    # この試験の値打ちは「全員が同じ定義を読む」こと。定義が移ったなら、
-    # **移った先で一致していること**を見る。
+    # What this test is worth is "everyone reads the same definition". If the
+    # definition moved, **it is checked for agreement where it moved to**.
     low = built.lower()
     assert "eyes are beat's" in low
     assert "focus on" in low, "焦点の置き場が FRAME に無い"
     assert "not where she is looking" not in low, "古い定義が残っている"
 
-    # weave には渡さない。**読む側には効かなかった。** weave パック
-    # (6試験 x 5回) で測ると、契約を抜いたほうが良い:
+    # Not handed to weave. **It did nothing for the reader.** Measured on the weave
+    # pack (6 tests x 5 runs), it is better without the contract:
     #
-    #     契約あり 5,228字  28/30   w3 の空応答 3/15
-    #     契約抜き 4,157字  30/30   w3 の空応答 0/15
+    #     with contract     5,228 chars  28/30   empty replies on w3 3/15
+    #     without contract  4,157 chars  30/30   empty replies on w3 0/15
     #
-    # 欄が何であるかは書く側の問題で、読む側は値さえ読めればよい。1,071字を
-    # 毎レンダー載せたうえ、たまに応答ごと潰していた。
+    # What a field IS is the writer's problem; the reader only has to read the values.
+    # It was riding on every render at 1,071 characters and occasionally crushing the
+    # whole reply.
     assert marker not in chain.SCRIPTER_WEAVE_SYSTEM
 
 
@@ -319,15 +321,16 @@ def test_the_restate_shape_is_not_a_second_copy_of_the_contract():
         prompt = crew.restate_output(field)
         assert phrase in prompt, field
         # …and the format-only tail is still appended, not lost.
-    # 上限は外した。実撮影で「衣装はそのままで」と言われたターンの言い直しが
-    # 数を守るために `hair ornament` を落とした。書式の指示は残っている。
+    # The cap was removed. In a real shoot, the restatement on a turn told "leave the
+    # outfit as it is" dropped `hair ornament` to keep to the count. The format
+    # instructions remain.
     w = crew.restate_output("wearing")
     assert "AT MOST" not in w
     assert "a garment left out is a garment she loses" in w
     assert "underscores" in w
 
 
-# ── なぜその欄をそう書いたか ──────────────────────────────────────────────
+# ── Why that field was written that way ─────────────────────────────────
 
 def test_the_scripter_is_asked_to_say_why_it_wrote_each_field():
     text = chain.SCRIPTER_SYSTEM
@@ -403,7 +406,7 @@ def test_the_reason_is_one_line_not_a_second_notebook():
     assert notebook.clean_why({"beat": "one\ntwo"}, {"beat": "v"})["beat"] == "one two"
 
 
-# ── compile が実際に使う契約 ──────────────────────────────────────────────
+# ── The contract compile actually uses ──────────────────────────────────
 
 def test_compile_runs_on_the_built_contract_not_the_old_one():
     """`SCRIPTER_SYSTEM` is kept, but compile no longer reads it.
@@ -423,46 +426,52 @@ def test_compile_runs_on_the_built_contract_not_the_old_one():
     src = inspect.getsource(chain.run_scripter)
     assert "build_scripter_system(genre=genre)" in src
     assert "else SCRIPTER_SYSTEM" not in src
-    # 旧版は捨てない。戻せることがこの入れ替えの前提。
+    # The old version is not thrown away. Being able to go back is this swap's premise.
     assert len(chain.SCRIPTER_SYSTEM) > 8000
 
 
 def test_the_built_contract_says_what_each_field_is_and_forbids_almost_nothing():
     built = chain.build_scripter_system()
-    # 実測の値は 2,327字（96.0%）で、上限はそこから伸びすぎないための柵。
-    # `expression` を欄として足したぶん（55字）で 3,000 を越えたので、そのぶん
-    # だけ上げた。**新しい欄一つぶんであって、条文が太ったのではない** ——
-    # 8,281字版が 52.7% だった教訓は生きている。
+    # The measured value is 2,327 characters (96.0%), and the cap is a fence keeping
+    # it from growing much past that. Adding `expression` as a field (55 characters)
+    # took it over 3,000, so the cap rose by that much. **That is one new field, not a
+    # fattened contract** — the lesson of the 8,281-character version at 52.7% still
+    # holds.
     #
-    # 焦点（カメラがどちらに寄るか）に持ち場を作ったぶん、もう一段上げた
-    # （総監督 2026-09-01「視点は beat に入る。**焦点はカメラワーク** ——
-    # `focus to …` とか `long shot` とかはこの箱」）。足したのは箱一つで、
-    # 説明を太らせたのではない —— `gaze` と `stem` の重複はそのぶん畳んだ。
-    # ジャンル別のエキスパート（`crew.GENRES`）は**箱ひとつぶん**。選ばれた
-    # 一つだけが末尾に付く（約290字）。前例どおり、箱を足したぶんだけ上げる。
+    # Making a place for the focus (which of them the camera closes in on) raised it
+    # one step further (the Showrunner, 2026-09-01: "the gaze goes into beat. **The
+    # focus is camerawork** — `focus to …`, `long shot` and so on are this box"). What
+    # was added is one box, not fatter explanation — the overlap between `gaze` and
+    # `stem` was folded away by as much.
     #
-    # **土台はむしろ痩せた** —— `PROPOSE` が同じ趣旨を三度書いていたので畳み、
-    # 3,264 → 2,829字。エキスパート付きで約3,120字なので、旧上限からの増分は
-    # 20字ほどで、**その中に丸ごと一つの箱が入っている**。
+    # The per-genre experts (`crew.GENRES`) are **one box's worth**. Only the chosen
+    # one is appended at the end (about 290 characters). As before, the cap rises by
+    # exactly one box.
+    #
+    # **The base actually got thinner** — `PROPOSE` said the same thing three times,
+    # so it was folded: 3,264 -> 2,829 characters. With an expert it is about 3,120,
+    # so the increase over the old cap is some 20 characters, **and a whole box fits
+    # inside that**.
     assert len(built) < 3200
     for genre in crew.GENRES:
         assert len(chain.build_scripter_system(genre=genre)) < 3200, genre
 
-    # 外枠 — 欄が何であるか。
+    # The outer frame — what a field is.
     for phrase in ("ATMOSPHERE", "SCENE", "LIGHT", "FRAME", "WEARING", "BEAT"):
         assert phrase in built
-    # **視線は BEAT。** 二人は別々の所を見るので、共有の一欄では持てない。
+    # **The gaze is BEAT's.** Two people look at different things, so one shared field cannot hold it.
     assert "eyes are beat's" in built.lower()
-    # **焦点は FRAME。** カメラの箱。
+    # **The focus is FRAME's.** The camera's box.
     assert "focus on" in built.lower()
-    assert "posture" in built.lower()                     # beat は姿勢を言う
+    assert "posture" in built.lower()                     # beat names the posture
 
-    # 中身は任せる。禁止で埋めない — それが 8,281字が負けた理由。
+    # The content is left to it. Not filled with prohibitions — that is why 8,281 characters lost.
     #
-    # 数えるのは**命令としての禁止**だけ。`the notebook never had` のような
-    # 説明の中の never まで数えていて、境界を一つ足しただけで落ちた。
-    # **語の出現ではなく、その語が何をしているかで数える。** 今日ここで
-    # 6回踏んだのと同じ形の失敗だったので、判定のほうを直した。
+    # Only **prohibitions as instructions** are counted. A `never` inside an
+    # explanation such as `the notebook never had` was being counted too, and adding
+    # one boundary made this fail. **Count what the word is doing, not that it
+    # occurs.** It was the same shape of failure as the six hit here today, so the
+    # judgement itself was fixed.
     import re
     lowered = built.lower()
     bans = len(re.findall(r"(?m)(?:^|[.;]\s+|\*\*)(?:do not|never|must not)\s+\w", lowered))
@@ -492,9 +501,9 @@ def test_intent_is_not_bought_at_the_notebook_s_expense():
     taken by another road — the `classify_intent` clerk, and whether the patch
     moved a field (92%, measured).
     """
-    assert "intent" in chain.SCRIPTER_BLOCKS          # 残してある
+    assert "intent" in chain.SCRIPTER_BLOCKS          # kept
     assert "intent" not in chain.SCRIPTER_BUILD_DEFAULT
-    assert "shot" in chain.CLASSIFY_INTENT_SYSTEM     # clerk が持っている
+    assert "shot" in chain.CLASSIFY_INTENT_SYSTEM     # the clerk holds it
 
 
 def test_a_solo_shoot_has_no_partner_fields_to_write_into():
@@ -516,7 +525,7 @@ def test_a_solo_shoot_has_no_partner_fields_to_write_into():
     for key in ("wearing_b", "beat_b"):
         assert key not in solo, key
         assert key in duo, key
-    # 本人の欄はどちらにもある。
+    # Her own fields are in both.
     for key in ("wearing", "beat", "frame", "scene"):
         assert key in solo and key in duo, key
 
@@ -543,7 +552,7 @@ def test_the_rewrite_log_keeps_a_whole_shoot():
             before={"beat": f"pose {i}"}, after={"beat": f"pose {i + 1}"})
     log = session["rewrite_log"]
     assert len(log) == notebook.REWRITE_LOG_MAX
-    # 古いほうから捨てる。最後の一件は最新であること。
+    # The oldest go first. The last entry is the newest.
     assert log[-1]["changed"]["beat"]["after"] == "pose 80"
 
 
@@ -569,9 +578,9 @@ def test_the_notebook_has_somewhere_for_what_is_behind_her():
         '{"intent":"shot","bg":"a crowd"}')["patch"] == {"bg": "a crowd"}
 
     contract = notebook.FIELD_CONTRACTS["bg"]
-    assert "background actors" in contract      # 人はエキストラ
-    assert "set dressing" in contract           # 物は飾り込み
-    # ボケはカメラの話。ここに入れない（現場では Shallow DoF）。
+    assert "background actors" in contract      # people are extras
+    assert "set dressing" in contract           # objects are set dressing
+    # Bokeh is the camera's business. Not here (on set it is shallow DoF).
     assert "depth of field" in contract and "FRAME" in contract
 
 
@@ -621,7 +630,7 @@ def test_the_angle_word_names_the_camera_not_the_gaze():
     assert "where the camera stands" in frame
     assert "high_angle" in frame and "low_angle" in frame
 
-    # 角度の説明に視線の向きを持ち込まない。ここが崩れると 0/8 に戻る。
+    # The gaze's direction is not brought into the explanation of the angle. Break this and it is back to 0/8.
     angle_line = [l for l in frame.splitlines() if "angle word" in l][0]
     for word in (" up ", " down ", "UP", "DOWN"):
         assert word not in angle_line, f"角度の説明に {word!r} を入れない"
@@ -670,23 +679,24 @@ def test_frame_owns_the_crop_without_a_word_list():
     here are the two cases where, given a deliberately conflicting bag, **the old
     code was the one dropping things**.
     """
-    # FRAME は上半身。旧は `close_up` を残していた —— 顔寄りが生き残る。
+    # FRAME is the upper body. The old one kept `close_up` — the face crop survived.
     got = notebook.drop_crops_not_in_frame(
         "close_up, wide_shot, full_body, sitting, from_above",
         frame="close, upper body",
     )
     assert "close_up" not in got
     assert "wide_shot" not in got and "full_body" not in got
-    # アングルは画角ではない。触らない。
+    # An angle is not a crop. Not touched.
     assert "from_above" in got and "sitting" in got
 
-    # FRAME が何も言わない矛盾。旧は両方落として**画角がひとつも無い絵**に
-    # した。先に来たほうを残す —— 矛盾は出さず、情報も捨てない。
+    # The contradiction where FRAME says nothing. The old one dropped both and made
+    # **a picture with no crop at all**. Whichever came first is kept — no
+    # contradiction, and no information thrown away.
     got = notebook.drop_crops_not_in_frame("wide_shot, close_up, sitting", frame="")
     assert "wide_shot" in got and "close_up" not in got
 
-    # `establishing_shot` は Muse 側の一覧にだけあった。画角の別名は
-    # `framing_from_phrase` に一本化した。
+    # `establishing_shot` existed only in Muse's own list. The crop aliases were
+    # unified into `framing_from_phrase`.
     got = notebook.drop_crops_not_in_frame(
         "establishing_shot, upper_body, desk", frame="close, upper body",
     )
@@ -713,14 +723,14 @@ def test_the_route_recorder_changes_nothing_it_only_writes_it_down():
     The Showrunner (2026-08-31): "observe first and collect only facts. Decide
     nothing yet." This proves the behaviour did not change.
     """
-    # 段の内訳を頼んでも、`scrub_craft_tags` の答えは変わらない。
+    # Asking for the per-stage breakdown does not change `scrub_craft_tags`'s answer.
     args = dict(wearing="blouse, skirt", scene="", beat="sitting",
                 struck=set(), frame="close, upper body")
     tags = "sitting, white_socks, straw_hat, park, wide_shot, close_up"
     steps: list = []
     assert notebook.scrub_craft_tags(tags, **args) == notebook.scrub_craft_tags(
         tags, trace=steps, **args)
-    # 頼んだときだけ、段ごとの出入りが積まれる。
+    # Only when asked is the per-stage in and out stacked up.
     assert [s["hop"] for s in steps] == [
         "2a reconcile_wardrobe_tags",
         "2b drop_crops_not_in_frame",

@@ -71,8 +71,9 @@ async def test_plan_memory_erase_counts_without_changing_anything():
 
     plan = await presets.plan_memory_erase(db)
 
-    # **消える欄が増えたら、ここも増える。** 数えている欄そのものが増えたので
-    # あって、消え方が変わったわけではない ―― 撮影回数や好みも記憶のうち。
+    # **More fields erased means more counted here.** What grew is the set of fields
+    # being counted, not the way they are erased — the shoot count and her tastes are
+    # memories too.
     assert plan == {
         "characters": 3, "affected": 2,
         "diaries": 2, "chemistry": 1, "social_seeds": 1,

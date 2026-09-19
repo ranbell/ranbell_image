@@ -623,7 +623,7 @@ async def test_reading_a_diary_that_is_not_there_is_a_404(monkeypatch):
 
 
 
-# ── 写した引用がずれていないか（見るだけ・直さない） ────────────────────────
+# ── Has a copied quotation drifted? (looked at only, never fixed) ───────────
 def test_a_copied_line_that_came_out_changed_is_reported():
     """A real one (2026-08-21). Earlier in the same diary she had written 「マイク」
     ("mic") correctly.
@@ -631,9 +631,10 @@ def test_a_copied_line_that_came_out_changed_is_reported():
     Across 92 measurements every breakage was inside a verbatim quote; where she
     writes in her own words it never broke once. **It breaks only while copying.**
     """
-    # 実際のログの一行そのまま。**短く刈り込まない** —— 前後がついた長い行に
-    # 対して短い引用を当てるのがこの網の仕事で、刈ると被覆率が 0.78 に落ちて
-    # 通らなくなる。閾値 0.80 は実データで決めたので、こちらを実物に合わせる。
+    # A real log line, exactly as it was. **Not trimmed short** — matching a short
+    # quotation against a long line with text before and after is this net's job, and
+    # trimmed, the coverage falls to 0.78 and it no longer passes. The 0.80 threshold
+    # was decided on real data, so this side is matched to the real thing.
     log = [
         "……あの、本当の私って……うーん、そうですね……。きっと、マイクの前で"
         "用意した言葉じゃなくて、もっと、こう……ふにゃふにゃしてて、弱虫な、"
@@ -662,7 +663,7 @@ def test_the_page_she_fixed_is_left_alone():
     page = "「バイバイ、って手を振るシーンにしよう」って言われて、現実に戻された。"
     hits = muse_diary.quote_drift(page, log)
     assert hits, "気づくことは気づく"
-    # 直す関数を生やさない。報告の形だけ
+    # No fixing function is grown. Only the shape of the report
     assert not hasattr(muse_diary, "repair_quote_drift")
 
 
