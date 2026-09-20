@@ -11,6 +11,8 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from ..jobs.sse_stream import queue_sse_response
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/invoke", tags=["invoke"])
@@ -39,10 +41,20 @@ class SummonRequest(BaseModel):
     camera_angle: str = ""  # e.g. "from_above", "dutch_angle"
     # Locale
     locale: str = "en"      # 'en' | 'ja' — controls monologue language
-    pro_topic: str = ""              # Pro mode natural language topic (お題テキスト直送)
+    pro_topic: str = ""              # Pro mode natural language topic (sent as it is)
     pro_sections: dict[str, str] = {}  # character / background / props / action seed hints
     # Rebel spirit control
     rebel_inversion: bool = True  # False = rebel aims for beautiful image without axis inversion
+    # Resonance mode: drift all spirits toward the user's starred aesthetic
+    resonance_mode: bool = False
+    # Frontier mode: drift all spirits AWAY from the user's known territory (mutually exclusive with resonance)
+    frontier_mode: bool = False
+    # Global LLM temperature multiplier applied on top of each spirit's native temperature
+    heat: float = 1.0  # 0.6–1.3
+    # Wildness 1-3: widens stranger/lunatic vocab pools (2: wider band + 3 wild tags, 3: + rare tag)
+    wildness: int = 1
+    # Target emotion dimension ('' | loneliness | nostalgia | ... — see emotion_tagger.EMOTION_DIMENSIONS)
+    emotion: str = ""
     # Common
     workflow_name: str = ""
     input_mode: str = "light"  # light | pro
@@ -67,6 +79,28 @@ class SendToRefineRequest(BaseModel):
 
 class DailyOracleRequest(BaseModel):
     workflow_name: str = ""
+
+
+class EvolveRequest(BaseModel):
+    sha256: str
+    mutation: float = 0.3    # fraction of mutable axes to jitter (0–1)
+    workflow_name: str = ""
+    enabled_spirits: list[str] = []
+    prompt_mode: str = "danbooru+natural"
+    locale: str = "en"
+    heat: float = 1.0
+    wildness: int = 1
+
+
+class BreedRequest(BaseModel):
+    sha256_a: str
+    sha256_b: str
+    workflow_name: str = ""
+    enabled_spirits: list[str] = []
+    prompt_mode: str = "danbooru+natural"
+    locale: str = "en"
+    heat: float = 1.0
+    wildness: int = 1
 
 
 class CancelRequest(BaseModel):
@@ -169,6 +203,8 @@ async def summon(body: SummonRequest, request: Request):
         pro_topic=_pro_topic,
         pro_sections=_pro_sections,
         rebel_inversion=body.rebel_inversion,
+        heat=body.heat,
+        wildness=body.wildness,
         db=db,
         ollama=ollama,
         comfy=comfy,
@@ -199,6 +235,9 @@ async def summon(body: SummonRequest, request: Request):
         pro_sections=_pro_sections,
         pro_prompt=_pro_prompt,
         session_manager=mgr,
+        resonance_mode=body.resonance_mode,
+        frontier_mode=body.frontier_mode,
+        emotion=body.emotion,
     )
 
     request.app.state.invoke_event_queues[session.session_id] = session.event_queue
@@ -227,10 +266,17 @@ async def respin(body: RespinRequest, request: Request):
         except Exception:
             pass
 
+    # Preserve the previous attempt so the respin can diverge from it
+    if spirit.prompt_result:
+        spirit.history.append(spirit.prompt_result)
+
     spirit.status = "composing"
     spirit.sha256 = None
     spirit.prompt_result = None
     spirit.alignment_score = None
+    spirit.novelty_score = None
+    # Allow the finalize job (pipeline → novelty → alignment) to run again for the respun image
+    session.finalize_submitted = False
 
     from ..spooler.models import JobLane
     from ..jobs.runners import run_invoke_respin
@@ -246,6 +292,125 @@ async def respin(body: RespinRequest, request: Request):
     )
     spirit.job_ids.append(job_id)
     return {"job_id": job_id}
+
+
+async def _load_genesis_axes(db, sha256: str) -> tuple[dict, dict]:
+    """Return (axes_snapshot, genesis) for an Invoke-born image, or raise HTTPException."""
+    doc = await db.get(sha256)
+    if not doc:
+        raise HTTPException(404, f"Image {sha256[:12]} not found")
+    genesis = doc.get("genesis") or {}
+    axes = genesis.get("axes_snapshot") or {}
+    if not axes:
+        raise HTTPException(400, f"Image {sha256[:12]} has no genesis axes (not Invoke-born)")
+    return axes, genesis
+
+
+async def _launch_lineage_session(
+    request: Request,
+    *,
+    mode: str,
+    parent_shas: list[str],
+    parent_axes: list[dict],
+    user_intent: str,
+    workflow_name: str,
+    enabled_spirits: list[str],
+    prompt_mode: str,
+    locale: str,
+    heat: float,
+    wildness: int,
+    mutation: float = 0.3,
+) -> dict:
+    mgr = _get_invoke_manager(request)
+    db = request.app.state.db
+    ollama = request.app.state.ollama
+
+    from ..runtime_config import get_runtime_config
+    cfg = await get_runtime_config(db)
+    workflow_name = workflow_name or cfg.get("invoke_daily_oracle_workflow", "")
+    if not workflow_name:
+        raise HTTPException(422, "workflow_name required (no default workflow configured)")
+
+    session = mgr.create_session(
+        user_intent=user_intent,
+        input_mode=mode,
+        workflow_name=workflow_name,
+        enabled_spirits=enabled_spirits,
+        prompt_mode=prompt_mode,
+        locale=locale,
+        heat=heat,
+        wildness=wildness,
+        parent_sha256s=parent_shas,
+        db=db,
+        ollama=ollama,
+        comfy=request.app.state.comfy,
+        spooler=request.app.state.spooler,
+    )
+
+    from ..spooler.models import JobLane
+    from ..jobs.runners import run_invoke_lineage
+
+    job_id = request.app.state.spooler.submit(
+        JobLane.PROMPT,
+        f"invoke.{mode}",
+        run_invoke_lineage,
+        meta={"session_id": session.session_id, "mode": mode, "parents": parent_shas},
+        db=db,
+        ollama=ollama,
+        session_id=session.session_id,
+        parent_axes=parent_axes,
+        mode=mode,
+        mutation=mutation,
+        session_manager=mgr,
+    )
+
+    request.app.state.invoke_event_queues[session.session_id] = session.event_queue
+    return {"session_id": session.session_id, "job_id": job_id}
+
+
+@router.post("/evolve")
+async def evolve(body: EvolveRequest, request: Request):
+    """Re-summon from an Invoke-born image's axes snapshot with mutation."""
+    db = request.app.state.db
+    axes, genesis = await _load_genesis_axes(db, body.sha256)
+    return await _launch_lineage_session(
+        request,
+        mode="evolve",
+        parent_shas=[body.sha256],
+        parent_axes=[axes],
+        user_intent=genesis.get("original_intent") or "[evolve]",
+        workflow_name=body.workflow_name,
+        enabled_spirits=body.enabled_spirits,
+        prompt_mode=body.prompt_mode,
+        locale=body.locale,
+        heat=body.heat,
+        wildness=body.wildness,
+        mutation=body.mutation,
+    )
+
+
+@router.post("/breed")
+async def breed(body: BreedRequest, request: Request):
+    """Merge two Invoke-born images' axes snapshots into a child session."""
+    db = request.app.state.db
+    axes_a, genesis_a = await _load_genesis_axes(db, body.sha256_a)
+    axes_b, genesis_b = await _load_genesis_axes(db, body.sha256_b)
+    intent_a = genesis_a.get("original_intent") or ""
+    intent_b = genesis_b.get("original_intent") or ""
+    user_intent = " × ".join(filter(None, dict.fromkeys([intent_a, intent_b]))) or "[breed]"
+    return await _launch_lineage_session(
+        request,
+        mode="breed",
+        parent_shas=[body.sha256_a, body.sha256_b],
+        parent_axes=[axes_a, axes_b],
+        user_intent=user_intent,
+        workflow_name=body.workflow_name,
+        enabled_spirits=body.enabled_spirits,
+        prompt_mode=body.prompt_mode,
+        locale=body.locale,
+        heat=body.heat,
+        wildness=body.wildness,
+    )
 
 
 @router.post("/adopt")
@@ -375,6 +540,7 @@ async def trigger_daily_oracle(body: DailyOracleRequest, request: Request):
         daily_oracle_date=today,
         workflow_name=workflow_name,
         topic=topic,
+        roulette=bool(cfg.get("invoke_daily_oracle_roulette", False)),
     )
     return {"status": "queued", "job_id": job_id, "date": today}
 
@@ -389,9 +555,7 @@ async def get_stats(request: Request):
 
 @router.post("/enhance-prompt")
 async def enhance_prompt(body: EnhancePromptRequest, request: Request):
-    """Embed user text, find semantically related Danbooru tags, refine into prompt + natural language."""
-    import asyncio
-
+    """Submit tag-generation job to PROMPT lane. Stream results via /enhance-prompt/{job_id}/stream."""
     db      = request.app.state.db
     spooler = request.app.state.spooler
 
@@ -405,6 +569,7 @@ async def enhance_prompt(body: EnhancePromptRequest, request: Request):
     from ..spooler.models import JobLane
     from ..jobs.runners import run_invoke_enhance_prompt
 
+    event_queue: asyncio.Queue = asyncio.Queue()
     job_id = spooler.submit(
         JobLane.PROMPT,
         "invoke.enhance_prompt",
@@ -413,14 +578,21 @@ async def enhance_prompt(body: EnhancePromptRequest, request: Request):
         ollama=request.app.state.ollama,
         text=body.text,
         tag_count=body.tag_count,
+        event_queue=event_queue,
     )
+    request.app.state.inspire_event_queues[job_id] = event_queue
+    return {"job_id": job_id, "status": "queued"}
 
-    try:
-        return await asyncio.wait_for(spooler.wait(job_id), timeout=120.0)
-    except asyncio.TimeoutError:
-        raise HTTPException(504, "Tag generation timed out")
-    except RuntimeError as e:
-        raise HTTPException(502, str(e))
+
+@router.get("/enhance-prompt/{job_id}/stream")
+async def enhance_prompt_stream(job_id: str, request: Request):
+    q: asyncio.Queue | None = request.app.state.inspire_event_queues.get(job_id)
+    if q is None:
+        raise HTTPException(404, f"enhance-prompt job {job_id!r} not found")
+    return queue_sse_response(
+        request, q, job_id=job_id,
+        registry=request.app.state.inspire_event_queues, encode="raw",
+    )
 
 
 @router.get("/session/{session_id}")
@@ -431,3 +603,74 @@ async def get_session(session_id: str, request: Request):
     if not session:
         raise HTTPException(404, "Session not found")
     return session.to_dict()
+
+
+@router.get("/resonance/preview")
+async def resonance_preview(request: Request, n: int = 20):
+    """Preview the taste centroid tags without triggering a summon.
+
+    Returns {tags: [{name, score}], star4_count, star5_count, total_contributing}.
+    Used by the frontend resonance toggle to show which aesthetic hints are active.
+    """
+    from qdrant_client import models as qm
+
+    db = request.app.state.db
+    # Count contributing images
+    star4_count = 0
+    star5_count = 0
+    offset = None
+    try:
+        while True:
+            pts, next_offset = await db._qc.scroll(
+                collection_name="images",
+                scroll_filter=qm.Filter(must=[
+                    qm.FieldCondition(key="star_rating", range=qm.Range(gte=4)),
+                    qm.FieldCondition(key="embedding_status", match=qm.MatchValue(value="done")),
+                ]),
+                limit=500,
+                offset=offset,
+                with_payload=qm.PayloadSelectorInclude(include=["star_rating"]),
+                with_vectors=False,
+            )
+            for p in pts:
+                r = (p.payload or {}).get("star_rating", 4)
+                if r >= 5:
+                    star5_count += 1
+                else:
+                    star4_count += 1
+            if next_offset is None or (star4_count + star5_count) >= 500:
+                break
+            offset = next_offset
+    except Exception as e:
+        logger.warning("resonance_preview count failed: %s", e)
+        return {"tags": [], "star4_count": 0, "star5_count": 0, "total_contributing": 0}
+
+    if star4_count + star5_count == 0:
+        return {"tags": [], "star4_count": 0, "star5_count": 0, "total_contributing": 0}
+
+    from ..invoke.vocab_bank import compute_resonance_hints
+    hints = await compute_resonance_hints(db, n_tags=n)
+    all_tags = hints.get("character", []) + hints.get("mood", []) + hints.get("scene", [])
+
+    return {
+        "tags": [{"name": t} for t in all_tags[:n]],
+        "star4_count": star4_count,
+        "star5_count": star5_count,
+        "total_contributing": star4_count + star5_count,
+    }
+
+
+@router.get("/frontier/preview")
+async def frontier_preview(request: Request, n: int = 20):
+    """Preview the frontier tags (never-seen vocabulary far from the taste centroid).
+
+    Returns {tags: [{name}], total_contributing}. Empty tags when no starred images
+    exist (the frontier is computed relative to the taste centroid).
+    """
+    db = request.app.state.db
+
+    from ..invoke.vocab_bank import compute_frontier_hints
+    hints = await compute_frontier_hints(db, n_tags=n)
+    all_tags = hints.get("character", []) + hints.get("mood", []) + hints.get("scene", [])
+
+    return {"tags": [{"name": t} for t in all_tags[:n]]}

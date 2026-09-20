@@ -34,14 +34,40 @@ _EVALUATION_BLOCKING_LANES: frozenset[JobLane] = _PRIORITY_TRIGGER_LANES | froze
 _TIER2_MANAGED_LANES: frozenset[JobLane] = frozenset([JobLane.EVALUATION])
 
 
+#: A failure that is only a missing resource. **Waiting fixes it**, so it goes back
+#: on the queue rather than failing. What comes up when ComfyUI is down is
+#: `httpx.ConnectError` (with the message "All connection attempts failed"), not
+#: `ResourceUnreachable` — that one is raised only when health monitoring already
+#: knows the resource is down. **Both are caught.**
+def _is_unreachable(exc: BaseException) -> bool:
+    if isinstance(exc, ResourceUnreachable):
+        return True
+    try:
+        import httpx
+    except ImportError:
+        return False
+    return isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout,
+                            httpx.ReadError, httpx.RemoteProtocolError))
+
+
+#: How many times it may go back. **It does not hold on for ever** — if the resource
+#: really is dead it has to be shown as a failure eventually, or the job sits there
+#: silently.
+REQUEUE_MAX = 20
+
+
 class JobSpooler:
     def __init__(
         self,
         resources: dict[str, Resource],
         lane_resource: dict[JobLane, str | None],
+        requeue_delay: float = 10.0,
     ) -> None:
         self._resources = resources
         self._lane_resource = lane_resource
+        #: While a resource is down, the wait before the next attempt. Too short and
+        #: the limit (`REQUEUE_MAX`) is spent before it comes back
+        self._requeue_delay = requeue_delay
         self._disk_paths: dict[str, str] = {}
         self._disk_caution_pct: int = 75
         self._disk_fault_pct: int = 90
@@ -73,6 +99,9 @@ class JobSpooler:
         # Auto-pause settings (can be overridden by update_pause_settings())
         self._auto_pause_on_priority: bool = True
         self._auto_pause_target_lanes: frozenset[JobLane] = _DEFAULT_AUTO_PAUSE_TARGETS
+        # tier2: pause EVALUATION while GEN/PROMPT/EMBED are active.
+        # Disable only when Ollama (eval VLM) runs on a different GPU than ComfyUI.
+        self._eval_auto_pause: bool = True
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -231,10 +260,70 @@ class JobSpooler:
 
         return False
 
+    # ── Task groups ────────────────────────────────────────────────────────────
+    # A group is any set of jobs sharing the same meta["group_id"].
+
+    def dismiss(self, job_id: str) -> bool:
+        """Clear a finished job out of the history. **Has no effect on a running
+        one.**
+
+        A failed job is not in `_registry`, so `cancel` never reached it and there
+        was no way to clear it from the screen (the Showrunner: "job cancel is
+        missing only when it errored"). There is nothing left to stop, so this is
+        not a cancel — it is **tidying up**.
+        """
+        if self._registry.get(job_id) is not None:
+            return False          # still running — that is `cancel`'s business
+        for i, job in enumerate(self._history):
+            if job.id == job_id:
+                del self._history[i]
+                self._push_event("job_dismissed", job)
+                return True
+        return False
+
+    async def cancel_group(self, group_id: str) -> int:
+        """Cancel all active (queued/held/running) jobs of the group."""
+        job_ids = [
+            jid for jid, job in list(self._registry.items())
+            if job.meta.get("group_id") == group_id
+        ]
+        cancelled = 0
+        for jid in job_ids:
+            if await self.cancel(jid):
+                cancelled += 1
+        return cancelled
+
+    async def delete_group(self, group_id: str) -> dict:
+        """Cancel active group jobs and drop finished group records from history.
+
+        Running jobs reach history asynchronously after their cancel completes;
+        those records expire naturally with the history deque.
+        """
+        cancelled = await self.cancel_group(group_id)
+        kept = [j for j in self._history if j.meta.get("group_id") != group_id]
+        removed = len(self._history) - len(kept)
+        if removed:
+            self._history = deque(kept, maxlen=_HISTORY_MAXLEN)
+        return {"cancelled": cancelled, "removed": removed}
+
     # ── Retry ──────────────────────────────────────────────────────────────────
 
-    def retry(self, job_id: str) -> str:
+    def _find(self, job_id: str) -> Job | None:
+        """Look a job up whether it is running or finished.
+
+        **A finished job leaves `_registry` and moves into `_history`**
+        (`_move_to_history` — the history is the source of truth). `retry` only
+        looked at `_registry`, so **retrying a failed job was 404 by definition**.
+        The screen lists from the history, which left a button you could press
+        that was certain to fail.
+        """
         job = self._registry.get(job_id)
+        if job is not None:
+            return job
+        return next((j for j in self._history if j.id == job_id), None)
+
+    def retry(self, job_id: str) -> str:
+        job = self._find(job_id)
         if job is None:
             raise KeyError(f"Job {job_id!r} not found")
         if job.state not in (JobState.FAILED, JobState.CANCELLED):
@@ -409,14 +498,17 @@ class JobSpooler:
         self,
         auto_pause_on_priority: bool,
         auto_pause_target_lanes: list[str],
+        eval_auto_pause: bool = True,
     ) -> None:
         self._auto_pause_on_priority = auto_pause_on_priority
         self._auto_pause_target_lanes = frozenset(
             JobLane(v) for v in auto_pause_target_lanes
             if v in JobLane._value2member_map_
         )
+        self._eval_auto_pause = eval_auto_pause
         if not auto_pause_on_priority:
             self.resume_lanes(list(JobLane), reason=LanePauseReason.AUTO)
+        self._check_eval_pause()
 
     def is_lane_active(self, lane: JobLane) -> bool:
         return self._lane_events[lane].is_set()
@@ -450,8 +542,12 @@ class JobSpooler:
         self._check_eval_pause()
 
     def _check_eval_pause(self) -> None:
-        """Recompute tier2 auto-pause for the EVALUATION lane (always applied, independent of settings).
-        Pauses EVALUATION if any of GENERATION / PROMPT / EMBEDDING is active."""
+        """Recompute tier2 auto-pause for the EVALUATION lane.
+        Pauses EVALUATION if any of GENERATION / PROMPT / EMBEDDING is active.
+        Can be disabled via eval_auto_pause (multi-GPU / separate-server setups)."""
+        if not self._eval_auto_pause:
+            self.resume_lanes([JobLane.EVALUATION], reason=LanePauseReason.AUTO)
+            return
         blocking = any(
             j.state in (JobState.QUEUED, JobState.RUNNING, JobState.CANCELLING)
             for j in self._registry.values()
@@ -566,16 +662,37 @@ class JobSpooler:
                 job.progress = 1.0
             except JobCancelled:
                 job.state = JobState.CANCELLED
-            except ResourceUnreachable as exc:
-                job.state = JobState.FAILED
-                job.error = str(exc)
-                logger.warning("Job %s failed: %s", job.id, exc)
             except asyncio.CancelledError:
                 job.state = JobState.CANCELLED
             except Exception as exc:
+                # **A missing resource means waiting, not failing.** The
+                # Showrunner: "it is a spooler, so when something is wrong it really
+                # has to wait and then run afterwards". This is the case where
+                # ComfyUI went down and `muse_board` fell over with
+                # `All connection attempts failed`. The comeback is already noticed
+                # by `monitor_remote_resources` — **we knew it would come back and
+                # were throwing away the jobs from while it was down.**
+                if _is_unreachable(exc) and job.requeues < REQUEUE_MAX:
+                    job.requeues += 1
+                    job.state = JobState.QUEUED
+                    job.error = str(exc)
+                    job.started_at = None
+                    self._job_pause_events.pop(job.id, None)
+                    logger.info("Job %s waiting for %s (%s/%s): %s",
+                                job.id, lane.value, job.requeues,
+                                REQUEUE_MAX, exc)
+                    self._push_event("job_updated", job)
+                    await asyncio.sleep(self._requeue_delay)
+                    self._lane_queues[lane].append(job.id)
+                    self._lane_work_ev[lane].set()
+                    continue
                 job.state = JobState.FAILED
                 job.error = str(exc)
-                logger.exception("Job %s failed with exception", job.id)
+                if _is_unreachable(exc):
+                    logger.warning("Job %s gave up waiting for %s: %s",
+                                   job.id, lane.value, exc)
+                else:
+                    logger.exception("Job %s failed with exception", job.id)
             finally:
                 self._job_pause_events.pop(job.id, None)
 

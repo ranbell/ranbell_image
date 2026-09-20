@@ -6,22 +6,37 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
+from ..api.images import invalidate_image_caches
 from ..config import settings
 from ..db.qdrant_client import QdrantDBClient
 from ..ingest import extract_from_image
 from ..thumbnails.generator import ensure_thumbnail, thumbnail_exists
+from .drafts import is_draft_path
 
 logger = logging.getLogger(__name__)
 
 SCAN_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 
 _registering: set[Path] = set()
+_self_registered: set[Path] = set()
 
 
 async def wait_for_registration(path: Path) -> None:
     """Wait until path is no longer being registered."""
     while path in _registering:
         await asyncio.sleep(0.05)
+
+
+def consume_self_registered(path: Path) -> bool:
+    """True and clears the mark: was this path successfully registered by
+    register_image()? One-shot check — the watcher uses this to decide whether
+    a generated_dir event still needs a scan_heal fallback, or whether the
+    synchronous save path already handled it.
+    """
+    if path in _self_registered:
+        _self_registered.discard(path)
+        return True
+    return False
 
 
 class ScanState(BaseModel):
@@ -61,6 +76,26 @@ class ScanState(BaseModel):
 
 
 scan_state = ScanState()
+_last_heal_counts: tuple[int, int] | None = None  # (disk_count, db_count)
+_legacy_shoot_reclass_done = False
+
+
+async def _reclassify_legacy_muse_shoots(db: QdrantDBClient) -> None:
+    """Once per process: unhide old playground/muse_shoot_* still marked draft."""
+    global _legacy_shoot_reclass_done
+    if _legacy_shoot_reclass_done:
+        return
+    unmark = getattr(db, "unmark_legacy_muse_shoot_drafts", None)
+    if not callable(unmark):
+        _legacy_shoot_reclass_done = True
+        return
+    try:
+        n = await unmark()
+        _legacy_shoot_reclass_done = True
+        if n:
+            invalidate_image_caches()
+    except Exception:
+        logger.exception("legacy muse_shoot reclass failed")
 
 
 def _sha256_file(path: Path) -> str:
@@ -125,12 +160,40 @@ async def run_heal(db: QdrantDBClient) -> None:
       2. Walk filesystem; skip SHA256 hashing when path+mtime match
       3. Detect and remove points whose files no longer exist
     """
+    global _last_heal_counts
     if scan_state.running:
         return
 
     scan_state.reset("heal")
 
     try:
+        loop = asyncio.get_event_loop()
+        files = await loop.run_in_executor(None, _collect_all_files)
+        scan_state.total = len(files)
+        disk_count = len(files)
+        db_count = await db.total_count()
+
+        await _reclassify_legacy_muse_shoots(db)
+
+        if _last_heal_counts == (disk_count, db_count):
+            # Disk/Qdrant counts match what they were the last time we checked
+            # — cheap proxy for "nothing added or removed since then". Compared
+            # against the *previous* check rather than against each other
+            # directly, because content-duplicate files (same sha256 at more
+            # than one path) permanently skew disk_count above db_count —
+            # Qdrant is content-addressed, so duplicates collapse to one point
+            # — which would make an absolute disk==db comparison never match
+            # and defeat this short-circuit forever. Comparing consecutive
+            # snapshots still catches real adds/deletes (either count moves)
+            # while tolerating a stable duplicate-driven skew.
+            scan_state.skipped = disk_count
+            logger.info(
+                "Heal: disk=%d db=%d unchanged since last check — short-circuit",
+                disk_count, db_count,
+            )
+            return
+        _last_heal_counts = (disk_count, db_count)
+
         # ── 0. Remove duplicate-path entries ────────────────────────────────
         dedup_count = await _dedup_paths(db)
         if dedup_count:
@@ -143,9 +206,6 @@ async def run_heal(db: QdrantDBClient) -> None:
         logger.info("Heal: %d known docs in Qdrant", len(known))
 
         # ── 2. Walk filesystem (both source and generated dirs) ──────────────
-        loop = asyncio.get_event_loop()
-        files = await loop.run_in_executor(None, _collect_all_files)
-        scan_state.total = len(files)
         logger.info("Heal: %d files on disk", len(files))
 
         seen_paths: set[str] = set()
@@ -195,6 +255,7 @@ async def run_heal(db: QdrantDBClient) -> None:
 
     finally:
         scan_state.finish()
+        invalidate_image_caches()
         logger.info(
             "Heal done: added=%d updated=%d skipped=%d deleted=%d errors=%d",
             scan_state.added, scan_state.updated,
@@ -202,7 +263,7 @@ async def run_heal(db: QdrantDBClient) -> None:
         )
 
 
-async def run_scan(db: QdrantDBClient) -> None:
+async def run_scan(db: QdrantDBClient, concurrency: int = 8) -> None:
     """Full scan: processes every file. Use for first-time setup or corruption recovery."""
     if scan_state.running:
         return
@@ -213,20 +274,25 @@ async def run_scan(db: QdrantDBClient) -> None:
         loop = asyncio.get_event_loop()
         files = await loop.run_in_executor(None, _collect_all_files)
         scan_state.total = len(files)
-        logger.info("Full scan: %d files", len(files))
+        logger.info("Full scan: %d files, concurrency=%d", len(files), concurrency)
 
-        for path in files:
-            scan_state.current_file = str(path)
-            try:
-                await _process_image(path, db)
-                scan_state.processed += 1
-                scan_state.added += 1
-            except Exception:
-                logger.exception("Failed to process %s", path)
-                scan_state.errors += 1
+        sem = asyncio.Semaphore(concurrency)
+
+        async def _bounded(path: Path) -> None:
+            async with sem:
+                try:
+                    await _process_image(path, db)
+                    scan_state.processed += 1
+                    scan_state.added += 1
+                except Exception:
+                    logger.exception("Failed to process %s", path)
+                    scan_state.errors += 1
+
+        await asyncio.gather(*(_bounded(p) for p in files))
 
     finally:
         scan_state.finish()
+        invalidate_image_caches()
         logger.info(
             "Full scan done: %d processed, %d errors",
             scan_state.processed, scan_state.errors,
@@ -292,6 +358,7 @@ async def register_image(path: Path, db: QdrantDBClient) -> str:
     _registering.add(path)
     try:
         await _process_image(path, db)
+        _self_registered.add(path)
         loop = asyncio.get_event_loop()
         sha256 = await loop.run_in_executor(None, _sha256_file, path)
         return sha256
@@ -319,12 +386,16 @@ async def _process_image(path: Path, db: QdrantDBClient) -> None:
             "mtime": mtime,
             "scanned_at": now,
             "is_reference": path.is_relative_to(settings.source_images_dir),
+            "is_draft": is_draft_path(path),
         })
         if not thumbnail_exists(sha256):
             await ensure_thumbnail(path, sha256)
         return
 
-    result = await loop.run_in_executor(None, extract_from_image, path)
+    result, _ = await asyncio.gather(
+        loop.run_in_executor(None, extract_from_image, path),
+        ensure_thumbnail(path, sha256),
+    )
 
     payload: dict = {
         "sha256": sha256,
@@ -345,7 +416,8 @@ async def _process_image(path: Path, db: QdrantDBClient) -> None:
         "embedding_status": "pending",
         "batch_category": "AI" if result.raw_metadata.format in ("a1111", "comfyui") else "NR",
         "is_reference": path.is_relative_to(settings.source_images_dir),
+        # Board sketches stay searchable but are kept out of the default gallery.
+        "is_draft": is_draft_path(path),
     }
 
     await db.upsert_new(sha256, payload)
-    await ensure_thumbnail(path, sha256)

@@ -9,7 +9,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-SPIRIT_ORDER = ["faithful", "rebel", "stranger", "lunatic", "oracle"]
+SPIRIT_ORDER = ["faithful", "rebel", "stranger", "lunatic", "oracle", "sorrow"]
 SESSION_TTL = 3600  # seconds
 
 
@@ -20,7 +20,9 @@ class SpiritState:
     sha256: str | None = None
     prompt_result: dict | None = None
     alignment_score: float | None = None
+    novelty_score: float | None = None
     job_ids: list[str] = field(default_factory=list)
+    history: list[dict] = field(default_factory=list)  # prior prompt_results (respin memory)
 
 
 @dataclass
@@ -33,9 +35,12 @@ class InvokeSession:
     prompt_mode: str = "danbooru+natural"  # 'danbooru+natural' | 'natural' | 'danbooru'
     locale: str = "en"                     # 'en' | 'ja' — controls monologue language
     rebel_inversion: bool = True           # False = rebel expresses Counter perspective without axis inversion
+    heat: float = 1.0                      # global LLM temperature multiplier (0.6–1.3)
+    wildness: int = 1                      # 1-3: widens stranger/lunatic vocab pools
+    parent_sha256s: list[str] = field(default_factory=list)  # lineage: evolve (1 parent) / breed (2 parents)
     person_tags: str = ""                  # e.g. "1girl, solo" — prepended to every positive prompt
     pro_negative: str = ""                 # user-supplied negative from Pro mode
-    pro_topic: str = ""                    # Pro mode natural language topic (お題テキスト)
+    pro_topic: str = ""                    # Pro mode natural language topic
     pro_sections: dict = field(default_factory=dict)  # character/background/props/action seed hints
     # Runtime resources (stored to avoid threading through callbacks)
     db: Any = None
@@ -45,7 +50,11 @@ class InvokeSession:
     spirits: dict[str, SpiritState] = field(default_factory=dict)
     axes: dict | None = None
     event_queue: asyncio.Queue = field(default_factory=asyncio.Queue)
+    # Set when the session reaches a terminal state (complete / all-error / cancelled).
+    # Awaitable by workers (e.g. daily oracle) without consuming the SSE event queue.
+    completion: asyncio.Event = field(default_factory=asyncio.Event)
     created_at: float = field(default_factory=time.time)
+    last_activity: float = field(default_factory=time.time)
     completed: bool = False
     cancelled: bool = False
     finalize_submitted: bool = False
@@ -63,6 +72,7 @@ class InvokeSession:
                     "status": s.status,
                     "sha256": s.sha256,
                     "alignment_score": s.alignment_score,
+                    "novelty_score": s.novelty_score,
                     "monologue": (s.prompt_result or {}).get("internal_monologue"),
                     "natural_language": (s.prompt_result or {}).get("natural_language"),
                     "natural_language_ja": (s.prompt_result or {}).get("natural_language_ja"),
@@ -92,6 +102,9 @@ class InvokeSessionManager:
         pro_topic: str = "",
         pro_sections: dict | None = None,
         rebel_inversion: bool = True,
+        heat: float = 1.0,
+        wildness: int = 1,
+        parent_sha256s: list[str] | None = None,
         db=None,
         ollama=None,
         comfy=None,
@@ -112,6 +125,9 @@ class InvokeSessionManager:
             pro_topic=pro_topic or "",
             pro_sections=pro_sections or {},
             rebel_inversion=rebel_inversion,
+            heat=max(0.6, min(1.3, heat)),
+            wildness=max(1, min(3, wildness)),
+            parent_sha256s=parent_sha256s or [],
             db=db,
             ollama=ollama,
             comfy=comfy,
@@ -129,12 +145,15 @@ class InvokeSessionManager:
         self._sessions.pop(session_id, None)
 
     def _evict_expired(self) -> None:
+        # Activity-based TTL: sessions with in-flight jobs keep touching last_activity
+        # via emit(), so queue congestion no longer expires them mid-flight.
         cutoff = time.time() - SESSION_TTL
-        expired = [sid for sid, s in self._sessions.items() if s.created_at < cutoff]
+        expired = [sid for sid, s in self._sessions.items() if s.last_activity < cutoff]
         for sid in expired:
             self._sessions.pop(sid, None)
 
     async def emit(self, session: InvokeSession, event_type: str, data: dict) -> None:
+        session.last_activity = time.time()
         await session.event_queue.put({"type": event_type, **data})
 
     async def on_axis_done(self, session_id: str, axes: dict) -> None:
@@ -156,7 +175,7 @@ class InvokeSessionManager:
         import asyncio
         from .vocab_bank import get_vocab_hints, get_axis_semantic_tags
         _vh, _ah = await asyncio.gather(
-            get_vocab_hints(session.db, session.ollama, axis_tags),
+            get_vocab_hints(session.db, session.ollama, axis_tags, wildness=session.wildness),
             get_axis_semantic_tags(session.db, session.ollama, axes),
             return_exceptions=True,
         )
@@ -171,19 +190,20 @@ class InvokeSessionManager:
         else:
             axis_tag_hints = _ah
 
-        # topic_tags をスピリット別ティアに分割
-        # 上位タグ（コア）= テーマに直結、下位タグ = より発散的
+        # Split topic_tags into per-spirit tiers.
+        # The top tags (the core) tie directly to the theme; the lower ones diverge
+        # more.
         topic_tags = axes.get('_topic_tags', [])
         n_tags = len(topic_tags)
         if n_tags > 0:
             cut1 = max(1, n_tags // 3)
             cut2 = max(cut1 + 1, n_tags * 2 // 3)
             _topic_tier = {
-                "faithful": topic_tags[:cut2],           # コア〜中間
-                "rebel":    topic_tags[:cut2],           # 同上（rebelはシーン軸で逆転）
-                "stranger": topic_tags[cut1:],           # 中間〜発散
-                "lunatic":  topic_tags[cut2:] or topic_tags[cut1:],  # 最も発散的
-                "oracle":   topic_tags[::2],             # 間引きで全域カバー
+                "faithful": topic_tags[:cut2],           # core to middle
+                "rebel":    topic_tags[:cut2],           # the same (rebel inverts on the scene axis)
+                "stranger": topic_tags[cut1:],           # middle to divergent
+                "lunatic":  topic_tags[cut2:] or topic_tags[cut1:],  # the most divergent
+                "oracle":   topic_tags[::2],             # thinned out to cover the whole range
             }
         else:
             _topic_tier = {}
@@ -199,11 +219,12 @@ class InvokeSessionManager:
             session.spirits[spirit_name].status = "composing"
             spirit_vocab = vocab_hints if spirit_name in ("stranger", "lunatic") else {"stranger": [], "lunatic": []}
 
-            # スピリット別 topic_tags をセマンティック候補の補足として末尾に追加
+            # Append the per-spirit topic_tags at the end, to supplement the
+            # semantic candidates
             spirit_topic = _topic_tier.get(spirit_name, topic_tags)
             spirit_hints = (axis_tag_hints + [t for t in spirit_topic if t not in axis_tag_hints_set])[:25]
 
-            # Pro mode: 各スピリットに異なるシーンバリアントを割り当て
+            # Pro mode: assign a different scene variant to each spirit
             if scene_variants and i < len(scene_variants):
                 spirit_axes = {**axes, 'scene': scene_variants[i]}
             else:
@@ -241,7 +262,7 @@ class InvokeSessionManager:
         spirit.prompt_result = prompt_result
         spirit.status = "composed"
 
-        # フロントへの通知は compose 完了ごとに逐次送信
+        # The frontend is notified one compose at a time, as each finishes
         _cat_fields = (
             "hair_tags", "expression_tags", "clothing_tags", "accessory_tags",
             "pose_tags", "background_tags", "object_tags", "lighting_tags",
@@ -257,7 +278,7 @@ class InvokeSessionManager:
             **{f: prompt_result.get(f, "") for f in _cat_fields},
         })
 
-        # 全 spirit が compose を終えたら generation を一括 submit
+        # Once every spirit has finished composing, submit generation in one go
         if all(s.status != "composing" for s in session.spirits.values()):
             from ..spooler.models import JobLane
             from ..jobs.runners import run_invoke_image_generate
@@ -317,7 +338,8 @@ class InvokeSessionManager:
             "sha256": sha256,
         })
 
-        # 全 spirit が generation フェーズを脱したら finalize（pipeline → alignment）を一括 submit
+        # Once every spirit has left the generation phase, submit finalize
+        # (pipeline -> alignment) in one go
         _maybe_submit_finalize(session, session_id, self)
 
     async def on_spirit_done(
@@ -340,6 +362,7 @@ class InvokeSessionManager:
             "spirit": spirit_name,
             "sha256": spirit.sha256,
             "alignment_score": alignment_score,
+            "novelty_score": spirit.novelty_score,
         })
 
         if all(session.spirits[n].status in ("done", "error") for n in session.enabled_spirits):
@@ -347,7 +370,9 @@ class InvokeSessionManager:
             await self.emit(session, "session_complete", {"session_id": session_id})
             await _update_summon_stats(session=session)
             await session.event_queue.put(None)
-            # finalize（pipeline + alignment）は on_image_done / on_spirit_error から submit 済み
+            session.completion.set()
+            # finalize (pipeline + alignment) has already been submitted from
+            # on_image_done / on_spirit_error
 
     async def on_spirit_error(self, session_id: str, spirit_name: str, error: str) -> None:
         session = self.get_session(session_id)
@@ -358,13 +383,15 @@ class InvokeSessionManager:
             spirit.status = "error"
         await self.emit(session, "spirit_error", {"spirit": spirit_name, "error": error})
 
-        # error で止まった spirit があっても残りが generation フェーズを脱したら finalize
+        # Even with a spirit stopped on an error, finalize once the rest have left
+        # the generation phase
         _maybe_submit_finalize(session, session_id, self)
 
         if all(session.spirits[n].status in ("done", "error") for n in session.enabled_spirits):
             session.completed = True
             await self.emit(session, "session_complete", {"session_id": session_id})
             await session.event_queue.put(None)
+            session.completion.set()
 
     async def cancel_session(self, session_id: str) -> bool:
         session = self.get_session(session_id)
@@ -383,6 +410,7 @@ class InvokeSessionManager:
         session.completed = True
         await self.emit(session, "session_cancelled", {"session_id": session_id})
         await session.event_queue.put(None)
+        session.completion.set()
         return True
 
     async def adopt_spirit(self, session_id: str, spirit_name: str) -> str | None:
@@ -418,7 +446,8 @@ class InvokeSessionManager:
 
 
 def _maybe_submit_finalize(session: InvokeSession, session_id: str, session_manager) -> bool:
-    """全 spirit が generation フェーズを脱したら finalize ジョブを 1 回だけ submit する。"""
+    """Submit the finalize job exactly once, after every spirit has left the generation
+    phase."""
     if session.finalize_submitted:
         return False
     if all(
@@ -439,7 +468,7 @@ def _submit_session_finalize(
     session_manager,
     spirit_sha256s: dict,
 ) -> None:
-    """EMBEDDING ランに run_invoke_session_finalize を submit する。"""
+    """Submit run_invoke_session_finalize onto the EMBEDDING lane."""
     from ..jobs.runners import run_invoke_session_finalize
     from ..spooler.models import JobLane
     session.spooler.submit(
@@ -472,7 +501,9 @@ def _build_genesis(
         "siblings": siblings or [],
         "adopted_at_genesis": adopted,
         "alignment_at_genesis": session.spirits[spirit_name].alignment_score,
+        "novelty_at_genesis": session.spirits[spirit_name].novelty_score,
         "wild_tags": pr.get("wild_tags_used", []),
+        "parents": list(session.parent_sha256s),
         "respin_count": 0,
         "workflow_preset": session.workflow_name,
         "daily_oracle_date": daily_date,

@@ -12,8 +12,11 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from ..ai.tile_image import create_tile_image
+from ..jobs.sse_stream import queue_sse_response
 from ..runtime_config import get_runtime_config
 from ..spooler.models import JobLane
+from ..ai import vecmath
+from ..tags import catalog as tag_catalog
 from .inspire_axes import (
     AXIS_DEFINITIONS, ALL_AXES, AXIS_ALIAS_MAP,
     STEP1_AXIS_TABLE, STEP2_INVERSION_HINTS,
@@ -38,67 +41,31 @@ def _load_wd14_character_tags() -> frozenset[str]:
 
 _WD14_CHAR_TAGS: frozenset[str] = _load_wd14_character_tags()
 
-# ── Tag category data from JSON ────────────────────────────────────────────────
-_TAG_DATA: dict = json.loads(
-    (Path(__file__).parent.parent / "static" / "tag_categories.json").read_text(encoding="utf-8")
-)
+# ── Tag category data (shared catalog — tag_categories.json) ───────────────────
+_TAG_DATA: dict = tag_catalog.TAG_DATA
+_FTC_COUNT = tag_catalog.COUNT
+_FTC_EYE_SHAPES = tag_catalog.EYE_SHAPES
+_FTC_BODY = tag_catalog.BODY
+_FTC_SKIN_FACE = tag_catalog.SKIN_FACE
+_FTC_RACE = tag_catalog.RACE
+_FTC_COMPOSITION = tag_catalog.COMPOSITION
+_FTC_PROPS = tag_catalog.PROPS
+_FTC_HAIR_STYLES = tag_catalog.HAIR_STYLES
+_FTC_EXPRESSION = tag_catalog.EXPRESSION
+_FTC_POSE = tag_catalog.POSE
+_FTC_CLOTHING_EXPLICIT = tag_catalog.CLOTHING_EXPLICIT
+_FTC_ACCESSORIES = tag_catalog.ACCESSORIES
+_FTC_BODY_PARTS = tag_catalog.BODY_PARTS
+_FTC_ART_STYLE = tag_catalog.ART_STYLE
+_FTC_ENVIRONMENT = tag_catalog.ENVIRONMENT
+_FTC_BACKGROUND = tag_catalog.BACKGROUND
+_FTC_CLOTHING_SUFFIXES = tag_catalog.CLOTHING_SUFFIXES
+_FTC_ACTION_KEYWORDS = tag_catalog.ACTION_KEYWORDS
+_STYLE_ALWAYS_FIXED = tag_catalog.STYLE_ALWAYS_FIXED
+_VISUAL_LIGHTING = tag_catalog.VISUAL_LIGHTING
+_ABSTRACT_BG = tag_catalog.ABSTRACT_BG
 
-def _fs(*keys: str) -> frozenset[str]:
-    """Retrieve tags at the given JSON key path and return as a frozenset."""
-    d: dict | list = _TAG_DATA
-    for k in keys:
-        d = d[k]  # type: ignore
-    return frozenset(d)  # type: ignore
-
-_FTC_COUNT:             frozenset[str] = _fs("always_fixed", "count")
-_FTC_EYE_SHAPES:        frozenset[str] = _fs("always_fixed", "eye_shapes")
-_FTC_BODY:              frozenset[str] = _fs("always_fixed", "body")
-_FTC_SKIN_FACE:         frozenset[str] = _fs("always_fixed", "skin_face")
-_FTC_RACE:              frozenset[str] = _fs("always_fixed", "race")
-_FTC_COMPOSITION:       frozenset[str] = _fs("always_fixed", "composition")
-_FTC_PROPS:             frozenset[str] = _fs("always_fixed", "props")
-_FTC_HAIR_STYLES:       frozenset[str] = _fs("axis_hair")
-_FTC_EXPRESSION:        frozenset[str] = _fs("axis_emotion")
-_FTC_POSE:              frozenset[str] = _fs("axis_action")
-_FTC_CLOTHING_EXPLICIT: frozenset[str] = _fs("axis_clothing_explicit")
-_FTC_ACCESSORIES:       frozenset[str] = _fs("axis_accessories")
-_FTC_BODY_PARTS:        frozenset[str] = _fs("axis_parts")
-_FTC_ART_STYLE:         frozenset[str] = (
-    _fs("axis_art_style", "volatile") | _fs("axis_art_style", "always_fixed")
-)
-_FTC_ENVIRONMENT:       frozenset[str] = (
-    _fs("axis_environment", "visual_lighting") | _fs("axis_environment", "time_weather")
-)
-_FTC_BACKGROUND:        frozenset[str] = (
-    _fs("axis_background", "abstract") | _fs("axis_background", "location")
-)
-_FTC_CLOTHING_SUFFIXES: tuple[str, ...] = tuple(_TAG_DATA["patterns"]["clothing_suffixes"])
-_FTC_ACTION_KEYWORDS:   tuple[str, ...] = tuple(_TAG_DATA["patterns"]["action_keywords"])
-
-_STYLE_ALWAYS_FIXED: frozenset[str] = _fs("axis_art_style", "always_fixed")
-_VISUAL_LIGHTING:    frozenset[str] = _fs("axis_environment", "visual_lighting")
-_ABSTRACT_BG:        frozenset[str] = _fs("axis_background", "abstract")
-
-# ── Display group lookup: tag → display group name (JSON driven) ──────────────
-def _build_display_group_map() -> dict[str, str]:
-    """Build a tag→group-name dict from tag_categories.json display_category_map."""
-    result: dict[str, str] = {}
-    for entry in _TAG_DATA.get("display_category_map", []):
-        label = entry["label"]
-        path = entry["source"].split(".")
-        node: dict | list = _TAG_DATA
-        for key in path:
-            if isinstance(node, dict):
-                node = node.get(key, [])
-            else:
-                node = []
-        if isinstance(node, list):
-            for tag in node:
-                if tag not in result:          # First-win (first definition takes priority)
-                    result[tag] = label
-    return result
-
-_TAG_DISPLAY_GROUP: dict[str, str] = _build_display_group_map()
+_TAG_DISPLAY_GROUP: dict[str, str] = tag_catalog.build_display_group_map()
 
 router = APIRouter(prefix="/api/inspire")
 
@@ -151,6 +118,11 @@ class BrainstormRequest(BaseModel):
     sha256s: list[str]
     extra_tags: list[str] = []
     lang: str = "ja"
+    # Supply the tag set directly instead of harvesting it from library docs.
+    # Muse uses this: its board images are tagged at a lower threshold than the
+    # library pipeline uses, and that merged set is what it wants ideas about.
+    reference_tags: list[str] | None = None
+    theme: str = ""
 
 
 class DiscoverRequest(BaseModel):
@@ -188,24 +160,11 @@ class OutlierRequest(BaseModel):
 
 
 # ── Vector math helpers ────────────────────────────────────────────────────────
-
-def _normalize(vec: list[float]) -> list[float]:
-    mag = math.sqrt(sum(x * x for x in vec))
-    if mag == 0:
-        return vec
-    return [x / mag for x in vec]
-
-
-def _vec_add(a: list[float], b: list[float]) -> list[float]:
-    return [x + y for x, y in zip(a, b)]
-
-
-def _vec_sub(a: list[float], b: list[float]) -> list[float]:
-    return [x - y for x, y in zip(a, b)]
-
-
-def _vec_lerp(a: list[float], b: list[float], t: float) -> list[float]:
-    return [x + t * (y - x) for x, y in zip(a, b)]
+# Now shared with Muse; kept aliased here so the handlers below read unchanged.
+_normalize = vecmath.normalize
+_vec_add = vecmath.vec_add
+_vec_sub = vecmath.vec_sub
+_vec_lerp = vecmath.vec_lerp
 
 
 def _sse(data: dict) -> str:
@@ -568,7 +527,7 @@ If criminal issues found, replace those tags with safe alternatives.
 _EXPAND_THEME_PROMPT = """\
 # ROLE
 You are a Danbooru tag expert. Given a theme/topic, generate specific danbooru-compatible tags
-for each of four categories. Think creatively and artistically — avoid obvious/generic tags.
+for each of six categories. Think creatively and artistically — avoid obvious/generic tags.
 Prefer visually striking, specific, non-obvious choices that create a vivid scene.
 
 # THEME
@@ -580,6 +539,8 @@ Prefer visually striking, specific, non-obvious choices that create a vivid scen
 - BACKGROUND: location, time of day, weather, architectural/natural elements (5-10 tags)
 - PROPS & ACCESSORIES: held objects, worn accessories, jewelry, nearby props (4-8 tags)
 - ACTION: pose, gesture, facial expression, body language (3-6 tags)
+- MOOD: lighting style, color palette, emotional atmosphere (e.g. soft_lighting, warm_color_palette, melancholic, dramatic_lighting) (3-6 tags)
+- CAMERA: shot framing and angle (e.g. close-up, wide_shot, from_above, dutch_angle, full_body) (2-4 tags)
 - Do NOT include quality meta-tags (masterpiece, best_quality, highres, etc.)
 - Do NOT repeat tags across sections
 
@@ -588,7 +549,9 @@ Prefer visually striking, specific, non-obvious choices that create a vivid scen
   "character": "tag1, tag2, ...",
   "background": "tag1, tag2, ...",
   "props": "tag1, tag2, ...",
-  "action": "tag1, tag2, ..."
+  "action": "tag1, tag2, ...",
+  "mood": "tag1, tag2, ...",
+  "camera": "tag1, tag2, ..."
 }}"""
 
 
@@ -712,7 +675,11 @@ def _extract_spec_category_tags(world_spec: dict) -> dict[str, list[str]]:
         "object_tags":     "object_desc",
         "lighting_tags":   "lighting_desc",
     }
-    return {cat: _extract_embedded_tags(world_spec.get(src, "")) for cat, src in cat_map.items()}
+    out = {cat: _extract_embedded_tags(world_spec.get(src, "")) for cat, src in cat_map.items()}
+    # subject_tags: Refine Visual Spec parity (9 categories)
+    subject = _extract_embedded_tags(world_spec.get("character_desc", ""))
+    out["subject_tags"] = subject
+    return out
 
 
 def _parse_json_from_llm(raw: str) -> dict:
@@ -747,59 +714,16 @@ def _split_tags(tag_str: str) -> list[str]:
 
 
 def _build_tag_to_axis() -> dict[str, str]:
-    """Build tag→axis mapping from frozensets + WD14 CSV. 'always_fixed' means fixed with no axis."""
-    m: dict[str, str] = {}
-
-    # WD14 category=4 character name tags → always FIXED
-    for tag in _WD14_CHAR_TAGS:
-        m[tag] = 'always_fixed'
-
-    # Content rating tags → always FIXED (VLM judgment is ambiguous for these)
-    for tag in ("general", "sensitive", "explicit", "safe", "nsfw",
-                "questionable", "rating_safe", "rating_explicit", "rating_general"):
-        m[tag] = 'always_fixed'
-
-    # Always FIXED (never becomes volatile regardless of which axis is selected)
-    for tag in (*_FTC_COUNT, *_FTC_EYE_SHAPES, *_FTC_BODY,
-                *_FTC_SKIN_FACE, *_FTC_RACE, *_FTC_COMPOSITION, *_FTC_PROPS):
-        m[tag] = 'always_fixed'
-
-    # style axis — some are always FIXED (uses top-level constant _STYLE_ALWAYS_FIXED)
-    for tag in _FTC_ART_STYLE:
-        m[tag] = 'always_fixed' if tag in _STYLE_ALWAYS_FIXED else 'style'
-
-    for tag in _FTC_HAIR_STYLES:        m[tag] = 'hair'
-    for tag in _FTC_EXPRESSION:         m[tag] = 'emotion'
-    for tag in _FTC_POSE:               m[tag] = 'action'
-    for tag in _FTC_ACCESSORIES:        m[tag] = 'clothing'
-    for tag in _FTC_CLOTHING_EXPLICIT:  m[tag] = 'clothing'
-    for tag in _FTC_BODY_PARTS:         m[tag] = 'parts'
-
-    # _FTC_ENVIRONMENT: visual lighting vs time/weather (uses top-level constant _VISUAL_LIGHTING)
-    for tag in _FTC_ENVIRONMENT:
-        m[tag] = 'visual' if tag in _VISUAL_LIGHTING else 'time_weather'
-
-    # _FTC_BACKGROUND: abstract background vs location (uses top-level constant _ABSTRACT_BG)
-    for tag in _FTC_BACKGROUND:
-        m[tag] = 'visual' if tag in _ABSTRACT_BG else 'location'
-
-    return m
+    """Build tag→axis mapping from shared catalog + WD14 character names."""
+    return tag_catalog.build_tag_to_axis(extra_always_fixed=_WD14_CHAR_TAGS)
 
 
 _TAG_TO_AXIS: dict[str, str] = _build_tag_to_axis()
 
 
 def _get_tag_axis(tag: str) -> str | None:
-    """Return the axis for a tag; None if not in any frozenset. Suffix patterns take precedence."""
-    if tag.endswith('_hair'):
-        return 'hair'
-    if tag.endswith('_eyes'):
-        return 'always_fixed'
-    if any(tag.endswith(s) for s in _FTC_CLOTHING_SUFFIXES):
-        return 'clothing'
-    if any(kw in tag for kw in _FTC_ACTION_KEYWORDS):
-        return 'action'
-    return _TAG_TO_AXIS.get(tag)
+    """Return the axis for a tag; None if not in any frozenset."""
+    return tag_catalog.get_tag_axis(tag, mapping=_TAG_TO_AXIS)
 
 
 def _group_volatile_by_axis(
@@ -1434,6 +1358,12 @@ async def _inversion_stream(body: InversionRequest, db, ollama, cfg) -> AsyncGen
     volatile_tags = [t for ax, tags in all_axis_grouped.items() if ax in change_set for t in tags]
     non_target_tags = [t for ax, tags in all_axis_grouped.items() if ax not in change_set for t in tags]
     fixed_tags = always_fixed + non_target_tags
+    # Safety net: re-assert frozenset + WD14 rules over LLM / split mistakes
+    # (e.g. smile left in fixed while emotion is a change target).
+    if frozenset_enabled:
+        fixed_tags, volatile_tags = _apply_frozenset_corrections(
+            fixed_tags, volatile_tags, change_set,
+        )
     fixed_tags_grouped = _categorize_fixed_tags(fixed_tags, base_tags, volatile_tags)
     # Reconstruct complete fixed_tags from grouped and pass to all subsequent steps
     fixed_tags = [tag for tags in fixed_tags_grouped.values() for tag in tags]
@@ -1441,7 +1371,13 @@ async def _inversion_stream(body: InversionRequest, db, ollama, cfg) -> AsyncGen
     if body.user_inject_sections:
         fixed_tags = _apply_section_overrides(fixed_tags, body.user_inject_sections)
     # Only expose groups for selected axes as volatile_tags_grouped
-    volatile_tags_grouped = {ax: tags for ax, tags in all_axis_grouped.items() if ax in change_set and tags}
+    volatile_tags_grouped = _group_volatile_by_axis(
+        volatile_tags, selected_targets, axis_override=llm_classification or None,
+    )
+    volatile_tags_grouped = {
+        ax: tags for ax, tags in volatile_tags_grouped.items()
+        if ax in change_set and tags
+    }
     yield _sse({"type": "step1_result", "fixed_tags": fixed_tags, "volatile_tags": volatile_tags,
                 "fixed_tags_grouped": fixed_tags_grouped, "volatile_tags_grouped": volatile_tags_grouped,
                 "llm_classification": llm_classification})
@@ -1498,6 +1434,20 @@ async def _inversion_stream(body: InversionRequest, db, ollama, cfg) -> AsyncGen
     )
     # Extract per-category tags from STEP3 danbooru-embedded *_desc fields
     ws_cat_tags = _extract_spec_category_tags(world_spec)
+    # Subject anchors from fixed character tags (Refine parity)
+    from ..tags.subject_anchors import SUBJECT_ANCHOR_TAGS
+    _subj = [
+        t for t in fixed_tags
+        if t.lower().replace(" ", "_") in SUBJECT_ANCHOR_TAGS
+    ]
+    if _subj:
+        seen_s = {x.lower() for x in ws_cat_tags.get("subject_tags", [])}
+        merged_s = list(ws_cat_tags.get("subject_tags") or [])
+        for t in _subj:
+            if t.lower() not in seen_s:
+                merged_s.append(t)
+                seen_s.add(t.lower())
+        ws_cat_tags["subject_tags"] = merged_s
     # BM25 normalize: validate/replace non-standard tags against Danbooru vocabulary
     ws_cat_tags = {k: _bm25_normalize_tags(v) for k, v in ws_cat_tags.items()}
     yield _sse({"type": "step3_result", **ws_cat_tags})
@@ -1589,7 +1539,9 @@ async def _inversion_stream(body: InversionRequest, db, ollama, cfg) -> AsyncGen
     if removal_set:
         kept: list[str] = []
         for t in final_positive:
-            if t in removal_set:
+            # BM25 may yield space-form tags; match underscore-normalized removal set
+            norm = str(t).lower().replace(" ", "_")
+            if norm in removal_set or t in removal_set:
                 removed_tags.append(t)
             else:
                 kept.append(t)
@@ -1625,45 +1577,38 @@ async def _inversion_stream(body: InversionRequest, db, ollama, cfg) -> AsyncGen
 
 @router.post("/expand-theme")
 async def expand_theme(body: ExpandThemeRequest, request: Request):
-    """Use VLM to expand a free-form theme into 4-section structured Danbooru tags."""
+    """Submit a job to the PROMPT lane and return job_id. Stream via /expand-theme/{job_id}/stream."""
     if not body.theme.strip():
         raise HTTPException(422, "theme must not be empty")
-    ollama = request.app.state.ollama
-    db     = request.app.state.db
-    cfg    = await get_runtime_config(db)
+    from ..jobs.runners import run_expand_theme
+    spooler = request.app.state.spooler
+    db      = request.app.state.db
+    ollama  = request.app.state.ollama
 
-    # Load reference images for VLM context if provided
-    tile_bytes: bytes | None = None
-    image_bytes_list: list[bytes] = []
-    for sha256 in body.sha256s[:4]:
-        doc = await db.get(sha256)
-        if not doc:
-            continue
-        fp = Path(doc.get("path", ""))
-        if fp.exists():
-            image_bytes_list.append(fp.read_bytes())
-    if image_bytes_list:
-        tile_bytes = create_tile_image(image_bytes_list)
+    event_queue: asyncio.Queue = asyncio.Queue()
+    job_id = spooler.submit(
+        JobLane.PROMPT,
+        "expand_theme",
+        run_expand_theme,
+        meta={},
+        body_dict=body.model_dump(),
+        db=db,
+        ollama=ollama,
+        event_queue=event_queue,
+    )
+    request.app.state.inspire_event_queues[job_id] = event_queue
+    return {"job_id": job_id, "status": "queued"}
 
-    safe_theme = body.theme.replace("{", "{{").replace("}", "}}")
-    prompt = _EXPAND_THEME_PROMPT.format(theme=safe_theme)
 
-    try:
-        if tile_bytes:
-            raw = await ollama.generate_vlm(prompt, [tile_bytes], model=cfg["vlm_model"])
-        else:
-            raw = await ollama.generate_text(prompt, model=cfg["vlm_model"])
-        data = _parse_json_from_llm(raw) or {}
-    except Exception as exc:
-        logger.warning("expand_theme VLM failed: %s", exc)
-        raise HTTPException(502, "VLM call failed")
-
-    return {
-        "character":  _normalize_section(data.get("character", "")),
-        "background": _normalize_section(data.get("background", "")),
-        "props":      _normalize_section(data.get("props", "")),
-        "action":     _normalize_section(data.get("action", "")),
-    }
+@router.get("/expand-theme/{job_id}/stream")
+async def expand_theme_stream(job_id: str, request: Request):
+    q: asyncio.Queue | None = request.app.state.inspire_event_queues.get(job_id)
+    if q is None:
+        raise HTTPException(404, f"expand-theme job {job_id!r} not found")
+    return queue_sse_response(
+        request, q, job_id=job_id,
+        registry=request.app.state.inspire_event_queues, encode="raw",
+    )
 
 
 @router.post("/inversion")
@@ -1695,28 +1640,9 @@ async def inversion_stream(job_id: str, request: Request):
     q: asyncio.Queue | None = request.app.state.inspire_event_queues.get(job_id)
     if q is None:
         raise HTTPException(404, f"Inversion job {job_id!r} not found")
-
-    async def generate():
-        try:
-            while True:
-                if await request.is_disconnected():
-                    await request.app.state.spooler.cancel(job_id)
-                    break
-                try:
-                    item = await asyncio.wait_for(q.get(), timeout=15)
-                except asyncio.TimeoutError:
-                    yield "event: ping\ndata: {}\n\n"
-                    continue
-                if item is None:
-                    break
-                yield item
-        finally:
-            request.app.state.inspire_event_queues.pop(job_id, None)
-
-    return StreamingResponse(
-        generate(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    return queue_sse_response(
+        request, q, job_id=job_id,
+        registry=request.app.state.inspire_event_queues, encode="raw",
     )
 
 
@@ -1727,18 +1653,32 @@ async def _brainstorm_stream(
     ollama,
     cfg: dict,
     lang: str = "ja",
+    reference_tags: list[str] | None = None,
+    theme: str = "",
 ) -> AsyncGenerator[str, None]:
-    wd14_tags: list[str] = []
-    for sha256 in sha256s[:6]:
-        doc = await db.get(sha256)
-        if doc and doc.get("wd14_tags"):
-            wd14_tags.extend(doc["wd14_tags"][:20])
-
-    unique_tags = list(dict.fromkeys(wd14_tags))[:50]
+    # ``reference_tags`` lets a caller supply the tag set directly instead of
+    # harvesting it from library documents. Muse needs that: its board images
+    # are re-tagged at a much lower threshold than the library pipeline uses,
+    # and the merged result is the whole point of the step feeding this one.
+    if reference_tags is not None:
+        unique_tags = list(dict.fromkeys(reference_tags))[:50]
+    else:
+        wd14_tags: list[str] = []
+        for sha256 in sha256s[:6]:
+            doc = await db.get(sha256)
+            if doc and doc.get("wd14_tags"):
+                wd14_tags.extend(doc["wd14_tags"][:20])
+        unique_tags = list(dict.fromkeys(wd14_tags))[:50]
     must_tags = list(dict.fromkeys(extra_tags)) if extra_tags else []
 
+    # Without this the proposals are built from tags alone and can wander off
+    # what was actually asked for — a run themed "came to swim" produced four
+    # ideas about sunbathing, because the tags allowed it and nothing said no.
+    theme_str = f"The picture must be about: {theme}\n\n" if theme else ""
+    theme_str_ja = f"この絵のお題は「{theme}」です。提案は必ずこのお題に沿ってください。\n\n" if theme else ""
+
     if lang == "en":
-        must_str = (
+        must_str = theme_str + (
             f"You MUST center the proposals around these concepts: {', '.join(must_tags)}\n\n"
             if must_tags else ""
         )
@@ -1757,7 +1697,7 @@ async def _brainstorm_stream(
             "Output in Markdown format (## Idea N: Title) in English."
         )
     else:
-        must_str = (
+        must_str = theme_str_ja + (
             f"必ず以下のコンセプトを中心に据えた提案にしてください：{', '.join(must_tags)}\n\n"
             if must_tags else ""
         )
@@ -1815,28 +1755,9 @@ async def brainstorm_stream(job_id: str, request: Request):
     q: asyncio.Queue | None = request.app.state.inspire_event_queues.get(job_id)
     if q is None:
         raise HTTPException(404, f"Brainstorm job {job_id!r} not found")
-
-    async def generate():
-        try:
-            while True:
-                if await request.is_disconnected():
-                    await request.app.state.spooler.cancel(job_id)
-                    break
-                try:
-                    item = await asyncio.wait_for(q.get(), timeout=15)
-                except asyncio.TimeoutError:
-                    yield "event: ping\ndata: {}\n\n"
-                    continue
-                if item is None:
-                    break
-                yield item
-        finally:
-            request.app.state.inspire_event_queues.pop(job_id, None)
-
-    return StreamingResponse(
-        generate(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    return queue_sse_response(
+        request, q, job_id=job_id,
+        registry=request.app.state.inspire_event_queues, encode="raw",
     )
 
 

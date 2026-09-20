@@ -147,9 +147,9 @@ cp docker-compose.override.yml.example docker-compose.override.yml
 | 変数名 | 説明 |
 |---|---|
 | `API_TOKEN` | 認証トークン。ブラウザが初回ロード時に自動取得するため手動設定不要。デフォルト: `RANBELL_IMAGE_API_TOKEN` |
-| `OLLAMA_URL` | Ollama のURL。デフォルト: `http://host.docker.internal:11434` |
+| `OLLAMA_URL` | Ollama のURL（埋め込みは常にこちら）。デフォルト: `http://host.docker.internal:11434` |
 | `EMBED_MODEL` | 埋め込みモデル名。デフォルト: `embeddinggemma:300m` |
-| `VLM_MODEL` | 視覚言語モデル名。デフォルト: `gemma4:e2b` |
+| `VLM_MODEL` | テキスト / VLM モデル名（Ollama・他機能用）。デフォルト: `gemma4:e2b` |
 | `EMBED_DIM` | 埋め込みモデルの出力次元数。モデルと**必ず一致させること**。デフォルト: `768` |
 | `EMBED_DIM_SMALL` | 高速プリフェッチ用の縮小次元数。デフォルト: `256` |
 | `COMFYUI_URL` | ComfyUI のURL。デフォルト: `http://host.docker.internal:8188` |
@@ -219,6 +219,28 @@ WD14 がインストール済みで Ollama に接続できる状態であれば�
 トークンは自動で設定されます。初回ページロード時にアプリがバックエンドからトークンを取得し、ブラウザのセッションストレージに保存します。手動での設定は不要です。
 
 `docker-compose.override.yml` で `API_TOKEN` を変更した場合は、コンテナを再起動（`docker compose up -d`）してブラウザのタブを閉じ、再度開くと新しいトークンが自動で反映されます。
+
+
+### 更新するとき（既存の環境を新しい版へ）
+
+**`docker-compose.yml` を必ず最新にしてから `pull` してください。** イメージだけ
+新しくしても、compose が古いままだと必要なマウントやサービス設定が欠けたまま動きます
+（バックアップ用の `./qdrant_snapshots` と `/mnt/backup`、Qdrant の版などはここに
+書かれています）。
+
+```bash
+git pull                      # または docker-compose.yml を配布版で置き換える
+docker compose pull
+docker compose up -d
+```
+
+`docker-compose.override.yml` は環境ごとの設定なので上書きされません。新しい項目が
+増えたときは `docker-compose.override.yml.example` と見比べてください。
+
+> **バックアップの行き先が見えていないとき**、画面の上に「バックアップが取られていません」
+> と出ます。ほぼ必ず compose が古いことが原因なので、上の手順で更新してください。
+
+---
 
 ---
 

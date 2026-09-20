@@ -297,7 +297,8 @@ def _build_completion_prompt(
                 lines.append(f"  {k}: {v}")
         lines.append("")
 
-    # Pro prompt spec: ユーザーが直接書いたプロンプトの展開仕様 — seed hints より高優先度
+    # Pro prompt spec: how a prompt the user wrote directly is expanded — higher
+    # priority than the seed hints
     if pro_prompt_spec:
         visual_spec = pro_prompt_spec.get("visual_spec", "")
         action_tags = pro_prompt_spec.get("action_tags", [])
@@ -509,11 +510,12 @@ async def generate_scene_variants(
     pro_topic: str,
     n: int = 5,
 ) -> list[str]:
-    """テーマと基本軸から N 種の異なるシーン記述を生成してスピリット別に割り当てる。
+    """Generate N different scene descriptions from the theme and base axes, and
+    hand one to each spirit.
 
-    各バリアントは環境タイプ（屋内/屋外、都市/自然、幻想/現実）を変えることで
-    スピリット間のシチュエーション多様性を確保する。
-    失敗時は base_scene の繰り返しにフォールバック。
+    Each variant changes the kind of environment (indoor/outdoor, urban/natural,
+    fantastic/real) so the spirits do not all end up in the same situation.
+    Falls back to repeating `base_scene` on failure.
     """
     base_scene = axes.get("scene", "")
     subject = axes.get("subject", "")

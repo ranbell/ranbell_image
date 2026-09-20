@@ -7,17 +7,19 @@ export const LampState = Object.freeze({
   CAUTION:  'caution',   // warning (queue backlog, etc.)
   FAULT:    'fault',     // abnormal stop
   STANDBY:  'standby',   // idle
-  PAUSED:   'paused',    // paused (GPU priority control)
+  PAUSED:   'paused',    // paused manually
+  GUARD:    'guard',     // auto-paused by the spooler to protect the GPU
 })
 
 // system definitions — lane-based and resource-based
-// activeLanes: lane prefixes whose job activity should be reflected in a resource-based system
+// lane + resource together: lane drives the status, resource unreachability forces FAULT
 const SYSTEMS = [
   { key: 'generation',   label: 'Generation',   lane: 'gen'   },
+  { key: 'tagging',      label: 'Tagging',       lane: 'tagging' },
   { key: 'embedding',    label: 'Embedding',     lane: 'embed' },
   { key: 'vectorStore',  label: 'Vector Store',  resource: 'remote-qdrant' },
   { key: 'alignment',    label: 'Alignment',     lane: 'eval'  },
-  { key: 'promptEngine', label: 'Prompt Engine', resource: 'remote-ollama', activeLanes: ['prompt', 'embed', 'eval'] },
+  { key: 'promptEngine', label: 'Prompt Engine', lane: 'prompt', resource: 'remote-ollama' },
 ]
 
 const MAX_LOG_ENTRIES = 200
@@ -55,6 +57,11 @@ export function useControlRoom(jobsMap, resourcesRef) {
 
     return SYSTEMS.reduce((acc, sys) => {
       if (sys.lane) {
+        // backing resource down (e.g. Ollama unreachable) trumps lane activity
+        if (sys.resource) {
+          const res = resources.find(r => r.name === sys.resource)
+          if (res && !res.reachable) { acc[sys.key] = LampState.FAULT; return acc }
+        }
         const laneJobs = jobs.filter(j => j.id.startsWith(sys.lane + '-'))
         const running  = laneJobs.filter(j => j.state === 'running' || j.state === 'cancelling')
         const queued   = laneJobs.filter(j => j.state === 'queued')
@@ -65,7 +72,9 @@ export function useControlRoom(jobsMap, resourcesRef) {
 
         const ls = laneStates.value[sys.lane]
         if (ls?.paused) {
-          // if jobs are queued while paused, signal CAUTION (backlog waiting for GPU)
+          // auto pause = GPU protection working as designed — never a CAUTION
+          if (ls.pause_reason === 'auto') { acc[sys.key] = LampState.GUARD; return acc }
+          // manual pause with a backlog is worth flagging
           acc[sys.key] = queued.length > 0 ? LampState.CAUTION : LampState.PAUSED
           return acc
         }
@@ -74,17 +83,6 @@ export function useControlRoom(jobsMap, resourcesRef) {
         if (queued.length > 0)                        { acc[sys.key] = LampState.ACTIVE;  return acc }
         acc[sys.key] = LampState.NOMINAL
       } else if (sys.resource) {
-        // check job activity via activeLanes before resource reachability (takes priority over STANDBY)
-        if (sys.activeLanes) {
-          const laneJobs = jobs.filter(j => sys.activeLanes.some(l => j.id.startsWith(l + '-')))
-          const running  = laneJobs.filter(j => j.state === 'running' || j.state === 'cancelling')
-          const queued   = laneJobs.filter(j => j.state === 'queued')
-          const failed   = laneJobs.filter(j => j.state === 'failed')
-          if (failed.length > 0)                          { acc[sys.key] = LampState.FAULT;   return acc }
-          if (running.length > 0)                         { acc[sys.key] = LampState.ACTIVE;  return acc }
-          if (queued.length >= CAUTION_QUEUE_THRESHOLD)   { acc[sys.key] = LampState.CAUTION; return acc }
-          if (queued.length > 0)                          { acc[sys.key] = LampState.ACTIVE;  return acc }
-        }
         // check resource reachability
         const res = resources.find(r => r.name === sys.resource)
         if (!res) { acc[sys.key] = LampState.STANDBY; return acc }
@@ -142,6 +140,79 @@ export function useControlRoom(jobsMap, resourcesRef) {
       })
   })
 
+  // ── P&ID lane observables ─────────────────────────────────────────────────────
+
+  const laneActiveJob = (prefix) => computed(() => {
+    const jobs = Array.from(jobsMap.value.values())
+    return jobs.find(j =>
+      j.id.startsWith(prefix + '-') &&
+      (j.state === 'running' || j.state === 'cancelling')
+    ) ?? null
+  })
+
+  const laneQueueDepth = (prefix) => computed(() => {
+    const jobs = Array.from(jobsMap.value.values())
+    return jobs.filter(j => j.id.startsWith(prefix + '-') && j.state === 'queued').length
+  })
+
+  const promptActiveJob  = laneActiveJob('prompt')
+  const promptQueueDepth = laneQueueDepth('prompt')
+  const genActiveJob    = laneActiveJob('gen')
+  const genQueueDepth   = laneQueueDepth('gen')
+  const tagActiveJob    = laneActiveJob('tagging')
+  const tagQueueDepth   = laneQueueDepth('tagging')
+  const embedActiveJob  = laneActiveJob('embed')
+  const embedQueueDepth = laneQueueDepth('embed')
+  const evalActiveJob   = laneActiveJob('eval')
+  const evalQueueDepth  = laneQueueDepth('eval')
+
+  // ── GPU guard (spooler auto-pause protecting the GPU) ────────────────────────
+
+  const guardActive = computed(() =>
+    Object.values(laneStates.value).some(ls => ls?.paused && ls.pause_reason === 'auto')
+  )
+
+  // which priority lane is holding the guard: "GEN" / "PE" / "GEN+PE"
+  const guardSourceLabel = computed(() => {
+    const jobs = Array.from(jobsMap.value.values())
+    const busy = prefix => jobs.some(j =>
+      j.id.startsWith(prefix + '-') && (j.state === 'running' || j.state === 'cancelling'))
+    const parts = []
+    if (busy('gen'))    parts.push('GEN')
+    if (busy('prompt')) parts.push('PE')
+    return parts.join('+') || 'AUTO'
+  })
+
+  // ── P&ID resource binding ─────────────────────────────────────────────────────
+  // GEN: prefers remote-comfyui (separate machine), falls back to local-gpu0
+  const genResource = computed(() => {
+    const r = resourcesRef.value
+    return r.find(x => x.name === 'remote-comfyui') ?? r.find(x => x.kind === 'local') ?? null
+  })
+
+  // EMBED: prefers remote-ollama, falls back to local-gpu0
+  const embedResource = computed(() => {
+    const r = resourcesRef.value
+    return r.find(x => x.name === 'remote-ollama') ?? r.find(x => x.kind === 'local') ?? null
+  })
+
+  // EVAL: same as embed (uses Ollama); local mode → show CPU stats
+  const evalResource = computed(() => {
+    const r = resourcesRef.value
+    return r.find(x => x.name === 'remote-ollama') ?? r.find(x => x.kind === 'local') ?? null
+  })
+
+  // TAG: CPU-only lane, always bound to local host stats
+  const tagResource = computed(() =>
+    resourcesRef.value.find(x => x.kind === 'local') ?? null
+  )
+
+  // PROMPT: LLM via Ollama; local mode → show GPU stats
+  const promptResource = computed(() => {
+    const r = resourcesRef.value
+    return r.find(x => x.name === 'remote-ollama') ?? r.find(x => x.kind === 'local') ?? null
+  })
+
   // ── throughput (completions in last 1 minute) ────────────────────────────────
 
   const throughput = computed(() => {
@@ -191,6 +262,10 @@ export function useControlRoom(jobsMap, resourcesRef) {
       _appendLog(now, `${data.id}  started`, 'info')
     }
 
+    if (type === 'job_dismissed') {
+      _appendLog(now, `${data.id}  dismissed`, 'info')
+    }
+
     if (type === 'job_finished') {
       if (data.state === 'succeeded') {
         completionTimes.value.push(now)
@@ -234,16 +309,23 @@ export function useControlRoom(jobsMap, resourcesRef) {
 
     // update pause state from the lanes field of lane_state / snapshot events
     if ((type === 'lane_state' || type === 'snapshot') && data.lanes) {
+      const prev = laneStates.value
       const ns = {}
       for (const ls of data.lanes) {
         ns[ls.lane] = { paused: ls.paused, pause_reason: ls.pause_reason }
       }
       laneStates.value = ns
       if (type === 'lane_state') {
+        // log only transitions — lane_state carries the full lane list every time
         for (const ls of data.lanes) {
-          if (ls.paused) {
-            const reason = ls.pause_reason === 'auto' ? '(auto)' : '(manual)'
-            _appendLog(now, `${ls.lane} lane paused ${reason}`, 'info')
+          const wasPaused = prev[ls.lane]?.paused ?? false
+          if (ls.paused && !wasPaused) {
+            const txt = ls.pause_reason === 'auto'
+              ? `${ls.lane} lane held (GPU guard)`
+              : `${ls.lane} lane paused (manual)`
+            _appendLog(now, txt, 'info')
+          } else if (!ls.paused && wasPaused) {
+            _appendLog(now, `${ls.lane} lane resumed`, 'info')
           }
         }
       }
@@ -270,6 +352,23 @@ export function useControlRoom(jobsMap, resourcesRef) {
     localResources,
     remoteResources,
     laneStates,
+    guardActive,
+    guardSourceLabel,
     ingestEvent,
+    promptActiveJob,
+    promptQueueDepth,
+    genActiveJob,
+    genQueueDepth,
+    tagActiveJob,
+    tagQueueDepth,
+    embedActiveJob,
+    embedQueueDepth,
+    evalActiveJob,
+    evalQueueDepth,
+    promptResource,
+    genResource,
+    tagResource,
+    embedResource,
+    evalResource,
   }
 }

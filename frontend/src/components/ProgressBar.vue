@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 const props = defineProps({
   progress:      { type: Number,  default: 0 },
@@ -12,12 +13,15 @@ const props = defineProps({
   totalSteps:    { type: Number,  default: 0 },
 })
 
-function formatEta(s: number): string {
-  if (s < 0) return ''
-  const sec = Math.floor(s)
-  if (sec < 60) return `${sec}s`
-  const m = Math.floor(sec / 60), r = sec % 60
-  return r > 0 ? `${m}m ${r}s` : `${m}m`
+const { t } = useI18n()
+
+function formatEta(seconds: number): string {
+  if (seconds == null || seconds < 0) return ''
+  const s = Math.ceil(seconds)
+  if (s < 60) return t('header.etaSec', { s })
+  const m = Math.floor(s / 60)
+  const r = s % 60
+  return r > 0 ? t('header.etaMin', { m, r }) : t('header.etaMinOnly', { m })
 }
 
 const pct = computed(() => Math.round((props.progress ?? 0) * 100))
@@ -43,12 +47,12 @@ const hasOverlay = computed(() => props.currentStep > 0 && props.totalSteps > 0)
       <div v-if="hasOverlay" class="pb-overlay">
         <span class="pb-overlay-phase">{{ label }}</span>
         <span class="pb-overlay-step">{{ currentStep }} / {{ totalSteps }}</span>
-        <span v-if="eta != null && eta > 2 && !indeterminate" class="pb-overlay-eta">残り約{{ Math.ceil(eta) }}秒</span>
+        <span v-if="eta != null && eta > 2 && !indeterminate" class="pb-overlay-eta">{{ formatEta(eta) }}</span>
       </div>
     </div>
     <div v-if="!hasOverlay" class="pb-meta">
       <span class="pb-label">{{ label }}</span>
-      <span v-if="eta != null && !indeterminate" class="pb-eta">{{ formatEta(eta) }} left</span>
+      <span v-if="eta != null && !indeterminate" class="pb-eta">{{ formatEta(eta) }}</span>
     </div>
   </div>
 </template>

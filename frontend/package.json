@@ -1,16 +1,19 @@
 {
   "name": "ranbell-image",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 3100",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "check": "node scripts/check_undefined.mjs src/**/*.vue src/*.vue"
   },
   "dependencies": {
+    "@pixiv/three-vrm": "^3.3.2",
     "d3-force": "^3.0.0",
     "plotly.js-dist-min": "^3.5.1",
+    "three": "^0.170.0",
     "vue": "^3.4.0",
     "vue-i18n": "^9.14.5"
   },

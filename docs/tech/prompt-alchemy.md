@@ -900,7 +900,8 @@ if _abort.is_set():
 ![Screenshot: Full alchemy panel (left pane + right pane)](../screenshots/prompt-alchemy-02.png)
 
 ```
-Alchemy overlay (z-index: 65, full-screen modal)
+Alchemy overlay (z-index: var(--z-panel-over) = 620, full-screen modal —
+one tier above the panels it can be opened from)
 ├── Header
 │   ├── Title + reference image count badge
 │   └── Phase badge (LLM running / ComfyUI running / done)

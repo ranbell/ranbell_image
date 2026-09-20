@@ -2,6 +2,7 @@
 import { ref, computed, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useInspireSession, INVERSION_AXIS_IDS } from '../composables/useInspireSession.js'
+import { getToken } from '../apiToken.js'
 
 const { t, locale } = useI18n()
 
@@ -37,6 +38,7 @@ const {
   inversionNewTagsGrouped,
   inversionLlmClassification,
   inversionStep2RawResult,
+  inversionSubjectTags,
   inversionHairTags,
   inversionClothingTags,
   inversionAccessoryTags,
@@ -59,6 +61,10 @@ const {
   blendWeights,
   outlierMode,
   textSearchQuery,
+  emotionSearchDimension,
+  emotionSearchMinScore,
+  emotionSearchResults,
+  emotionSearchLoading,
   inspireResultSelection,
   toggleInspireResultSelection,
   inspireSlotsDirty,
@@ -68,6 +74,7 @@ const {
   hasSession,
   resetSession,
   setActiveReader,
+  runEmotionSearch,
 } = useInspireSession()
 
 // Tag color-coding Sets for inversion (O(1) lookup)
@@ -109,6 +116,7 @@ const TABS = computed(() => [
   { id: 'blend',         icon: '⚖️', label: t('inspire.tabs.blend'),         desc: t('inspire.tabs.blendDesc'),         badges: ['vec'],         producesResults: true,  noSlotsNeeded: false },
   { id: 'outlier',       icon: '🌌', label: t('inspire.tabs.outlier'),       desc: t('inspire.tabs.outlierDesc'),       badges: ['vec'],         producesResults: true,  noSlotsNeeded: true  },
   { id: 'text_search',   icon: '🔤', label: t('inspire.tabs.textSearch'),    desc: t('inspire.tabs.textSearchDesc'),    badges: ['vec'],         producesResults: true,  noSlotsNeeded: true  },
+  { id: 'emotion_search', icon: '🌒', label: t('inspire.tabs.emotionSearch'), desc: t('inspire.tabs.emotionSearchDesc'), badges: ['LLM'],         producesResults: true,  noSlotsNeeded: true  },
 ])
 const activeTabDef = computed(() => TABS.value.find(tab => tab.id === inspireTab.value))
 const isQueryEmpty = computed(() => {
@@ -308,6 +316,7 @@ async function runInspire() {
               inversionStep2RawResult.value = evt.step2_raw_by_axis || inversionStep2RawResult.value
             } else if (evt.type === 'step3_result') {
               inversionAtmosphereTags.value = evt.atmosphere_tags || []
+              inversionSubjectTags.value    = evt.subject_tags    || []
               inversionHairTags.value       = evt.hair_tags       || []
               inversionClothingTags.value   = evt.clothing_tags   || []
               inversionAccessoryTags.value  = evt.accessory_tags  || []
@@ -336,6 +345,7 @@ async function runInspire() {
               inversionNewTagsGrouped.value = evt.new_tags_by_axis || inversionNewTagsGrouped.value
               inversionStep2RawResult.value = evt.step2_raw_by_axis || inversionStep2RawResult.value
               inversionAtmosphereTags.value = evt.atmosphere_tags || inversionAtmosphereTags.value
+              inversionSubjectTags.value    = evt.subject_tags    || inversionSubjectTags.value
               inversionHairTags.value       = evt.hair_tags       || inversionHairTags.value
               inversionClothingTags.value   = evt.clothing_tags   || inversionClothingTags.value
               inversionAccessoryTags.value  = evt.accessory_tags  || inversionAccessoryTags.value
@@ -598,7 +608,7 @@ async function copyToClipboard(text) {
   }
 }
 
-// ── テーマ自動展開 ─────────────────────────────────────────────────────────────
+// ── Automatic theme expansion ────────────────────────────────────────────────
 const inversionTheme        = ref('')
 const inversionThemeLoading = ref(false)
 
@@ -628,7 +638,7 @@ async function expandTheme() {
   inversionThemeLoading.value = false
 }
 
-// ── 4セクション WD14 オートコンプリート ───────────────────────────────────────
+// ── WD14 autocomplete for the four sections ──────────────────────────────────
 const INVERSION_SECTIONS = [
   { key: 'character',  icon: '👤', labelKey: 'inspire.sectionCharacter',  phKey: 'inspire.sectionCharacterPh' },
   { key: 'background', icon: '🌄', labelKey: 'inspire.sectionBackground', phKey: 'inspire.sectionBackgroundPh' },
@@ -750,7 +760,7 @@ function simpleMarkdown(text) {
 
 <template>
   <Teleport to="body">
-    <div v-if="show" class="fixed inset-0 z-[55] bg-black/92 flex items-center justify-center p-3"
+    <div v-if="show" class="fixed inset-0 z-[var(--z-panel)] bg-black/92 flex items-center justify-center p-3"
       @click.self="emit('update:show', false)">
       <div class="bg-gray-900 rounded-2xl w-full max-w-7xl shadow-2xl border border-gray-800/80 max-h-[95vh] flex flex-col"
         style="box-shadow: 0 0 60px rgba(99,102,241,0.15), 0 25px 60px rgba(0,0,0,0.7);">
@@ -903,7 +913,7 @@ function simpleMarkdown(text) {
                 <p v-if="inversionChangeTargets.length === 0" class="text-[11px] text-amber-500/70 px-1">
                   ⚠ {{ $t('inspire.inversionSelectRequired') }}
                 </p>
-                <!-- テーマ入力 + 自動展開 -->
+                <!-- Theme input and automatic expansion -->
                 <div class="space-y-1.5 pt-0.5">
                   <p class="text-[10px] text-gray-500 uppercase tracking-wide font-semibold">
                     {{ t('inspire.themeLabel') }}
@@ -923,7 +933,7 @@ function simpleMarkdown(text) {
                     </button>
                   </div>
                 </div>
-                <!-- セクション別ヒント (WD14 AC付き) -->
+                <!-- Per-section hints (with WD14 autocomplete) -->
                 <div class="space-y-1.5 pt-0.5">
                   <p class="text-[10px] text-gray-500 uppercase tracking-wide font-semibold">
                     {{ t('inspire.hintSectionsLabel') }}
@@ -1076,6 +1086,35 @@ function simpleMarkdown(text) {
                 <textarea v-model="textSearchQuery" rows="3"
                   :placeholder="$t('inspire.textSearchPlaceholder')"
                   class="w-full bg-gray-800/60 border border-gray-700/60 rounded-lg px-3 py-2 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-indigo-500/60 transition-colors resize-none" />
+              </div>
+
+              <!-- Emotion search controls -->
+              <div v-if="inspireTab === 'emotion_search'" class="space-y-3">
+                <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide">{{ $t('inspire.emotionSearchLabel') }}</p>
+                <select v-model="emotionSearchDimension"
+                  class="w-full bg-gray-800/60 border border-gray-700/60 rounded-lg px-3 py-2 text-xs text-gray-200 focus:outline-none focus:border-slate-500/60 transition-colors">
+                  <option v-for="dim in ['loneliness','nostalgia','ephemeral','melancholy','serenity','wonder','joy','tension','warmth','mystery','desolation','vitality']"
+                    :key="dim" :value="dim">
+                    {{ $t(`inspire.emotion.${dim}`) }}
+                  </option>
+                </select>
+                <div class="space-y-1">
+                  <div class="flex justify-between text-[10px] text-gray-500">
+                    <span>{{ $t('inspire.emotionMinScore') }}</span>
+                    <span class="text-slate-400 font-mono">{{ emotionSearchMinScore.toFixed(1) }}</span>
+                  </div>
+                  <input type="range" v-model.number="emotionSearchMinScore" min="0.1" max="1.0" step="0.1"
+                    class="w-full h-1 rounded-lg appearance-none bg-gray-700 accent-slate-400" />
+                </div>
+                <button @click="runEmotionSearch(getToken())"
+                  :disabled="emotionSearchLoading"
+                  class="w-full py-2.5 rounded-xl text-xs font-semibold transition-all duration-150 disabled:opacity-40 flex items-center justify-center gap-2 bg-slate-700 hover:bg-slate-600 text-slate-200 shadow-lg">
+                  <svg v-if="emotionSearchLoading" class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                  </svg>
+                  <span>{{ emotionSearchLoading ? $t('inspire.emotionSearchRunning') : $t('inspire.emotionSearchRun') }}</span>
+                </button>
               </div>
 
               <!-- Execute button -->
@@ -1236,9 +1275,16 @@ function simpleMarkdown(text) {
               </div>
 
               <!-- Step3: Visual Spec — structured category tags -->
-              <div v-if="inversionHairTags.length || inversionClothingTags.length || inversionPoseTags.length || inversionExpressionTags.length || inversionBackgroundTags.length"
+              <div v-if="inversionSubjectTags.length || inversionHairTags.length || inversionClothingTags.length || inversionPoseTags.length || inversionExpressionTags.length || inversionBackgroundTags.length"
                 class="bg-emerald-950/30 border border-emerald-800/30 rounded-xl p-3.5 space-y-2.5">
                 <p class="text-xs font-semibold text-emerald-400 uppercase tracking-wide">{{ $t('inspire.visualSpecTitle') }}</p>
+                <div v-if="inversionSubjectTags.length" class="space-y-1">
+                  <p class="text-[10px] text-emerald-400/70 font-semibold">{{ $t('inspire.tagGroupSubject') }}</p>
+                  <div class="flex flex-wrap gap-1">
+                    <span v-for="tag in inversionSubjectTags" :key="tag"
+                      class="px-1.5 py-0.5 bg-teal-900/40 border border-teal-700/30 text-teal-300/90 rounded-full text-[10px] font-mono">{{ tag }}</span>
+                  </div>
+                </div>
                 <!-- Row 1: Hair / Clothing / Accessories -->
                 <div class="grid grid-cols-3 gap-2">
                   <div v-if="inversionHairTags.length" class="space-y-1">
@@ -1603,6 +1649,48 @@ function simpleMarkdown(text) {
                           <p class="text-[10px] text-gray-500 truncate">{{ img.name }}</p>
                         </div>
                       </div>
+                    </div>
+                  </div>
+                </div>
+              </template>
+
+              <!-- Emotion search results -->
+              <template v-else-if="inspireTab === 'emotion_search' && emotionSearchResults.length">
+                <p class="text-xs text-gray-400 font-medium mb-3 flex-shrink-0">
+                  🌒 {{ $t(`inspire.emotion.${emotionSearchDimension}`) }} ≥ {{ emotionSearchMinScore.toFixed(1) }}
+                  <span class="text-gray-600 ml-1">({{ emotionSearchResults.length }})</span>
+                </p>
+                <div class="grid grid-cols-3 gap-1.5 overflow-y-auto flex-1">
+                  <div v-for="img in emotionSearchResults" :key="img.sha256"
+                    class="cursor-pointer group rounded-xl overflow-hidden bg-gray-800 ring-1 ring-gray-700/60 hover:ring-slate-500/60 transition-all duration-150"
+                    @click="emit('select-image', img)">
+                    <div class="relative bg-gray-800 h-28 overflow-hidden">
+                      <img :src="`/api/thumbnails/${img.sha256}.webp`" :alt="img.name"
+                        class="w-full h-full object-contain transition-transform duration-200 group-hover:scale-[1.05]"
+                        loading="lazy" />
+                      <span class="absolute bottom-1 right-1 text-[9px] font-mono bg-slate-900/80 text-slate-300 px-1 py-0.5 rounded">
+                        {{ (img[`emotion_${emotionSearchDimension}`] || 0).toFixed(2) }}
+                      </span>
+                      <button
+                        @click.stop="emit('toggle-image-selection', img, $event.currentTarget)"
+                        class="absolute top-1.5 left-1.5 w-5 h-5 rounded-full flex items-center justify-center transition-all duration-150 cursor-pointer z-10"
+                        :class="selectedSet.has(img.sha256) ? 'bg-purple-500 border-2 border-purple-300 opacity-100' : 'bg-black/50 border-2 border-gray-400/70 opacity-0 group-hover:opacity-100'">
+                        <svg v-if="selectedSet.has(img.sha256)" class="w-2.5 h-2.5 text-white" viewBox="0 0 12 12" fill="none">
+                          <path d="M2 6l3 3 5-5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                      </button>
+                      <button
+                        @click.stop="handleAddToBucket(img.sha256)"
+                        class="absolute top-1.5 right-1.5 w-5 h-5 rounded-full flex items-center justify-center
+                               transition-all duration-150 z-10 bg-black/50 border-2 border-gray-400/70
+                               text-white opacity-0 group-hover:opacity-100 hover:bg-emerald-600 hover:border-emerald-400
+                               cursor-pointer"
+                        :title="$t('inspire.addToBucket')">
+                        <span class="text-[11px] leading-none font-bold">+</span>
+                      </button>
+                    </div>
+                    <div class="px-1.5 py-1">
+                      <p class="text-[10px] text-gray-500 truncate">{{ img.name }}</p>
                     </div>
                   </div>
                 </div>

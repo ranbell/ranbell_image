@@ -17,6 +17,7 @@ from ..ai.color_extractor import rgb_to_lab
 from ..config import settings
 from ..db.qdrant_client import QdrantDBClient
 from ..thumbnails.generator import get_thumbnail_path
+from .cache import Cached
 from .sort_utils import sort_docs
 from .tag_categories import guess_category
 
@@ -29,66 +30,55 @@ MEDIA_TYPES = {
     ".webp": "image/webp",
 }
 
-_tags_cache: dict = {"data": None, "ts": 0.0}
-_TAGS_TTL = 60.0
+# Each of these wraps a scroll over the whole collection. See api/cache.py for
+# why they hold a lock and why a failed rebuild serves the old value instead of
+# turning a working page into a 500.
+_tags_cache = Cached(900.0, what="tag histogram")  # a whole-library histogram barely moves
+_dirs_cache = Cached(60.0, what="dir list")
+_name_cache = Cached(300.0, what="name index")
+_align_sort_cache = Cached(120.0, what="alignment sort")
+_facets_cache = Cached(120.0, what="model facets")
+_date_range_cache = Cached(300.0, what="date range")
 
-_dirs_cache: dict = {"data": None, "ts": 0.0}
-_DIRS_TTL = 60.0
+_ALL_CACHES = (
+    _tags_cache, _dirs_cache, _name_cache,
+    _align_sort_cache, _facets_cache, _date_range_cache,
+)
 
-_name_cache: dict = {"name_asc": None, "name_desc": None, "ts": 0.0}
-_NAME_CACHE_TTL = 300.0  # 5 minutes
 
-_align_sort_cache: dict = {"data": None, "ts": 0.0}
-_ALIGN_SORT_TTL = 120.0  # 2 minutes
-
-_facets_cache: dict = {"data": None, "ts": 0.0}
-_FACETS_TTL = 120.0
+def invalidate_image_caches() -> None:
+    """Force-expire all in-memory caches. Call after scan or AI pipeline completes."""
+    for cache in _ALL_CACHES:
+        cache.clear()
 
 
 async def _get_name_sorted(db, sort: str) -> list[str]:
     """Return sha256 list sorted by name (cached, built from minimal payload scroll)."""
-    now = time.time()
-    if _name_cache["name_asc"] is not None and now - _name_cache["ts"] < _NAME_CACHE_TTL:
-        return _name_cache[sort]
-    pairs = await db.scroll_name_index()
-    pairs.sort(key=lambda x: x[0])
-    asc = [sha for _, sha in pairs]
-    _name_cache["name_asc"] = asc
-    _name_cache["name_desc"] = list(reversed(asc))
-    _name_cache["ts"] = now
-    return _name_cache[sort]
+    async def _build() -> dict[str, list[str]]:
+        pairs = await db.scroll_name_index()
+        pairs.sort(key=lambda x: x[0])
+        asc = [sha for _, sha in pairs]
+        return {"name_asc": asc, "name_desc": list(reversed(asc))}
+
+    both = await _name_cache.get(_build)
+    return both[sort]
 
 
 async def _get_align_sorted(db) -> list[str]:
     """Return sha256 list sorted by alignment score DESC (cached)."""
-    now = time.time()
-    if _align_sort_cache["data"] is not None and now - _align_sort_cache["ts"] < _ALIGN_SORT_TTL:
-        return _align_sort_cache["data"]
-    shas = await db.get_alignment_sorted_sha256s()
-    _align_sort_cache["data"] = shas
-    _align_sort_cache["ts"] = now
-    return shas
+    return await _align_sort_cache.get(db.get_alignment_sorted_sha256s)
 
 
 @router.get("/dirs")
 async def list_dirs_route(request: Request):
-    now = time.time()
-    if _dirs_cache["data"] is not None and now - _dirs_cache["ts"] < _DIRS_TTL:
-        return {"dirs": _dirs_cache["data"]}
-    dirs = await _db(request).list_dirs(
-        [str(settings.source_images_dir), str(settings.generated_images_dir)]
-    )
-    _dirs_cache["data"] = dirs
-    _dirs_cache["ts"] = now
-    return {"dirs": dirs}
+    db = _db(request)
 
+    async def _build():
+        return await db.list_dirs(
+            [str(settings.source_images_dir), str(settings.generated_images_dir)]
+        )
 
-def _as_str(v) -> str:
-    if v is None:
-        return ""
-    if isinstance(v, list):
-        return ", ".join(str(x) for x in v)
-    return str(v)
+    return {"dirs": await _dirs_cache.get(_build)}
 
 
 def _db(request: Request) -> QdrantDBClient:
@@ -115,16 +105,32 @@ def _opposite_hue_ranges(hue_deg: float, arc: float = 60.0) -> list[tuple[float,
 
 @router.get("/images/facets")
 async def get_image_facets(request: Request):
-    """Return unique model names with image counts for use as a filter facet."""
-    now = time.monotonic()
-    if _facets_cache["data"] is not None and now - _facets_cache["ts"] < _FACETS_TTL:
-        return _facets_cache["data"]
+    """Filter facets: model names, and which Muse is in the picture.
+
+    Both come back in one call because the header loads them together and a
+    second round trip for a handful of rows is not worth the code.
+    """
     db = _db(request)
-    facets = await db.scroll_model_facets()
-    result = {"models": facets}
-    _facets_cache["data"] = result
-    _facets_cache["ts"] = now
-    return result
+
+    async def _build():
+        models, characters = await asyncio.gather(
+            db.scroll_model_facets(), db.scroll_character_facets(),
+        )
+        return {"models": models, "characters": characters}
+
+    return await _facets_cache.get(_build)
+
+
+@router.get("/images/date-range")
+async def get_date_range(request: Request):
+    """Return min and max mtime across all images for the timeline slider."""
+    db = _db(request)
+
+    async def _build():
+        min_mtime, max_mtime = await db.get_mtime_range()
+        return {"min_mtime": min_mtime, "max_mtime": max_mtime}
+
+    return await _date_range_cache.get(_build)
 
 
 @router.get("/images")
@@ -142,6 +148,16 @@ async def list_images(
     star_min: int | None = None,   # minimum star rating filter (1-5)
     category: str | None = None,   # "AI" | "NR" — batch_category filter
     align_min: float | None = None, # 0.0-1.0 — minimum alignment score filter
+    date_seek: str = "",           # ISO datetime string — seek to date position (overrides cursor)
+    include_drafts: bool = False,  # Muse board sketches are hidden unless asked for
+    # Whose photos. Every Muse render already carries these (muse/runner.py
+    # `_character_payload_extra`); they ride the same filter path as tags and
+    # stars so "her photos" composes with every search the gallery already has
+    # rather than becoming a second, poorer search of its own.
+    character_id: str = "",
+    include_partner: bool = False,  # also frames she was cast into as the second Muse
+    muse_stage: str = "",           # "shoot" | "board" | "still"
+    muse_session_id: str = "",      # one shoot
 ):
     import base64 as _b64
 
@@ -176,6 +192,12 @@ async def list_images(
         all_docs = await db.scroll_all(
             models=dir_model_list or None, star_min=star_min,
             category=category, sha256_ids=align_sha256s,
+            exclude_drafts=not include_drafts,
+            gallery_fields=True,
+            character_id=character_id or None,
+            include_partner=include_partner,
+            muse_stage=muse_stage or None,
+            muse_session_id=muse_session_id or None,
         )
         docs = sort_docs([d for d in all_docs if _in_dir(d)], sort)
         return {"total": len(docs), "next_cursor": None, "images": docs,
@@ -186,8 +208,21 @@ async def list_images(
     keyword = q.strip() or None
     model_list = [m.strip() for m in models.split(",") if m.strip()] if models else []
 
+    muse_stage = muse_stage if muse_stage in ("shoot", "board", "still") else ""
     is_filter = bool(keyword or inc_list or exc_list or model_list or star_min is not None
-                     or category is not None or align_min is not None)
+                     or category is not None or align_min is not None
+                     or character_id or muse_stage or muse_session_id)
+
+    # date_seek: convert ISO datetime string to synthetic cursor for mtime-based sorts.
+    #
+    # Only when there is no cursor yet. date_seek names where to *start*, and the
+    # client keeps sending it for as long as the timeline slider is set — so
+    # rebuilding the cursor from it on every request pins the scroll to the seek
+    # point and each "next page" serves the first page again.
+    if date_seek and not cursor and sort in ("newest", "oldest"):
+        if re.match(r'^\d{4}-\d{2}-\d{2}', date_seek):
+            import base64 as _b64s, json as _jsons
+            cursor = _b64s.b64encode(_jsons.dumps({"start": date_seek, "seen": []}).encode()).decode()
 
     # align_desc sort: pre-fetch alignment-ordered sha256 list, paginate with integer cursor
     if sort == "align_desc":
@@ -202,6 +237,12 @@ async def list_images(
                 star_min=star_min,
                 category=category,
                 sha256_ids=align_sha256s,
+                exclude_drafts=not include_drafts,
+                gallery_fields=True,
+                character_id=character_id or None,
+                include_partner=include_partner,
+                muse_stage=muse_stage or None,
+                muse_session_id=muse_session_id or None,
             )
             sha_to_doc = {d["sha256"]: d for d in docs}
             # Order by alignment score, then append unscored docs at the end
@@ -256,49 +297,6 @@ async def list_images(
                 "search_mode": False, "sort": sort}
 
     if is_filter:
-        available_tags: list[str] = []
-
-        if inc_list and model_list:
-            # 2-phase: parallel Qdrant calls to get model-only set (for tag universe) + full filtered set
-            model_only_task = db.scroll_all(
-                models=model_list, keyword=keyword, star_min=star_min,
-                category=category, sha256_ids=align_sha256s,
-            )
-            full_task = db.scroll_all(
-                tags_include=inc_list, tags_exclude=exc_list or None, tag_logic=tag_logic,
-                models=model_list, keyword=keyword, star_min=star_min,
-                category=category, sha256_ids=align_sha256s,
-            )
-            model_docs, docs = await asyncio.gather(model_only_task, full_task)
-            tag_universe: set[str] = set()
-            for d in model_docs:
-                tag_universe.update(d.get("wd14_tags") or [])
-            available_tags = sorted(tag_universe)
-        else:
-            docs = await db.scroll_all(
-                tags_include=inc_list or None,
-                tags_exclude=exc_list or None,
-                tag_logic=tag_logic,
-                models=model_list or None,
-                keyword=keyword,
-                star_min=star_min,
-                category=category,
-                sha256_ids=align_sha256s,
-            )
-
-        docs = sort_docs(docs, sort)
-
-        total = len(docs)
-        offset_idx = 0
-        if cursor:
-            try:
-                offset_idx = int(_b64.b64decode(cursor.encode()).decode())
-            except Exception:
-                offset_idx = 0
-        page = docs[offset_idx:offset_idx + limit]
-        has_more = offset_idx + limit < total
-        next_cur = _b64.b64encode(str(offset_idx + limit).encode()).decode() if has_more else None
-
         active_filters = {
             "tags_include": inc_list,
             "tags_exclude": exc_list,
@@ -306,7 +304,53 @@ async def list_images(
             "keyword": keyword or "",
             "models": model_list,
             "sort": sort,
+            "character_id": character_id or "",
+            "include_partner": include_partner,
+            "muse_stage": muse_stage or "",
+            "muse_session_id": muse_session_id or "",
         }
+
+        # Use order_by cursor pagination (one page at a time, no full-load).
+        # align_desc is handled above before this block and always returns early.
+        filter_kwargs = dict(
+            tags_include=inc_list or None,
+            tags_exclude=exc_list or None,
+            tag_logic=tag_logic,
+            models=model_list or None,
+            keyword=keyword,
+            star_min=star_min,
+            category=category,
+            sha256_ids=align_sha256s,
+            exclude_drafts=not include_drafts,
+            character_id=character_id or None,
+            include_partner=include_partner,
+            muse_stage=muse_stage or None,
+            muse_session_id=muse_session_id or None,
+        )
+
+        available_tags: list[str] = []
+        if inc_list and model_list:
+            # Fetch tag universe for the model scope in parallel with the page fetch
+            model_scope_task = db.scroll_all(
+                models=model_list, keyword=keyword,
+                star_min=star_min, category=category, sha256_ids=align_sha256s,
+                exclude_drafts=not include_drafts,
+                gallery_fields=True,   # only wd14_tags is read off these rows
+            )
+            page_task = db.scroll_filtered_page(
+                limit=limit, cursor=cursor or None, sort=sort, **filter_kwargs
+            )
+            model_docs, (page, next_cur, total) = await asyncio.gather(
+                model_scope_task, page_task
+            )
+            tag_universe: set[str] = set()
+            for d in model_docs:
+                tag_universe.update(d.get("wd14_tags") or [])
+            available_tags = sorted(tag_universe)
+        else:
+            page, next_cur, total = await db.scroll_filtered_page(
+                limit=limit, cursor=cursor or None, sort=sort, **filter_kwargs
+            )
 
         return {
             "total": total,
@@ -322,8 +366,9 @@ async def list_images(
             cursor=cursor or None,
             limit=limit,
             sort=sort,
+            exclude_drafts=not include_drafts,
         )
-        total = await db.total_count()
+        total = await db.total_count(exclude_drafts=not include_drafts)
         return {
             "total": total,
             "next_cursor": next_cursor,
@@ -430,51 +475,50 @@ async def set_image_rating(sha256: str, body: RatingBody, request: Request):
 
 @router.get("/tags")
 async def get_tags(request: Request, limit: int = 1000):
-    now = time.monotonic()
-    if _tags_cache["data"] is not None and now - _tags_cache["ts"] < _TAGS_TTL:
-        return _tags_cache.get("data_filtered", _tags_cache["data"])[:limit]
-
     db = _db(request)
-    docs = await db.scroll_tags()
 
-    tag_count: dict[str, int] = {}
-    for doc in docs:
-        prompt = doc.get("positive_prompt", "")
-        if isinstance(prompt, str) and prompt:
-            for t in prompt.split(","):
-                t = t.strip().lower()
-                if 2 < len(t) < 60:
+    async def _build() -> dict[str, list[dict]]:
+        docs = await db.scroll_tags()
+
+        tag_count: dict[str, int] = {}
+        for doc in docs:
+            prompt = doc.get("positive_prompt", "")
+            if isinstance(prompt, str) and prompt:
+                for t in prompt.split(","):
+                    t = t.strip().lower()
+                    if 2 < len(t) < 60:
+                        tag_count[t] = tag_count.get(t, 0) + 1
+            for t in (doc.get("wd14_tags") or []):
+                if isinstance(t, str) and 2 < len(t) < 60:
                     tag_count[t] = tag_count.get(t, 0) + 1
-        for t in (doc.get("wd14_tags") or []):
-            if isinstance(t, str) and 2 < len(t) < 60:
-                tag_count[t] = tag_count.get(t, 0) + 1
 
-    top = sorted(tag_count.items(), key=lambda x: -x[1])[:1000]
-    data = [{"tag": t, "count": c, "category": guess_category(t)} for t, c in top]
+        top = sorted(tag_count.items(), key=lambda x: -x[1])[:1000]
+        data = [{"tag": t, "count": c, "category": guess_category(t)} for t, c in top]
 
-    from ..runtime_config import get_runtime_config
-    cfg = await get_runtime_config(db)
-    noise = set(cfg.get("graph_noise_tags", []))
-    data_filtered = [d for d in data if d["tag"] not in noise]
+        from ..runtime_config import get_runtime_config
+        cfg = await get_runtime_config(db)
+        noise = set(cfg.get("graph_noise_tags", []))
+        return {
+            "data": data,
+            "data_filtered": [d for d in data if d["tag"] not in noise],
+        }
 
-    _tags_cache["data"] = data
-    _tags_cache["data_filtered"] = data_filtered
-    _tags_cache["ts"] = now
-    return data_filtered[:limit]
+    built = await _tags_cache.get(_build)
+    return built["data_filtered"][:limit]
 
 
 @router.get("/tags/suggest")
 async def suggest_tags(q: str = "", limit: int = 10):
     if not q or len(q) < 1:
         return []
-    source = _tags_cache.get("data_filtered") or _tags_cache.get("data")
+    built = _tags_cache.data or {}
+    source = built.get("data_filtered") or built.get("data")
     if not source:
         return []
     q_lower = q.lower().strip()
     starts = [t for t in source if t["tag"].startswith(q_lower)]
     contains = [t for t in source if q_lower in t["tag"] and not t["tag"].startswith(q_lower)]
     return (starts + contains)[:limit]
-
 
 
 @router.get("/thumbnails/{sha256}.webp")

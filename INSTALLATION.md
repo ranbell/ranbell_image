@@ -149,9 +149,9 @@ Open `docker-compose.override.yml` in a text editor and configure it:
 | Variable | Description |
 |---|---|
 | `API_TOKEN` | Authentication token. The browser fetches this automatically on first load — no manual setup required. Default: `RANBELL_IMAGE_API_TOKEN` |
-| `OLLAMA_URL` | URL of your Ollama instance. Default: `http://host.docker.internal:11434` |
+| `OLLAMA_URL` | URL of your Ollama instance (always used for embeddings). Default: `http://host.docker.internal:11434` |
 | `EMBED_MODEL` | Embedding model name. Default: `embeddinggemma:300m` |
-| `VLM_MODEL` | Vision-language model name. Default: `gemma4:e2b` |
+| `VLM_MODEL` | Text / VLM model for Ollama (other features). Default: `gemma4:e2b` |
 | `EMBED_DIM` | Output dimension of the embedding model. Must match your model exactly. Default: `768` |
 | `EMBED_DIM_SMALL` | Truncated dimension for fast prefetch search. Default: `256` |
 | `COMFYUI_URL` | URL of your ComfyUI instance. Default: `http://host.docker.internal:8188` |
@@ -221,6 +221,29 @@ If WD14 is installed and Ollama is reachable, the INVOKE Vocab import starts aut
 The token is configured automatically. On first page load, the app fetches the token from the backend and stores it in the browser's session storage — no manual setup required.
 
 If you change `API_TOKEN` in `docker-compose.override.yml`, restart the containers (`docker compose up -d`) and close and reopen the browser tab. The new token will be picked up automatically.
+
+
+### Upgrading an existing install
+
+**Always update `docker-compose.yml` before you pull.** New images with an old
+compose file run with yesterday's volumes and service settings — the backup
+mounts (`./qdrant_snapshots` and `/mnt/backup`) and the Qdrant version live in
+that file.
+
+```bash
+git pull                      # or replace docker-compose.yml with the shipped one
+docker compose pull
+docker compose up -d
+```
+
+`docker-compose.override.yml` is yours and is never overwritten. When new options
+appear, compare it against `docker-compose.override.yml.example`.
+
+> **When the backup directory is not visible**, the app says "Backups are not
+> being kept" across the top of the screen. That is almost always an old compose
+> file — upgrade it as above.
+
+---
 
 ---
 

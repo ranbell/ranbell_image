@@ -6,11 +6,11 @@
 
 **ローカル AI 画像スタジオ — 意味で探し、感覚で錬成する。**
 
-[![Version](https://img.shields.io/badge/version-0.2.0-blue)](https://github.com/ranbell/ranbell_image/releases)
+[![Version](https://img.shields.io/badge/version-0.4.0-blue)](https://github.com/ranbell/ranbell_image/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker)](docker-compose.yml)
 [![ghcr.io](https://img.shields.io/badge/ghcr.io-ranbell%2Franbell--image-blue?logo=github)](https://github.com/ranbell/ranbell_image/pkgs/container/ranbell-image-backend)
-[![Qdrant](https://img.shields.io/badge/Qdrant-v1.18-6B4FBB)](https://qdrant.tech/)
+[![Qdrant](https://img.shields.io/badge/Qdrant-v1.19-6B4FBB)](https://qdrant.tech/)
 [![Ollama](https://img.shields.io/badge/Ollama-local_AI-grey)](https://ollama.ai/)
 [![ComfyUI](https://img.shields.io/badge/ComfyUI-integration-orange)](https://github.com/comfyanonymous/ComfyUI)
 [![WD14](https://img.shields.io/badge/WD14-tagger-pink)](https://huggingface.co/SmilingWolf)
@@ -33,11 +33,41 @@
 
 Ranbell Image は**完全ローカル動作**のアプリケーションです。画像はあなたのマシンの外に出ません。
 
-> *このアプリは [Claude](https://claude.ai)（Anthropic）との緊密な共同作業によって設計・実装されました。アーキテクチャの決定から機能設計、すべてのコードに至るまで、その協働から生まれています。ドメイン知識を持つ人間と、それを実装できる AI が組み合わさったときに何が生まれるか、その一例です。*
+> *このアプリは [Claude](https://claude.ai)（Anthropic）との緊密な共同作業によって設計・実装されました。アーキテクチャと機能設計、スタジオを支えるロジックはその協働から生まれています。ドメイン知識を持つ人間と、それを実装できる AI が組み合わさったときに何が生まれるか、その一例です。*
+>
+> *UI をポップにして UX を高めるところは [Cursor](https://cursor.com) 上の [Grok](https://x.ai) の力を借りました。かわいらしい撮影室にできたのは、そのおかげです。本当に助かりました。ありがとう。*
 
 ---
 
 ## 主な機能
+
+### 🎬 Muse — 会話しながら一枚を撮る
+
+プロンプトを書くのではなく、**撮影監督として指示する** ことで画像生成することができます。
+
+はじめに 30人の Muse (女優) から1人もしくは2人を選びます。
+![Muse 撮影室](docs/screenshots/JA_X1_muse_overview.png)
+
+
+「公園の遊歩道をおしゃべりしながら歩いて」と指示すると、女優（Muse）と撮影班が台帳（ledger）にその状態を書き起こして最終的に画像プロンプトにしてくれます。
+
+![Muse 台帳](docs/screenshots/JA_X2_muse_ledger.png)
+
+試し撮りを見て「これでいい？」を確かめ、OK なら**同じ種のまま**本番へ。
+
+![Muse 撮影](docs/screenshots/JA_X3_muse_take.png)
+
+#### 特徴とその他機能
+- **台帳で状態を管理** — 服・姿勢・表情・場所・光・背景・画角を欄で持ち、会話のたびに差分で書き換わります。言い直しは次のターンで必ず効く
+- **一人撮り / W 撮り / スタジオ撮り** — 一人、二人（それぞれの台詞と立ち位置を書き分け）、または 6 プリセットの撮影班を選んで特徴ある撮影が可能です
+- **試し撮り → 本番** — 試し撮りは押すたびに seed を引き直し、本番は**OK を出した seed のまま**　steps だけ上げて仕上げます
+- **ワークフローの系統を自動で見分ける** — anima 系と krea2 系で steps・negative の要不要が違います。cfg と解像度はワークフローに焼かれた値をそのまま使います
+- **撮影のあと** — 彼女は誰にも見せない秘密の日記を書き、楽屋に短い投稿をし、たまに友達と出かけます。次の撮影ではその記憶が前置きに入ります
+
+詳細は、以下を参考にしてください。
+> 📖 [クリエイターガイド — Muse](docs/guide/muse.ja.md) ／ [技術リファレンス](docs/tech/muse.ja.md)
+
+---
 
 ### 🔍 探索 — なんとなくの雰囲気で検索
 
@@ -52,20 +82,7 @@ Ranbell Image は**完全ローカル動作**のアプリケーションです�
 ![Semanctic](docs/screenshots/JA_02_search_semantic.png)
 ---
 
-### 🎛️ コントロールルーム — すべてのジョブの指令センター
 
-`/` キーまたは上部ボタンでコントロールルームを開きます。
-
-スキャン・埋め込み生成・プロンプト錬成・画像生成のすべてがジョブとして管理されます。
-
-- 個々のジョブのキャンセル・一時停止・再開・並び替え
-- レーン単位の一時停止（SYNC / EMBED / EVAL / GEN）
-- ISA-101 スタイルのステータスランプ（Qdrant・Ollama・ComfyUI・GPU）
-- 全ジョブ履歴を一元管理
-
-![Control Room](docs/screenshots/03_control_room.png)
-
----
 
 ### ⚗️ 錬成 — プロンプト錬金術スタジオ
 
@@ -138,6 +155,8 @@ Ranbell Image は**完全ローカル動作**のアプリケーションです�
 
 ---
 
+
+
 ### 📊 アナライズ — コレクション全体を俯瞰する
 
 **セマンティックマップ（UMAP）**
@@ -154,12 +173,28 @@ Ranbell Image は**完全ローカル動作**のアプリケーションです�
 ![Analyzer-3](docs/screenshots/06_03_analyzer.png)
 ---
 
+### 🎛️ コントロールルーム — すべてのジョブの指令センター
+
+`/` キーまたは上部ボタンでコントロールルームを開きます。
+
+スキャン・埋め込み生成・プロンプト錬成・画像生成のすべてがジョブとして管理されます。
+
+- 個々のジョブのキャンセル・一時停止・再開・並び替え
+- レーン単位の一時停止（SYNC / EMBED / EVAL / GEN）
+- ISA-101 スタイルのステータスランプ（Qdrant・Ollama・ComfyUI・GPU）
+- 全ジョブ履歴を一元管理
+
+![Control Room](docs/screenshots/03_control_room.png)
+
+---
+
 ## ドキュメント
 
 各機能に 2 種類のドキュメントがあります。目的に合った入り口を選んでください。
 
 | 機能 | 使い方を知りたい | 仕組みを深く知りたい |
 |---|---|---|
+| **Muse（会話で撮る）** | [クリエイターガイド →](docs/guide/muse.ja.md) | [技術リファレンス →](docs/tech/muse.ja.md) |
 | **召喚（Invoke）** | [クリエイターガイド →](docs/guide/invoke.ja.md) | 近日公開 |
 | **インスパイア & ブレスト** | [クリエイターガイド →](docs/guide/inspire-brainstorm.ja.md) | [技術リファレンス →](docs/tech/inspire-brainstorm.ja.md) |
 | **プロンプト錬成** | [クリエイターガイド →](docs/guide/prompt-alchemy.ja.md) | [技術リファレンス →](docs/tech/prompt-alchemy.ja.md) |
@@ -196,10 +231,29 @@ Ranbell Image は**完全ローカル動作**のアプリケーションです�
 |---|---|---|
 | VLM — 画像解析・プロンプト錬成 | `gemma4:e2b` | `ollama pull gemma4:e2b` |
 | 埋め込み — セマンティック検索 | `embeddinggemma:300m` ⚠️ 必須 | `ollama pull embeddinggemma:300m` |
+| **Muse — 会話・台帳・安全弁** | **`gemma4:26b-a4b-it-qat`** ⚠️ 実質必須 | `ollama pull gemma4:26b-a4b-it-qat` |
 
 > ⚠️ **埋め込みモデルは `embeddinggemma:300m` が必須です。** システムはマルチ解像度セマンティック検索にマトリョーシカ埋め込みを使用しており、通常の埋め込みモデルはこれに対応していないため代替できません。
 >
 > VLM については他の Ollama 対応モデルでも動作する可能性はありますが、テストは行っていません。
+
+### 🎬 Muse を使う場合の要件
+
+> ⚠️ **Muse は「一応動く」と「使える」の差がいちばん大きい機能です。** どの LLM・どの画像モデルでもエラーにはなりませんが、**満足できる撮影になるのは次の組み合わせに限られます。**
+
+| | 必要なもの | 外すとどうなるか |
+|---|---|---|
+| **LLM** | **Gemma 4 26B（A4B）** —— `gemma4:26b-a4b-it-qat` | 会話も台帳も狙いどおりに届きません。**小さいモデルでは、撮影そのものが成立しません** |
+| **画像モデル** | **Anima 系列・Krea2 系列**のワークフロー | Muse が出すのは自然文まじりのプロンプトです。自然文を読めないモデルでは絵になりません |
+
+**Gemma4 26B が必要な理由**
+
+- より小型の LLM で撮影した場合、**「指示したのに画に反映されない」ことが多く発生します。** 会話は続くのに台帳が書き換わらないので、**壊れていることに気づきにくい**のが厄介です
+- 撮影班（スタジオ撮り）は 1 ターンに何度も LLM を呼びます。判定・台本・女優・確認が噛み合って初めて一枚になるため、**どれか一つが弱いと全体が崩れます**
+
+**VRAM** — 26B（Q4_0）で約 **15.6GB**。**16GB のカードでも動きますが、画像生成と同時には載りません**。Muse は描画の直前に LLM を VRAM から必ず降ろします（`unload_vlm`、既定 on）。**24GB 以上あると余裕があります。**
+
+**画像モデル（ワークフロー）** — ComfyUI の API 形式 json を `/mnt/comfy/workflows`（`COMFYUI_WORKFLOWS_DIR`）に置いてください。ファイル名に `krea` が入っていれば Krea2 系として自動で見分け、**step 数と negative prompt の要不要を切り替えます**（Anima 系 20/30 step・negative あり／Krea2 系 4/8 step・negative なし）。cfg と解像度は、**どちらの系統でもワークフローに焼き込まれた値をそのまま使います。**
 
 ---
 
@@ -232,6 +286,8 @@ docker compose up -d --build
 
 **初回起動後:** アプリが自動でセットアップ状態を確認し、未設定の項目があれば **管理 → 診断** タブを自動で開きます（WD14 モデル・Ollama 接続・INVOKE Vocab・ComfyUI ワークフローを確認）。案内に従って必要な設定を行ったあと、ヘッダーの **SCAN** ボタンをクリックし、**Admin** パネルから AI バックフィルを実行してください。詳細は [INSTALLATION.ja.md](INSTALLATION.ja.md) を参照してください。
 
+**更新するとき:** `pull` の前に **`docker-compose.yml` を必ず最新にしてください**。イメージだけ新しくしても、compose が古いままだと以前のマウント（バックアップの行き先を含む）やサービス設定で動きます。`docker-compose.override.yml` は上書きされません。詳細は [更新するとき](INSTALLATION.ja.md#更新するとき既存の環境を新しい版へ)。
+
 ---
 
 ## 感謝
@@ -260,6 +316,7 @@ graph LR
         UI["Control Room"]
         IP["Inspire Panel"]
         INV["Invoke Panel"]
+        MUSE["Muse Studio"]
     end
 
     subgraph BE ["Backend · FastAPI"]
@@ -293,7 +350,7 @@ graph LR
     end
 
     User -->|"clicks"| UI
-    UI & IP & INV -- "REST /api" --> API
+    UI & IP & INV & MUSE -- "REST /api" --> API
     API -- "SSE /api/jobs/stream" --> UI
     API -- "spooler.submit()" --> Spl
     Spl --> SYNC & EMBED & GEN_L & PROMPT_L & EVAL_L

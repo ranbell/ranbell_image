@@ -6,11 +6,15 @@ import {
   SPIRIT_NAMES,
   SPIRIT_META,
   EMOJI_PALETTE,
+  EMOTION_DIMENSIONS,
   getSpiritFrame,
 } from '../composables/useInvokeSession.js'
 import { getToken } from '../apiToken.js'
 
-const props = defineProps({ show: Boolean })
+const props = defineProps({
+  show: Boolean,
+  comfyOffline: { type: Boolean, default: false },
+})
 const emit  = defineEmits(['update:show', 'send-to-refine', 'toast', 'select-image'])
 
 const { locale, t } = useI18n()
@@ -24,11 +28,64 @@ const {
   invokeCameraShot, invokeCameraAngle,
   invokeProTopic, invokeProPersonTags, invokeProPrompt, invokeProNegative, invokeProSections, invokeWorkflow, invokeSeeds,
   invokeEnabledSpirits, enabledSpiritList, invokeRebelInversion,
+  invokeResonanceMode, invokeResonanceTags, invokeResonanceCount,
+  invokeFrontierMode, invokeFrontierTags, invokeHeat,
+  invokeWildness, invokeEmotion,
   openInvoke, closeInvoke,
-  summon, cancel, respin, adopt, sendToRefine,
-  fetchDaily, fetchStats, enhancePrompt,
+  summon, cancel, respin, adopt, sendToRefine, evolve, breed,
+  fetchDaily, fetchStats, enhancePrompt, fetchResonancePreview, fetchFrontierPreview,
   toggleEmoji, toggleSpirit,
 } = useInvokeSession()
+
+// ── Lineage (Evolve & Breed) ──────────────────────────────────────────────────
+const breedPicks = ref([])  // sha256 list, max 2
+
+function toggleBreedPick(sha256) {
+  const idx = breedPicks.value.indexOf(sha256)
+  if (idx !== -1) breedPicks.value.splice(idx, 1)
+  else {
+    if (breedPicks.value.length >= 2) breedPicks.value.shift()
+    breedPicks.value.push(sha256)
+  }
+}
+
+async function handleEvolve(spiritName) {
+  const sha256 = invokeSpirits.value[spiritName]?.sha256
+  if (!sha256) return
+  breedPicks.value = []
+  try {
+    await evolve(sha256, getToken(), locale.value)
+  } catch (err) {
+    emit('toast', { msg: t('invoke.errors.summon', { msg: err.message }), type: 'error' })
+  }
+}
+
+async function handleBreed() {
+  if (breedPicks.value.length !== 2) return
+  const [a, b] = breedPicks.value
+  breedPicks.value = []
+  try {
+    await breed(a, b, getToken(), locale.value)
+  } catch (err) {
+    emit('toast', { msg: t('invoke.errors.summon', { msg: err.message }), type: 'error' })
+  }
+}
+
+// Resonance / Frontier are mutually exclusive drift directions
+function toggleResonance() {
+  invokeResonanceMode.value = !invokeResonanceMode.value
+  if (invokeResonanceMode.value) {
+    invokeFrontierMode.value = false
+    fetchResonancePreview(getToken())
+  }
+}
+function toggleFrontier() {
+  invokeFrontierMode.value = !invokeFrontierMode.value
+  if (invokeFrontierMode.value) {
+    invokeResonanceMode.value = false
+    fetchFrontierPreview(getToken())
+  }
+}
 
 // ── Workflows ─────────────────────────────────────────────────────────────────
 const workflows = ref([])
@@ -387,6 +444,13 @@ function _animateMonologue(spiritName, text) {
       }
       i++
       _animTimers[spiritName] = setTimeout(nextChar, delay)
+
+    } else if (spiritName === 'sorrow') {
+      // Slow, contemplative — each word carries weight; rare long pauses
+      spiritDisplayText[spiritName].value += c
+      i++
+      const pause = (i % 6 === 0 && Math.random() < 0.35) ? 320 : 72
+      _animTimers[spiritName] = setTimeout(nextChar, pause)
     }
   }
 
@@ -455,7 +519,7 @@ onUnmounted(() => {
   Object.values(_iacTimers).forEach(clearTimeout)
 })
 
-// ── Pro mode: テーマ → セクション自動展開 ─────────────────────────────────────
+// ── Pro mode: theme -> automatic section expansion ───────────────────────────
 const _invokeSectionsLoading = ref(false)
 async function expandSections() {
   if (!invokeProTopic.value.trim() || _invokeSectionsLoading.value) return
@@ -466,13 +530,32 @@ async function expandSections() {
       headers: { 'Content-Type': 'application/json', 'X-API-Token': getToken() },
       body: JSON.stringify({ theme: invokeProTopic.value, sha256s: [], lang: locale.value || 'ja' }),
     })
-    if (r.ok) {
-      const data = await r.json()
-      invokeProSections.value = {
-        character:  data.character  || invokeProSections.value.character,
-        background: data.background || invokeProSections.value.background,
-        props:      data.props      || invokeProSections.value.props,
-        action:     data.action     || invokeProSections.value.action,
+    if (!r.ok) throw new Error(await r.text())
+    const { job_id } = await r.json()
+    const streamR = await fetch(`/api/inspire/expand-theme/${job_id}/stream`)
+    const reader = streamR.body.getReader()
+    const decoder = new TextDecoder()
+    let buf = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      const parts = buf.split('\n\n')
+      buf = parts.pop()
+      for (const part of parts) {
+        const dataLine = part.split('\n').find(l => l.startsWith('data:'))
+        if (!dataLine) continue
+        const evt = JSON.parse(dataLine.slice(5))
+        if (evt.type === 'done') {
+          invokeProSections.value = {
+            character:  evt.character  || invokeProSections.value.character,
+            background: evt.background || invokeProSections.value.background,
+            props:      evt.props      || invokeProSections.value.props,
+            action:     evt.action     || invokeProSections.value.action,
+            mood:       evt.mood       || invokeProSections.value.mood,
+            camera:     evt.camera     || invokeProSections.value.camera,
+          }
+        }
       }
     }
   } catch {}
@@ -540,7 +623,7 @@ function iacKeydown(key, e) {
 
 function iacHide(key) { setTimeout(() => { _iacShowDropdown.value = { ..._iacShowDropdown.value, [key]: false } }, 150) }
 
-// ── Visual Spec タグ採用 ───────────────────────────────────────────────────────
+// ── Adopting Visual Spec tags ────────────────────────────────────────────────
 const personTagSet = computed(() =>
   new Set(invokeProPersonTags.value.split(',').map(t => t.trim()).filter(Boolean))
 )
@@ -618,7 +701,7 @@ function onThumbnailError(event) {
 <template>
   <Teleport to="body">
     <div v-if="show"
-      class="fixed inset-0 z-[56] bg-black/92 flex items-center justify-center p-3"
+      class="fixed inset-0 z-[var(--z-panel)] bg-black/92 flex items-center justify-center p-3"
       @mousedown.self="overlayMousedownOnBg = true"
       @mouseup.self="if (overlayMousedownOnBg) emit('update:show', false); overlayMousedownOnBg = false"
       @mouseleave="overlayMousedownOnBg = false">
@@ -810,12 +893,65 @@ function onThumbnailError(event) {
                   </div>
                 </div>
 
+                <!-- Echoes of Resonance / Frontier -->
+                <div class="pt-1">
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <button
+                      @click="toggleResonance"
+                      :class="invokeResonanceMode
+                        ? 'bg-violet-700/50 border-violet-500/60 text-violet-200'
+                        : 'bg-gray-800/60 border-gray-700/40 text-gray-500 hover:text-gray-300 hover:border-gray-600/60'"
+                      class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[10px] transition">
+                      <span>🌟</span>
+                      <span>{{ t('invoke.resonanceLabel') }}</span>
+                    </button>
+                    <button
+                      @click="toggleFrontier"
+                      :title="t('invoke.frontierTitle')"
+                      :class="invokeFrontierMode
+                        ? 'bg-teal-700/50 border-teal-500/60 text-teal-200'
+                        : 'bg-gray-800/60 border-gray-700/40 text-gray-500 hover:text-gray-300 hover:border-gray-600/60'"
+                      class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[10px] transition">
+                      <span>🧭</span>
+                      <span>{{ t('invoke.frontierLabel') }}</span>
+                    </button>
+                    <span v-if="invokeResonanceMode && invokeResonanceCount > 0" class="text-[9px] text-violet-400">
+                      {{ invokeResonanceTags.slice(0, 5).map(t => t.name).join(', ') }}<span v-if="invokeResonanceTags.length > 5">…</span>
+                    </span>
+                    <span v-else-if="invokeResonanceMode && invokeResonanceCount === 0" class="text-[9px] text-gray-600">
+                      {{ t('invoke.resonanceNoStars') }}
+                    </span>
+                    <span v-else-if="invokeFrontierMode && invokeFrontierTags.length > 0" class="text-[9px] text-teal-400">
+                      {{ invokeFrontierTags.slice(0, 5).map(t => t.name).join(', ') }}<span v-if="invokeFrontierTags.length > 5">…</span>
+                    </span>
+                    <span v-else-if="invokeFrontierMode" class="text-[9px] text-gray-600">
+                      {{ t('invoke.frontierNoStars') }}
+                    </span>
+                  </div>
+                </div>
+
+                <!-- Emotion register -->
+                <div>
+                  <p class="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1"
+                    :title="t('invoke.emotionTitle')">🌒 {{ t('invoke.emotionLabel') }}</p>
+                  <div class="flex flex-wrap gap-1">
+                    <button v-for="em in EMOTION_DIMENSIONS" :key="em"
+                      @click="invokeEmotion = invokeEmotion === em ? '' : em"
+                      :class="invokeEmotion === em
+                        ? 'bg-indigo-700/60 border-indigo-500/60 text-indigo-200'
+                        : 'bg-gray-800/60 border-gray-700/40 text-gray-500 hover:text-gray-300 hover:border-gray-600/60'"
+                      class="px-2 py-1 rounded-lg border text-[9px] transition">
+                      {{ t(`inspire.emotion.${em}`) }}
+                    </button>
+                  </div>
+                </div>
+
               </template>
 
               <!-- ── Pro mode inputs ── -->
               <template v-else>
 
-                <!-- キャラクタータグ -->
+                <!-- Character tags -->
                 <div class="relative">
                   <p class="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-2">{{ t('invoke.proCharTagsLabel') }} <span class="text-gray-700 normal-case font-normal">{{ t('invoke.proCharTagsOptional') }}</span></p>
                   <textarea v-model="invokeProPersonTags"
@@ -838,7 +974,7 @@ function onThumbnailError(event) {
                   <p class="text-[9px] text-gray-700 mt-0.5">{{ t('invoke.proCharTagsHint') }}</p>
                 </div>
 
-                <!-- お題タグ変換 -->
+                <!-- Topic-to-tag conversion -->
                 <div>
                   <p class="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-2">{{ t('invoke.proTopicLabel') }}</p>
                   <div class="flex gap-1.5 items-start">
@@ -869,7 +1005,7 @@ function onThumbnailError(event) {
                   </p>
                 </div>
 
-                <!-- カテゴリ別セクションヒント -->
+                <!-- Per-category section hints -->
                 <div class="space-y-2">
                   <p class="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">{{ t('invoke.sectionHintsLabel') }}</p>
                   <div v-for="sec in INVOKE_SECTIONS" :key="sec.key" class="relative">
@@ -991,6 +1127,44 @@ function onThumbnailError(event) {
                 </div>
               </div>
 
+              <!-- ── Heat slider (common) ── -->
+              <div>
+                <p class="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1 flex items-center justify-between">
+                  <span :title="t('invoke.heatTitle')">🔥 {{ t('invoke.heatLabel') }}</span>
+                  <span class="font-mono text-orange-400/80 normal-case">×{{ invokeHeat.toFixed(2) }}</span>
+                </p>
+                <input type="range" min="0.6" max="1.3" step="0.05" v-model.number="invokeHeat"
+                  class="w-full accent-orange-500" />
+                <div class="flex justify-between text-[9px] text-gray-700">
+                  <span>{{ t('invoke.heatCalm') }}</span>
+                  <span>{{ t('invoke.heatWild') }}</span>
+                </div>
+                <p class="mt-1 text-[9px] text-gray-500 leading-relaxed flex gap-1">
+                  <span class="flex-shrink-0">💡</span>
+                  <span>{{ t('invoke.heatTip') }}</span>
+                </p>
+              </div>
+
+              <!-- ── Wildness — stranger/lunatic vocab pools (common) ── -->
+              <div v-if="invokeEnabledSpirits.stranger || invokeEnabledSpirits.lunatic">
+                <p class="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1"
+                  :title="t('invoke.wildnessTitle')">🌪️ {{ t('invoke.wildnessLabel') }}</p>
+                <div class="flex gap-1">
+                  <button v-for="lv in [1, 2, 3]" :key="lv"
+                    @click="invokeWildness = lv"
+                    :class="invokeWildness === lv
+                      ? 'bg-amber-700/60 border-amber-500/60 text-amber-200'
+                      : 'bg-gray-800/60 border-gray-700/40 text-gray-500 hover:text-gray-300'"
+                    class="flex-1 py-1 rounded-lg border text-[10px] transition-all">
+                    {{ t(`invoke.wildness${lv}`) }}
+                  </button>
+                </div>
+                <p class="mt-1 text-[9px] text-gray-500 leading-relaxed flex gap-1">
+                  <span class="flex-shrink-0">💡</span>
+                  <span>{{ t('invoke.wildnessTip') }}</span>
+                </p>
+              </div>
+
               <!-- ── Summon / Cancel ── -->
               <div class="space-y-1.5">
                 <button @click="handleSummon"
@@ -1017,6 +1191,19 @@ function onThumbnailError(event) {
                 <p v-if="summonBlockReason && !isLoading" class="text-[10px] text-amber-500 text-center">
                   {{ summonBlockReason }}
                 </p>
+                <Transition
+                  enter-active-class="transition-all duration-200"
+                  enter-from-class="opacity-0 -translate-y-1"
+                  enter-to-class="opacity-100 translate-y-0"
+                  leave-active-class="transition-all duration-150"
+                  leave-from-class="opacity-100 translate-y-0"
+                  leave-to-class="opacity-0 -translate-y-1">
+                  <div v-if="props.comfyOffline"
+                    class="flex items-center gap-2 px-3 py-2 bg-amber-950/60 border border-amber-700/40 rounded-xl text-xs text-amber-300">
+                    <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse flex-shrink-0"></span>
+                    <span>{{ t('invoke.comfyOfflineHint') }}</span>
+                  </div>
+                </Transition>
               </div>
 
             </div>
@@ -1068,8 +1255,20 @@ function onThumbnailError(event) {
                 </div>
               </div>
 
+              <!-- Breed action bar: appears when 2 spirits are picked -->
+              <div v-if="breedPicks.length > 0" class="mb-3 flex items-center gap-2 px-3 py-2 rounded-xl border border-pink-800/40 bg-pink-950/30">
+                <span class="text-[10px] text-pink-300">⚭ {{ t('invoke.breedPicked', { n: breedPicks.length }) }}</span>
+                <button @click="handleBreed"
+                  :disabled="breedPicks.length !== 2 || isLoading"
+                  class="px-3 py-1 rounded-lg border border-pink-500/60 bg-pink-800/50 hover:bg-pink-700/50 text-[10px] text-pink-100 disabled:opacity-40 transition">
+                  {{ t('invoke.btnBreed') }}
+                </button>
+                <button @click="breedPicks = []"
+                  class="px-2 py-1 rounded-lg text-[10px] text-gray-500 hover:text-gray-300 transition">✕</button>
+              </div>
+
               <!-- Bento spirit cards (horizontal, appears immediately on summon) -->
-              <div v-else class="pb-2">
+              <div v-if="hasAnyResult || isLoading" class="pb-2">
                 <div class="grid gap-3" :style="`grid-template-columns: repeat(${enabledSpiritList.length}, minmax(0, 1fr))`">
                   <template v-for="name in SPIRIT_NAMES" :key="name">
                     <div v-if="invokeEnabledSpirits[name]"
@@ -1091,6 +1290,17 @@ function onThumbnailError(event) {
                           <p class="text-[9px] text-gray-600">
                             {{ spiritStatusLabel(invokeSpirits[name]?.status) }}
                           </p>
+                        </div>
+                        <!-- Surprise (novelty) badge -->
+                        <div v-if="invokeSpirits[name]?.novelty_score !== null && invokeSpirits[name]?.novelty_score !== undefined"
+                          :title="t('invoke.surpriseTitle')"
+                          :class="[
+                            invokeSpirits[name].novelty_score >= 40
+                              ? 'bg-teal-900/60 border-teal-500/60 text-teal-300'
+                              : 'bg-gray-800/60 border-gray-700/40 text-gray-500',
+                            'text-[9px] px-1.5 py-0.5 rounded-full border font-mono flex-shrink-0'
+                          ]">
+                          ✦{{ Math.round(invokeSpirits[name].novelty_score) }}
                         </div>
                         <!-- Alignment badge -->
                         <div v-if="invokeSpirits[name]?.alignment_score !== null && invokeSpirits[name]?.alignment_score !== undefined"
@@ -1160,31 +1370,50 @@ function onThumbnailError(event) {
                       </div>
 
                       <!-- Action buttons -->
-                      <div v-if="invokeSpirits[name]?.status === 'done'" @click.stop class="flex gap-1 px-2.5 pb-2.5 mt-auto">
-                        <button @click="handleRespin(name)"
-                          :disabled="isLoading"
-                          class="flex-1 py-1.5 rounded-lg border border-gray-700/50 bg-gray-800/60 hover:bg-gray-700/60 text-[9px] text-gray-400 hover:text-gray-200 disabled:opacity-40 transition">
-                          {{ t('invoke.btnRespin') }}
-                        </button>
-                        <button @click="handleAdopt(name)"
-                          class="flex-1 py-1.5 rounded-lg border border-yellow-600/40 bg-yellow-900/30 hover:bg-yellow-800/40 text-[9px] text-yellow-300 hover:text-yellow-200 transition">
-                          {{ t('invoke.btnAdopt') }}
-                        </button>
-                        <button @click="handleSendToRefine(name)"
-                          class="flex-1 py-1.5 rounded-lg border border-purple-700/40 bg-purple-900/30 hover:bg-purple-800/40 text-[9px] text-purple-300 hover:text-purple-200 transition">
-                          {{ t('invoke.btnRefine') }}
-                        </button>
+                      <div v-if="invokeSpirits[name]?.status === 'done'" @click.stop class="px-2.5 pb-2.5 mt-auto space-y-1">
+                        <div class="flex gap-1">
+                          <button @click="handleRespin(name)"
+                            :disabled="isLoading"
+                            class="flex-1 py-1.5 rounded-lg border border-gray-700/50 bg-gray-800/60 hover:bg-gray-700/60 text-[9px] text-gray-400 hover:text-gray-200 disabled:opacity-40 transition">
+                            {{ t('invoke.btnRespin') }}
+                          </button>
+                          <button @click="handleAdopt(name)"
+                            class="flex-1 py-1.5 rounded-lg border border-yellow-600/40 bg-yellow-900/30 hover:bg-yellow-800/40 text-[9px] text-yellow-300 hover:text-yellow-200 transition">
+                            {{ t('invoke.btnAdopt') }}
+                          </button>
+                          <button @click="handleSendToRefine(name)"
+                            class="flex-1 py-1.5 rounded-lg border border-purple-700/40 bg-purple-900/30 hover:bg-purple-800/40 text-[9px] text-purple-300 hover:text-purple-200 transition">
+                            {{ t('invoke.btnRefine') }}
+                          </button>
+                        </div>
+                        <div v-if="invokeSpirits[name]?.sha256" class="flex gap-1">
+                          <button @click="handleEvolve(name)"
+                            :disabled="isLoading"
+                            :title="t('invoke.evolveTitle')"
+                            class="flex-1 py-1.5 rounded-lg border border-emerald-700/40 bg-emerald-950/30 hover:bg-emerald-900/40 text-[9px] text-emerald-300 hover:text-emerald-200 disabled:opacity-40 transition">
+                            🧬 {{ t('invoke.btnEvolve') }}
+                          </button>
+                          <button @click="toggleBreedPick(invokeSpirits[name].sha256)"
+                            :disabled="isLoading"
+                            :title="t('invoke.breedPickTitle')"
+                            :class="breedPicks.includes(invokeSpirits[name].sha256)
+                              ? 'border-pink-500/60 bg-pink-900/50 text-pink-200'
+                              : 'border-pink-800/40 bg-pink-950/20 text-pink-400/70 hover:text-pink-300'"
+                            class="flex-1 py-1.5 rounded-lg border text-[9px] disabled:opacity-40 transition">
+                            ⚭ {{ t('invoke.btnBreedPick') }}
+                          </button>
+                        </div>
                       </div>
                       <!-- Progress bar while in-flight -->
                       <div v-else-if="['composing','generating','tagging'].includes(invokeSpirits[name]?.status)" class="px-2.5 pb-2.5 mt-auto">
                         <div class="h-1 w-full rounded-full bg-gray-800/80 overflow-hidden">
-                          <!-- Real progress: ComfyUI ステップ中のみ (generating && progress > 0) -->
+                          <!-- Real progress: only during the ComfyUI steps (generating && progress > 0) -->
                           <div v-if="invokeSpirits[name]?.status === 'generating' && (invokeSpirits[name]?.genProgress ?? 0) > 0"
                                :class="SPIRIT_META[name].border.replace('border-','bg-')"
                                class="h-full rounded-full transition-[width] duration-300 ease-out"
                                :style="{ width: (invokeSpirits[name].genProgress * 100) + '%' }"></div>
-                          <!-- Indeterminate: composing / queue待ち / tagging (画像後のAI処理) -->
-                          <!-- tagging 中は w-full + opacity-40 で「画像完了・後処理中」を表現 -->
+                          <!-- Indeterminate: composing / waiting in the queue / tagging (the AI work after the image) -->
+                          <!-- While tagging, w-full + opacity-40 says "image done, post-processing" -->
                           <div v-else
                                :class="[
                                  SPIRIT_META[name].border.replace('border-','bg-'),
@@ -1273,7 +1502,7 @@ function onThumbnailError(event) {
                     </div>
                   </div>
 
-                  <!-- ④ Visual Spec category tags card (emerald) — タグをクリックでキャラタグへ追記 -->
+                  <!-- 4. Visual Spec category tags card (emerald) — click a tag to append it to the character tags -->
                   <div v-if="selectedNarrativeSpirit && (
                       invokeSpirits[selectedNarrativeSpirit]?.hair_tags?.length ||
                       invokeSpirits[selectedNarrativeSpirit]?.clothing_tags?.length ||

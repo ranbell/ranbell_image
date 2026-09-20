@@ -591,17 +591,23 @@ async function fetchColor3D() {
   }
 }
 
+let _backfillPolling = false
 async function triggerColorBackfill() {
   try {
     const res = await fetch('/api/admin/colors/backfill', { method: 'POST' })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     // SSE watcher fires fetchColor3D on job completion, but if SSE misses the event,
-    // fall back to polling until the pending count clears (max 60 s).
+    // fall back to polling until the pending count clears (max 60 s). One chain
+    // at a time — each poll rebuilds the Plotly scene.
+    if (_backfillPolling) return
+    _backfillPolling = true
     const deadline = Date.now() + 60_000
     const poll = async () => {
       await fetchColor3D()
       if (color3dPendingCount.value > 0 && Date.now() < deadline)
         setTimeout(poll, 4000)
+      else
+        _backfillPolling = false
     }
     setTimeout(poll, 3000)
   } catch (e) {
@@ -1133,7 +1139,7 @@ async function runTagTaxonomy() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const { job_id } = await res.json()
     tagTaxonomyJobId.value = job_id
-    // tagTaxonomyLoading は下の watch で完了/失敗時に解除
+    // tagTaxonomyLoading is released by the watch below, on completion or failure
   } catch (e) {
     console.error('Tag taxonomy error:', e)
     tagTaxonomyLoading.value = false
@@ -1173,7 +1179,7 @@ async function fetchAnalyzerHealth() {
 
 <template>
   <Teleport to="body">
-    <div v-if="show" class="fixed inset-0 z-[58] bg-black/92 flex items-center justify-center p-3">
+    <div v-if="show" class="fixed inset-0 z-[var(--z-panel)] bg-black/92 flex items-center justify-center p-3">
       <div class="bg-gray-900 rounded-2xl w-full max-w-7xl shadow-2xl border border-gray-800 flex flex-col" style="height: 94vh">
         <!-- Header -->
         <div class="flex items-center gap-4 px-5 py-3 border-b border-gray-800 flex-shrink-0">
@@ -1705,7 +1711,7 @@ async function fetchAnalyzerHealth() {
   <!-- UMAP hover thumbnail tooltip -->
   <Teleport to="body">
     <div v-if="umapTooltip.visible"
-      class="fixed z-[70] pointer-events-none"
+      class="fixed z-[var(--z-panel-child)] pointer-events-none"
       :style="`left:${umapTooltip.x}px;top:${umapTooltip.y}px`">
       <div class="bg-gray-900 border border-gray-700 rounded-lg shadow-xl p-1.5 flex flex-col items-center gap-1">
         <img :src="`/api/thumbnails/${umapTooltip.sha256}.webp`"
@@ -1718,7 +1724,7 @@ async function fetchAnalyzerHealth() {
   <!-- Tag network hover tooltip -->
   <Teleport to="body">
     <div v-if="tagNetTooltip.visible"
-      class="fixed z-[70] pointer-events-none"
+      class="fixed z-[var(--z-panel-child)] pointer-events-none"
       :style="`left:${tagNetTooltip.x}px;top:${tagNetTooltip.y}px`">
       <div class="bg-gray-900 border border-gray-700/80 rounded-xl shadow-2xl px-3 py-2.5 min-w-[120px]">
         <div class="text-xs font-semibold text-gray-100 mb-0.5">{{ tagNetTooltip.node?.label }}</div>

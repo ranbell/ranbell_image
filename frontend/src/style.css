@@ -2,6 +2,35 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── z-index layering scale ──────────────────────────────────────────────────
+   Single source of truth for every full-screen overlay. All overlays (both
+   `Teleport to body` panels and inline App overlays) compete in the root
+   stacking context, so use these named tiers instead of ad-hoc numbers.
+   Reference via Tailwind arbitrary values, e.g. `z-[var(--z-panel-muse)]`.
+   Never write a raw `z-50` on a full-screen overlay: anything under
+   --z-header (100) ends up painted over by the sticky top bar. */
+:root {
+  --z-header:          100;  /* sticky top header */
+  --z-chrome:          200;  /* selection tray, bottom bar */
+  --z-popover:         300;  /* dropdowns, hover previews, quick panels */
+  --z-fullscreen-view: 400;  /* similarity graph & other content-level fullscreen views */
+  --z-gallery:         500;  /* gallery image detail (selected) */
+  --z-gallery-zoom:    550;  /* focus/lightbox zoom (above the detail it launched from) */
+  --z-panel:           600;  /* major panels: Invoke / Refine / Analyzer / Inspire / About */
+  --z-panel-child:     610;  /* panel-owned sub-detail (Analyzer detail, etc.) */
+  --z-panel-over:      620;  /* a panel opened FROM another panel (Refine launched
+                                from Inspire / Invoke). Same tier meant the one
+                                teleported to <body> last won, and Refine opened
+                                BEHIND the panel that asked for it. */
+  --z-panel-muse:      640;  /* Muse shell (top-most panel) */
+  --z-panel-muse-child: 650; /* Muse-owned dialogs */
+  --z-panel-media:     700;  /* panel-owned media zoom / lightbox */
+  --z-modal:           800;  /* blocking confirms + Admin: instruction / AI reset / raw metadata / token prompt */
+  --z-toast:           900;  /* toasts & context menus — always above content */
+  --z-system:         1000;  /* Control Room */
+  --z-dragghost:      9999;  /* drag ghost */
+}
+
 /* ── Low-Power / GPU-Saving Animations Override ── */
 /* Loop opacity in 2 steps over 3 seconds to avoid continuous 60 FPS painting */
 .animate-pulse {

@@ -33,6 +33,18 @@ const emit = defineEmits([
 // ── Admin internal state ──────────────────────────────────────────────────────
 const adminTab = ref('diag')
 const ollamaModels = ref([])
+//: ComfyUI's workflow list. **Needed without opening the diagnostics pane** — the
+//: field for choosing Muse's default lives here, so it does not wait on the health
+//: check's reply (2026-09-13).
+const comfyWorkflows = ref([])
+const ollamaVisionModels = ref([])
+// Only warn once we actually know which models have vision; an empty list means
+// the capability probe failed, not that every model is text-only.
+const vlmModelLacksVision = computed(() =>
+  ollamaVisionModels.value.length > 0 &&
+  !!adminConfig.value?.vlm_model &&
+  !ollamaVisionModels.value.includes(adminConfig.value.vlm_model)
+)
 const showAdvanced = ref(false)
 const adminStats = ref(null)
 const adminConfig = ref(null)
@@ -40,13 +52,26 @@ const adminLoading = ref('')
 const adminError = ref('')
 const adminSuccess = ref('')
 const adminConfirm = ref(null)
+// Set alongside adminConfirm when a destructive action wants more than a
+// click — the execute button stays disabled until this matches
+// adminConfirm.value.requirePhrase exactly.
+const adminConfirmInput = ref('')
 const vocabStatus = ref(null)   // {imported: bool, tag_count: int}
 const vocabImporting = ref(false)
 const mrlStatus = ref(null)
+const schemaStatus = ref(null)
+const backupStatus = ref(null)
+const schemaDim = ref(null)
+const schemaDimSmall = ref(null)
+const restoreOpen = ref(false)
 const colorStatus = ref(null)
 const duplicatesData = ref(null)
 const duplicatesLoading = ref(false)
 const backendOffline = ref(false)
+
+// Muse character roster
+const rosterLoading = ref(false)
+const roster = ref(null)         // { total, mine, drawn }
 
 const configWorkflows = ref([])
 
@@ -142,6 +167,13 @@ async function fetchAdminConfig() {
   } catch {}
 }
 
+async function fetchComfyWorkflows() {
+  try {
+    const r = await fetch('/api/comfy/workflows')
+    if (r.ok) comfyWorkflows.value = await r.json()
+  } catch { comfyWorkflows.value = [] }
+}
+
 async function saveAdminConfig() {
   adminLoading.value = 'config'
   adminError.value = ''
@@ -204,16 +236,119 @@ async function adminAction(key, url, opts = {}) {
   } finally {
     adminLoading.value = ''
     adminConfirm.value = null
+    adminConfirmInput.value = ''
   }
 }
 
-function confirmThen(message, description, action) {
-  adminConfirm.value = { message, description, action }
+function confirmThen(message, description, action, opts = {}) {
+  adminConfirm.value = { message, description, action, requirePhrase: opts.requirePhrase || '' }
+  adminConfirmInput.value = ''
 }
 
 async function fetchMrlStatus() {
   const r = await fetch('/api/admin/mrl/status')
   if (r.ok) mrlStatus.value = await r.json()
+}
+
+async function fetchSchemaStatus() {
+  const r = await fetch('/api/admin/schema/status')
+  if (!r.ok) return
+  schemaStatus.value = await r.json()
+  const rec = schemaStatus.value.recorded || {}
+  if (!schemaDim.value) schemaDim.value = rec.embed_dim
+  if (!schemaDimSmall.value) schemaDimSmall.value = rec.embed_dim_small
+}
+
+async function fetchBackupStatus() {
+  const r = await fetch('/api/admin/backup/status')
+  if (r.ok) backupStatus.value = await r.json()
+}
+
+/** Change the vector width. Rebuilds the collection, so it asks first. */
+async function applySchema(restart = false) {
+  adminLoading.value = 'schemaApply'
+  adminError.value = ''
+  try {
+    const r = await fetch('/api/admin/schema/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        embed_dim: Number(schemaDim.value),
+        embed_dim_small: Number(schemaDimSmall.value),
+        confirm: 'confirm',
+        restart,
+      }),
+    })
+    const data = await r.json()
+    if (r.status === 409) {
+      // Already running. Restarting throws away the work done so far, so the
+      // choice belongs to whoever is watching, not to this function.
+      adminLoading.value = ''
+      confirmThen(
+        data.detail?.message || t('admin.schema.restartConfirm'),
+        t('admin.schema.restartDesc'),
+        () => applySchema(true),
+      )
+      return
+    }
+    if (!r.ok) {
+      adminError.value = data.detail?.message || t('admin.failed')
+      return
+    }
+    adminSuccess.value = t('admin.schema.started')
+    setTimeout(() => { adminSuccess.value = '' }, 4000)
+    await fetchSchemaStatus()
+  } catch (e) {
+    adminError.value = e.message
+  } finally {
+    adminLoading.value = ''
+    adminConfirm.value = null
+    adminConfirmInput.value = ''
+  }
+}
+
+function confirmSchemaApply() {
+  const total = schemaStatus.value?.total_images ?? 0
+  confirmThen(
+    t('admin.schema.confirm', { dim: schemaDim.value, small: schemaDimSmall.value }),
+    t('admin.schema.confirmDesc', { n: total.toLocaleString() }),
+    () => applySchema(false),
+    { requirePhrase: 'confirm' },
+  )
+}
+
+const snapshotCollections = computed(() =>
+  Object.keys(backupStatus.value?.snapshots || {})
+    .filter(k => (backupStatus.value.snapshots[k] || []).length)
+    .sort(),
+)
+
+/** Recover one collection from a snapshot. Replaces everything in it. */
+function confirmRestore(collection, snap) {
+  confirmThen(
+    t('admin.backup.restoreConfirm', { collection }),
+    t('admin.backup.restoreConfirmDesc', {
+      collection,
+      when: (snap.created || snap.name).toString().slice(0, 19),
+    }),
+    () => adminAction('restore', '/api/admin/backup/restore', {
+      body: JSON.stringify({
+        collection, snapshot: snap.name, confirm: 'confirm',
+      }),
+      successMsg: () => t('admin.backup.restored', { collection }),
+      after: fetchBackupStatus,
+    }),
+    { requirePhrase: 'confirm' },
+  )
+}
+
+async function importLineage() {
+  await adminAction('importLineage', '/api/admin/backup/import-lineage', {
+    successMsg: (d) => t('admin.backup.imported', {
+      n: d.restored, kept: d.already_present, missing: d.image_missing,
+    }),
+    after: fetchBackupStatus,
+  })
 }
 
 async function fetchColorStatus() {
@@ -295,7 +430,11 @@ async function fetchAiStatus() {
 async function fetchOllamaModels() {
   try {
     const r = await fetch('/api/ollama/models')
-    if (r.ok) ollamaModels.value = (await r.json()).models ?? []
+    if (r.ok) {
+      const d = await r.json()
+      ollamaModels.value = d.models ?? []
+      ollamaVisionModels.value = d.vision_models ?? []
+    }
   } catch {}
 }
 
@@ -343,6 +482,169 @@ function switchAdminTab(id) {
   }
   if (id === 'info') { fetchInfo(); fetchAiStatus() }
   if (id === 'system') fetchInfo()
+  if (id === 'characters') fetchCharacterRoster()
+}
+
+// ── Muse character roster ─────────────────────────────────────────────────────
+async function fetchCharacterRoster() {
+  rosterLoading.value = true
+  try {
+    const r = await fetch('/api/characters')
+    if (!r.ok) throw new Error(r.statusText)
+    const rows = (await r.json()).characters || []
+    roster.value = {
+      total: rows.length,
+      mine: rows.filter(c => c.user_created).length,
+      drawn: rows.filter(c => Object.values(c.board || {}).some(Boolean)).length,
+    }
+  } catch (e) {
+    adminError.value = e.message || String(e)
+  } finally {
+    rosterLoading.value = false
+  }
+}
+
+/*
+ * Re-read the shipped roster.
+ *
+ * It deletes — a character the asset file has stopped claiming is removed — so
+ * it asks with the real numbers rather than with a sentence about what usually
+ * happens. The preview is the same call with `dry_run`, and it is the only way
+ * the confirmation can say "and these 100 go" without being a guess.
+ */
+async function resetCharacterRoster() {
+  rosterLoading.value = true
+  adminError.value = ''
+  try {
+    const r = await fetch('/api/characters/reset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dry_run: true }),
+    })
+    if (!r.ok) throw new Error(r.statusText)
+    const plan = await r.json()
+    confirmThen(
+      t('admin.characters.resetConfirm', { n: plan.seeds ?? 0 }),
+      resetPlanDescription(plan),
+      () => adminAction('characterReset', '/api/characters/reset', {
+        body: JSON.stringify({}),
+        successMsg: d => t('admin.characters.resetDone', {
+          n: d.inserted ?? 0, removed: d.removed ?? 0,
+        }),
+        after: fetchCharacterRoster,
+      }),
+    )
+  } catch (e) {
+    adminError.value = e.message || String(e)
+  } finally {
+    rosterLoading.value = false
+  }
+}
+
+function resetPlanDescription(plan) {
+  const lines = []
+  if (plan.removed) {
+    lines.push(t('admin.characters.resetRemoves', {
+      n: plan.removed, who: (plan.removed_labels || []).slice(0, 6).join(', '),
+    }))
+  }
+  if (plan.orphan_images) {
+    lines.push(t('admin.characters.resetOrphanImages', { n: plan.orphan_images }))
+  }
+  if (plan.kept) lines.push(t('admin.characters.resetKeepsMine', { n: plan.kept }))
+  if (!lines.length) lines.push(t('admin.characters.resetNothingToRemove'))
+  return lines.join(' ')
+}
+
+/*
+ * Wipe every character's diaries / chemistry notes / lounge whispers, plus
+ * every Muse session, lounge thread and auto-generated handpost page —
+ * all at once, for the whole roster. Never touches a photo or the character
+ * sheet. This is more destructive than the other two actions here (it is not
+ * scoped to "what the asset file no longer claims"), so on top of the usual
+ * dry-run preview it asks the operator to type a fixed phrase before the
+ * execute button will do anything.
+ */
+async function eraseCharacterMemory() {
+  rosterLoading.value = true
+  adminError.value = ''
+  try {
+    const r = await fetch('/api/characters/erase-memory', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dry_run: true }),
+    })
+    if (!r.ok) throw new Error(r.statusText)
+    const plan = await r.json()
+    confirmThen(
+      t('admin.characters.eraseConfirm', { n: plan.affected ?? 0 }),
+      erasePlanDescription(plan),
+      () => adminAction('characterEraseMemory', '/api/characters/erase-memory', {
+        body: JSON.stringify({ dry_run: false }),
+        successMsg: d => t('admin.characters.eraseDone', {
+          n: d.characters ?? 0, sessions: d.sessions ?? 0,
+          lounge: d.lounge_threads ?? 0, handpost: d.handpost_pages ?? 0,
+        }),
+        after: fetchCharacterRoster,
+      }),
+      { requirePhrase: t('admin.characters.erasePhrase') },
+    )
+  } catch (e) {
+    adminError.value = e.message || String(e)
+  } finally {
+    rosterLoading.value = false
+  }
+}
+
+function erasePlanDescription(plan) {
+  if (!plan.affected && !plan.sessions && !plan.lounge_threads && !plan.handpost_pages) {
+    return t('admin.characters.eraseNothing')
+  }
+  return t('admin.characters.eraseConfirmDesc', {
+    diaries: plan.diaries ?? 0, chemistry: plan.chemistry ?? 0, seeds: plan.social_seeds ?? 0,
+    sessions: plan.sessions ?? 0, lounge: plan.lounge_threads ?? 0, handpost: plan.handpost_pages ?? 0,
+  })
+}
+
+/*
+ * Versioned Muse asset sync — JSON fields only; diaries / boards stay put.
+ */
+async function syncMuseRoster() {
+  rosterLoading.value = true
+  adminError.value = ''
+  try {
+    const r = await fetch('/api/characters/sync-muse', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dry_run: true }),
+    })
+    if (!r.ok) throw new Error(r.statusText)
+    const plan = await r.json()
+    const detail = (plan.inserted || plan.updated)
+      ? t('admin.characters.syncPreview', {
+          inserted: plan.inserted ?? 0,
+          updated: plan.updated ?? 0,
+          skipped: plan.skipped ?? 0,
+        })
+      : t('admin.characters.syncNothing')
+    confirmThen(
+      t('admin.characters.syncConfirm', { n: plan.seeds ?? 0 }),
+      detail,
+      () => adminAction('characterMuseSync', '/api/characters/sync-muse', {
+        body: JSON.stringify({}),
+        successMsg: d => t('admin.characters.syncDone', {
+          inserted: d.inserted ?? 0,
+          updated: d.updated ?? 0,
+          skipped: d.skipped ?? 0,
+        }),
+        after: fetchCharacterRoster,
+      }),
+    )
+  } catch (e) {
+    adminError.value = e.message || String(e)
+  } finally {
+    rosterLoading.value = false
+  }
 }
 
 // Proxy functions that emit to App.vue
@@ -371,7 +673,11 @@ watch(() => props.show, async (val) => {
     backendOffline.value = false
     adminStats.value = null
     adminConfig.value = null
-    await Promise.all([fetchDiagData(), fetchAdminStats(), fetchAdminConfig(), fetchMrlStatus(), fetchColorStatus(), fetchOllamaModels(), fetchVocabStatus()])
+    await Promise.all([
+      fetchDiagData(), fetchAdminStats(), fetchAdminConfig(), fetchMrlStatus(),
+      fetchColorStatus(), fetchOllamaModels(), fetchVocabStatus(),
+      fetchSchemaStatus(), fetchBackupStatus(), fetchComfyWorkflows(),
+    ])
   }
 })
 
@@ -382,11 +688,17 @@ watch(() => props.jobs?.find(j => j.title === 'color_extract')?.state, (state) =
 watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) => {
   if (state) fetchMrlStatus()
 })
+watch(() => props.jobs?.find(j => j.title === 'schema_apply')?.state, (state) => {
+  if (state) { fetchSchemaStatus(); fetchMrlStatus() }
+})
+watch(() => props.jobs?.find(j => j.title === 'backup')?.state, (state) => {
+  if (state) fetchBackupStatus()
+})
 </script>
 
 <template>
   <Teleport to="body">
-    <div v-if="show" class="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
+    <div v-if="show" class="fixed inset-0 z-[var(--z-modal)] bg-black/90 flex items-center justify-center p-4"
       @click.self="emit('update:show', false)">
       <div class="bg-gray-900 rounded-xl w-full max-w-3xl max-h-[92vh] flex flex-col shadow-2xl border border-gray-800">
 
@@ -401,6 +713,7 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
             { id: 'overview',    label: $t('admin.overview.title') },
             { id: 'ai',          label: $t('admin.ai.title') },
             { id: 'config',      label: $t('admin.config.title') },
+            { id: 'characters',  label: $t('admin.characters.title') },
             { id: 'system',      label: $t('admin.system.title') },
             { id: 'jobs',        label: 'Jobs' },
             { id: 'connection',  label: $t('admin.connection.title') },
@@ -431,13 +744,34 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
         <div v-if="adminConfirm" class="mx-6 mt-4 p-4 bg-red-950/60 border border-red-700/50 rounded-lg flex-shrink-0">
           <p class="text-sm font-medium text-red-300 mb-1">{{ adminConfirm.message }}</p>
           <p class="text-xs text-red-400/70 mb-3">{{ adminConfirm.description }}</p>
+          <div v-if="adminConfirm.requirePhrase" class="mb-3">
+            <label class="block text-[11px] text-red-400/80 mb-1">
+              {{ $t('admin.typeToConfirm', { phrase: adminConfirm.requirePhrase }) }}
+            </label>
+            <input
+              v-model="adminConfirmInput" type="text" autocomplete="off"
+              :placeholder="adminConfirm.requirePhrase"
+              class="w-full px-2 py-1.5 bg-black/40 border border-red-700/50 rounded text-xs
+                     text-red-100 placeholder-red-800/60 focus:outline-none focus:border-red-500"
+            />
+          </div>
           <div class="flex gap-2">
+            <!-- The `!!` around the phrase clause is load-bearing. Without it,
+                 a confirm that needs no phrase leaves `requirePhrase` as '',
+                 the clause evaluates to '' (not false), and `false || ''` is
+                 ''. Vue's includeBooleanAttr counts the empty string as true
+                 for boolean attributes, so `:disabled=""` DISABLES the button —
+                 ten of the thirteen confirmations here could not be executed
+                 at all. The phrase check itself is untouched: with a phrase
+                 set the clause is already a boolean and `!!` changes nothing,
+                 so schema-apply, restore and erase-memory still refuse until
+                 the phrase is typed. -->
             <button @click="adminConfirm.action()"
-              :disabled="!!adminLoading"
+              :disabled="!!adminLoading || !!(adminConfirm.requirePhrase && adminConfirmInput !== adminConfirm.requirePhrase)"
               class="px-3 py-1.5 bg-red-700 hover:bg-red-600 disabled:opacity-40 rounded text-xs text-white font-medium">
               {{ $t('admin.execute') }}
             </button>
-            <button @click="adminConfirm = null" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs text-gray-300">
+            <button @click="adminConfirm = null; adminConfirmInput = ''" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs text-gray-300">
               {{ $t('admin.cancel') }}
             </button>
           </div>
@@ -445,7 +779,7 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
 
         <div class="flex-1 overflow-y-auto px-6 py-4">
 
-          <!-- ── 診断タブ ── -->
+          <!-- ── The diagnostics tab ── -->
           <div v-if="adminTab === 'diag'" class="space-y-4">
             <div class="flex justify-end">
               <button @click="fetchDiagData" :disabled="diagLoading"
@@ -858,6 +1192,124 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
                   </button>
                 </div>
 
+                <!-- Vector width. Changing it rebuilds the collection, so it is
+                     kept out of the ordinary settings save and asks for a typed
+                     confirmation here. -->
+                <div v-if="schemaStatus" class="bg-gray-800 rounded-xl p-4 space-y-3">
+                  <div class="flex items-center justify-between">
+                    <h4 class="text-sm text-gray-300">{{ $t('admin.schema.title') }}</h4>
+                    <button @click="fetchSchemaStatus" class="text-xs text-gray-600 hover:text-gray-400">↺</button>
+                  </div>
+                  <p class="text-xs text-gray-500">{{ $t('admin.schema.desc') }}</p>
+
+                  <div v-if="schemaStatus.obsolete_env?.length"
+                    class="text-xs text-yellow-500/90 bg-yellow-900/20 rounded-lg px-3 py-2">
+                    {{ $t('admin.schema.obsoleteEnv', { vars: schemaStatus.obsolete_env.join(', ') }) }}
+                  </div>
+
+                  <div v-if="schemaStatus.collection && !schemaStatus.collection.matches"
+                    class="text-xs text-yellow-500/90 bg-yellow-900/20 rounded-lg px-3 py-2 space-y-1">
+                    <p>{{ $t('admin.schema.mismatch') }}</p>
+                    <ul class="list-disc list-inside text-yellow-600/80">
+                      <li v-for="r in schemaStatus.collection.reasons" :key="r">{{ r }}</li>
+                    </ul>
+                  </div>
+
+                  <div v-if="schemaStatus.job" class="text-xs text-blue-400 flex items-center gap-2">
+                    <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                    </svg>
+                    {{ schemaStatus.job.progress_text || $t('admin.schema.running') }}
+                  </div>
+
+                  <div class="grid grid-cols-2 gap-2 text-xs">
+                    <label class="space-y-1">
+                      <span class="text-gray-500">{{ $t('admin.schema.dim') }}</span>
+                      <input v-model.number="schemaDim" type="number" min="1"
+                        class="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 font-mono text-gray-200" />
+                    </label>
+                    <label class="space-y-1">
+                      <span class="text-gray-500">{{ $t('admin.schema.dimSmall') }}</span>
+                      <input v-model.number="schemaDimSmall" type="number" min="1"
+                        class="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 font-mono text-gray-200" />
+                    </label>
+                  </div>
+
+                  <button
+                    @click="confirmSchemaApply"
+                    :disabled="!!adminLoading || !schemaDim || !schemaDimSmall"
+                    class="w-full py-2 bg-red-900/30 hover:bg-red-800/50 border border-red-800/40 rounded-lg text-xs text-red-300 disabled:opacity-40 transition-colors">
+                    {{ $t('admin.schema.applyBtn') }}
+                  </button>
+                </div>
+
+                <!-- Backup. Runs on a schedule and before any schema change;
+                     there is no "run it now" button on purpose. -->
+                <div v-if="backupStatus" class="bg-gray-800 rounded-xl p-4 space-y-3">
+                  <div class="flex items-center justify-between">
+                    <h4 class="text-sm text-gray-300">{{ $t('admin.backup.title') }}</h4>
+                    <button @click="fetchBackupStatus" class="text-xs text-gray-600 hover:text-gray-400">↺</button>
+                  </div>
+                  <p class="text-xs text-gray-500">
+                    {{ $t('admin.backup.schedule', { time: backupStatus.time, tz: backupStatus.timezone, keep: backupStatus.retain }) }}
+                  </p>
+
+                  <div v-if="!backupStatus.ledger?.writable"
+                    class="text-xs text-red-400 bg-red-900/20 rounded-lg px-3 py-2">
+                    {{ $t('admin.backup.notWritable', { dir: backupStatus.dir, err: backupStatus.ledger?.error }) }}
+                  </div>
+                  <div v-else class="text-xs text-gray-400 font-mono">
+                    {{ $t('admin.backup.ledgerInfo', {
+                      files: backupStatus.ledger.files.length,
+                      kb: Math.round((backupStatus.ledger.bytes || 0) / 1024),
+                    }) }}
+                  </div>
+
+                  <button
+                    @click="importLineage"
+                    :disabled="!!adminLoading || !backupStatus.ledger?.files?.length"
+                    class="w-full py-2 bg-indigo-900/40 hover:bg-indigo-800/60 border border-indigo-700/40 rounded-lg text-xs text-indigo-300 disabled:opacity-40 transition-colors">
+                    {{ $t('admin.backup.importBtn') }}
+                  </button>
+                  <p class="text-[11px] text-gray-600">{{ $t('admin.backup.importDesc') }}</p>
+
+                  <!-- Snapshot restore. Replaces a whole collection, so it is
+                       folded away by default and asks for a typed confirmation. -->
+                  <div class="pt-1 border-t border-gray-700/60 space-y-2">
+                    <button @click="restoreOpen = !restoreOpen"
+                      class="w-full flex items-center justify-between text-xs text-gray-500 hover:text-gray-300 py-1">
+                      <span>{{ $t('admin.backup.restoreTitle') }}</span>
+                      <span class="text-[10px]">{{ restoreOpen ? '▲' : '▼' }}</span>
+                    </button>
+
+                    <div v-if="restoreOpen" class="space-y-2">
+                      <p class="text-[11px] text-yellow-600/90">{{ $t('admin.backup.restoreWarn') }}</p>
+
+                      <div v-if="!snapshotCollections.length" class="text-[11px] text-gray-600">
+                        {{ $t('admin.backup.noSnapshots') }}
+                      </div>
+
+                      <div v-for="col in snapshotCollections" :key="col"
+                        class="bg-gray-900/60 rounded-lg p-2.5 space-y-1.5">
+                        <p class="text-[11px] text-gray-400 font-mono">{{ col }}</p>
+                        <div v-for="s in backupStatus.snapshots[col].slice(0, 5)" :key="s.name"
+                          class="flex items-center justify-between gap-2">
+                          <span class="text-[10px] text-gray-500 font-mono truncate" :title="s.name">
+                            {{ (s.created || s.name).toString().slice(0, 19) }}
+                          </span>
+                          <button
+                            @click="confirmRestore(col, s)"
+                            :disabled="!!adminLoading"
+                            class="shrink-0 px-2 py-1 bg-red-900/30 hover:bg-red-800/50 border border-red-800/40 rounded text-[10px] text-red-300 disabled:opacity-40">
+                            {{ $t('admin.backup.restoreBtn') }}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 <!-- Color palette backfill -->
                 <div class="bg-gray-800 rounded-xl p-4 space-y-3">
                   <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">{{ $t('admin.color.title') }}</p>
@@ -999,7 +1451,7 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
                 <div>
                   <label class="text-xs text-gray-500 flex items-center gap-1.5 mb-1">
                     {{ $t('admin.config.embedModel') }}
-                    <button @click="fetchOllamaModels" class="text-gray-600 hover:text-gray-400" title="モデル一覧を再取得">↺</button>
+                    <button @click="fetchOllamaModels" class="text-gray-600 hover:text-gray-400" :title="$t('admin.config.refreshModels')">↺</button>
                   </label>
                   <select v-if="ollamaModels.length" v-model="adminConfig.embed_model"
                     class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500">
@@ -1021,7 +1473,62 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
                       :value="adminConfig.vlm_model">{{ adminConfig.vlm_model }}</option>
                   </select>
                   <input v-else v-model="adminConfig.vlm_model" type="text"
+                    placeholder="gemma4:e2b"
                     class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
+                  <p v-if="vlmModelLacksVision" class="mt-1 text-[11px] text-amber-400">
+                    ⚠ {{ $t('admin.config.vlmModelNoVision') }}
+                  </p>
+                </div>
+                <!--
+                  **Muse's defaults (2026-09-13).** The Showrunner: "empty the llm
+                  and image model too, so they are chosen before running. If a
+                  default is set in the admin screen, it should be possible to start
+                  from that default." Empty, and Muse's screen asks to choose (the
+                  first of the list is never applied on its own).
+                -->
+                <div>
+                  <label class="text-xs text-gray-500 flex items-center gap-1.5 mb-1">
+                    {{ $t('admin.config.museModel') }}
+                  </label>
+                  <select v-if="ollamaModels.length" v-model="adminConfig.muse_model"
+                    class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500">
+                    <option value="">{{ $t('admin.config.museModelEmpty') }}</option>
+                    <option v-for="m in ollamaModels" :key="m" :value="m">{{ m }}</option>
+                    <option v-if="adminConfig.muse_model && !ollamaModels.includes(adminConfig.muse_model)"
+                      :value="adminConfig.muse_model">{{ adminConfig.muse_model }}</option>
+                  </select>
+                  <input v-else v-model="adminConfig.muse_model" type="text"
+                    class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
+                </div>
+                <div>
+                  <label class="text-xs text-gray-500 flex items-center gap-1.5 mb-1">
+                    {{ $t('admin.config.museWorkflow') }}
+                  </label>
+                  <select v-model="adminConfig.muse_workflow"
+                    class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500">
+                    <option value="">{{ $t('admin.config.museModelEmpty') }}</option>
+                    <option v-for="w in comfyWorkflows" :key="w" :value="w">{{ w }}</option>
+                    <!-- So the selection does not turn blank when a vanished workflow is still the default -->
+                    <option v-if="adminConfig.muse_workflow && !comfyWorkflows.includes(adminConfig.muse_workflow)"
+                      :value="adminConfig.muse_workflow">{{ adminConfig.muse_workflow }}（{{ $t('admin.config.museWorkflowGone') }}）</option>
+                  </select>
+                  <p class="mt-1 text-[11px] text-gray-500">{{ $t('admin.config.museDefaultHint') }}</p>
+                </div>
+                <div>
+                  <label class="text-xs text-gray-500 flex items-center gap-1.5 mb-1">
+                    {{ $t('admin.config.utilityModel') }}
+                  </label>
+                  <select v-if="ollamaModels.length" v-model="adminConfig.utility_model"
+                    class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500">
+                    <option value="">{{ $t('admin.config.utilityModelFallback') }}</option>
+                    <option v-for="m in ollamaModels" :key="m" :value="m">{{ m }}</option>
+                    <option v-if="adminConfig.utility_model && !ollamaModels.includes(adminConfig.utility_model)"
+                      :value="adminConfig.utility_model">{{ adminConfig.utility_model }}</option>
+                  </select>
+                  <input v-else v-model="adminConfig.utility_model" type="text"
+                    placeholder="gemma4:e4b"
+                    class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
+                  <p class="text-[10px] text-gray-600 mt-1">{{ $t('admin.config.utilityModelHint') }}</p>
                 </div>
               </div>
               <div>
@@ -1090,7 +1597,33 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
                   <input v-model.number="adminConfig.tags_cache_ttl" type="number" min="0" max="3600"
                     class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
                 </div>
+                <div>
+                  <label class="text-xs text-gray-500 block mb-1">{{ $t('admin.config.semanticSearchLimit') }}</label>
+                  <input v-model.number="adminConfig.semantic_search_limit" type="number" min="1" max="500" step="10"
+                    class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
+                </div>
               </div>
+            </div>
+
+            <div class="bg-gray-800 rounded-xl p-4 space-y-3">
+              <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">{{ $t('admin.museContract.title') }}</p>
+
+              <div class="flex items-center justify-between gap-3">
+                <div>
+                  <p class="text-xs text-gray-300">{{ $t('admin.museContract.blockNsfw') }}</p>
+                  <p class="text-[10px] text-gray-600 mt-0.5">{{ $t('admin.museContract.blockNsfwDesc') }}</p>
+                </div>
+                <button
+                  @click="adminConfig.muse_block_nsfw = !adminConfig.muse_block_nsfw"
+                  :class="adminConfig.muse_block_nsfw ? 'bg-purple-600' : 'bg-gray-600'"
+                  class="relative inline-flex h-5 w-9 flex-shrink-0 rounded-full transition-colors duration-200 focus:outline-none">
+                  <span
+                    :class="adminConfig.muse_block_nsfw ? 'translate-x-4' : 'translate-x-0.5'"
+                    class="inline-block h-4 w-4 mt-0.5 transform rounded-full bg-white transition-transform duration-200">
+                  </span>
+                </button>
+              </div>
+              <p class="text-[10px] text-gray-600">{{ $t('admin.museContract.alwaysNote') }}</p>
             </div>
 
             <!-- ── GPU priority control ─────────────────────────────────────────── -->
@@ -1128,6 +1661,23 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
                   <span class="text-xs text-gray-300">{{ lane }}</span>
                 </label>
                 <span class="text-[10px] text-gray-600 self-center">{{ $t('admin.gpuPriority.alwaysTrigger') }}</span>
+              </div>
+
+              <!-- tier2: EVALUATION auto-pause (hard rule, now configurable) -->
+              <div class="flex items-center justify-between gap-3">
+                <div>
+                  <p class="text-xs text-gray-300">{{ $t('admin.gpuPriority.evalAutoPause') }}</p>
+                  <p class="text-[10px] text-gray-600 mt-0.5">{{ $t('admin.gpuPriority.evalAutoPauseDesc') }}</p>
+                </div>
+                <button
+                  @click="adminConfig.eval_auto_pause = !adminConfig.eval_auto_pause"
+                  :class="adminConfig.eval_auto_pause ? 'bg-purple-600' : 'bg-gray-600'"
+                  class="relative inline-flex h-5 w-9 flex-shrink-0 rounded-full transition-colors duration-200 focus:outline-none">
+                  <span
+                    :class="adminConfig.eval_auto_pause ? 'translate-x-4' : 'translate-x-0.5'"
+                    class="inline-block h-4 w-4 mt-0.5 transform rounded-full bg-white transition-transform duration-200">
+                  </span>
+                </button>
               </div>
 
               <!-- Auto-run alignment evaluation -->
@@ -1257,6 +1807,18 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
                   class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500 resize-none" />
                 <p class="text-[10px] text-gray-600 mt-1">{{ $t('admin.dailyOracle.topicHint') }}</p>
               </div>
+              <div v-if="adminConfig.invoke_daily_oracle_enabled" class="flex items-center justify-between">
+                <div>
+                  <label class="text-xs text-gray-500 block">🎡 {{ $t('admin.dailyOracle.roulette') }}</label>
+                  <p class="text-[10px] text-gray-600">{{ $t('admin.dailyOracle.rouletteHint') }}</p>
+                </div>
+                <button @click="adminConfig.invoke_daily_oracle_roulette = !adminConfig.invoke_daily_oracle_roulette"
+                  :class="adminConfig.invoke_daily_oracle_roulette ? 'bg-purple-600' : 'bg-gray-600'"
+                  class="relative w-9 h-5 rounded-full transition-colors flex-shrink-0">
+                  <span :class="adminConfig.invoke_daily_oracle_roulette ? 'translate-x-4' : 'translate-x-0.5'"
+                    class="absolute top-0.5 left-0 w-4 h-4 bg-white rounded-full transition-transform"></span>
+                </button>
+              </div>
               <div v-if="adminConfig.invoke_daily_oracle_enabled">
                 <label class="text-xs text-gray-500 block mb-1">{{ $t('admin.dailyOracle.executionTime') }}</label>
                 <input v-model="adminConfig.invoke_daily_oracle_time" type="time"
@@ -1309,6 +1871,69 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
               class="w-full py-2.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 rounded-lg text-sm font-medium transition-colors">
               {{ adminLoading === 'config' ? $t('admin.config.saving') : $t('admin.config.save') }}
             </button>
+          </div>
+
+          <!-- ── Muse characters tab ── -->
+          <div v-if="adminTab === 'characters'" class="space-y-4">
+            <div class="bg-gray-800 rounded-xl p-4 space-y-3">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+                    {{ $t('admin.characters.title') }}
+                  </p>
+                  <p class="text-[11px] text-gray-500 mt-1">{{ $t('admin.characters.desc') }}</p>
+                </div>
+                <button type="button" @click="fetchCharacterRoster" :disabled="rosterLoading"
+                  class="text-xs text-gray-400 hover:text-gray-200 disabled:opacity-40 shrink-0">
+                  {{ $t('admin.characters.refresh') }}
+                </button>
+              </div>
+
+              <div v-if="rosterLoading && !roster" class="text-xs text-gray-500 py-4 text-center">
+                {{ $t('admin.loading') }}
+              </div>
+              <div v-else-if="roster" class="grid grid-cols-3 gap-3">
+                <div class="bg-gray-900/50 rounded-lg px-3 py-2">
+                  <p class="text-[11px] text-gray-500">{{ $t('admin.characters.total') }}</p>
+                  <p class="text-xl font-bold text-gray-100">{{ roster.total }}</p>
+                </div>
+                <div class="bg-gray-900/50 rounded-lg px-3 py-2">
+                  <p class="text-[11px] text-gray-500">{{ $t('admin.characters.drawn') }}</p>
+                  <p class="text-xl font-bold text-purple-400">{{ roster.drawn }}</p>
+                </div>
+                <div class="bg-gray-900/50 rounded-lg px-3 py-2">
+                  <p class="text-[11px] text-gray-500">{{ $t('admin.characters.mine') }}</p>
+                  <p class="text-xl font-bold text-teal-400">{{ roster.mine }}</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="bg-teal-950/30 border border-teal-800/40 rounded-xl p-4 space-y-2">
+              <p class="text-xs font-semibold text-teal-300/90">{{ $t('admin.characters.syncTitle') }}</p>
+              <p class="text-[11px] text-gray-400">{{ $t('admin.characters.syncDesc') }}</p>
+              <button type="button" @click="syncMuseRoster" :disabled="!!adminLoading || rosterLoading"
+                class="px-3 py-1.5 bg-teal-800/70 hover:bg-teal-700 disabled:opacity-40 rounded-lg text-xs text-teal-50 font-medium">
+                {{ $t('admin.characters.syncBtn') }}
+              </button>
+            </div>
+
+            <div class="bg-amber-950/30 border border-amber-800/40 rounded-xl p-4 space-y-2">
+              <p class="text-xs font-semibold text-amber-300/90">{{ $t('admin.characters.resetTitle') }}</p>
+              <p class="text-[11px] text-gray-400">{{ $t('admin.characters.resetDesc') }}</p>
+              <button type="button" @click="resetCharacterRoster" :disabled="!!adminLoading || rosterLoading"
+                class="px-3 py-1.5 bg-amber-800/70 hover:bg-amber-700 disabled:opacity-40 rounded-lg text-xs text-amber-50 font-medium">
+                {{ $t('admin.characters.resetBtn') }}
+              </button>
+            </div>
+
+            <div class="bg-red-950/30 border border-red-800/40 rounded-xl p-4 space-y-2">
+              <p class="text-xs font-semibold text-red-300/90">{{ $t('admin.characters.eraseTitle') }}</p>
+              <p class="text-[11px] text-gray-400">{{ $t('admin.characters.eraseDesc') }}</p>
+              <button type="button" @click="eraseCharacterMemory" :disabled="!!adminLoading || rosterLoading"
+                class="px-3 py-1.5 bg-red-800/70 hover:bg-red-700 disabled:opacity-40 rounded-lg text-xs text-red-50 font-medium">
+                {{ $t('admin.characters.eraseBtn') }}
+              </button>
+            </div>
           </div>
 
           <!-- ── System tab ── -->
@@ -1510,36 +2135,38 @@ watch(() => props.jobs?.find(j => j.title === 'mrl_backfill')?.state, (state) =>
                 </div>
               </div>
               <div class="bg-gray-800 rounded-xl p-4 space-y-1">
-                <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Ollama</p>
+                <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">LLM</p>
                 <div class="flex justify-between">
                   <span class="text-gray-400">{{ $t('admin.connection.statusLabel') }}</span>
-                  <span :class="healthData.ollama.ok ? 'text-green-400' : 'text-red-400'">{{ healthData.ollama.ok ? $t('admin.connection.ok') : $t('admin.connection.error') }}</span>
+                  <span :class="healthData.ollama.ok ? 'text-green-400' : 'text-red-400'">
+                    {{ healthData.ollama.ok ? $t('admin.connection.ok') : $t('admin.connection.error') }}
+                  </span>
                 </div>
-                <template v-if="healthData.ollama.ok">
-                  <div class="flex justify-between">
-                    <span class="text-gray-400">{{ $t('admin.connection.embedModel') }}</span>
-                    <span :class="healthData.ollama.embed_model_available ? 'text-green-400' : 'text-yellow-400'">
-                      {{ healthData.ollama.embed_model }} {{ healthData.ollama.embed_model_available ? '✓' : $t('admin.connection.notInstalled') }}
-                    </span>
+                <div class="flex justify-between">
+                  <span class="text-gray-400">{{ $t('admin.connection.embedModel') }}</span>
+                  <span :class="healthData.ollama.embed_model_available ? 'text-green-400' : 'text-yellow-400'">
+                    {{ healthData.ollama.embed_model }} {{ healthData.ollama.embed_model_available ? '✓' : $t('admin.connection.notInstalled') }}
+                  </span>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-gray-400">{{ $t('admin.connection.vlmModel') }}</span>
+                  <span :class="healthData.ollama.vlm_model_available ? 'text-green-400' : 'text-yellow-400'">
+                    {{ healthData.ollama.vlm_model }} {{ healthData.ollama.vlm_model_available ? '✓' : $t('admin.connection.notInstalled') }}
+                  </span>
+                </div>
+                <div v-if="healthData.ollama.models?.length" class="mt-2">
+                  <p class="text-xs text-gray-500 mb-1">{{ $t('admin.connection.installedModels') }}</p>
+                  <div class="flex flex-wrap gap-1">
+                    <span v-for="m in healthData.ollama.models" :key="m"
+                      class="px-1.5 py-0.5 bg-gray-700 rounded text-xs text-gray-300 font-mono">{{ m }}</span>
                   </div>
-                  <div class="flex justify-between">
-                    <span class="text-gray-400">{{ $t('admin.connection.vlmModel') }}</span>
-                    <span :class="healthData.ollama.vlm_model_available ? 'text-green-400' : 'text-yellow-400'">
-                      {{ healthData.ollama.vlm_model }} {{ healthData.ollama.vlm_model_available ? '✓' : $t('admin.connection.notInstalled') }}
-                    </span>
-                  </div>
-                  <div v-if="healthData.ollama.models?.length" class="mt-2">
-                    <p class="text-xs text-gray-500 mb-1">{{ $t('admin.connection.installedModels') }}</p>
-                    <div class="flex flex-wrap gap-1">
-                      <span v-for="m in healthData.ollama.models" :key="m"
-                        class="px-1.5 py-0.5 bg-gray-700 rounded text-xs text-gray-300 font-mono">{{ m }}</span>
-                    </div>
-                  </div>
-                </template>
-                <div v-if="!healthData.ollama.ok" class="text-red-400 text-xs mt-1 font-mono break-all">{{ healthData.ollama.error }}</div>
+                </div>
+                <div v-if="!healthData.ollama.ok" class="text-red-400 text-xs mt-1 font-mono break-all">
+                  {{ healthData.ollama.error }}
+                </div>
                 <div class="flex justify-between text-xs">
                   <span class="text-gray-500">{{ $t('admin.connection.url') }}</span>
-                  <span class="text-gray-500 font-mono">{{ healthData.ollama.url }}</span>
+                  <span class="text-gray-500 font-mono break-all text-right">{{ healthData.ollama.url }}</span>
                 </div>
               </div>
               <div class="bg-gray-800 rounded-xl p-4 space-y-2">

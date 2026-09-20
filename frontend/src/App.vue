@@ -1,12 +1,17 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { jobLabel, jobProgress } from './jobLabel.js'
 import { saveAndSyncToken, getToken } from './apiToken.js'
 import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide } from 'd3-force'
 import AnalyzerModal from './components/AnalyzerModal.vue'
 import AdminModal from './components/AdminModal.vue'
 import InspirePanel from './components/InspirePanel.vue'
 import InvokePanel from './components/InvokePanel.vue'
+import MusePanel from './components/MusePanel.vue'
+import CharacterGallery from './components/CharacterGallery.vue'
+import ActressDiaryModal from './components/muse/ActressDiaryModal.vue'
+import CharacterDossier from './components/muse/CharacterDossier.vue'
 import ControlRoom from './components/ControlRoom.vue'
 import ProgressBar from './components/ProgressBar.vue'
 import { useControlRoom } from './composables/useControlRoom.js'
@@ -15,7 +20,7 @@ import { useInvokeSession } from './composables/useInvokeSession.js'
 
 const { fetchDaily: fetchDailyOracle } = useInvokeSession()
 
-const { t, locale } = useI18n()
+const { t, te, locale } = useI18n()
 function toggleLocale() {
   locale.value = locale.value === 'ja' ? 'en' : 'ja'
   localStorage.setItem('locale', locale.value)
@@ -37,11 +42,39 @@ const nextCursor = ref(null)
 const LIMIT = 100
 const loading = ref(false)
 const hasMore = ref(true)
+const pendingGalleryRefresh = ref(false)
 
 // ── Backend readiness ─────────────────────────────────────────────────────────
 const backendStatus = ref('connecting') // 'connecting' | 'starting' | 'ready'
 const backendActivity = ref(null)       // { job, scan } from /health when running
 const dismissedWarnings = ref(false)
+
+// **Say what the database is still doing.** Payload indexes are asked for with
+// `wait=False`, so the app is usable while Qdrant builds them. `/api/health`
+// carries the count only while some are missing, so a settled instance reports
+// nothing and this stops polling on its own.
+const indexProgress = ref(null)
+let _indexTimer = null
+
+async function pollIndexProgress() {
+  clearTimeout(_indexTimer)
+  try {
+    const r = await fetch('/api/health')
+    const data = r.ok ? await r.json() : null
+    indexProgress.value = data?.indexes || null
+  } catch {
+    indexProgress.value = null
+  }
+  const p = indexProgress.value
+  if (p && p.ready < p.total) _indexTimer = setTimeout(pollIndexProgress, 10000)
+}
+
+function warningText(w) {
+  if (typeof w === 'string') return w
+  const key = w?.key ? `startupWarning.${w.key}` : ''
+  if (key && te(key)) return t(key, w.params || {})
+  return w?.text || ''
+}
 
 async function waitForBackend() {
   while (true) {
@@ -50,8 +83,10 @@ async function waitForBackend() {
       if (r.ok) {
         const data = await r.json()
         backendActivity.value = data
+        indexProgress.value = data.indexes || null
         if (data.ready) {
           backendStatus.value = 'ready'
+          if (indexProgress.value) pollIndexProgress()
           return
         }
         backendStatus.value = 'starting'
@@ -67,7 +102,28 @@ async function waitForBackend() {
 
 // ── Job stream ────────────────────────────────────────────────────────────────
 const jobsMap = ref(new Map())   // job.id -> job dict
+// A getter so the job list is handed over without being rebuilt every time (the
+// studio picks up the progress).
+function getJobsMap() { return jobsMap.value }
 let _jobEventSource = null
+
+// Terminal jobs accumulate for the whole session via SSE upserts, while the
+// backend keeps only 100 finished jobs (spooler _HISTORY_MAXLEN) — so anything
+// beyond this cap could never survive a reload anyway. Active jobs are never
+// pruned. Keeps the ~19 computeds that scan the whole map O(bounded).
+const TERMINAL_JOB_STATES = new Set(['succeeded', 'failed', 'cancelled'])
+const MAX_TERMINAL_JOBS = 200
+function pruneJobsMap(map) {
+  let terminal = 0
+  for (const j of map.values()) if (TERMINAL_JOB_STATES.has(j.state)) terminal++
+  if (terminal <= MAX_TERMINAL_JOBS) return map
+  const doomed = [...map.values()]
+    .filter(j => TERMINAL_JOB_STATES.has(j.state))
+    .sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0))
+    .slice(MAX_TERMINAL_JOBS)
+  for (const j of doomed) map.delete(j.id)
+  return map
+}
 
 // ── Control Room ──────────────────────────────────────────────────────────────
 const controlRoomVisible = ref(false)
@@ -78,6 +134,22 @@ const diskFaultPct = ref(90)
 const jobStreamConnected = ref(false)
 const cr = useControlRoom(jobsMap, resourcesRef)
 const { masterStatus, systemStatus, ingestEvent: crIngestEvent } = cr
+
+// ── Remote resource connection status ─────────────────────────────────────────
+function _resourceStatus(name) {
+  const res = resourcesRef.value.find(r => r.name === name)
+  if (!res) return 'unknown'   // SSE まだ未受信 → 警告を出さない
+  if (res.reachable) return 'ok'
+  return res.last_ok == null ? 'starting' : 'fault'
+}
+const comfyOffline = computed(() => {
+  const s = _resourceStatus('remote-comfyui')
+  return s === 'fault' || s === 'starting'
+})
+const ollamaOffline = computed(() => {
+  const s = _resourceStatus('remote-ollama')
+  return s === 'fault' || s === 'starting'
+})
 
 const hasAnyActiveJob = computed(() =>
   [...jobsMap.value.values()].some(j => j.state === 'running' || j.state === 'cancelling')
@@ -98,6 +170,7 @@ const selected = ref(null)
 const wd14Copied = ref(false)
 const showAiResetConfirm = ref(false)
 const sentinel = ref(null)
+const sentinelVisible = ref(false)
 const mainEl = ref(null)
 
 const showInfo = ref(false)
@@ -116,8 +189,19 @@ const activeModels = ref([])        // selected model names (OR logic)
 const modelFilteredTagSet = ref(null) // Set<string> | null — tags in model-only filtered results
 const starFilter = ref(null)        // null | 1..5 — ≥N stars filter
 const categoryFilter = ref('all')   // 'all' | 'AI' | 'NR'
+// Muse board sketches are registered in the library but hidden here by
+// default — six 512px throwaways per run would otherwise bury everything.
+const showDrafts = ref(false)
 const alignMinFilter = ref(null)    // null | 0.6 | 0.7 | 0.8
 const colorPickerVisible = ref(false)
+
+// ── Date timeline slider ──────────────────────────────────────────────────────
+const dateRangeMin = ref(null)      // ISO string — earliest image mtime
+const dateRangeMax = ref(null)      // ISO string — latest image mtime
+const dateRangeLoading = ref(false)
+const dateRangeError = ref(false)
+const sliderTimestamp = ref(null)   // number(ms) | null
+let _dateSeekTimer = null
 
 // ── Color Picker search ────────────────────────────────────────────────────────
 const colorPickHex = ref('#ff6b6b')         // selected hex color
@@ -127,6 +211,11 @@ const colorPickLoading = ref(false)
 const colorPickActive = ref(false)          // true when color pick results are displayed
 const modelFacets = ref([])         // [{model, count}, ...] from /api/images/facets
 const modelsExpanded = ref(false)   // show all models vs top 8
+// Which Muse is in the picture. Single-select: 「みおの写真」 ("a photo of Mio") is
+// one girl, and
+// a union of two casts is not a question anyone has asked for.
+const characterFacets = ref([])     // [{character_id, name, shoot, board, count}]
+const activeCharacter = ref(null)   // character_id | null
 
 // ── Folder view ───────────────────────────────────────────────────────────────
 const viewMode = ref(localStorage.getItem('viewMode') || 'flat')  // 'flat' | 'folder'
@@ -148,6 +237,7 @@ const SORT_OPTIONS = computed(() => [
 function setSort(val) {
   sortOrder.value = val
   localStorage.setItem('sortOrder', val)
+  if (!['newest', 'oldest'].includes(val)) sliderTimestamp.value = null
   fetchImages(true)
 }
 
@@ -196,8 +286,54 @@ const headerActiveJobs = computed(() => {
   return list
 })
 // ── Alignment ─────────────────────────────────────────────────────────────────
+// Written in place. A ref'd Map is already deeply reactive, so `.set()` is
+// tracked and the gallery re-renders only the cards whose key changed; replacing
+// the Map instead changes its identity, which invalidates every card that reads
+// it. With one copy per page fetch that is quadratic in scroll depth — the cost
+// the old MAX_GALLERY_IMAGES cap was really holding back.
 const alignmentCache = ref(new Map())        // sha256 -> record | null
 const alignmentEvaluating = ref(new Map())  // sha256 -> job_id (while queued/running)
+
+// ── Muse: diary link + character chips on photo detail ─────────────────────
+const museDiaryCache = ref(new Map())        // `${characterId}:${sha256}` -> diary | null
+const museDiaryModal = ref({ show: false, characterId: '', characterName: '', diaryId: '' })
+const museDossierId = ref('')
+
+function diaryCacheKey(characterId, sha256) {
+  return `${characterId}:${sha256}`
+}
+async function loadMuseDiaryLink(sha256, characterId) {
+  if (!characterId || !sha256) return
+  const key = diaryCacheKey(characterId, sha256)
+  if (museDiaryCache.value.has(key)) return
+  try {
+    const r = await fetch(`/api/characters/${characterId}/diaries/by-image/${sha256}`)
+    const data = r.ok ? await r.json() : null
+    museDiaryCache.value.set(key, data?.diary || null)
+  } catch {
+    museDiaryCache.value.set(key, null)
+  }
+}
+function museDiaryFor(characterId, sha256) {
+  if (!characterId || !sha256) return null
+  return museDiaryCache.value.get(diaryCacheKey(characterId, sha256)) || null
+}
+function openMuseDiaryLink(img, characterId) {
+  const cid = characterId || img.character_id
+  const diary = museDiaryFor(cid, img.sha256)
+  const name = cid === img.partner_character_id
+    ? (img.partner_character_name || '')
+    : (img.character_name || '')
+  museDiaryModal.value = {
+    show: true,
+    characterId: cid,
+    characterName: name,
+    diaryId: diary?.id || '',
+  }
+}
+function openPhotoCharacter(characterId) {
+  if (characterId) museDossierId.value = characterId
+}
 
 // Batch-fetch alignment for currently displayed images and populate cache (fire-and-forget)
 async function fetchAlignmentsForImages(imgs) {
@@ -211,9 +347,7 @@ async function fetchAlignmentsForImages(imgs) {
     })
     if (!r.ok) return
     const records = await r.json()  // { sha256: record }
-    const next = new Map(alignmentCache.value)
-    for (const sha256 of uncached) next.set(sha256, records[sha256] ?? null)
-    alignmentCache.value = next
+    for (const sha256 of uncached) alignmentCache.value.set(sha256, records[sha256] ?? null)
   } catch {}
 }
 
@@ -222,9 +356,9 @@ async function loadAlignment(sha256) {
   try {
     const r = await fetch(`/api/alignment/${sha256}`)
     const record = r.ok ? await r.json() : null
-    alignmentCache.value = new Map(alignmentCache.value).set(sha256, record)
+    alignmentCache.value.set(sha256, record)
   } catch {
-    alignmentCache.value = new Map(alignmentCache.value).set(sha256, null)
+    alignmentCache.value.set(sha256, null)
   }
 }
 
@@ -298,6 +432,36 @@ let refineAbortController = null
 
 // ── Refine settings ────────────────────────────────────────────────────────────
 const refineTemp = ref(0.7)
+const refineDivergence = ref(0)        // 0.0〜1.0: Transmute (mutate style away from references)
+const refineMutationTags = ref([])     // mutation tags sampled by the backend
+const refineVariationCount = ref(1)    // natural style: prose pass fan-out (1〜3)
+const refineProseParagraphs = ref(5)   // natural style: Visual Script length (3〜7)
+const refineVariants = ref([])         // [{positive, temperature}] extra fan-out variants
+const refineEmotionShift = ref('')     // target emotion dimension ('' = off)
+const imageRoles = ref(new Map())      // sha256 → 'both' | 'style' | 'content'
+
+const REFINE_EMOTIONS = [
+  'loneliness', 'nostalgia', 'ephemeral', 'melancholy', 'serenity', 'wonder',
+  'joy', 'tension', 'warmth', 'mystery', 'desolation', 'vitality',
+]
+
+const _ROLE_CYCLE = { both: 'style', style: 'content', content: 'both' }
+const _ROLE_ICONS = { both: '🖼️', style: '🎨', content: '🧍' }
+
+function cycleImageRole(sha) {
+  const next = new Map(imageRoles.value)
+  next.set(sha, _ROLE_CYCLE[next.get(sha) || 'both'])
+  imageRoles.value = next
+}
+
+function imageRoleIcon(sha) {
+  return _ROLE_ICONS[imageRoles.value.get(sha) || 'both']
+}
+
+function applyRefineVariant(variant) {
+  positivePrompt.value = variant.positive
+  refinedPrompt.value = variant.positive
+}
 const refineNumCtx = ref(16384)
 const refineStyle = ref('natural')           // 'natural' | 'danbooru' | 'detailed'
 const refineInstructionMode = ref('basic')   // 'none' | 'basic' | 'enhanced'
@@ -375,6 +539,7 @@ const refineCurrentStep = computed(() => {
 })
 
 const refineHairTags = ref([])
+const refineSubjectTags = ref([])
 const refineClothingTags = ref([])
 const refineAccessoryTags = ref([])
 const refinePoseTags = ref([])
@@ -382,6 +547,7 @@ const refineExpressionTags = ref([])
 const refineBackgroundTags = ref([])
 const refineObjectTags = ref([])
 const refineLightingTags = ref([])
+const refineInjectedLiterals = ref([])
 const refineWd14Analysis = ref(null)   // { common_tags, common_total, common_selected, unique_by_image }
 const refineCommonRatio = ref(0.3)     // 0.0〜1.0
 const refineUniqueCount = ref(20)      // 固有タグ数/画像@100%重み
@@ -690,7 +856,7 @@ function openImageFromOracle(sha256) {
   showInvoke.value = false
   const img = images.value.find(i => i.sha256 === sha256)
   if (img) {
-    selected.value = img
+    selectImage(img)
   } else {
     fetch(`/api/images/${sha256}`)
       .then(r => r.ok ? r.json() : null)
@@ -702,7 +868,7 @@ function openImageFromOracle(sha256) {
 function navigateToGraphNode(sha256) {
   const img = images.value.find(i => i.sha256 === sha256)
   if (img) {
-    selected.value = img
+    selectImage(img)
   } else {
     fetch(`/api/images/${sha256}`)
       .then(r => r.ok ? r.json() : null)
@@ -809,7 +975,15 @@ function _scheduleFlush() {
 // ── Graph Canvas Rendering ─────────────────────────────────────────────────────
 const NODE_RADIUS = 40
 const ROOT_RADIUS = 64
-const _imgCache = {}
+// Decoded node thumbnails. App.vue never unmounts, so without a cap every
+// graph ever opened keeps its bitmaps alive for the whole session.
+const IMG_CACHE_MAX = 300
+const _imgCache = new Map()
+function _imgCachePut(sha, img) {
+  if (_imgCache.has(sha)) _imgCache.delete(sha)
+  _imgCache.set(sha, img)
+  while (_imgCache.size > IMG_CACHE_MAX) _imgCache.delete(_imgCache.keys().next().value)
+}
 let _graphSim = null
 let _graphNodes = []
 let _graphLinks = []
@@ -948,10 +1122,10 @@ function _startSim(canvas, data) {
   }
 
   Promise.all(_graphNodes.map(n => {
-    if (_imgCache[n.sha256]?.complete) return Promise.resolve()
+    if (_imgCache.get(n.sha256)?.complete) return Promise.resolve()
     return new Promise(resolve => {
       const img = new Image()
-      img.onload = img.onerror = () => { _imgCache[n.sha256] = img; resolve() }
+      img.onload = img.onerror = () => { _imgCachePut(n.sha256, img); resolve() }
       img.src = `/api/thumbnails/${n.sha256}.webp`
     })
   })).then(() => { if (_graphSim) _graphSim.alpha(0.1).restart() })
@@ -1008,7 +1182,7 @@ function _startSim(canvas, data) {
       ctx.beginPath()
       ctx.arc(node.x, node.y, r, 0, Math.PI * 2)
       ctx.clip()
-      const img = _imgCache[node.sha256]
+      const img = _imgCache.get(node.sha256)
       if (img?.complete && img.naturalWidth) {
         const iw = img.naturalWidth, ih = img.naturalHeight
         const scale = Math.max(r * 2 / iw, r * 2 / ih)
@@ -1072,7 +1246,7 @@ function _startSim(canvas, data) {
 
     // Hover preview popup (drawn last, on top of everything)
     if (_hoverPreviewNode) {
-      const pimg = _imgCache[_hoverPreviewNode.sha256]
+      const pimg = _imgCache.get(_hoverPreviewNode.sha256)
       if (pimg?.complete && pimg.naturalWidth) {
         const PREV_MAX = 260
         const iw = pimg.naturalWidth, ih = pimg.naturalHeight
@@ -1236,6 +1410,8 @@ watch(showSimilarityGraph, v => {
 
 watch(selected, (img) => {
   if (img?.sha256) loadAlignment(img.sha256)
+  if (img?.sha256 && img?.character_id) loadMuseDiaryLink(img.sha256, img.character_id)
+  if (img?.sha256 && img?.partner_character_id) loadMuseDiaryLink(img.sha256, img.partner_character_id)
 })
 
 function onGraphCanvasClick(e) {
@@ -1297,7 +1473,7 @@ function onGraphCanvasHover(e) {
 
 // ── Computed ──────────────────────────────────────────────────────────────────
 const activeTags = computed(() => Object.entries(tagsFilter.value).filter(e => e[1] === 'include').map(e => e[0]))
-const isSearchMode = computed(() => !!searchQuery.value || !!Object.keys(tagsFilter.value).length || !!similarSource.value || !!activeModels.value.length || colorPickActive.value || !!starFilter.value || categoryFilter.value !== 'all' || alignMinFilter.value !== null)
+const isSearchMode = computed(() => !!searchQuery.value || !!Object.keys(tagsFilter.value).length || !!similarSource.value || !!activeModels.value.length || colorPickActive.value || !!starFilter.value || categoryFilter.value !== 'all' || alignMinFilter.value !== null || !!activeCharacter.value)
 const effectiveQuery = computed(() => searchQuery.value || activeTags.value[0] || '')
 const selectedCount = computed(() => selectedIds.value.size)
 
@@ -1306,19 +1482,23 @@ async function fetchImages(reset = false) {
   if (loading.value) return
   if (!reset && !hasMore.value) return
   loading.value = true
-  if (reset) { images.value = []; nextCursor.value = null; hasMore.value = true }
+  // On reset, keep the old list on screen until the new page arrives — clearing
+  // here would blank the gallery and clamp scrollTop to 0 for the whole fetch
+  // (up to 30s under Qdrant load). The list is replaced on arrival instead.
+  if (reset) { nextCursor.value = null; hasMore.value = true }
   try {
     if (searchMode.value === 'semantic' && searchQuery.value) {
       const res = await fetch('/api/ai/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: searchQuery.value, n_results: 50, sort: sortOrder.value }),
+        body: JSON.stringify({ query: searchQuery.value, sort: sortOrder.value }),
       })
       const data = await res.json()
       images.value = data.results || []
       total.value = images.value.length
       hasMore.value = false
       fetchAlignmentsForImages(images.value)
+      if (reset) mainEl.value?.scrollTo({ top: 0 })
     } else {
       const params = new URLSearchParams({ limit: LIMIT, sort: sortOrder.value })
       if (nextCursor.value) params.set('cursor', nextCursor.value)
@@ -1333,12 +1513,30 @@ async function fetchImages(reset = false) {
       if (includes.length > 1) params.set('tag_logic', tagLogic.value)
       if (activeDir.value !== null) params.set('dir', activeDir.value)
       if (activeModels.value.length) params.set('models', activeModels.value.join(','))
+      if (activeCharacter.value) params.set('character_id', activeCharacter.value)
       if (starFilter.value) params.set('star_min', starFilter.value)
       if (categoryFilter.value !== 'all') params.set('category', categoryFilter.value)
+      if (showDrafts.value) params.set('include_drafts', 'true')
       if (alignMinFilter.value !== null) params.set('align_min', alignMinFilter.value)
+      // Only on the first page: date_seek picks the starting point, and the
+      // cursor carries the position from there. Sending both lets the seek
+      // override the cursor and re-serve the first page forever.
+      if (!nextCursor.value && sliderTimestamp.value
+          && ['newest', 'oldest'].includes(sortOrder.value)) {
+        params.set('date_seek', new Date(sliderTimestamp.value).toISOString())
+      }
       const res = await fetch(`/api/images?${params}`)
       const data = await res.json()
-      images.value.push(...data.images)
+      if (reset) {
+        // The list is replaced, so the alignment records behind it are dead
+        // weight. Cleared here rather than at the top of the fetch so the cards
+        // on screen keep their badges until the new page actually lands.
+        alignmentCache.value.clear()
+        images.value = data.images
+        mainEl.value?.scrollTo({ top: 0 })
+      } else {
+        images.value.push(...data.images)
+      }
       total.value = data.total
       nextCursor.value = data.next_cursor
       hasMore.value = !!data.next_cursor
@@ -1349,8 +1547,55 @@ async function fetchImages(reset = false) {
         modelFilteredTagSet.value = null
       }
     }
+  } catch (err) {
+    // **The backend is down or restarting (2026-09-21).** There was no catch here,
+    // so a failed page left `hasMore` true and `finally` re-armed the sentinel —
+    // and because an empty gallery keeps the sentinel in view, the two chased each
+    // other as fast as the network allowed (live: a wall of
+    // `GET /api/images?limit=100 502` in the nginx log). Stop paginating, hand the
+    // watching to the readiness monitor, and let the ready-transition resync
+    // refill the gallery.
+    hasMore.value = false
+    if (backendStatus.value === 'ready') backendStatus.value = 'connecting'
+    ensureBackendReadinessMonitor()
   } finally {
     loading.value = false
+    // Re-check the sentinel: IntersectionObserver only fires on state change,
+    // so a fetch skipped while loading would otherwise stall pagination.
+    nextTick(() => maybeFetchNext())
+  }
+}
+
+function maybeFetchNext() {
+  // Never paginate while the backend is unreachable — see the catch in
+  // `fetchImages`. `resyncAll` refills the gallery when it comes back.
+  if (backendStatus.value !== 'ready') return
+  if (sentinelVisible.value && !loading.value && hasMore.value) fetchImages()
+}
+
+// **A picture that did not load, retried a few times and then left alone.**
+// `@error` on a freshly generated image fired into a handler that did not exist
+// (the name was in the template and nowhere else), so a miss threw instead of
+// being retried. A render writes the file and indexes it a moment later, so an
+// early miss is usually worth one more ask — but only while the backend is up,
+// and never forever.
+const _imgRetries = new Map()
+
+function retryImageLoad(event, sha256) {
+  const el = event?.target
+  if (!el || backendStatus.value !== 'ready') return
+  const tries = _imgRetries.get(sha256) || 0
+  if (tries >= 3) return
+  _imgRetries.set(sha256, tries + 1)
+  const base = String(el.getAttribute('src') || '').split('?')[0]
+  setTimeout(() => { el.src = `${base}?r=${tries + 1}` }, 600 * 2 ** tries)
+}
+
+function softRefreshGallery() {
+  if ((mainEl.value?.scrollTop ?? 0) < 200) {
+    fetchImages(true)
+  } else {
+    pendingGalleryRefresh.value = true
   }
 }
 
@@ -1367,8 +1612,66 @@ async function fetchDirs() {
 async function fetchFacets() {
   try {
     const res = await fetch('/api/images/facets')
-    if (res.ok) { const d = await res.json(); modelFacets.value = d.models || [] }
+    if (res.ok) {
+      const d = await res.json()
+      modelFacets.value = d.models || []
+      characterFacets.value = d.characters || []
+    }
   } catch { }
+}
+
+async function fetchDateRange() {
+  dateRangeLoading.value = true
+  dateRangeError.value = false
+  try {
+    const res = await fetch('/api/images/date-range')
+    if (!res.ok) throw new Error()
+    const d = await res.json()
+    if (d.min_mtime && d.max_mtime) {
+      dateRangeMin.value = d.min_mtime
+      dateRangeMax.value = d.max_mtime
+    }
+  } catch { dateRangeError.value = true }
+  finally { dateRangeLoading.value = false }
+}
+
+function isoToMs(iso) { return iso ? new Date(iso).getTime() : 0 }
+
+const sliderDateLabel = computed(() => {
+  if (!sliderTimestamp.value) return ''
+  return new Date(sliderTimestamp.value).toLocaleDateString(
+    locale.value === 'ja' ? 'ja-JP' : 'en-US',
+    { year: 'numeric', month: 'short' }
+  )
+})
+
+const dateSeekActive = computed(() => sliderTimestamp.value !== null)
+
+function onSliderInput(e) {
+  sliderTimestamp.value = Number(e.target.value)
+  clearTimeout(_dateSeekTimer)
+  _dateSeekTimer = setTimeout(() => applyDateSeek(), 300)
+}
+
+function onSliderChange(e) {
+  sliderTimestamp.value = Number(e.target.value)
+  clearTimeout(_dateSeekTimer)
+  applyDateSeek()
+}
+
+function applyDateSeek() {
+  if (!sliderTimestamp.value) return
+  if (!['newest', 'oldest'].includes(sortOrder.value)) {
+    sortOrder.value = 'newest'
+    localStorage.setItem('sortOrder', 'newest')
+  }
+  fetchImages(true)
+}
+
+function clearDateSeek() {
+  sliderTimestamp.value = null
+  clearTimeout(_dateSeekTimer)
+  fetchImages(true)
 }
 
 function toggleModel(name) {
@@ -1382,6 +1685,19 @@ function toggleModel(name) {
 function clearModels() {
   activeModels.value = []
   fetchImages(true)
+}
+
+// Clicking the girl you are already looking at goes back to everything —
+// the same gesture the tag chips use, so there is nothing new to learn.
+function toggleCharacter(id) {
+  activeCharacter.value = activeCharacter.value === id ? null : id
+  fetchImages(true)
+}
+
+// The chip has to say the number the click will actually produce, so it
+// follows the same toggle the grid does.
+function characterCount(c) {
+  return showDrafts.value ? c.count : c.visible
 }
 
 async function setImageRating(img, n) {
@@ -1452,6 +1768,70 @@ async function fetchAiStatus() {
   } catch { }
 }
 
+// ── Backend readiness & coalesced refresh ─────────────────────────────────────
+// Background refetches (fetchTags, softRefreshGallery, etc.) fired by
+// job_finished are heavy — a single fetchTags scrolls the entire images
+// collection through Qdrant. Without coalescing, an AI pipeline that completes
+// small batches back-to-back triggers this scroll storm every few seconds.
+// We batch into a 1s window and drop calls while the backend is unavailable
+// (the ready-transition watch below runs a full resyncAll on recovery, which
+// re-reads all filter/sort refs and thus loses no user intent).
+const isBackendReady = computed(() => backendStatus.value === 'ready')
+
+let _resyncInFlight = false
+async function resyncAll() {
+  if (_resyncInFlight) return
+  _resyncInFlight = true
+  try {
+    // Auxiliary data first — these are cheap and don't touch the scroll position.
+    const aux = [fetchTags(), fetchFacets(), fetchInfo(), fetchAiStatus(), fetchDateRange()]
+    if (viewMode.value === 'folder') {
+      await Promise.all([fetchDirs(), ...aux])
+    } else {
+      // softRefreshGallery respects scroll position: at top it re-fetches, deep
+      // in the list it surfaces a manual "reload" button instead of yanking the
+      // user back. Fine for recovery paths; on initial mount scrollTop is 0 so
+      // the flat gallery refetches immediately.
+      softRefreshGallery()
+      await Promise.all(aux)
+    }
+  } finally {
+    _resyncInFlight = false
+  }
+}
+
+let _bgRefreshFlags = null
+let _bgRefreshTimer = null
+function scheduleBackgroundRefresh(flags) {
+  if (!isBackendReady.value) return
+  if (!_bgRefreshFlags) _bgRefreshFlags = { tags: false, gallery: false, dateRange: false, aiStatus: false }
+  for (const k in flags) if (flags[k]) _bgRefreshFlags[k] = true
+  if (_bgRefreshTimer) return
+  _bgRefreshTimer = setTimeout(async () => {
+    const f = _bgRefreshFlags
+    _bgRefreshFlags = null
+    _bgRefreshTimer = null
+    if (!isBackendReady.value) return
+    const tasks = []
+    if (f.aiStatus) tasks.push(fetchAiStatus())
+    if (f.tags) tasks.push(fetchTags())
+    if (f.dateRange) tasks.push(fetchDateRange())
+    await Promise.all(tasks)
+    if (f.gallery) softRefreshGallery()
+  }, 1000)
+}
+
+let _waitInFlight = false
+async function ensureBackendReadinessMonitor() {
+  if (_waitInFlight) return
+  _waitInFlight = true
+  try {
+    await waitForBackend()
+  } finally {
+    _waitInFlight = false
+  }
+}
+
 // ── Job stream ────────────────────────────────────────────────────────────────
 async function handleJobFinished(job) {
   // GENERATION failure: reset the refine panel before checking for success
@@ -1465,20 +1845,17 @@ async function handleJobFinished(job) {
 
   // Scan complete → refresh gallery
   if (SCAN_TITLES.has(job.title)) {
-    await fetchImages(true)
-    await fetchTags()
+    scheduleBackgroundRefresh({ gallery: true, tags: true, dateRange: true })
   }
 
   // AI pipeline complete → refresh AI status + gallery
   if (PIPELINE_TITLES.has(job.title)) {
-    await fetchAiStatus()
-    await fetchTags()
-    await fetchImages(true)
+    scheduleBackgroundRefresh({ gallery: true, tags: true, aiStatus: true })
   }
 
   // GENERATION complete → refresh gallery + notify refine panel
   if (job.lane === 'gen') {
-    await fetchImages(true)
+    scheduleBackgroundRefresh({ gallery: true })
     if (refineGenJobId.value === job.id) {
       refineGenJobId.value = null
       refinePhase.value = 'done'
@@ -1509,16 +1886,14 @@ async function handleJobFinished(job) {
       alignmentEvaluating.value = nextEval
     }
 
-    // Invalidate cache and re-fetch (targets only; full evaluation clears all)
+    // Invalidate cache and re-fetch (targets only; full evaluation clears all).
+    // A full evaluation targets the whole loaded list, so the refetch goes
+    // through the batch endpoint — one request instead of one per image.
     const targets = sha256s.length > 0 ? sha256s : images.value.map(img => img.sha256)
-    const next = new Map(alignmentCache.value)
-    for (const sha256 of targets) next.delete(sha256)
-    alignmentCache.value = next
+    for (const sha256 of targets) alignmentCache.value.delete(sha256)
 
     const targetSet = new Set(targets)
-    for (const img of images.value) {
-      if (targetSet.has(img.sha256)) loadAlignment(img.sha256)
-    }
+    fetchAlignmentsForImages(images.value.filter(img => targetSet.has(img.sha256)))
   }
 }
 
@@ -1547,22 +1922,37 @@ function startJobStream() {
         }
       }
       if (evalMap.size > 0) alignmentEvaluating.value = evalMap
-    } catch {}
+    } catch (err) { console.debug('[sse] snapshot handler failed', err) }
   })
 
   const upsert = (e) => {
     try {
       const job = JSON.parse(e.data)
-      jobsMap.value = new Map(jobsMap.value).set(job.id, job)
+      jobsMap.value = pruneJobsMap(new Map(jobsMap.value).set(job.id, job))
       crIngestEvent(e.type, job)
       if (e.type === 'job_finished') {
         _pendingJobUpdates?.delete(job.id)
         handleJobFinished(job)
       }
-    } catch {}
+    } catch (err) { console.debug(`[sse] ${e.type} handler failed`, err) }
   }
   es.addEventListener('job_created', upsert)
   es.addEventListener('job_finished', upsert)
+
+  // **Dismissing a failed job left it on screen (2026-09-21).** The ✕ does reach
+  // the server — the spooler drops it from the history and pushes `job_dismissed`
+  // — but nothing here listened, and terminal jobs live in `jobsMap` for the whole
+  // session, so the row stayed until a reload. Take it out of the map.
+  es.addEventListener('job_dismissed', (e) => {
+    try {
+      const job = JSON.parse(e.data)
+      const next = new Map(jobsMap.value)
+      next.delete(job.id)
+      jobsMap.value = next
+      _pendingJobUpdates?.delete(job.id)
+      crIngestEvent('job_dismissed', job)
+    } catch (err) { console.debug('[sse] job_dismissed handler failed', err) }
+  })
 
   // job_updated is throttled at 250ms (max 4 Hz) to batch reactive updates
   // and reduce Vue full re-render overhead from high-frequency SSE events
@@ -1578,12 +1968,12 @@ function startJobStream() {
         _pendingJobUpdatesTimer = setTimeout(() => {
           const newMap = new Map(jobsMap.value)
           for (const [id, j] of _pendingJobUpdates) newMap.set(id, j)
-          jobsMap.value = newMap
+          jobsMap.value = pruneJobsMap(newMap)
           _pendingJobUpdates = null
           _pendingJobUpdatesTimer = null
         }, 250)
       }
-    } catch {}
+    } catch (err) { console.debug('[sse] job_updated handler failed', err) }
   })
 
   es.addEventListener('resource_stats', (e) => {
@@ -1594,19 +1984,30 @@ function startJobStream() {
       if (data.disk_caution_pct != null) diskCautionPct.value = data.disk_caution_pct
       if (data.disk_fault_pct   != null) diskFaultPct.value   = data.disk_fault_pct
       crIngestEvent('resource_stats', data)
-    } catch {}
+    } catch (err) { console.debug('[sse] resource_stats handler failed', err) }
   })
 
   es.addEventListener('lane_state', (e) => {
     try {
       crIngestEvent('lane_state', JSON.parse(e.data))
-    } catch {}
+    } catch (err) { console.debug('[sse] lane_state handler failed', err) }
   })
 
   es.onerror = () => {
     jobStreamConnected.value = false
     es.close()
     _jobEventSource = null
+    // Drop this connection's pending update batch — the reconnect snapshot
+    // supersedes it, and the stale timer would otherwise fire into the new map.
+    clearTimeout(_pendingJobUpdatesTimer)
+    _pendingJobUpdatesTimer = null
+    _pendingJobUpdates = null
+    // Treat SSE drop as a backend-availability signal: mark not-ready so
+    // scheduleBackgroundRefresh drops incoming refresh requests, and resume
+    // /api/health polling so the ready-transition watch fires resyncAll on
+    // recovery.
+    if (backendStatus.value === 'ready') backendStatus.value = 'connecting'
+    ensureBackendReadinessMonitor()
     setTimeout(startJobStream, 3000)
   }
 }
@@ -1785,10 +2186,23 @@ function selectTag(tag) {
   fetchImages(true)
 }
 
+// The Analyzer's "search this tag" (its colour map and tag network both emit it,
+// then close themselves). Sets the tag rather than toggling it: arriving from
+// another screen with that tag already on and having it turn *off* is not what
+// the click meant.
+function searchTag(tag) {
+  const name = String(tag || '').trim()
+  if (!name) return
+  tagsFilter.value = { ...tagsFilter.value, [name]: 'include' }
+  showSuggestions.value = false
+  fetchImages(true)
+}
+
 function clearFilter() {
   searchQuery.value = ''
   tagsFilter.value = {}
   activeModels.value = []
+  activeCharacter.value = null
   starFilter.value = null
   categoryFilter.value = 'all'
   alignMinFilter.value = null
@@ -1824,8 +2238,22 @@ function toggleImageSelection(img) {
   selectedIds.value = next
 }
 
-function onImageClick(img) {
+// Gallery rows carry only what the grid draws. The detail panel wants the rest
+// — prompts, params, raw metadata — so paint the row immediately and fill the
+// full document in behind it. The sha guard keeps a slow response from
+// overwriting a selection the user has already moved past.
+function selectImage(img) {
+  if (!img) return
   selected.value = img
+  const sha = img.sha256
+  fetch(`/api/images/${sha}`)
+    .then(r => r.ok ? r.json() : null)
+    .then(doc => { if (doc && selected.value?.sha256 === sha) selected.value = doc })
+    .catch(() => {})
+}
+
+function onImageClick(img) {
+  selectImage(img)
 }
 
 function onCheckboxClick(e, img) {
@@ -1883,7 +2311,7 @@ function prevImage() {
   const i = selectedIndex.value
   if (i > 0) {
     _markImgPending()
-    selected.value = images.value[i - 1]
+    selectImage(images.value[i - 1])
     if (showLightbox.value) { lbPanX.value = 0; lbPanY.value = 0 }
   }
 }
@@ -1894,13 +2322,13 @@ async function nextImage() {
   if (i < 0) return
   if (i < images.value.length - 1) {
     _markImgPending()
-    selected.value = images.value[i + 1]
+    selectImage(images.value[i + 1])
     if (showLightbox.value) { lbPanX.value = 0; lbPanY.value = 0 }
   } else if (hasMore.value) {
     _markImgPending()
     await fetchImages()
     if (i + 1 < images.value.length) {
-      selected.value = images.value[i + 1]
+      selectImage(images.value[i + 1])
       if (showLightbox.value) {
         lbPanX.value = 0; lbPanY.value = 0
         await nextTick()
@@ -2095,7 +2523,7 @@ function cancelRefine() {
 }
 
 async function runRefine() {
-  if (selectedCount.value === 0) return
+  if (selectedCount.value === 0 && refineDirectPrompt.value === null) return
   refining.value = true
   refineStarted.value = true
   refinePhase.value = 'llm'
@@ -2115,6 +2543,7 @@ async function runRefine() {
   refinePromptJobId.value = null
   refinePhaseCode.value = ''
   refineHairTags.value = []
+  refineSubjectTags.value = []
   refineClothingTags.value = []
   refineAccessoryTags.value = []
   refinePoseTags.value = []
@@ -2122,7 +2551,10 @@ async function runRefine() {
   refineBackgroundTags.value = []
   refineObjectTags.value = []
   refineLightingTags.value = []
+  refineInjectedLiterals.value = []
   refineWd14Analysis.value = null
+  refineMutationTags.value = []
+  refineVariants.value = []
 
   try {
     const orderedShas = [...selectedIds.value].slice(0, 6)
@@ -2138,6 +2570,11 @@ async function runRefine() {
       suppress_conflict_tags: refineSuppressConflict.value,
       wd14_common_ratio: refineCommonRatio.value,
       wd14_unique_count: refineUniqueCount.value,
+      divergence: refineDivergence.value,
+      variation_count: refineVariationCount.value,
+      prose_paragraphs: refineProseParagraphs.value,
+      roles: orderedShas.map(s => imageRoles.value.get(s) || 'both'),
+      emotion_shift: refineEmotionShift.value,
       auto_submit: refineAutoSubmit.value,
       batch_count: refineBatchCount.value,
       workflow_name: refineWorkflow.value,
@@ -2179,11 +2616,15 @@ async function runRefine() {
       buffer = lines.pop() ?? ''
       for (const line of lines) {
         if (!line.startsWith('data: ')) continue
-        try { handleRefineEvent(JSON.parse(line.slice(6))) } catch {}
+        try { handleRefineEvent(JSON.parse(line.slice(6))) } catch (err) { console.warn('[refine] stream event failed', err) }
       }
     }
   } catch (e) {
-    if (e?.name !== 'AbortError') console.error('Refine error:', e)
+    // Without this the panel just flips to 'done' and looks like it succeeded.
+    if (e?.name !== 'AbortError') {
+      console.error('Refine error:', e)
+      refineErrorMsg.value = e?.message || t('refine.error')
+    }
   } finally {
     refineAbortController = null
     refining.value = false
@@ -2213,7 +2654,10 @@ function handleRefineEvent(evt) {
       proseMissing.value = !!evt.prose_missing
       removedTags.value = evt.removed_tags || []
       refineWd14Analysis.value = evt.wd14_analysis || null
+      refineMutationTags.value = evt.mutation_tags || []
+      refineVariants.value = evt.variants || []
       refineHairTags.value = evt.hair_tags || []
+      refineSubjectTags.value = evt.subject_tags || []
       refineClothingTags.value = evt.clothing_tags || []
       refineAccessoryTags.value = evt.accessory_tags || []
       refinePoseTags.value = evt.pose_tags || []
@@ -2221,6 +2665,9 @@ function handleRefineEvent(evt) {
       refineBackgroundTags.value = evt.background_tags || []
       refineObjectTags.value = evt.object_tags || []
       refineLightingTags.value = evt.lighting_tags || []
+      refineInjectedLiterals.value = (evt.injected_literals || []).map(
+        (x) => (typeof x === 'string' ? x : (x?.text || ''))
+      ).filter(Boolean)
       refinePhase.value = evt.auto_submit ? 'comfy' : 'done'
       break
     case 'comfy_queued':
@@ -2244,7 +2691,7 @@ function handleRefineEvent(evt) {
       break
     case 'comfy_done':
       refinePhase.value = 'done'
-      fetchImages(true)
+      softRefreshGallery()
       break
     case 'cancelled':
       refinePhase.value = 'done'
@@ -2289,6 +2736,10 @@ const {
   hasSession: inspireHasSession,
   isRunning: inspireIsRunning,
   resetSession: inspireReset,
+  // The Refine panel's 「ブレストに戻る」 reads this. The template referred to a
+  // bare `brainstormText`, which lives in `InspirePanel`'s setup and is not in
+  // scope here — so the button's `v-if` was always false and it never appeared.
+  brainstormText,
 } = useInspireSession()
 
 const refineHasSession = computed(() =>
@@ -2302,6 +2753,96 @@ function openInspire() { showInspire.value = true }
 
 // ── Invoke Panel ───────────────────────────────────────────────────────────────
 const showInvoke = ref(false)
+
+// ── Muse ──────────────────────────────────────────────────────────────────────
+// The header button opens **the roster**, not the studio — who to shoot with is
+// decided before the studio screen appears. Choosing someone in the roster opens the
+// studio (`pickMuseCharacter`).
+//
+// **Muse Classic retired on 2026-09-12.** There is one studio: Muse.
+const showMuse = ref(false)
+const showMuseGallery = ref(false)
+const museGalleryWorkflow = ref('')
+// Whoever the roster chose. Read once on opening (the panel compares it against its
+// own session and does nothing if they match).
+const musePendingCharacterId = ref('')
+// From the chemistry viewer's "shoot these two", the partner arrives as well.
+const musePendingPartnerId = ref('')
+// A paused shoot. Held so the roster can show "shooting".
+const museResume = ref({ available: false, name: '', sessionId: '' })
+
+function startDuetPair({ leadId, partnerId }) {
+  showMuseGallery.value = false
+  musePendingCharacterId.value = leadId
+  musePendingPartnerId.value = partnerId
+  showMuse.value = true
+}
+
+async function openMuse() {
+  // Dismiss gallery detail so it cannot cover the panel.
+  selected.value = null
+  showMuseGallery.value = true
+  // `workflows` is otherwise only populated by openRefine()/Admin — Muse used
+  // to be reachable without either ever having run, leaving the gallery's and
+  // dossier's workflow pickers permanently empty.
+  if (workflows.value.length === 0) {
+    try {
+      const r = await fetch('/api/comfy/workflows')
+      if (r.ok) workflows.value = await r.json()
+    } catch {}
+  }
+}
+
+function pickMuseCharacter(id) {
+  selected.value = null
+  museDossierId.value = ''
+  showMuseGallery.value = false
+  musePendingCharacterId.value = id
+  musePendingPartnerId.value = ''
+  // The panel is not removed with v-if — a session survives opening and closing, so
+  // toggling `show` does not rebuild it.
+  showMuse.value = true
+}
+
+function onMuseShow(open) {
+  showMuse.value = open
+  if (open) {
+    selected.value = null
+    return
+  }
+  // If ✕ is pressed by mistake, it lands on the roster (with "shooting" shown)
+  // rather than on nothing.
+  if (museResume.value.available) showMuseGallery.value = true
+}
+
+function onMuseSessionState(state) {
+  museResume.value = {
+    available: Boolean(state?.available),
+    name: String(state?.name || ''),
+    sessionId: String(state?.sessionId || ''),
+  }
+}
+
+function resumeMuseSession() {
+  selected.value = null
+  showMuseGallery.value = false
+  // Clearing the choice sits back down in the paused session as it was.
+  musePendingCharacterId.value = ''
+  musePendingPartnerId.value = ''
+  showMuse.value = true
+}
+
+function openImageBySha(sha256) {
+  const img = images.value.find(i => i.sha256 === sha256)
+  if (img) {
+    selectImage(img)
+    return
+  }
+  fetch(`/api/images/${sha256}`)
+    .then(r => r.ok ? r.json() : null)
+    .then(doc => { if (doc) selected.value = doc })
+    .catch(() => {})
+}
 
 function handleInvokeSendToRefine(data) {
   // data: { positive_prompt, negative_prompt, sha256, workflow_name }
@@ -2332,16 +2873,17 @@ function handleSendToRefine({ shas, text, inspireContext = null }) {
   openRefine()
 }
 
-function handleSendToRefineDirect({ shas, directPrompt, directNegativePrompt = '', source = '', inspireContext = null }) {
+function handleSendToRefineDirect({ shas, directPrompt, directNegativePrompt = '', source = '', inspireContext = null, workflow_name = '' }) {
   selectedIds.value = new Set(shas)
   pinnedShas.value = new Set(shas)
-  randomCount.value = Math.min(6, Math.max(shas.length, 1))
+  randomCount.value = Math.min(6, Math.max(shas.length || 1, 1))
   refineInstruction.value = ''
   refineDirectPrompt.value = directPrompt
   refineDirectNegativePrompt.value = directNegativePrompt
   refineDirectPromptSource.value = source
   refineInspireContext.value = inspireContext
   refineStyle.value = 'natural'
+  if (workflow_name) refineWorkflow.value = workflow_name
   openRefine()
 }
 
@@ -2359,31 +2901,38 @@ function handleToggleImageSelection(img, sourceEl) {
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 onMounted(async () => {
+  // Set up the observer before anything async — waitForBackend/fetchImages can
+  // hang for up to 30s and the observer must be live for scrolls during that time.
+  observer = new IntersectionObserver(entries => {
+    sentinelVisible.value = entries[0].isIntersecting
+    maybeFetchNext()
+  }, { root: mainEl.value, rootMargin: '200px' })
+  if (sentinel.value) {
+    observer.observe(sentinel.value)
+  }
+  // The sentinel lives in the flat-view v-else branch, so it unmounts on view
+  // switches (and is absent when starting in folder view) — re-observe on remount.
+  watch(sentinel, (el, old) => {
+    if (old) { observer.unobserve(old); sentinelVisible.value = false }
+    if (el) observer.observe(el)
+  })
+
   await waitForBackend()
 
   startJobStream()
   runStartupChecks()
 
-  // Set up observer immediately — before awaiting data fetches.
-  // fetchImages() can hang for up to 30s under Qdrant load, and the observer
-  // must be ready before that to fire when the user scrolls.
-  observer = new IntersectionObserver(entries => {
-    const entry = entries[0]
-    if (entry.isIntersecting) {
-      if (!loading.value && hasMore.value) {
-        fetchImages()
-      }
-    }
-  }, { root: mainEl.value, rootMargin: '200px' })
-  if (sentinel.value) {
-    observer.observe(sentinel.value)
-  }
+  await resyncAll()
 
-  if (viewMode.value === 'folder') {
-    await Promise.all([fetchDirs(), fetchTags(), fetchFacets(), fetchInfo(), fetchAiStatus()])
-  } else {
-    await Promise.all([fetchImages(), fetchTags(), fetchFacets(), fetchInfo(), fetchAiStatus()])
-  }
+  // Watch for backend ready-transitions AFTER the initial sync so the initial
+  // load isn't delayed by the 2s flap guard. Subsequent transitions (server
+  // restart recovery) go through this path and re-sync once things stabilize.
+  watch(backendStatus, async (s, prev) => {
+    if (prev === 'ready' || s !== 'ready') return
+    await new Promise(r => setTimeout(r, 2000))
+    if (backendStatus.value !== 'ready') return
+    await resyncAll()
+  })
 })
 
 function onVisibilityChange() {
@@ -2406,8 +2955,23 @@ function _onGlobalKey(e) {
     controlRoomVisible.value = !controlRoomVisible.value
     return
   }
-  if (e.key === 'Escape' && controlRoomVisible.value) {
-    controlRoomVisible.value = false
+  if (e.key === 'Escape') {
+    // Gallery image detail sits above the panels; close it before they handle Esc.
+    if (showLightbox.value) {
+      closeLightbox()
+      e.preventDefault()
+      e.stopPropagation()
+      return
+    }
+    if (selected.value) {
+      selected.value = null
+      e.preventDefault()
+      e.stopPropagation()
+      return
+    }
+    if (controlRoomVisible.value) {
+      controlRoomVisible.value = false
+    }
   }
 }
 
@@ -2439,6 +3003,7 @@ onUnmounted(() => {
   observer?.disconnect()
   stopJobStream()
   clearTimeout(searchTimer)
+  clearTimeout(_dateSeekTimer)
   document.removeEventListener('visibilitychange', onVisibilityChange)
   document.removeEventListener('click', _onDocClick)
   document.removeEventListener('keydown', _onGlobalKey)
@@ -2458,7 +3023,7 @@ onUnmounted(() => {
     />
 
     <!-- ── Header ── -->
-    <header class="sticky top-0 z-20 bg-gray-900 border-b border-gray-800">
+    <header class="sticky top-0 z-[var(--z-header)] bg-gray-900 border-b border-gray-800">
       <div class="flex items-center gap-2 px-4 py-2.5 flex-wrap">
         <button @click="goHome" class="flex items-center gap-2 cursor-pointer focus:outline-none">
           <img src="/logo.png" alt="Ranbell Image" class="h-7 w-7 rounded-md flex-shrink-0" />
@@ -2496,7 +3061,7 @@ onUnmounted(() => {
 
           <!-- Tag autocomplete dropdown -->
           <div v-if="showSuggestions && tagSuggestions.length"
-            class="absolute top-full left-0 right-0 mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-50 overflow-hidden">
+            class="absolute top-full left-0 right-0 mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-[var(--z-popover)] overflow-hidden">
             <div v-for="(s, i) in tagSuggestions" :key="s.tag"
               @mousedown.prevent="selectSuggestion(s.tag)"
               :class="i === suggestionIndex ? 'bg-purple-700/60 text-white' : 'hover:bg-gray-700 text-gray-200'"
@@ -2521,12 +3086,12 @@ onUnmounted(() => {
           class="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-200 whitespace-nowrap transition-colors min-w-0 max-w-[40vw]">
           <span class="w-1.5 h-1.5 rounded-full inline-block flex-shrink-0"
             :class="headerActiveJobs[0].state === 'running' ? 'bg-blue-400 animate-pulse' : headerActiveJobs[0].state === 'cancelling' ? 'bg-orange-400 animate-pulse' : 'bg-yellow-400'"></span>
-          <span class="truncate">{{ headerActiveJobs[0].title }}</span>
-          <span v-if="headerActiveJobs[0].state === 'running' && headerActiveJobs[0].progress_text" class="text-gray-500 truncate">{{ headerActiveJobs[0].progress_text }}</span>
+          <span class="truncate" :title="headerActiveJobs[0].title">{{ jobLabel(headerActiveJobs[0].title, { t, te }) }}</span>
+          <span v-if="headerActiveJobs[0].state === 'running' && jobProgress(headerActiveJobs[0], { t, te })" class="text-gray-500 truncate">{{ jobProgress(headerActiveJobs[0], { t, te }) }}</span>
           <span v-else-if="headerActiveJobs[0].state === 'running' && headerActiveJobs[0].progress > 0" class="text-gray-500">{{ Math.round(headerActiveJobs[0].progress * 100) }}%</span>
           <span v-else-if="headerActiveJobs[0].state === 'queued'" class="text-yellow-400/70">{{ $t('header.jobQueued') }}</span>
           <span v-else-if="headerActiveJobs[0].state === 'cancelling'" class="text-orange-400/70">{{ $t('header.jobCancelling') }}</span>
-          <span v-if="headerActiveJobs.length > 1" class="text-gray-500 flex-shrink-0">+{{ headerActiveJobs.length - 1 }}件</span>
+          <span v-if="headerActiveJobs.length > 1" class="text-gray-500 flex-shrink-0">{{ $t('header.jobMore', { n: headerActiveJobs.length - 1 }) }}</span>
         </button>
 
         <!-- Action buttons -->
@@ -2579,6 +3144,11 @@ onUnmounted(() => {
             class="px-3 py-1.5 bg-violet-900/70 hover:bg-violet-800/80 border border-violet-600/40 hover:border-violet-500/60 rounded-lg text-xs font-medium text-violet-200 transition-colors whitespace-nowrap">
             {{ $t('header.invoke') }}
           </button>
+          <button @click="openMuse()"
+            :title="$t('header.museTitle')"
+            class="px-3 py-1.5 bg-cyan-900/70 hover:bg-cyan-800/80 border border-cyan-600/40 hover:border-cyan-500/60 rounded-lg text-xs font-medium text-cyan-200 transition-colors whitespace-nowrap">
+            {{ $t('header.muse') }}
+          </button>
           <button @click="triggerScan" :disabled="scanState?.state === 'running'"
             class="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 rounded-lg text-xs font-medium transition-colors whitespace-nowrap">
             {{ scanState?.state === 'running' ? $t('header.scan.running') : $t('header.scan.button') }}
@@ -2602,6 +3172,14 @@ onUnmounted(() => {
             :class="categoryFilter === 'NR' ? 'bg-amber-700 text-white border-amber-500' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 border-gray-700'"
             class="px-2 py-0.5 rounded-full border transition-colors">{{ $t('header.filter.categoryNR') }}</button>
         </div>
+
+        <div class="w-px h-3 bg-gray-700 flex-shrink-0"></div>
+
+        <!-- Muse board sketches -->
+        <button @click="showDrafts = !showDrafts; fetchImages(true)"
+          :title="$t('gallery.showDraftsHint')"
+          :class="showDrafts ? 'bg-teal-800 text-teal-100 border-teal-600' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 border-gray-700'"
+          class="px-2 py-0.5 rounded-full border transition-colors flex-shrink-0">{{ $t('gallery.showDrafts') }}</button>
 
         <div class="w-px h-3 bg-gray-700 flex-shrink-0"></div>
 
@@ -2629,6 +3207,36 @@ onUnmounted(() => {
             :class="alignMinFilter === pct/100 ? 'bg-orange-700 text-white border-orange-500' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 border-gray-700'"
             class="px-2 py-0.5 rounded-full border transition-colors">≥{{ pct }}%</button>
         </div>
+
+        <!-- Date timeline slider -->
+        <template v-if="dateRangeMin && dateRangeMax && isoToMs(dateRangeMax) > isoToMs(dateRangeMin)">
+          <div class="w-px h-3 bg-gray-700 flex-shrink-0"></div>
+          <div class="flex items-center gap-2 flex-shrink-0 ml-auto">
+            <span class="text-gray-500">{{ $t('header.filter.dateSeek') }}</span>
+            <span v-if="dateSeekActive" class="flex items-center gap-1 text-violet-300">
+              <span class="w-1.5 h-1.5 rounded-full bg-violet-400 flex-shrink-0"></span>
+              {{ sliderDateLabel }}
+              <button @click="clearDateSeek" class="text-gray-500 hover:text-gray-300 ml-0.5 leading-none">✕</button>
+            </span>
+            <input type="range"
+              :min="isoToMs(dateRangeMin)"
+              :max="isoToMs(dateRangeMax)"
+              :value="sliderTimestamp ?? isoToMs(dateRangeMax)"
+              :disabled="dateRangeLoading"
+              @input="onSliderInput"
+              @change="onSliderChange"
+              class="w-32 h-1.5 appearance-none rounded-full cursor-pointer bg-gray-700 accent-violet-500 disabled:opacity-40 disabled:cursor-not-allowed" />
+            <span class="text-gray-600 text-[10px] whitespace-nowrap">
+              {{ new Date(dateRangeMin).getFullYear() }}–{{ new Date(dateRangeMax).getFullYear() }}
+            </span>
+          </div>
+        </template>
+        <div v-else-if="dateRangeError" class="flex items-center gap-1 ml-auto flex-shrink-0">
+          <span class="text-gray-600 text-[10px]">{{ $t('header.filter.dateSeekError') }}</span>
+          <button @click="fetchDateRange" class="text-gray-500 hover:text-gray-300 text-[10px] underline">
+            {{ $t('header.filter.dateSeekRetry') }}
+          </button>
+        </div>
       </div>
       </template><!-- /flat-only quality bar -->
 
@@ -2648,7 +3256,7 @@ onUnmounted(() => {
             :class="similarSource._colorMode ? 'border border-pink-700/50' : 'border border-indigo-700/50'" />
           <Teleport to="body">
             <div v-if="similarThumbHover"
-              class="fixed top-16 left-4 z-[9999] pointer-events-none">
+              class="fixed top-16 left-4 z-[var(--z-dragghost)] pointer-events-none">
               <img :src="`/api/thumbnails/${similarSource.sha256}.webp`"
                 class="w-48 h-auto max-h-72 rounded-xl object-contain bg-gray-900 shadow-2xl ring-1"
                 :class="similarSource._colorMode ? 'ring-pink-600/50' : 'ring-indigo-600/50'" />
@@ -2717,9 +3325,16 @@ onUnmounted(() => {
       </div>
 
       <!-- Active filter bar -->
-      <div v-if="Object.keys(tagsFilter).length || searchQuery || activeModels.length || alignMinFilter !== null"
+      <div v-if="Object.keys(tagsFilter).length || searchQuery || activeModels.length || alignMinFilter !== null || activeCharacter"
         class="flex items-center gap-1.5 px-4 pt-1 pb-1 flex-wrap">
         <span class="text-xs text-gray-500 mr-0.5">{{ $t('header.filter.label') }}</span>
+
+        <!-- who is in the picture -->
+        <span v-if="activeCharacter"
+          class="flex items-center gap-1 px-2 py-0.5 bg-sky-900/60 border border-sky-600/50 rounded-full text-xs text-sky-200">
+          🎬 {{ (characterFacets.find(c => c.character_id === activeCharacter) || {}).name || activeCharacter.slice(0, 8) }}
+          <button @click="toggleCharacter(activeCharacter)" class="text-sky-400 hover:text-white leading-none">✕</button>
+        </span>
 
         <!-- keyword badge -->
         <span v-if="searchQuery"
@@ -2795,6 +3410,24 @@ onUnmounted(() => {
         </div>
         <!-- Collapsible tag list -->
         <div v-show="tagsExpanded" class="mt-2 max-h-52 overflow-y-auto scrollbar-hide flex flex-col gap-2">
+          <!-- Muse section. Every render the studio makes stamps the cast onto
+               the image, so this is the one filter that can answer 「この子の
+               写真を全部」 — and it composes with every other filter here. -->
+          <div v-if="characterFacets.length" class="flex items-start gap-2">
+            <div class="text-[10px] text-sky-400/70 uppercase font-bold w-16 pt-1 shrink-0">Muse</div>
+            <div class="flex flex-wrap gap-1.5 flex-1">
+              <button v-for="c in characterFacets" :key="c.character_id"
+                @click="toggleCharacter(c.character_id)"
+                :class="activeCharacter === c.character_id
+                  ? 'bg-sky-600 border border-sky-500 text-white'
+                  : 'bg-gray-800 border border-transparent text-gray-400 hover:bg-gray-700'"
+                class="flex-shrink-0 px-2.5 py-0.5 rounded-full text-xs transition-colors">
+                {{ c.name || c.character_id.slice(0, 8) }}
+                <span class="opacity-60 text-[10px] ml-1">{{ characterCount(c) }}</span>
+              </button>
+            </div>
+          </div>
+
           <!-- Model section -->
           <div v-if="filteredModels.length" class="flex items-start gap-2">
             <div class="text-[10px] text-amber-500/70 uppercase font-bold w-16 pt-1 shrink-0">Model</div>
@@ -2838,8 +3471,26 @@ onUnmounted(() => {
         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
       </svg>
-      <span v-if="backendStatus === 'connecting'">{{ $t('header.connecting') }}</span>
+      <span v-if="backendStatus === 'connecting'">
+        {{ $t('header.connecting') }}
+        <span class="text-gray-500 ml-1">— {{ $t('header.connectingHint') }}</span>
+      </span>
       <span v-else>{{ $t('header.starting') }}</span>
+    </div>
+
+    <!-- ── Search indexes still building ── -->
+    <!-- **Say what the database is doing (2026-09-21).** Payload indexes are asked
+         for with `wait=False`, so the app is up while Qdrant is still building them
+         (a first boot after an update: tens of seconds each, thirty of them). Search
+         works throughout — a filter is a scan until its index lands — so this is a
+         note, not a block. -->
+    <div v-if="backendStatus === 'ready' && indexProgress && indexProgress.ready < indexProgress.total"
+      class="flex items-center justify-center gap-3 px-4 py-2 bg-gray-900/95 border-b border-gray-800 text-xs text-gray-400">
+      <svg class="w-3.5 h-3.5 animate-spin text-purple-400 shrink-0" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+      </svg>
+      <span>{{ $t('header.indexing', { ready: indexProgress.ready, total: indexProgress.total }) }}</span>
     </div>
 
     <!-- ── Startup warnings banner ── -->
@@ -2851,7 +3502,9 @@ onUnmounted(() => {
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
           </svg>
           <ul class="space-y-1 min-w-0">
-            <li v-for="(w, i) in backendActivity.warnings" :key="i" class="break-words">{{ w }}</li>
+            <!-- A warning is either a plain string or {key, params, text}: the key
+                 says it in the reader's language, the text is the fallback. -->
+            <li v-for="(w, i) in backendActivity.warnings" :key="i" class="break-words">{{ warningText(w) }}</li>
           </ul>
         </div>
         <button @click="dismissedWarnings = true"
@@ -2865,6 +3518,21 @@ onUnmounted(() => {
 
     <!-- ── Grid ── -->
     <main ref="mainEl" class="flex-1 min-h-0 p-2 overflow-y-auto">
+
+      <!-- ── New images banner ── -->
+      <Transition name="fade">
+        <div v-if="pendingGalleryRefresh"
+          class="sticky top-0 z-10 mb-2 flex items-center justify-center">
+          <button
+            @click="pendingGalleryRefresh = false; fetchImages(true); mainEl?.scrollTo({ top: 0, behavior: 'smooth' })"
+            class="flex items-center gap-2 px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium rounded-full shadow-lg transition-colors">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+            </svg>
+            {{ $t('gallery.newImagesAvailable') }}
+          </button>
+        </div>
+      </Transition>
 
       <!-- ── Folder list ── -->
       <template v-if="viewMode === 'folder' && activeDir === null">
@@ -2914,7 +3582,7 @@ onUnmounted(() => {
         </div>
         <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-2 items-start">
           <div v-for="img in images" :key="img.sha256"
-            class="cursor-pointer group rounded-lg overflow-hidden bg-gray-900 transition-all duration-200"
+            class="gallery-card cursor-pointer group rounded-lg overflow-hidden bg-gray-900 transition-all duration-200"
             :class="[
               selectedIds.has(img.sha256)
                 ? 'ring-2 ring-purple-500 shadow-[0_0_14px_rgba(168,85,247,0.45)]'
@@ -2982,7 +3650,7 @@ onUnmounted(() => {
       <template v-else>
         <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-2 items-start">
           <div v-for="img in images" :key="img.sha256"
-            class="cursor-pointer group rounded-lg overflow-hidden bg-gray-900 transition-all duration-200"
+            class="gallery-card cursor-pointer group rounded-lg overflow-hidden bg-gray-900 transition-all duration-200"
             :class="[
               selectedIds.has(img.sha256)
                 ? 'ring-2 ring-purple-500 shadow-[0_0_14px_rgba(168,85,247,0.45)]'
@@ -3071,7 +3739,11 @@ onUnmounted(() => {
 
     <!-- ── Prompt Refine Panel (2-pane) ── -->
     <Teleport to="body">
-      <div v-if="showRefine" class="fixed inset-0 z-[75] bg-black/90 flex items-center justify-center p-3"
+      <!-- **Refine sits one tier above the panels (2026-09-20).** It is opened
+           from Inspire ("Refine with this") and from Invoke, and every panel
+           teleports to <body> at --z-panel — so the one mounted last, which is
+           Inspire, painted over it and the button looked dead. -->
+      <div v-if="showRefine" class="fixed inset-0 z-[var(--z-panel-over)] bg-black/90 flex items-center justify-center p-3"
         @mousedown.self="refineOverlayMousedownOnBg = true"
         @mouseup.self="if (refineOverlayMousedownOnBg) showRefine = false; refineOverlayMousedownOnBg = false"
         @mouseleave="refineOverlayMousedownOnBg = false">
@@ -3134,12 +3806,23 @@ onUnmounted(() => {
                     class="bg-cyan-950/60 border border-cyan-600/50 rounded-xl p-3.5 space-y-2.5">
                     <div class="flex items-start justify-between gap-2">
                       <div class="flex items-center gap-2 min-w-0">
-                        <span class="text-base shrink-0">🪞</span>
+                        <span class="text-base shrink-0">{{
+                          refineDirectPromptSource.startsWith('inversion') ? '🪞'
+                          : refineDirectPromptSource === 'history' ? '📜'
+                          : refineDirectPromptSource === 'invoke'  ? '✨'
+                          : refineDirectPromptSource === 'detail'  ? '🎨'
+                          : '📥'
+                        }}</span>
                         <div class="min-w-0">
-                          <p class="text-xs font-semibold text-cyan-300">{{ $t('refine.directFromInversion') }}</p>
+                          <p class="text-xs font-semibold text-cyan-300">{{
+                            refineDirectPromptSource.startsWith('inversion') ? $t('refine.directFromInversion')
+                            : refineDirectPromptSource === 'history' ? $t('refine.directFromHistory')
+                            : refineDirectPromptSource === 'invoke'  ? $t('refine.directFromInvoke')
+                            : refineDirectPromptSource === 'detail'  ? $t('refine.directFromDetail')
+                            : $t('refine.directFromDirect')
+                          }}</p>
                           <p class="text-[10px] text-cyan-600 mt-0.5">
-                            {{ refineDirectPromptSource === 'inversion-tags' ? $t('refine.directFormatTags') : $t('refine.directFormatProse') }}
-                            {{ $t('refine.directBypassNote') }}
+                            <template v-if="refineDirectPromptSource.startsWith('inversion')">{{ refineDirectPromptSource === 'inversion-tags' ? $t('refine.directFormatTags') : $t('refine.directFormatProse') }} </template>{{ $t('refine.directBypassNote') }}
                           </p>
                         </div>
                       </div>
@@ -3157,6 +3840,25 @@ onUnmounted(() => {
                       <p class="text-[10px] text-rose-200/60 font-mono leading-relaxed break-all">{{ refineDirectNegativePrompt }}</p>
                     </div>
                     <p class="text-[10px] text-cyan-700">{{ $t('refine.directClearHint') }}</p>
+                  </div>
+                </Transition>
+
+                <!-- Ollama offline banner -->
+                <Transition
+                  enter-active-class="transition-all duration-200"
+                  enter-from-class="opacity-0 -translate-y-2"
+                  enter-to-class="opacity-100 translate-y-0"
+                  leave-active-class="transition-all duration-150"
+                  leave-from-class="opacity-100 translate-y-0"
+                  leave-to-class="opacity-0 -translate-y-2">
+                  <div v-if="ollamaOffline && refineDirectPrompt === null"
+                    class="bg-amber-950/60 border border-amber-700/40 rounded-xl p-3.5 space-y-2">
+                    <div class="flex items-center gap-2">
+                      <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse flex-shrink-0"></span>
+                      <p class="text-xs font-semibold text-amber-300">{{ $t('refine.ollamaOfflineTitle') }}</p>
+                    </div>
+                    <p class="text-[10px] text-amber-500/80 leading-relaxed">{{ $t('refine.ollamaOfflineHint') }}</p>
+                    <p class="text-[10px] text-amber-600 italic">{{ $t('refine.ollamaOfflineDirectHint') }}</p>
                   </div>
                 </Transition>
 
@@ -3186,6 +3888,10 @@ onUnmounted(() => {
                     <span class="flex items-center gap-2">
                       {{ $t('refine.ollamaControl') }}
                       <span v-if="refineDirectPrompt !== null" class="text-[9px] text-cyan-600 normal-case font-normal">{{ $t('refine.directSkipping') }}</span>
+                      <span v-else-if="ollamaOffline" class="text-[9px] text-amber-500 normal-case font-normal flex items-center gap-1">
+                        <span class="w-1 h-1 rounded-full bg-amber-500 animate-pulse inline-block"></span>
+                        {{ $t('refine.ollamaOfflineBadge') }}
+                      </span>
                     </span>
                     <span class="text-gray-600 group-open:rotate-180 transition-transform">▼</span>
                   </summary>
@@ -3199,6 +3905,59 @@ onUnmounted(() => {
                         :disabled="refining || refineDirectPrompt !== null" class="w-full accent-purple-500 disabled:opacity-50" />
                       <div class="flex justify-between text-xs text-gray-600 mt-0.5">
                         <span>{{ $t('refine.tempLow') }}</span><span>{{ $t('refine.tempHigh') }}</span>
+                      </div>
+                    </div>
+                    <div>
+                      <label class="text-xs text-gray-500 flex justify-between mb-1.5">
+                        <span :title="$t('refine.divergenceTitle')">⚗️ {{ $t('refine.divergence') }}</span>
+                        <span class="text-teal-400 font-mono">{{ Math.round(refineDivergence * 100) }}%</span>
+                      </label>
+                      <input v-model.number="refineDivergence" type="range" min="0" max="1" step="0.05"
+                        :disabled="refining || refineDirectPrompt !== null" class="w-full accent-teal-500 disabled:opacity-50" />
+                      <div class="flex justify-between text-xs text-gray-600 mt-0.5">
+                        <span>{{ $t('refine.divergenceLow') }}</span><span>{{ $t('refine.divergenceHigh') }}</span>
+                      </div>
+                      <p v-if="refineMutationTags.length" class="text-[10px] text-teal-500/80 mt-1 break-all">
+                        {{ $t('refine.mutationTags') }}: {{ refineMutationTags.join(', ') }}
+                      </p>
+                    </div>
+                    <div>
+                      <label class="text-xs text-gray-500 block mb-1" :title="$t('refine.emotionShiftTip')">
+                        🌒 {{ $t('refine.emotionShift') }}
+                      </label>
+                      <select v-model="refineEmotionShift" :disabled="refining || refineDirectPrompt !== null"
+                        class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none focus:border-indigo-500 disabled:opacity-50">
+                        <option value="">{{ $t('refine.emotionShiftOff') }}</option>
+                        <option v-for="em in REFINE_EMOTIONS" :key="em" :value="em">{{ $t(`inspire.emotion.${em}`) }}</option>
+                      </select>
+                    </div>
+                    <div v-if="refineStyle === 'natural'">
+                      <label class="text-xs text-gray-500 block mb-1" :title="$t('refine.variationTip')">
+                        🎲 {{ $t('refine.variationCount') }}
+                      </label>
+                      <div class="flex gap-1">
+                        <button v-for="n in [1, 2, 3]" :key="n"
+                          @click="refineVariationCount = n"
+                          :disabled="refining || refineDirectPrompt !== null"
+                          :class="refineVariationCount === n
+                            ? 'bg-purple-700/60 border-purple-500/60 text-purple-200'
+                            : 'bg-gray-800/60 border-gray-700/40 text-gray-500 hover:text-gray-300'"
+                          class="flex-1 py-1.5 rounded-lg border text-xs transition disabled:opacity-50">
+                          {{ n }}
+                        </button>
+                      </div>
+                    </div>
+                    <div v-if="refineStyle === 'natural'">
+                      <label class="text-xs text-gray-500 flex justify-between mb-1.5" :title="$t('refine.proseLengthTip')">
+                        <span>{{ $t('refine.proseLength') }}</span>
+                        <span class="text-purple-400 font-mono">{{ refineProseParagraphs }}{{ $t('refine.proseLengthUnit') }}</span>
+                      </label>
+                      <input v-model.number="refineProseParagraphs" type="range" min="3" max="7" step="1"
+                        :disabled="refining || refineDirectPrompt !== null"
+                        class="w-full accent-purple-500 disabled:opacity-50" />
+                      <div class="flex justify-between text-xs text-gray-600 mt-0.5">
+                        <span>{{ $t('refine.proseLengthShort') }}</span>
+                        <span>{{ $t('refine.proseLengthLong') }}</span>
                       </div>
                     </div>
                     <div>
@@ -3433,6 +4192,18 @@ onUnmounted(() => {
                   <div v-if="proseMissing" class="px-3 py-2 bg-yellow-900/40 border border-yellow-700/50 rounded-lg">
                     <p class="text-xs text-yellow-300">{{ $t('refine.proseMissing') }}</p>
                   </div>
+                  <!-- Fan-out variant switcher -->
+                  <div v-if="refineVariants.length" class="flex items-center gap-1.5 flex-wrap">
+                    <span class="text-[10px] text-gray-600 uppercase tracking-wide">{{ $t('refine.variants') }}</span>
+                    <button v-for="(v, i) in refineVariants" :key="i"
+                      @click="applyRefineVariant(v)"
+                      :class="positivePrompt === v.positive
+                        ? 'bg-purple-700 text-white border-purple-500'
+                        : 'bg-gray-800 text-gray-400 border-gray-700 hover:text-gray-200'"
+                      class="px-2 py-0.5 rounded-md border text-[10px] font-mono transition">
+                      V{{ i + 2 }} · t{{ v.temperature }}
+                    </button>
+                  </div>
                   <!-- Tag format toggle -->
                   <div class="flex items-center gap-1.5">
                     <span class="text-[10px] text-gray-600 uppercase tracking-wide">{{ $t('refine.tagFormatLabel') }}</span>
@@ -3452,6 +4223,13 @@ onUnmounted(() => {
                         class="text-xs text-gray-500 hover:text-gray-200 px-2 py-0.5 bg-gray-800 hover:bg-gray-700 rounded transition-colors">{{ $t('refine.copy') }}</button>
                     </div>
                     <p class="text-xs text-gray-200 bg-gray-800/80 rounded-lg p-3 whitespace-pre-wrap break-words leading-relaxed max-h-36 overflow-y-auto">{{ fmtPrompt(positivePrompt) }}</p>
+                  </div>
+                  <div v-if="refineInjectedLiterals.length" class="flex flex-wrap items-center gap-1.5">
+                    <span class="text-[10px] text-purple-400/80 font-semibold uppercase tracking-wide">{{ $t('refine.injectedLiterals') }}</span>
+                    <span v-for="(lit, i) in refineInjectedLiterals" :key="i"
+                      class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-purple-900/40 border border-purple-700/40 text-purple-200/90">
+                      text "{{ lit }}"
+                    </span>
                   </div>
                   <div v-if="negativePromptText">
                     <div class="flex items-center justify-between mb-1.5">
@@ -3474,8 +4252,23 @@ onUnmounted(() => {
               </div>
 
               <!-- Run / Cancel button (pinned bottom of left pane) -->
-              <div class="p-4 border-t border-gray-800 flex-shrink-0 flex gap-2">
-                <button @click="runRefine" :disabled="refining || selectedCount === 0 || (refineAutoSubmit && !refineWorkflow)"
+              <div class="p-4 border-t border-gray-800 flex-shrink-0 space-y-2">
+                <!-- ComfyUI offline warning -->
+                <Transition
+                  enter-active-class="transition-all duration-200"
+                  enter-from-class="opacity-0 -translate-y-1"
+                  enter-to-class="opacity-100 translate-y-0"
+                  leave-active-class="transition-all duration-150"
+                  leave-from-class="opacity-100 translate-y-0"
+                  leave-to-class="opacity-0 -translate-y-1">
+                  <div v-if="comfyOffline && (refineAutoSubmit || refineDirectPrompt !== null)"
+                    class="bg-amber-950/60 border border-amber-700/40 rounded-xl px-3 py-2 flex items-center gap-2 text-xs text-amber-300">
+                    <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse flex-shrink-0"></span>
+                    <span>{{ $t('refine.comfyOfflineHint') }}</span>
+                  </div>
+                </Transition>
+                <div class="flex gap-2">
+                <button @click="runRefine" :disabled="refining || (selectedCount === 0 && refineDirectPrompt === null) || (refineAutoSubmit && !refineWorkflow)"
                   class="flex-1 py-3 rounded-xl text-sm font-semibold transition-all"
                   :class="refining
                     ? 'bg-gray-800 text-gray-400 cursor-not-allowed'
@@ -3502,6 +4295,7 @@ onUnmounted(() => {
                   class="px-4 py-3 rounded-xl text-sm font-semibold bg-red-900/60 hover:bg-red-800/80 text-red-300 hover:text-red-200 border border-red-800/60 transition-all">
                   {{ $t('admin.cancel') }}
                 </button>
+                </div>
               </div>
             </div>
 
@@ -3546,9 +4340,20 @@ onUnmounted(() => {
                         :value="imageWeights.get(sha256) ?? 50"
                         :disabled="refining"
                         @input="onWeightChange(sha256, Number($event.target.value))"
-                        class="w-full h-1 rounded appearance-none bg-gray-700 accent-purple-500 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                        class="w-full h-1 rounded appearance-none bg-gray-700 accent-purple-500 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
                         :title="$t('refine.weightTip')"
                       />
+                      <button @click="cycleImageRole(sha256)"
+                        :disabled="refining"
+                        :title="$t('refine.roleTip')"
+                        :class="(imageRoles.get(sha256) || 'both') === 'both'
+                          ? 'border-gray-700/60 text-gray-500'
+                          : (imageRoles.get(sha256) === 'style'
+                            ? 'border-teal-600/60 text-teal-300 bg-teal-950/40'
+                            : 'border-rose-600/60 text-rose-300 bg-rose-950/40')"
+                        class="mt-1 w-full py-0.5 rounded border text-[9px] transition disabled:opacity-40">
+                        {{ imageRoleIcon(sha256) }} {{ $t(`refine.role_${imageRoles.get(sha256) || 'both'}`) }}
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -3643,13 +4448,21 @@ onUnmounted(() => {
                   </details>
 
                   <!-- Visual Spec category tags card (emerald) — collapsible, natural + detailed styles -->
-                  <details v-if="refineHairTags.length || refineClothingTags.length || refinePoseTags.length || refineExpressionTags.length || refineBackgroundTags.length || refineObjectTags.length || refineLightingTags.length"
+                  <details v-if="refineSubjectTags.length || refineHairTags.length || refineClothingTags.length || refinePoseTags.length || refineExpressionTags.length || refineBackgroundTags.length || refineObjectTags.length || refineLightingTags.length || refineAccessoryTags.length"
                     class="group bg-emerald-950/30 border border-emerald-800/30 rounded-xl overflow-hidden">
                     <summary class="px-3.5 py-2.5 flex items-center justify-between cursor-pointer list-none hover:bg-emerald-900/20 transition-colors">
                       <span class="text-xs font-semibold text-emerald-400 uppercase tracking-wide">{{ $t('refine.visualSpecTitle') }}</span>
                       <span class="text-emerald-700 group-open:rotate-180 transition-transform text-xs">▼</span>
                     </summary>
                     <div class="px-3.5 pb-3 space-y-2.5">
+                    <!-- Row 0: Subject -->
+                    <div v-if="refineSubjectTags.length" class="space-y-1">
+                      <p class="text-[10px] text-emerald-400/70 font-semibold">{{ $t('refine.tagGroupSubject') }}</p>
+                      <div class="flex flex-wrap gap-1">
+                        <span v-for="tag in refineSubjectTags" :key="tag"
+                          class="px-1.5 py-0.5 bg-emerald-900/40 border border-emerald-700/30 text-emerald-300/90 rounded-full text-[10px] font-mono">{{ tag }}</span>
+                      </div>
+                    </div>
                     <!-- Row 1: Hair / Clothing / Accessories -->
                     <div class="grid grid-cols-3 gap-2">
                       <div v-if="refineHairTags.length" class="space-y-1">
@@ -3767,8 +4580,8 @@ onUnmounted(() => {
                         class="text-[9px] text-cyan-400 bg-cyan-900/40 border border-cyan-800/40 px-1.5 py-0.5 rounded font-mono normal-case font-normal">
                         {{ $t('refine.promptSourceBypass') }}
                       </span>
-                      <span v-if="refineGenJob?.progress_text" class="text-gray-500 font-normal font-mono normal-case">
-                        ({{ refineGenJob.progress_text }})
+                      <span v-if="refineGenJob && jobProgress(refineGenJob, { t, te })" class="text-gray-500 font-normal font-mono normal-case">
+                        ({{ jobProgress(refineGenJob, { t, te }) }})
                       </span>
                     </p>
                     <ProgressBar
@@ -3808,10 +4621,15 @@ onUnmounted(() => {
                       {{ $t('refine.newJob') }}
                     </button>
                   </div>
-                  <!-- Error message -->
-                  <div v-if="refineErrorMsg" class="px-3 py-2 bg-red-900/40 border border-red-700/50 rounded-lg">
-                    <p class="text-xs text-red-300 break-all">⚠ {{ refineErrorMsg }}</p>
-                  </div>
+                </div>
+
+                <!-- Error message. Outside the ComfyUI block on purpose: a run that
+                     fails before queuing ends in phase 'done' with no images, and
+                     while this lived inside that block its gate was never true, so
+                     the message was unreachable exactly when it mattered. -->
+                <div v-if="refineStarted && refineErrorMsg"
+                  class="px-3 py-2 bg-red-900/40 border border-red-700/50 rounded-lg">
+                  <p class="text-xs text-red-300 break-all">⚠ {{ refineErrorMsg }}</p>
                 </div>
 
               </div>
@@ -3824,7 +4642,7 @@ onUnmounted(() => {
 
     <!-- ── Instruction Modal ── -->
     <Teleport to="body">
-      <div v-if="showInstructionModal" class="fixed inset-0 z-[90] bg-black/80 flex items-center justify-center p-4"
+      <div v-if="showInstructionModal" class="fixed inset-0 z-[var(--z-modal)] bg-black/80 flex items-center justify-center p-4"
         @mousedown.self="showInstructionModal = false">
         <div class="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-lg shadow-2xl flex flex-col gap-3 p-5">
           <div class="flex items-center justify-between">
@@ -3868,7 +4686,7 @@ onUnmounted(() => {
       <Teleport to="body">
         <div v-if="showLightbox && selected"
           ref="lbContainerRef"
-          class="fixed inset-0 z-[70] bg-black flex items-center justify-center overflow-hidden select-none"
+          class="fixed inset-0 z-[var(--z-gallery-zoom)] bg-black flex items-center justify-center overflow-hidden select-none"
           :style="{ cursor: lbDragging ? 'grabbing' : 'grab' }"
           @wheel.prevent="lbOnWheel"
           @mousedown="lbOnMousedown"
@@ -3927,7 +4745,7 @@ onUnmounted(() => {
       </Teleport>
 
       <!-- AI Reset confirmation dialog -->
-      <div v-if="showAiResetConfirm" class="fixed inset-0 z-[100] bg-black/70 flex items-center justify-center p-4" @click.self="showAiResetConfirm = false">
+      <div v-if="showAiResetConfirm" class="fixed inset-0 z-[var(--z-modal)] bg-black/70 flex items-center justify-center p-4" @click.self="showAiResetConfirm = false">
         <div class="bg-gray-900 border border-gray-700 rounded-xl p-6 max-w-sm w-full shadow-2xl">
           <p class="text-sm text-gray-200 mb-5">{{ $t('detail.aiResetConfirmMsg') }}</p>
           <div class="flex gap-3 justify-end">
@@ -3939,7 +4757,7 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div v-if="selected" class="fixed inset-0 z-[70] bg-black/85 flex items-center justify-center p-4"
+      <div v-if="selected" class="fixed inset-0 z-[var(--z-gallery)] bg-black/85 flex items-center justify-center p-4"
         @click.self="selected = null"
         @keydown.left.prevent="prevImage" @keydown.right.prevent="nextImage" @keydown.escape="selected = null"
         tabindex="-1">
@@ -3985,6 +4803,38 @@ onUnmounted(() => {
                 <span v-if="selected.star_rating" class="text-xs text-gray-500 ml-2">★{{ selected.star_rating }}</span>
               </div>
 
+              <!-- Muse cast + secret diary -->
+              <div
+                v-if="selected.character_id || selected.partner_character_id"
+                class="flex flex-wrap items-center gap-1.5"
+              >
+                <span class="text-[10px] text-gray-500 uppercase tracking-wide">{{ $t('detail.starring') }}</span>
+                <button
+                  v-if="selected.character_id"
+                  type="button"
+                  class="px-2 py-0.5 rounded-full bg-pink-900/40 text-pink-200 hover:bg-pink-800/60 text-xs"
+                  @click="openPhotoCharacter(selected.character_id)"
+                >{{ selected.character_name || $t('detail.starringLead') }}</button>
+                <button
+                  v-if="museDiaryFor(selected.character_id, selected.sha256)"
+                  type="button"
+                  class="text-pink-400/80 hover:text-pink-300 underline text-[11px]"
+                  @click="openMuseDiaryLink(selected, selected.character_id)"
+                >📖 {{ $t('detail.creationDiaryLink') }}</button>
+                <button
+                  v-if="selected.partner_character_id"
+                  type="button"
+                  class="px-2 py-0.5 rounded-full bg-violet-900/40 text-violet-200 hover:bg-violet-800/60 text-xs"
+                  @click="openPhotoCharacter(selected.partner_character_id)"
+                >{{ selected.partner_character_name || $t('detail.starringPartner') }}</button>
+                <button
+                  v-if="museDiaryFor(selected.partner_character_id, selected.sha256)"
+                  type="button"
+                  class="text-violet-400/80 hover:text-violet-300 underline text-[11px]"
+                  @click="openMuseDiaryLink(selected, selected.partner_character_id)"
+                >📖 {{ $t('detail.creationDiaryLink') }}</button>
+              </div>
+
               <!-- Category badges -->
               <div class="flex flex-wrap gap-1">
                 <span v-if="selected.batch_category === 'AI'"
@@ -4006,6 +4856,12 @@ onUnmounted(() => {
                   @click="openRefineFromDetail(selected)"
                   class="flex items-center gap-1.5 px-3 py-1.5 bg-amber-900/50 hover:bg-amber-800/70 border border-amber-700/50 text-amber-300 hover:text-amber-100 rounded-lg text-xs transition-colors">
                   ✨ {{ $t('detail.refineFromThis') }}
+                </button>
+                <button
+                  v-if="selected.positive_prompt"
+                  @click="handleSendToRefineDirect({ shas: [selected.sha256], directPrompt: selected.positive_prompt, directNegativePrompt: selected.negative_prompt || '', source: 'detail' })"
+                  class="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-900/50 hover:bg-cyan-800/70 border border-cyan-700/50 text-cyan-300 hover:text-cyan-100 rounded-lg text-xs transition-colors">
+                  🎨 {{ $t('detail.generateFromPrompt') }}
                 </button>
                 <button
                   v-if="selected.embedding_status === 'done'"
@@ -4054,7 +4910,7 @@ onUnmounted(() => {
               <div v-if="selected.positive_prompt">
                 <div class="flex items-center justify-between mb-1">
                   <div class="flex items-center gap-1.5">
-                    <p class="text-xs font-semibold text-purple-400 uppercase tracking-wide">Prompt</p>
+                    <p class="text-xs font-semibold text-purple-400 uppercase tracking-wide">{{ $t('detail.sectionPrompt') }}</p>
                     <span v-if="selected.extraction?.method"
                       :class="{
                         'bg-green-900/60 text-green-300 border-green-700/50':  selected.extraction.method === 'a1111',
@@ -4088,7 +4944,7 @@ onUnmounted(() => {
               <!-- WD14 auto-tags -->
               <div v-if="selected.wd14_tags?.length">
                 <div class="flex items-center justify-between mb-1">
-                  <p class="text-xs font-semibold text-teal-400 uppercase tracking-wide">WD14 Auto-tags</p>
+                  <p class="text-xs font-semibold text-teal-400 uppercase tracking-wide">{{ $t('detail.sectionWd14') }}</p>
                   <div class="flex items-center gap-2">
                     <button @click="copyWd14Tags"
                       class="text-xs text-gray-500 hover:text-teal-400 transition-colors">{{ wd14Copied ? '✓ Copied' : 'Copy' }}</button>
@@ -4108,7 +4964,7 @@ onUnmounted(() => {
               <!-- Prompt Alignment -->
               <div v-if="selected.positive_prompt && selected.wd14_tags?.length">
                 <div class="flex items-center justify-between mb-1">
-                  <p class="text-xs font-semibold text-orange-400 uppercase tracking-wide">Alignment</p>
+                  <p class="text-xs font-semibold text-orange-400 uppercase tracking-wide">{{ $t('detail.sectionAlignment') }}</p>
                   <button
                     @click="triggerAlignmentEvaluate(selected.sha256)"
                     :disabled="alignmentEvaluating.has(selected.sha256)"
@@ -4128,7 +4984,7 @@ onUnmounted(() => {
                              : 'text-red-400'">
                       {{ Math.round(alignmentCache.get(selected.sha256).score * 100) }}%
                     </span>
-                    <span class="text-xs text-gray-500">embedding similarity</span>
+                    <span class="text-xs text-gray-500">{{ $t('detail.embeddingSimilarity') }}</span>
                   </div>
                   <p v-if="alignmentCache.get(selected.sha256).summary_i18n?.[locale] || alignmentCache.get(selected.sha256).summary"
                     class="text-xs text-gray-300 bg-gray-800 rounded-lg p-2 leading-relaxed">
@@ -4167,6 +5023,16 @@ onUnmounted(() => {
                   <span>🎨 {{ $t('detail.creationRecord') }}</span>
                   <span class="text-gray-500 font-normal normal-case">
                     {{ $t('detail.creationMethod_' + selected.creation_record.method) }}
+                    <!-- Who it is of, on the summary line. The cast chips below
+                         say it too, but this row is the one you read without
+                         opening anything, and a shoot with no name on it is
+                         how a photo of nobody sat on somebody's page. -->
+                    <template v-if="selected.character_name">
+                      &middot; {{ selected.character_name }}
+                      <template v-if="selected.partner_character_name">
+                        &amp; {{ selected.partner_character_name }}
+                      </template>
+                    </template>
                     &middot;
                     {{ new Date(selected.creation_record.recorded_at).toLocaleDateString() }}
                   </span>
@@ -4212,7 +5078,7 @@ onUnmounted(() => {
               </details>
 
               <div v-if="selected.params && Object.keys(selected.params).length">
-                <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Parameters</p>
+                <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">{{ $t('detail.sectionParameters') }}</p>
                 <dl class="grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs bg-gray-800 rounded-lg p-2.5">
                   <template v-for="(v, k) in selected.params" :key="k">
                     <dt class="text-gray-500 truncate">{{ k }}</dt>
@@ -4241,13 +5107,13 @@ onUnmounted(() => {
     <!-- ── Raw Metadata Modal ── -->
     <Teleport to="body">
       <div v-if="rawMetadataModal.open"
-        class="fixed inset-0 z-[70] bg-black/80 flex items-center justify-center p-4"
+        class="fixed inset-0 z-[var(--z-modal)] bg-black/80 flex items-center justify-center p-4"
         @click.self="rawMetadataModal.open = false">
         <div class="bg-gray-900 rounded-xl w-full max-w-3xl max-h-[85vh] flex flex-col shadow-2xl border border-gray-700">
           <!-- header -->
           <div class="flex items-center justify-between px-5 py-3 border-b border-gray-700 shrink-0">
             <div>
-              <p class="text-sm font-semibold text-gray-100">Raw Metadata</p>
+              <p class="text-sm font-semibold text-gray-100">{{ $t('detail.sectionRawMetadata') }}</p>
               <p class="text-xs text-gray-500 font-mono">{{ rawMetadataModal.sha256?.slice(0, 16) }}…</p>
             </div>
             <button @click="rawMetadataModal.open = false" class="text-gray-500 hover:text-gray-200 text-xl leading-none">✕</button>
@@ -4305,7 +5171,7 @@ onUnmounted(() => {
     <!-- ── Similarity Graph Overlay ── -->
     <Teleport to="body">
       <div v-if="showSimilarityGraph"
-        class="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center"
+        class="fixed inset-0 z-[var(--z-fullscreen-view)] bg-black/90 flex items-center justify-center"
         @click.self="closeSimilarityGraph">
         <div class="bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl flex flex-col"
           style="width: 92vw; height: 92vh;">
@@ -4408,7 +5274,7 @@ onUnmounted(() => {
                 leave-from-class="opacity-100 scale-100"
                 leave-to-class="opacity-0 scale-95">
                 <div v-if="graphContextMenu"
-                  class="fixed z-[200] py-1 rounded-xl shadow-2xl
+                  class="fixed z-[var(--z-toast)] py-1 rounded-xl shadow-2xl
                          bg-gray-900/95 backdrop-blur-md border border-gray-700/80"
                   :style="{
                     left: graphContextMenu.screenX + 'px',
@@ -4459,7 +5325,7 @@ onUnmounted(() => {
         leave-from-class="opacity-100 scale-100 translate-y-0"
         leave-to-class="opacity-0 scale-95 translate-y-1">
         <div v-if="bucketHovered && selectedCount > 0"
-          class="fixed z-[50] bg-slate-900/95 backdrop-blur-md border border-purple-500/30 rounded-xl shadow-2xl p-2"
+          class="fixed z-[var(--z-popover)] bg-slate-900/95 backdrop-blur-md border border-purple-500/30 rounded-xl shadow-2xl p-2"
           :style="bucketPopupStyle"
           @mouseenter="bucketHovered = true"
           @mouseleave="bucketHovered = false">
@@ -4482,7 +5348,7 @@ onUnmounted(() => {
         leave-from-class="opacity-100 scale-100"
         leave-to-class="opacity-0 scale-90">
         <div v-if="hoveredThumbnailSha"
-          class="fixed z-[60] pointer-events-none rounded-xl overflow-hidden ring-2 ring-purple-400/70 shadow-2xl"
+          class="fixed z-[var(--z-popover)] pointer-events-none rounded-xl overflow-hidden ring-2 ring-purple-400/70 shadow-2xl"
           :style="hoveredThumbnailStyle">
           <img :src="`/api/thumbnails/${hoveredThumbnailSha}.webp`"
             class="w-28 h-28 object-cover block" />
@@ -4494,7 +5360,7 @@ onUnmounted(() => {
     <Teleport to="body">
       <div
         v-if="inspireHasSession || refineHasSession"
-        class="fixed bottom-0 left-4 z-[46] pb-20 flex flex-col items-start gap-2 pointer-events-none">
+        class="fixed bottom-0 left-4 z-[var(--z-chrome)] pb-20 flex flex-col items-start gap-2 pointer-events-none">
         <!-- Inspiration session chip -->
         <div v-if="inspireHasSession"
           class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl shadow-xl backdrop-blur-sm
@@ -4538,7 +5404,7 @@ onUnmounted(() => {
 
     <!-- ── Bottom Selection Tray ── -->
     <Teleport to="body">
-      <div class="fixed bottom-0 left-0 right-0 z-[45] transition-transform duration-500 pointer-events-none"
+      <div class="fixed bottom-0 left-0 right-0 z-[var(--z-chrome)] transition-transform duration-500 pointer-events-none"
         :style="`transform: translateY(${selectedCount > 0 ? '0' : '100%'}); transition-timing-function: cubic-bezier(0.4,0,0.2,1);`">
         <div class="mx-3 mb-3 pointer-events-auto">
           <div class="bg-slate-950/90 backdrop-blur-md border border-purple-500/25 rounded-2xl shadow-2xl shadow-black/60"
@@ -4630,15 +5496,68 @@ onUnmounted(() => {
     <!-- ── Invoke Panel ── -->
     <InvokePanel
       :show="showInvoke"
+      :comfyOffline="comfyOffline"
       @update:show="showInvoke = $event"
       @send-to-refine="handleInvokeSendToRefine($event)"
       @toast="showToast($event.msg, $event.type)"
       @select-image="openImageFromOracle($event)"
     />
 
+    <!-- Muse roster — the "who with" screen, one layer under the studio.
+         ここが素の --z-panel (600) なのは意図的 —— 撮影室は night-archive.css の
+         .muse-root で --z-panel-muse (640) を強制するので、DOM の順に関わらず
+         名簿の上に出る。ここを --z-panel-muse より上げないこと。 -->
+    <CharacterGallery
+      :show="showMuseGallery"
+      :workflows="workflows"
+      :workflow="museGalleryWorkflow"
+      :get-jobs-map="getJobsMap"
+      :resume-available="museResume.available && !showMuse"
+      :resume-name="museResume.name"
+      @pick="pickMuseCharacter"
+      @close="showMuseGallery = false"
+      @toast="showToast($event.msg, $event.type)"
+      @update:workflow="museGalleryWorkflow = $event"
+      @start-duet-pair="startDuetPair"
+      @resume="resumeMuseSession"
+    />
+
+    <ActressDiaryModal
+      :show="museDiaryModal.show"
+      :character-id="museDiaryModal.characterId"
+      :character-name="museDiaryModal.characterName"
+      :open-diary-id="museDiaryModal.diaryId"
+      @close="museDiaryModal.show = false"
+      @toast="showToast($event.msg, $event.type)"
+    />
+
+    <CharacterDossier
+      v-if="museDossierId"
+      :character-id="museDossierId"
+      :workflows="workflows"
+      :workflow="museGalleryWorkflow"
+      :get-jobs-map="getJobsMap"
+      @close="museDossierId = ''"
+      @pick="museDossierId = ''; pickMuseCharacter($event)"
+      @toast="showToast($event.msg, $event.type)"
+      @update:workflow="museGalleryWorkflow = $event"
+    />
+
+    <MusePanel
+      :show="showMuse"
+      :comfyOffline="comfyOffline"
+      :get-jobs-map="getJobsMap"
+      :initial-character-id="musePendingCharacterId"
+      :initial-partner-id="musePendingPartnerId"
+      @update:show="onMuseShow"
+      @session-state="onMuseSessionState"
+      @select-image="openImageBySha($event)"
+      @toast="showToast($event.msg, $event.type)"
+    />
+
         <!-- ── About modal ── -->
     <Teleport to="body">
-      <div v-if="showAbout" class="fixed inset-0 z-[80] bg-black/80 flex items-center justify-center p-4"
+      <div v-if="showAbout" class="fixed inset-0 z-[var(--z-panel)] bg-black/80 flex items-center justify-center p-4"
         @click.self="showAbout = false" @keydown.esc="showAbout = false">
         <div class="bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl w-full max-w-sm flex flex-col items-center gap-5 p-8 relative">
           <button @click="showAbout = false"
@@ -4706,7 +5625,7 @@ onUnmounted(() => {
 
     <Teleport to="body">
       <Transition enter-from-class="opacity-0 translate-y-2" leave-to-class="opacity-0 translate-y-2">
-        <div v-if="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 z-[200] pointer-events-none">
+        <div v-if="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 z-[var(--z-toast)] pointer-events-none">
           <div class="flex items-center gap-2.5 px-4 py-2.5 rounded-xl shadow-2xl text-sm font-medium transition-all duration-300"
             :class="{
               'bg-gray-800 border border-gray-700 text-gray-200': toast.type === 'info',
@@ -4726,12 +5645,16 @@ onUnmounted(() => {
   <!-- ── API Token Prompt ── -->
   <Teleport to="body">
     <div v-if="showTokenPrompt"
-      class="fixed inset-0 z-[200] bg-black/80 flex items-center justify-center p-4">
+      class="fixed inset-0 z-[var(--z-modal)] bg-black/80 flex items-center justify-center p-4">
       <div class="bg-gray-900 rounded-xl w-full max-w-sm shadow-2xl border border-gray-700 p-6 space-y-4">
-        <h2 class="text-base font-semibold text-gray-100">API トークンの入力</h2>
+        <h2 class="text-base font-semibold text-gray-100">{{ $t('header.tokenTitle') }}</h2>
         <p class="text-xs text-gray-400">
-          サーバーへのアクセスには API トークンが必要です。<br>
-          環境変数 <code class="text-purple-300">API_TOKEN</code> で設定したトークンを入力してください。
+          {{ $t('header.tokenBody') }}<br>
+          <!-- The variable's name is a parameter rather than markup: one sentence,
+               one key. `<i18n-t>` would keep the <code> styling, but nothing else
+               in this app uses that component and a cosmetic gain is not worth a
+               mechanism nobody else reads. -->
+          <span class="text-purple-300">{{ $t('header.tokenHint', { env: 'API_TOKEN' }) }}</span>
         </p>
         <input
           v-model="tokenInput"
@@ -4745,7 +5668,7 @@ onUnmounted(() => {
           <button
             @click="saveToken"
             class="px-4 py-2 bg-purple-600 hover:bg-purple-500 rounded-lg text-sm font-medium transition-colors">
-            保存して再読み込み
+            {{ $t('header.tokenSave') }}
           </button>
         </div>
       </div>
@@ -4758,6 +5681,15 @@ onUnmounted(() => {
 <style>
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* ── Gallery cards ───────────────────────────────────────────────────────── */
+/* Off-screen cards skip rendering and let the browser drop their decoded
+   thumbnail bitmaps; the intrinsic size matches the h-48 thumb + caption so
+   the scrollbar stays stable. */
+.gallery-card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 254px;
+}
 
 /* ── Control Room Status Bar ─────────────────────────────────────────────── */
 .cr-statusline {
@@ -4778,4 +5710,10 @@ onUnmounted(() => {
 .cr-slide-leave-active { transition: transform 150ms ease-in; }
 .cr-slide-enter-from,
 .cr-slide-leave-to { transform: translateY(-100%); }
+
+/* ── Fade Transition ─────────────────────────────────────────────────────── */
+.fade-enter-active { transition: opacity 200ms ease; }
+.fade-leave-active { transition: opacity 150ms ease; }
+.fade-enter-from,
+.fade-leave-to { opacity: 0; }
 </style>

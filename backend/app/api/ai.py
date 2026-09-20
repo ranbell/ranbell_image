@@ -13,12 +13,45 @@ from pydantic import BaseModel
 
 from ..config import settings
 from ..ai.tile_image import create_tile_image
+from ..jobs.sse_stream import queue_sse_response
+from ..prompt.visual_spec import (
+    DEFAULT_PROSE_PARAGRAPHS,
+    LABELED_TAG_FOOTER,
+    REFINE_CAT_FIELDS as _REFINE_CAT_FIELDS,
+    clamp_prose_paragraphs,
+    parse_visual_script as _parse_visual_script_sections,
+    strip_section_markers as _strip_visual_script_markers,
+    visual_script_length_line,
+)
 from ..runtime_config import get_runtime_config
 from ..scanner.scanner import register_image
 from ..spooler.models import JobLane
+from ..tags.subject_anchors import (
+    SUBJECT_ANCHOR_TAGS as _SUBJECT_ANCHOR_TAGS,
+    insert_after_anchors,
+)
 from .sort_utils import sort_docs
 
 logger = logging.getLogger(__name__)
+
+# Tag-merge helpers now live in prompt/tag_merge.py (they are pure functions,
+# which is why they don't need to drag in the whole route module). Re-exported
+# here because runners.py imports them from this module.
+from ..prompt.tag_merge import (  # noqa: E402
+    _WD14_MUST_INCLUDE_THRESHOLD,
+    _ROLE_CONTEXT_LABELS,
+    _apply_must_replacements,
+    _build_all_must,
+    _build_weighted_wd14_context,
+    _correct_prose_wd14_conflicts,
+    _enforce_wd14_on_cat_tags,
+    _filter_tags_for_role,
+    _inject_wd14_must_tags,
+    _resolve_weights,
+    _tags_conflict,
+    filter_tag_list,
+    removal_tag_set,
+)
 router = APIRouter(prefix="/api/ai")
 
 
@@ -49,11 +82,18 @@ class RefineRequest(BaseModel):
     suppress_conflict_tags: bool = False
     wd14_common_ratio: float = 0.3
     wd14_unique_count: int = 20
+    divergence: float = 0.0  # 0–1: mutate style/scene away from references (Transmute)
+    variation_count: int = 1  # natural style only: run the prose pass N times (1–3) at rising temperatures
+    # natural style Visual Script length (paragraphs 3–7). Models differ in
+    # which length they handle cleanly — UI exposes this as a slider.
+    prose_paragraphs: int = DEFAULT_PROSE_PARAGRAPHS
+    roles: list[str] = []  # per-image role aligned with sha256s: 'both' | 'style' | 'content'
+    emotion_shift: str = ""  # target emotion dimension (e.g. 'nostalgia') to rewrite the register toward
 
 
 class SearchRequest(BaseModel):
     query: str
-    n_results: int = 20
+    n_results: int | None = None  # None → use the admin-configured semantic_search_limit
     tag: str = ""
     sort: str = "relevance"
 
@@ -64,8 +104,6 @@ class SimilarRequest(BaseModel):
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
-
-_WD14_MUST_INCLUDE_THRESHOLD = 0.70
 
 def _sse(data: dict) -> str:
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
@@ -322,57 +360,54 @@ _NATURAL_PROSE_RETRY_PREFIX = (
     "list.\n\n"
 )
 
-_NATURAL_VISUAL_SCRIPT_INSTRUCTION = (
-    "Write a VISUAL SCRIPT for an AI image generator: flowing English prose where every concrete\n"
-    "visual element is simultaneously named in danbooru vocabulary within ASCII parentheses.\n"
-    "This text goes directly into an AI image generator — clarity and natural English are critical.\n\n"
-    "# OUTPUT FORMAT\n"
-    "Write exactly 5 flowing paragraphs (2-4 sentences each). "
-    "Do NOT label paragraphs. Do NOT write [CHARACTER], [ACTION], [SCENE], [DETAIL], [MOOD] "
-    "or any bracket markers in the output — those are INTERNAL STRUCTURAL GUIDES ONLY.\n"
-    "Embed danbooru tags inline in ASCII parentheses immediately after each element:\n"
-    "Example: \"A (1girl, solo) with (long_hair, brown_hair) grips a (sword, holding_sword) "
-    "with both hands, knuckles white. Her (school_uniform) shifts as she stands in a (park, outdoor), "
-    "bathed in (afternoon_sun, warm_light). The (green_trees, sky) frame her determined expression.\"\n\n"
-    "# INTERNAL PARAGRAPH GUIDE (do NOT echo these labels in output)\n"
-    "Paragraph 1 — APPEARANCE: subject count as very first tag (1girl/solo/2girls/1boy…), "
-    "then hair, eyes, face, expression, clothing, accessories.\n"
-    "Paragraph 2 — ACTION: pose, gesture, body language, physical interactions from the story.\n"
-    "Paragraph 3 — ENVIRONMENT: location, background, setting, time of day.\n"
-    "Paragraph 4 — DETAIL: textures, props, fine details, lighting direction and quality.\n"
-    "Paragraph 5 — MOOD: color temperature, atmosphere, overall impression.\n\n"
-    "# RULES\n"
-    "0. SUBJECT-FIRST: The VERY FIRST parenthetical MUST be the subject count: "
-    "(1girl, solo) or (2girls) or (1boy), etc. Never start with a scene element.\n"
-    "1. ACTION-ANCHOR: All concrete physical actions from [User instruction] MUST appear as "
-    "danbooru action tags in paragraph 2. "
-    "Translate story verbs: 握る→(gripping,clenched_hand), 触れる→(touching,fingertips), "
-    "抱きしめる→(hug,arms_around_another's_neck), 手を繋ぐ→(holding_hands), "
-    "走る→(running,dynamic_pose), 跪く→(kneeling,one_knee), 手を伸ばす→(reaching,outstretched_arm).\n"
-    "2. EXPLICIT TAG RULE: NEVER use euphemistic language for actions or body parts. "
-    "WRONG: '(tender_touch)', '(intimate_gesture)', '(closeness)'. "
-    "CORRECT: '(hand_on_another's_cheek)', '(breast_grab)', '(gripping)', '(lap_pillow)', "
-    "'(hair_grab)', '(wrist_grab)', '(nape)', '(collarbone)', '(thigh_grab)'.\n"
-    "3. English only — at least 2 danbooru tags per sentence.\n"
-    "4. No vague phrases: no 'somehow', 'a sense of', 'filled with emotion'.\n"
-    "5. NEVER add quality meta-tags (masterpiece, best_quality, highres etc.).\n\n"
-    "Write the 5-paragraph prose now. Then, on a new line after the prose, output ONLY these "
-    "labeled tag lines (no JSON, no code block, no extra text):\n\n"
-    "SUBJECT_TAGS: [comma,separated,danbooru,tags]\n"
-    "HAIR_TAGS: [comma,separated,danbooru,tags]\n"
-    "EXPRESSION_TAGS: [comma,separated,danbooru,tags]\n"
-    "CLOTHING_TAGS: [comma,separated,danbooru,tags]\n"
-    "ACCESSORY_TAGS: [comma,separated,danbooru,tags]\n"
-    "POSE_TAGS: [comma,separated,danbooru,tags]\n"
-    "BACKGROUND_TAGS: [comma,separated,danbooru,tags]\n"
-    "OBJECT_TAGS: [comma,separated,danbooru,tags]\n"
-    "LIGHTING_TAGS: [comma,separated,danbooru,tags]"
-)
+def _natural_visual_script_instruction(
+    prose_paragraphs: int = DEFAULT_PROSE_PARAGRAPHS,
+) -> str:
+    n = clamp_prose_paragraphs(prose_paragraphs)
+    length_line = visual_script_length_line(n)
+    return (
+        "Write a VISUAL SCRIPT for an AI image generator: flowing English prose where every concrete\n"
+        "visual element is simultaneously named in danbooru vocabulary within ASCII parentheses.\n"
+        "This text goes directly into an AI image generator — clarity and natural English are critical.\n\n"
+        "# OUTPUT FORMAT\n"
+        f"{length_line} "
+        "Do NOT write [CHARACTER], [ACTION], [SCENE], [DETAIL], [MOOD] "
+        "or any bracket markers in the output — those are INTERNAL STRUCTURAL GUIDES ONLY.\n"
+        "Embed danbooru tags inline in ASCII parentheses immediately after each element:\n"
+        "Example: \"A (1girl, solo) with (long_hair, brown_hair) grips a (sword, holding_sword) "
+        "with both hands, knuckles white. Her (school_uniform) shifts as she stands in a (park, outdoor), "
+        "bathed in (afternoon_sun, warm_light). The (green_trees, sky) frame her determined expression.\"\n\n"
+        "# INTERNAL FOCUS GUIDE (do NOT echo these labels in output)\n"
+        "Focus APPEARANCE: subject count as very first tag (1girl/solo/2girls/1boy…), "
+        "then hair, eyes, face, expression, clothing, accessories.\n"
+        "Focus ACTION: pose, gesture, body language, physical interactions from the story.\n"
+        "Focus ENVIRONMENT: location, background, setting, time of day.\n"
+        "Focus DETAIL: textures, props, fine details, lighting direction and quality.\n"
+        "Focus MOOD: color temperature, atmosphere, overall impression.\n\n"
+        "# RULES\n"
+        "0. SUBJECT-FIRST: The VERY FIRST parenthetical MUST be the subject count: "
+        "(1girl, solo) or (2girls) or (1boy), etc. Never start with a scene element.\n"
+        "1. ACTION-ANCHOR: All concrete physical actions from [User instruction] MUST appear as "
+        "danbooru action tags in the ACTION focus. "
+        "Translate story verbs: 握る→(gripping,clenched_hand), 触れる→(touching,fingertips), "
+        "抱きしめる→(hug,arms_around_another's_neck), 手を繋ぐ→(holding_hands), "
+        "走る→(running,dynamic_pose), 跪く→(kneeling,one_knee), 手を伸ばす→(reaching,outstretched_arm).\n"
+        "2. EXPLICIT TAG RULE: NEVER use euphemistic language for actions or body parts. "
+        "WRONG: '(tender_touch)', '(intimate_gesture)', '(closeness)'. "
+        "CORRECT: '(hand_on_another's_cheek)', '(breast_grab)', '(gripping)', '(lap_pillow)', "
+        "'(hair_grab)', '(wrist_grab)', '(nape)', '(collarbone)', '(thigh_grab)'.\n"
+        "3. English only — at least 2 danbooru tags per sentence.\n"
+        "4. No vague phrases: no 'somehow', 'a sense of', 'filled with emotion'.\n"
+        "5. NEVER add quality meta-tags (masterpiece, best_quality, highres etc.).\n\n"
+        f"Write the {n}-paragraph prose now. Then, on a new line after the prose, output ONLY these "
+        "labeled tag lines (no JSON, no code block, no extra text):\n\n"
+        f"{LABELED_TAG_FOOTER}"
+    )
 
-_REFINE_CAT_FIELDS = (
-    "subject_tags",
-    "hair_tags", "expression_tags", "clothing_tags", "accessory_tags",
-    "pose_tags", "background_tags", "object_tags", "lighting_tags",
+
+# Default (5-paragraph) instruction kept for import/test back-compat.
+_NATURAL_VISUAL_SCRIPT_INSTRUCTION = _natural_visual_script_instruction(
+    DEFAULT_PROSE_PARAGRAPHS
 )
 
 
@@ -462,15 +497,17 @@ def _build_natural_visual_script_prompt(
     instruction: str,
     tags_text: str,
     instruction_framing: bool = False,
+    prose_paragraphs: int = DEFAULT_PROSE_PARAGRAPHS,
 ) -> str:
     instr_block = _format_instruction_block(instruction, instruction_framing)
+    style_instr = _natural_visual_script_instruction(prose_paragraphs)
 
     story_mandate = (
         "[Story → Image Mandate]\n"
         "The [User instruction] describes a story. "
         "The characters in that story are the PRIMARY SUBJECTS of this image. "
         "Translate their concrete physical actions (gripping, touching, running, kneeling, etc.) "
-        "directly into embedded danbooru action tags in the [ACTION] section. "
+        "directly into embedded danbooru action tags in the ACTION focus. "
         "Do NOT lose or generalize the story's specific physical interactions."
     )
 
@@ -480,7 +517,7 @@ def _build_natural_visual_script_prompt(
         "UNIFIED COMPOSITION MANDATE: Describe ONE SINGLE IMAGE. Regardless of how many "
         "reference images are provided, synthesize them into a single coherent scene — "
         "not a collage, not a diptych, not a reference sheet.\n\n"
-        f"[Style directive]\n{_NATURAL_VISUAL_SCRIPT_INSTRUCTION}\n\n"
+        f"[Style directive]\n{style_instr}\n\n"
         f"[Reference metadata]\n{context}\n\n"
         f"[Tags already extracted for this scene — use as danbooru vocabulary anchor]\n{tags_text}\n\n"
         f"{story_mandate}\n\n"
@@ -804,367 +841,67 @@ def _remove_forced_tags(
     return '\n'.join(lines), removed
 
 
-# ── ComfyUI image save helper ─────────────────────────────────────────────────
-
-async def _save_and_register_comfy_image(
-    img_bytes: bytes,
-    original_name: str,
-    db,
-) -> str | None:
-    sha256 = hashlib.sha256(img_bytes).hexdigest()
-    gen_dir = settings.generated_images_dir
-    gen_dir.mkdir(parents=True, exist_ok=True)
-
-    suffix = Path(original_name).suffix or ".png"
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"comfy_{ts}_{sha256[:8]}{suffix}"
-    path = gen_dir / filename
-
-    loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, path.write_bytes, img_bytes)
-
-    try:
-        await register_image(path, db)
-        return sha256
-    except Exception as exc:
-        logger.error("register_image failed: %s", exc)
-        return None
-
-
 # ── Streaming refine generator ─────────────────────────────────────────────────
 
-def _resolve_weights(sha256s: list[str], raw_weights: list[float]) -> list[float]:
-    n = len(sha256s)
-    if n == 0:
-        return []
-    if not raw_weights or len(raw_weights) != n:
-        return [1.0 / n] * n
-    total = sum(raw_weights)
-    if total <= 0:
-        return [1.0 / n] * n
-    return [w / total for w in raw_weights]
-
-
-def _tags_conflict(tag_a: str, tag_b: str) -> bool:
-    """BM25-style: shared meaningful token (len≥3) → same category → likely conflict."""
-    if tag_a == tag_b:
-        return False  # identical = duplicate, handled separately
-    toks_a = {t for t in tag_a.split("_") if len(t) >= 3}
-    toks_b = {t for t in tag_b.split("_") if len(t) >= 3}
-    return bool(toks_a & toks_b)
-
-
-def _build_weighted_wd14_context(
-    raw_docs: list[tuple[dict, int]],
-    weights: list[float],
-    conflict_tags: set[str],
+async def _sample_mutation_tags(
+    db,
+    ollama,
+    wd14_analysis: dict,
+    divergence: float,
     *,
-    common_ratio: float = 0.3,
-    unique_count: int = 20,
-    must_threshold: float = _WD14_MUST_INCLUDE_THRESHOLD,
-) -> tuple[str, dict]:
-    """Build VLM context with common/unique tag decomposition.
+    max_tags: int = 12,
+) -> list[str]:
+    """Sample "related but absent" Danbooru tags for the Transmute divergence dial.
 
-    Returns (context_str, analysis_dict).
-    analysis_dict: common_tags, unique_by_image.
+    Embeds the reference tag set and searches the wd14_vocab bank, then takes the
+    mid-ranked band (close enough to stay coherent, far enough to mutate) excluding
+    tags already present in the references. Returns [] on any failure or when the
+    vocab bank is not imported.
     """
-    if not raw_docs:
-        return "", {}
+    import random
 
-    # Collect scored tags per image, using correct weight by original index
-    image_scored: list[list[tuple[str, float]]] = []
-    image_tag_sets: list[set[str]] = []
-    image_weights: list[float] = []
-    image_indices: list[int] = []
+    from ..invoke.vocab_bank import _is_species_tag
 
-    for doc, img_idx in raw_docs:
-        w = weights[img_idx] if img_idx < len(weights) else 0.0
-        wd14 = doc.get("wd14_tags", [])
-        scores = doc.get("wd14_tags_scores", [])
-        if scores and len(scores) == len(wd14):
-            scored = sorted(
-                [(t, s) for t, s in zip(wd14, scores) if t not in conflict_tags],
-                key=lambda x: -x[1],
-            )
-        else:
-            scored = [(t, 0.5) for t in wd14 if t not in conflict_tags]
-        image_scored.append(scored)
-        image_tag_sets.append({t for t, _ in scored})
-        image_weights.append(w)
-        image_indices.append(img_idx)
+    source_tags: set[str] = set(wd14_analysis.get("common_tags", []))
+    for info in wd14_analysis.get("unique_by_image", {}).values():
+        source_tags.update(info.get("must", []))
+        source_tags.update(info.get("ref", []))
+    if not source_tags:
+        return []
 
-    # Pre-build weight and score-map lookups (O(1) access throughout)
-    weight_by_idx = dict(zip(image_indices, image_weights))
-    score_map_by_idx = {idx: {t: s for t, s in sc} for idx, sc in zip(image_indices, image_scored)}
+    try:
+        vec = await ollama.embed(" ".join(sorted(source_tags)[:80]))
+        hits = await db.search_wd14_vocab(vec, min_freq=0.02, max_freq=0.6, limit=120)
+    except Exception as exc:
+        logger.debug("mutation tag sampling failed: %s", exc)
+        return []
 
-    # Common tags: intersection of ACTIVE (weight>0) images only
-    active_sets = [ts for ts, w in zip(image_tag_sets, image_weights) if w > 0]
-    active_scored = [sc for sc, w in zip(image_scored, image_weights) if w > 0]
-    common_set: set[str] = active_sets[0].intersection(*active_sets[1:]) if len(active_sets) > 1 else set()
-
-    # Rank common tags by average confidence across active images
-    active_score_maps = [{t: s for t, s in sc} for sc in active_scored]
-    common_with_scores = sorted(
-        [
-            (tag, sum(m.get(tag, 0.0) for m in active_score_maps) / len(active_score_maps))
-            for tag in common_set
-        ],
-        key=lambda x: -x[1],
-    )
-    n_common = max(0, round(len(common_with_scores) * common_ratio))
-    selected_common = [t for t, _ in common_with_scores[:n_common]]
-    selected_common_set = set(selected_common)
-
-    # Per-image unique tags: budget proportional to weight (weight=0 → 0 tags)
-    n_active = max(1, sum(1 for w in image_weights if w > 0))
-    raw_unique_by_idx: dict[int, list[str]] = {}
-
-    for img_idx, scored, weight in zip(image_indices, image_scored, image_weights):
-        if weight <= 0:
-            raw_unique_by_idx[img_idx] = []
-            continue
-        unique_scored = [(t, s) for t, s in scored if t not in selected_common_set]
-        budget = max(0, round(unique_count * weight * n_active))
-        must_unique = [t for t, s in unique_scored if s >= must_threshold]
-        ref_unique = [t for t, s in unique_scored if s < must_threshold]
-        raw_unique_by_idx[img_idx] = (must_unique + ref_unique)[:budget]
-
-    # Cross-image dedup + BM25 conflict resolution
-    tag_to_imgs: dict[str, list[tuple[int, float]]] = {}
-    for img_idx, tags in raw_unique_by_idx.items():
-        w = weight_by_idx.get(img_idx, 0.0)
-        for tag in tags:
-            tag_to_imgs.setdefault(tag, []).append((img_idx, w))
-
-    removal: dict[int, set[str]] = {}
-
-    # Pass 1: exact duplicates — keep only highest-weight image
-    for tag, occurrences in tag_to_imgs.items():
-        if len(occurrences) > 1:
-            best_idx = max(occurrences, key=lambda x: x[1])[0]
-            for img_idx, _ in occurrences:
-                if img_idx != best_idx:
-                    removal.setdefault(img_idx, set()).add(tag)
-
-    # Pass 2: BM25 conflicts — active images only, remove from lower-weight
-    imgs_list = [
-        (img_idx, raw_unique_by_idx[img_idx], weight_by_idx[img_idx])
-        for img_idx in image_indices
-        if weight_by_idx[img_idx] > 0
+    pool = [
+        h["name"] for h in hits
+        if h["name"] not in source_tags and not _is_species_tag(h["name"])
     ]
-    for i, (idx_i, tags_i, w_i) in enumerate(imgs_list):
-        for idx_j, tags_j, w_j in imgs_list[i + 1:]:
-            lower_idx, lower_tags, higher_tags = (
-                (idx_j, tags_j, tags_i) if w_i >= w_j else (idx_i, tags_i, tags_j)
-            )
-            for tag_low in lower_tags:
-                if tag_low in removal.get(lower_idx, set()):
-                    continue
-                for tag_high in higher_tags:
-                    if _tags_conflict(tag_low, tag_high):
-                        removal.setdefault(lower_idx, set()).add(tag_low)
-                        break
+    # Mid-ranked band: skip the nearest hits (they barely mutate anything)
+    band = pool[30:80] if len(pool) > 40 else pool
+    n = max(1, round(divergence * max_tags))
+    return random.sample(band, min(n, len(band))) if band else []
 
-    # Apply removals and build per-image analysis
-    unique_by_image: dict[int, dict] = {}  # keyed as str in analysis output
-    context_parts: list[str] = []
-
-    for doc, img_idx in raw_docs:
-        weight = weight_by_idx.get(img_idx, 0.0)
-        raw_tags = raw_unique_by_idx.get(img_idx, [])
-        final_tags = [t for t in raw_tags if t not in removal.get(img_idx, set())]
-
-        sm = score_map_by_idx.get(img_idx, {})
-        must_final = [t for t in final_tags if sm.get(t, 0.0) >= must_threshold]
-        ref_final = [t for t in final_tags if t not in must_final]
-
-        unique_by_image[img_idx] = {
-            "must": must_final,
-            "ref": ref_final,
-            "weight": weight,
-            "selected_count": len(final_tags),
-            "budget": max(0, round(unique_count * weight * n_active)),
-        }
-
-        if weight <= 0:
-            continue  # weight=0 の画像はコンテキストに含めない
-
-        pct = round(weight * 100)
-        lines: list[str] = []
-        prompt_txt = doc.get("positive_prompt", "")
-        if prompt_txt:
-            lines.append(f"Prompt: {prompt_txt}")
-        all_unique = must_final + ref_final
-        if all_unique:
-            lines.append(f"Style/aesthetic reference tags (influence {pct}%): {', '.join(all_unique)}")
-        part = f"[Image {len(context_parts) + 1} — influence weight: {pct}% — distinctive elements]"
-        if lines:
-            part += "\n" + "\n".join(lines)
-        context_parts.append(part)
-
-    # Assemble context string with priority guide
-    sections: list[str] = [
-        "When image elements conflict (e.g. different hair colors), prioritize the higher influence weight image."
-    ]
-    if selected_common:
-        sections.append(
-            f"[Shared traits — present in all images]:\n{', '.join(selected_common)}"
-        )
-    sections.extend(context_parts)
-    context = "\n\n---\n\n".join(sections)
-
-    analysis = {
-        "common_tags": selected_common,
-        "common_total": len(common_with_scores),
-        "common_selected": len(selected_common),
-        "unique_by_image": {str(k): v for k, v in unique_by_image.items()},
-    }
-    return context, analysis
-
-
-# ── Visual Script parser (labeled-section format, replaces fragile JSON parse) ──
-
-_VS_LABEL_RE = re.compile(
-    r"^(SUBJECT|HAIR|EXPRESSION|CLOTHING|ACCESSORY|POSE|BACKGROUND|OBJECT|LIGHTING)_TAGS:\s*(.*)$",
-    re.MULTILINE | re.IGNORECASE,
-)
-
-_SECTION_MARKER_RE = re.compile(r"\[(?:CHARACTER|ACTION|SCENE|DETAIL|MOOD)\]\s*", re.I)
-
-_SUBJECT_ANCHOR_TAGS = frozenset({
-    "1girl", "1boy", "2girls", "2boys", "3girls", "4girls", "6+girls",
-    "solo", "couple", "multiple_girls", "multiple_boys", "multiple girls",
-})
-
-
-def _inject_wd14_must_tags(tags_text: str, wd14_analysis: dict) -> str:
-    """Merge WD14 must_unique into the tag line after VLM Pass1.
-
-    High-budget (high-weight) images' tags are inserted first.
-    Tags already present (case-insensitive) are skipped.
-    """
-    parts = [t.strip() for t in tags_text.split(",") if t.strip()]
-    existing = {p.lower() for p in parts}
-
-    sorted_images = sorted(
-        wd14_analysis.get("unique_by_image", {}).items(),
-        key=lambda x: x[1].get("budget", 0),
-        reverse=True,
-    )
-    new_must: list[str] = []
-    for _, info in sorted_images:
-        for tag in info.get("must", []) + info.get("ref", []):
-            key = tag.lower()
-            if key not in existing:
-                new_must.append(tag)
-                existing.add(key)
-
-    if not new_must:
-        return tags_text
-
-    # Insert after every subject-anchor tag (1girl, solo, etc.), wherever they appear
-    cut = max(
-        (i + 1 for i, p in enumerate(parts) if p.lower() in _SUBJECT_ANCHOR_TAGS),
-        default=0,
-    ) or len(parts)
-
-    return ", ".join(parts[:cut] + new_must + parts[cut:])
-
-
-def _build_all_must(wd14_analysis: dict) -> list[str]:
-    """Return weight-descending deduped list of all unique tags (must+ref) for conflict resolution."""
-    seen: set[str] = set()
-    result: list[str] = []
-    for _, info in sorted(
-        wd14_analysis.get("unique_by_image", {}).items(),
-        key=lambda x: x[1].get("weight", 0),
-        reverse=True,
-    ):
-        for t in info.get("must", []) + info.get("ref", []):
-            if t not in seen:
-                result.append(t)
-                seen.add(t)
-    return result
-
-
-def _apply_must_replacements(tags: list[str], all_must: list[str]) -> list[str]:
-    """Replace each tag with a conflicting WD14 must_unique tag (BM25-style), dedup."""
-    seen: set[str] = set()
-    result: list[str] = []
-    for tag in tags:
-        rep = next((m for m in all_must if _tags_conflict(tag, m) and tag != m), tag)
-        if rep not in seen:
-            result.append(rep)
-            seen.add(rep)
-    return result
-
-
-def _correct_prose_wd14_conflicts(prose: str, all_must: list[str]) -> str:
-    """Replace inline (tag) groups in prose where tags conflict with WD14 must_unique.
-
-    Example: (golden_hair, long_hair) + must=[purple_hair] → (purple_hair, long_hair)
-    """
-    def _fix_group(m: re.Match) -> str:
-        tags = [t.strip() for t in m.group(1).split(",")]
-        return f"({', '.join(_apply_must_replacements(tags, all_must))})"
-
-    return re.sub(r"\(([^)]+)\)", _fix_group, prose)
-
-
-def _enforce_wd14_on_cat_tags(cat_tags: dict[str, list[str]], all_must: list[str]) -> dict[str, list[str]]:
-    """Override VLM-generated category tags with WD14 must_unique where they conflict."""
-    return {field: _apply_must_replacements(tags, all_must) for field, tags in cat_tags.items()}
-
-
-def _parse_visual_script_sections(text: str) -> tuple[str, dict[str, list[str]]]:
-    """Split visual script into prose + per-category tag dict.
-
-    Handles the labeled section format:
-        [prose...]
-        HAIR_TAGS: purple_hair, long_hair
-        POSE_TAGS: standing, arms_at_sides
-        ...
-    Falls back gracefully when labels are absent (returns full text as prose).
-    """
-    from .inspire import _split_tags  # local import to avoid circular dep
-
-    first_m = _VS_LABEL_RE.search(text)
-    if first_m:
-        prose = text[: first_m.start()].strip()
-        tags_block = text[first_m.start():]
-    else:
-        prose = text.strip()
-        tags_block = ""
-
-    cat_tags: dict[str, list[str]] = {}
-    for m in _VS_LABEL_RE.finditer(tags_block):
-        field = m.group(1).lower() + "_tags"
-        cat_tags[field] = _split_tags(m.group(2))
-
-    return prose, cat_tags
-
-
-def _strip_visual_script_markers(text: str) -> str:
-    """Remove [CHARACTER]/[ACTION]/[SCENE]/[DETAIL]/[MOOD] section markers from prose."""
-    return _SECTION_MARKER_RE.sub("", text).strip()
-
-
-# ── Routes ─────────────────────────────────────────────────────────────────────
 
 @router.post("/pipeline")
 async def trigger_pipeline(
     request: Request,
     body: PipelineRequest = PipelineRequest(),
 ):
-    from ..jobs.runners import run_pipeline
+    from ..jobs.runners import run_pipeline_tagging
     spooler = request.app.state.spooler
     db = request.app.state.db
     ollama = request.app.state.ollama
     sha256s = body.sha256s or None
+    # CPU tagging stage first (TAGGING lane, never auto-paused); it chains the
+    # embed stage onto the EMBEDDING lane when done.
     job_id = spooler.submit(
-        JobLane.EMBEDDING,
-        "ai_pipeline",
-        run_pipeline,
+        JobLane.TAGGING,
+        "ai_tagging",
+        run_pipeline_tagging,
         db=db,
         ollama=ollama,
         sha256s=sha256s,
@@ -1258,28 +995,12 @@ async def refine_stream(job_id: str, request: Request):
     token_queue: asyncio.Queue | None = request.app.state.refine_token_queues.get(job_id)
     if token_queue is None:
         raise HTTPException(404, f"Refine job {job_id!r} not found")
-
-    async def generate():
-        try:
-            while True:
-                if await request.is_disconnected():
-                    await request.app.state.spooler.cancel(job_id)
-                    break
-                try:
-                    item = await asyncio.wait_for(token_queue.get(), timeout=15)
-                except asyncio.TimeoutError:
-                    yield "event: ping\ndata: {}\n\n"
-                    continue
-                if item is None:
-                    break
-                yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
-        finally:
-            request.app.state.refine_token_queues.pop(job_id, None)
-
-    return StreamingResponse(
-        generate(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    return queue_sse_response(
+        request,
+        token_queue,
+        job_id=job_id,
+        registry=request.app.state.refine_token_queues,
+        encode="json",
     )
 
 
@@ -1297,8 +1018,10 @@ async def semantic_search(body: SearchRequest, request: Request):
         }
 
     cfg = await get_runtime_config(db)
+    limit = max(1, min(int(cfg.get("semantic_search_limit", 100)), 500))
+    n_results = min(body.n_results, limit) if body.n_results else limit
     embedding = await ollama.embed(body.query, model=cfg["embed_model"])
-    docs = await db.search_vector(embedding, n_results=body.n_results, tag=body.tag or None)
+    docs = await db.search_vector(embedding, n_results=n_results, tag=body.tag or None)
 
     if body.sort != "relevance":
         docs = sort_docs(docs, body.sort)
@@ -1331,6 +1054,73 @@ async def get_similarity_graph(
     if not graph["nodes"]:
         raise HTTPException(404, "Image not found or has no embedding")
     return graph
+
+
+class EmotionTagRequest(BaseModel):
+    sha256s: list[str] = []  # empty = process all pending (no emotion_loneliness field)
+
+
+@router.post("/emotion-tag")
+async def trigger_emotion_tag(body: EmotionTagRequest, request: Request):
+    """Queue emotion scoring job for specified images or all untagged images."""
+    from ..jobs.runners import run_emotion_tag
+    db = request.app.state.db
+    ollama = request.app.state.ollama
+    spooler = request.app.state.spooler
+    job_id = spooler.submit(
+        JobLane.EMBEDDING,
+        "emotion_tag",
+        run_emotion_tag,
+        db=db,
+        ollama=ollama,
+        sha256s=body.sha256s or None,
+    )
+    return {"status": "queued", "job_id": job_id}
+
+
+class EmotionSearchRequest(BaseModel):
+    emotion: str          # one of the 12 EMOTION_DIMENSIONS names
+    min_score: float = 0.5
+    limit: int = 50
+
+
+@router.post("/emotion-search")
+async def emotion_search(body: EmotionSearchRequest, request: Request):
+    """Return images scored at or above min_score on the given emotion dimension.
+
+    Results are ordered highest score first.
+    """
+    from ..ai.emotion_tagger import EMOTION_DIMENSIONS
+    from qdrant_client import models as qm
+    from ..db.qdrant_client import IMAGES_COLLECTION
+
+    if body.emotion not in EMOTION_DIMENSIONS:
+        raise HTTPException(400, f"Unknown emotion '{body.emotion}'. Valid: {EMOTION_DIMENSIONS}")
+
+    db = request.app.state.db
+    field_key = f"emotion_{body.emotion}"
+    limit = max(1, min(body.limit, 200))
+
+    try:
+        points, _ = await db._qc.scroll(
+            collection_name=IMAGES_COLLECTION,
+            scroll_filter=qm.Filter(must=[
+                qm.FieldCondition(
+                    key=field_key,
+                    range=qm.Range(gte=body.min_score),
+                ),
+            ]),
+            limit=limit,
+            order_by=qm.OrderBy(key=field_key, direction=qm.Direction.DESC),
+            with_payload=True,
+            with_vectors=False,
+        )
+    except Exception as e:
+        logger.warning("emotion_search failed: %s", e)
+        raise HTTPException(500, "Emotion search failed — indexes may not be built yet")
+
+    docs = [p.payload for p in points if p.payload]
+    return {"emotion": body.emotion, "min_score": body.min_score, "results": docs}
 
 
 @router.get("/status")

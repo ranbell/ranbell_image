@@ -36,7 +36,10 @@ class _ImageEventHandler(FileSystemEventHandler):
 class ImageDirectoryWatcher:
     """Watch source_images_dir and generated_images_dir and auto-submit jobs.
 
-    - New file in generated_images_dir → register_image() + submit AI_PIPELINE job
+    - New file in generated_images_dir → save_generated_image() already registered
+      it synchronously; this only submits SCAN_HEAL as a fallback when that
+      didn't happen (manual copy, registration failure) or on delete/move.
+      AI_PIPELINE tagging is still submitted unconditionally for new files.
     - Change in source_images_dir → submit SCAN_HEAL job after debounce
     """
 
@@ -75,12 +78,17 @@ class ImageDirectoryWatcher:
         logger.info("File watcher started")
 
     async def _dispatch_loop(self) -> None:
-        from ..jobs.runners import run_pipeline, run_scan_heal
+        from ..jobs.runners import run_pipeline_tagging, run_scan_heal
         from ..spooler.models import JobLane
-        from .scanner import register_image, wait_for_registration
+        from .scanner import consume_self_registered, wait_for_registration
 
         pending_heal = False
         heal_deadline: float | None = None
+        pending_generated = False
+        generated_deadline: float | None = None
+        has_non_invoke = False
+        generated_pending_paths: set[Path] = set()
+        generated_needs_heal_forced = False
 
         while True:
             try:
@@ -88,9 +96,28 @@ class ImageDirectoryWatcher:
                     self._event_queue.get(), timeout=1.0
                 )
             except asyncio.TimeoutError:
-                if pending_heal and heal_deadline is not None:
-                    now = asyncio.get_event_loop().time()
-                    if now >= heal_deadline:
+                now = asyncio.get_event_loop().time()
+                if pending_heal and heal_deadline is not None and now >= heal_deadline:
+                    self._spooler.submit(
+                        JobLane.SYNC,
+                        "scan_heal",
+                        run_scan_heal,
+                        db=self._db,
+                        ollama=self._ollama,
+                        spooler=self._spooler,
+                    )
+                    logger.info("Auto-triggered SCAN_HEAL")
+                    pending_heal = False
+                    heal_deadline = None
+                if pending_generated and generated_deadline is not None and now >= generated_deadline:
+                    needs_heal = generated_needs_heal_forced
+                    for p in generated_pending_paths:
+                        # Registration typically finishes well under the 2s
+                        # debounce, so this rarely actually waits.
+                        await wait_for_registration(p)
+                        if not consume_self_registered(p):
+                            needs_heal = True
+                    if needs_heal:
                         self._spooler.submit(
                             JobLane.SYNC,
                             "scan_heal",
@@ -99,35 +126,42 @@ class ImageDirectoryWatcher:
                             ollama=self._ollama,
                             spooler=self._spooler,
                         )
-                        logger.info("Auto-triggered SCAN_HEAL")
-                        pending_heal = False
-                        heal_deadline = None
+                        logger.info("Auto-triggered SCAN_HEAL for generated_dir")
+                    if self._auto_ai_pipeline and has_non_invoke:
+                        self._spooler.submit(
+                            JobLane.TAGGING,
+                            "ai_tagging_auto",
+                            run_pipeline_tagging,
+                            db=self._db,
+                            ollama=self._ollama,
+                            spooler=self._spooler,
+                        )
+                    pending_generated = False
+                    generated_deadline = None
+                    has_non_invoke = False
+                    generated_pending_paths = set()
+                    generated_needs_heal_forced = False
                 continue
             except asyncio.CancelledError:
                 break
 
             try:
                 if path.is_relative_to(self._generated_dir):
+                    pending_generated = True
+                    generated_deadline = asyncio.get_event_loop().time() + 2.0
                     if event_type == "created":
                         # Invoke-generated images are saved under generated_dir/invoke/
                         # and are managed by the invoke pipeline (wd14 + alignment jobs).
-                        # Skip ai_pipeline_auto for these to avoid redundant scans on the main screen.
+                        # Debounce all generated files; skip ai_pipeline_auto for invoke ones.
                         is_invoke = path.is_relative_to(self._generated_dir / "invoke")
-
-                        sha256 = await register_image(path, self._db)
-                        if not sha256:
-                            await wait_for_registration(path)
-                            logger.debug("waited for in-flight registration: %s", path.name)
-                        logger.info("Auto-registered%s: %s", " (invoke-skip-pipeline)" if is_invoke else "", path.name)
-                        if self._auto_ai_pipeline and not is_invoke:
-                            self._spooler.submit(
-                                JobLane.EMBEDDING,
-                                "ai_pipeline_auto",
-                                run_pipeline,
-                                db=self._db,
-                                ollama=self._ollama,
-                                spooler=self._spooler,
-                            )
+                        generated_pending_paths.add(path)
+                        if not is_invoke:
+                            has_non_invoke = True
+                    else:
+                        # "deleted" / "moved": there is no self-registration
+                        # record to check — the path is gone or renamed either
+                        # way, so run_heal's full reconciliation must run.
+                        generated_needs_heal_forced = True
                 else:
                     pending_heal = True
                     heal_deadline = asyncio.get_event_loop().time() + self._debounce

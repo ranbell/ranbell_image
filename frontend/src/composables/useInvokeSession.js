@@ -1,6 +1,6 @@
 import { ref, computed } from 'vue'
 
-export const SPIRIT_NAMES = ['faithful', 'rebel', 'stranger', 'lunatic', 'oracle']
+export const SPIRIT_NAMES = ['faithful', 'rebel', 'stranger', 'lunatic', 'oracle', 'sorrow']
 
 export const SPIRIT_META = {
   faithful: { kanji: '映', en: 'Mirror',  color: 'text-sky-400',    border: 'border-sky-500',    bg: 'bg-sky-950' },
@@ -8,6 +8,7 @@ export const SPIRIT_META = {
   stranger: { kanji: '漂', en: 'Wander',  color: 'text-violet-400', border: 'border-violet-500', bg: 'bg-violet-950' },
   lunatic:  { kanji: '奔', en: 'Surge',   color: 'text-amber-400',  border: 'border-amber-500',  bg: 'bg-amber-950' },
   oracle:   { kanji: '瞰', en: 'Vantage', color: 'text-emerald-400', border: 'border-emerald-500', bg: 'bg-emerald-950' },
+  sorrow:   { kanji: '愁', en: 'Poet',    color: 'text-slate-400',  border: 'border-slate-500',  bg: 'bg-slate-950' },
 }
 
 // Spirit frame: faithful/stranger → gold on high alignment; rebel/lunatic → obsidian on LOW alignment
@@ -21,6 +22,9 @@ export function getSpiritFrame(spiritName, alignmentScore, threshold = 0.85) {
   }
   if (spiritName === 'rebel' || spiritName === 'lunatic') {
     return alignmentScore <= (1 - threshold) ? 'obsidian' : null
+  }
+  if (spiritName === 'sorrow') {
+    return alignmentScore >= threshold ? 'gold' : null
   }
   return null
 }
@@ -71,9 +75,32 @@ const invokeWorkflow    = ref('')
 const invokeSeeds       = ref({})
 
 // Spirit ON/OFF
-const invokeEnabledSpirits = ref({ faithful: true, rebel: true, stranger: true, lunatic: true, oracle: true })
+const invokeEnabledSpirits = ref({ faithful: true, rebel: true, stranger: true, lunatic: true, oracle: true, sorrow: true })
 // Rebel inversion mode: true = invert one axis (may produce dramatic/broken images), false = Counter perspective without inversion
 const invokeRebelInversion = ref(true)
+
+// Echoes of Resonance
+const invokeResonanceMode = ref(false)
+const invokeResonanceTags = ref([])   // [{name}] preview from /resonance/preview
+const invokeResonanceCount = ref(0)   // total contributing starred images
+
+// Frontier (inverse resonance: never-seen vocabulary far from the taste centroid)
+const invokeFrontierMode = ref(false)
+const invokeFrontierTags = ref([])    // [{name}] preview from /frontier/preview
+
+// Heat: global LLM temperature multiplier over each spirit's native temperature
+const invokeHeat = ref(1.0)           // 0.6–1.3
+
+// Wildness: widens stranger/lunatic vocab pools (1-3)
+const invokeWildness = ref(1)
+
+// Emotion register: target emotion dimension ('' = off)
+const invokeEmotion = ref('')
+
+export const EMOTION_DIMENSIONS = [
+  'loneliness', 'nostalgia', 'ephemeral', 'melancholy', 'serenity', 'wonder',
+  'joy', 'tension', 'warmth', 'mystery', 'desolation', 'vitality',
+]
 
 // SSE
 let _eventSource = null
@@ -92,6 +119,7 @@ function _resetSpirits() {
       genProgress: 0,
       sha256: null,
       alignment_score: null,
+      novelty_score: null,
       monologue: null,
       natural_language: null,
       natural_language_ja: null,
@@ -120,7 +148,7 @@ function _connectEventSource(sessionId, token) {
     try {
       const evt = JSON.parse(e.data)
       _handleEvent(evt)
-    } catch {}
+    } catch (err) { console.debug('[invoke] stream event failed', err) }
   }
 
   _eventSource.onerror = () => {
@@ -169,6 +197,7 @@ function _handleEvent(evt) {
       s.status = 'done'
       s.sha256 = evt.sha256 || s.sha256
       s.alignment_score = evt.alignment_score
+      s.novelty_score = evt.novelty_score ?? null
     }
   }
   else if (type === 'spirit_error') {
@@ -233,6 +262,11 @@ async function summon(token, locale = 'en') {
     camera_shot: invokeCameraShot.value,
     camera_angle: invokeCameraAngle.value,
     rebel_inversion: invokeRebelInversion.value,
+    resonance_mode: invokeResonanceMode.value,
+    frontier_mode: invokeFrontierMode.value,
+    heat: invokeHeat.value,
+    wildness: invokeWildness.value,
+    emotion: invokeEmotion.value,
     locale,
   }
 
@@ -250,6 +284,77 @@ async function summon(token, locale = 'en') {
     invokeLoading.value = false
     console.error('Invoke summon failed:', err)
     throw err
+  }
+}
+
+async function fetchResonancePreview(token) {
+  try {
+    const r = await fetch('/api/invoke/resonance/preview?n=20', {
+      headers: { 'X-API-Token': token },
+    })
+    if (!r.ok) return
+    const data = await r.json()
+    invokeResonanceTags.value = data.tags || []
+    invokeResonanceCount.value = data.total_contributing || 0
+  } catch {
+    invokeResonanceTags.value = []
+    invokeResonanceCount.value = 0
+  }
+}
+
+async function _launchLineage(endpoint, payload, token, locale) {
+  if (invokeLoading.value) return
+  invokeLoading.value = true
+  invokeSessionId.value = null
+  invokeAxes.value = null
+  _resetSpirits()
+
+  const enabled = SPIRIT_NAMES.filter(n => invokeEnabledSpirits.value[n])
+  const body = {
+    ...payload,
+    workflow_name: invokeWorkflow.value,
+    enabled_spirits: enabled,
+    prompt_mode: invokePromptMode.value,
+    heat: invokeHeat.value,
+    wildness: invokeWildness.value,
+    locale,
+  }
+
+  try {
+    const r = await fetch(`/api/invoke/${endpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-API-Token': token },
+      body: JSON.stringify(body),
+    })
+    if (!r.ok) throw new Error(await r.text())
+    const data = await r.json()
+    invokeSessionId.value = data.session_id
+    _connectEventSource(data.session_id, token)
+  } catch (err) {
+    invokeLoading.value = false
+    console.error(`Invoke ${endpoint} failed:`, err)
+    throw err
+  }
+}
+
+async function evolve(sha256, token, locale = 'en', mutation = 0.3) {
+  await _launchLineage('evolve', { sha256, mutation }, token, locale)
+}
+
+async function breed(sha256A, sha256B, token, locale = 'en') {
+  await _launchLineage('breed', { sha256_a: sha256A, sha256_b: sha256B }, token, locale)
+}
+
+async function fetchFrontierPreview(token) {
+  try {
+    const r = await fetch('/api/invoke/frontier/preview?n=20', {
+      headers: { 'X-API-Token': token },
+    })
+    if (!r.ok) return
+    const data = await r.json()
+    invokeFrontierTags.value = data.tags || []
+  } catch {
+    invokeFrontierTags.value = []
   }
 }
 
@@ -309,7 +414,7 @@ async function fetchDaily() {
       invokeDailyOracle.value = data
       invokeOracleNextRun.value = data.next_run_at ?? null
     }
-  } catch {}
+  } catch (err) { console.debug('[invoke] fetchDaily failed', err) }
 }
 
 
@@ -317,7 +422,7 @@ async function fetchStats() {
   try {
     const r = await fetch('/api/invoke/stats')
     if (r.ok) invokeStats.value = await r.json()
-  } catch {}
+  } catch (err) { console.debug('[invoke] fetchStats failed', err) }
 }
 
 async function enhancePrompt(token) {
@@ -328,9 +433,34 @@ async function enhancePrompt(token) {
     body: JSON.stringify({ text: invokeProTopic.value, tag_count: 25 }),
   })
   if (!r.ok) throw new Error(await r.text())
-  const data = await r.json()
-  if (data.tags) invokeProPrompt.value = data.tags
-  return data
+  const { job_id } = await r.json()
+  const streamR = await fetch(`/api/invoke/enhance-prompt/${job_id}/stream`)
+  const reader = streamR.body.getReader()
+  const decoder = new TextDecoder()
+  let buf = ''
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      const parts = buf.split('\n\n')
+      buf = parts.pop()
+      for (const part of parts) {
+        const dataLine = part.split('\n').find(l => l.startsWith('data:'))
+        if (!dataLine) continue
+        const evt = JSON.parse(dataLine.slice(5))
+        if (evt.type === 'done') {
+          if (evt.tags) invokeProPrompt.value = evt.tags
+          return evt
+        }
+      }
+    }
+  } finally {
+    // Release the stream on early return or parse error, or the connection
+    // stays locked open.
+    reader.cancel().catch(() => {})
+  }
+  return null
 }
 
 function toggleEmoji(emoji) {
@@ -358,9 +488,12 @@ export function useInvokeSession() {
     invokeCameraShot, invokeCameraAngle,
     invokeProTopic, invokeProPersonTags, invokeProPrompt, invokeProNegative, invokeProSections, invokeWorkflow, invokeSeeds,
     invokeEnabledSpirits, enabledSpiritList, invokeRebelInversion,
+    invokeResonanceMode, invokeResonanceTags, invokeResonanceCount,
+    invokeFrontierMode, invokeFrontierTags, invokeHeat,
+    invokeWildness, invokeEmotion,
     openInvoke, closeInvoke,
-    summon, cancel, respin, adopt, sendToRefine,
-    fetchDaily, fetchStats, enhancePrompt,
+    summon, cancel, respin, adopt, sendToRefine, evolve, breed,
+    fetchDaily, fetchStats, enhancePrompt, fetchResonancePreview, fetchFrontierPreview,
     toggleEmoji, toggleSpirit,
     getSpiritFrame,
   }

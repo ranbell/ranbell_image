@@ -1056,3 +1056,53 @@ def _move_to_history(self, job: Job) -> None:
 | ETA サンプルウィンドウ | 5 サンプル | `Job._eta_samples` の `deque(maxlen=5)` |
 | フロントエンド SSE バッチウィンドウ | 250 ms | Vue 再レンダリング前の `job_updated` イベントのまとめ期間 |
 | フロントエンド再接続遅延 | 3 秒 | エラー時に `EventSource` を再オープンするまでの遅延 |
+
+---
+
+## 2026-07 更新: TAGGING レーン・クライアントレベル Ollama 制御・構成別設定
+
+このセクションは、上記のレーン一覧・デフォルト lane → resource マッピング・
+「ハードコードされた tier2 ルール」の記述を上書きします。
+
+### 変更点
+
+- **`TAGGING` レーン新設**（`tagging`）: CPU 専用処理（WD14 タグ付け + 色抽出）。
+  自動ポーズの対象にならないため、画像生成中もタグ付けが進みます。AI パイプ
+  ラインは2段化され、TAGGING レーンのジョブ（WD14+色）が完了時に EMBEDDING
+  レーンのジョブ（embed+UMAP）を連鎖投入します。embed ステージはタグ未付与の
+  doc をフルパスで処理するフォールバックを持つため、単独で実行しても安全です。
+- **Ollama トラフィックは `OllamaClient` 内部で制御**: すべての HTTP リクエスト
+  （prompt / embed / eval / sync どのレーンからでも）が、そのリクエストの間だけ
+  `remote-ollama` セマフォを取得します。checkpoint ポーズをまたいでセマフォを
+  保持するジョブが存在しなくなり、従来のデッドロック制約が解消。サーバへの総
+  同時リクエスト数は `RESOURCE_REMOTE_OLLAMA_CONCURRENCY` で制御できます。
+  この仕組み上、`RESOURCE_LANE_MAP` でレーンを `remote-ollama` にマッピング
+  することはできません（二重取得で自己デッドロックするため警告付きで拒否）。
+- **`remote-comfyui` が実リソース化**: GENERATION はデフォルトでこれにマッピング
+  され、`RESOURCE_REMOTE_COMFYUI_CONCURRENCY` で直列化、ComfyUI 不達時は
+  （初回ヘルスチェック後）`ResourceUnreachable` でフェイルファストします。
+- **tier2 が設定化**: `eval_auto_pause`（runtime config / 管理画面 → GPU 優先制御）
+  で、gen/prompt/embed 稼働中の EVALUATION ポーズを無効化できます。既定 `true`
+  （1GPU 保護）。
+- **`PROMPT_GEN_MUTEX`**（環境設定、既定 `false`）: PROMPT（Ollama LLM）と
+  GENERATION（ComfyUI）を共有 `local-gpu0` セマフォでジョブ単位に直列化します。
+  両レーンはポーズ対象にならないため、ジョブ全体でのセマフォ保持が checkpoint
+  ポーズと循環することはありません。
+- **`RESOURCE_LANE_MAP`**（環境設定、JSON 形式、例
+  `{"gen": "remote-comfyui", "sync": null}`）: lane → resource マッピングの上級者
+  向け上書き。不明なレーン/リソース、クライアント管理リソースは警告付きで無視。
+- Daily Oracle の LLM 処理（テーマルーレット + 軸分解）は PROMPT レーンのジョブ
+  として実行され、SYNC レーンの oracle ジョブは純粋なオーケストレーションとなり、
+  invoke セッションの `completion` イベントで完了を待ちます。
+
+### 構成別の推奨設定
+
+| 構成 | `auto_pause_on_generation` | `eval_auto_pause` | `PROMPT_GEN_MUTEX` |
+|---|---|---|---|
+| 1GPU（Ollama + ComfyUI 同居） | `true`（既定） | `true`（既定） | **`true` 推奨** |
+| 2サーバ / 2GPU（Ollama 分離） | **`false`** | **`false`** | `false`（既定） |
+
+1GPU 構成ではポーズが GPU を保護します（生成優先・裏方停止）。2サーバ構成では
+これらのポーズは2枚目の GPU を遊ばせるだけなので無効化し、各サーバの保護は
+`RESOURCE_REMOTE_OLLAMA_CONCURRENCY` / `RESOURCE_REMOTE_COMFYUI_CONCURRENCY`
+に委ねてください。

@@ -24,18 +24,131 @@
           :key="sys.key"
           class="cr-ann-tile"
           :class="`cr-ann--${systemStatus[sys.key] || 'standby'}`"
+          :title="systemStatus[sys.key] === 'guard' ? t('controlRoom.gpuGuardTooltip') : undefined"
         >
           <span class="cr-lamp" :class="`cr-lamp--${systemStatus[sys.key] || 'standby'}`" />
           <span class="cr-ann-name">{{ sys.label }}</span>
-          <span class="cr-ann-state">{{ (systemStatus[sys.key] || 'standby').toUpperCase() }}</span>
+          <span class="cr-ann-state">{{ systemStatus[sys.key] === 'guard' ? '⛨ GPU GUARD' : (systemStatus[sys.key] || 'standby').toUpperCase() }}</span>
           <button
             v-if="sys.lane"
             class="cr-ann-ctrl-btn"
-            :class="{ 'is-paused': laneStates[sys.lane]?.paused }"
+            :class="{ 'is-paused': laneStates[sys.lane]?.paused, 'is-guard': isGuardPaused(sys.lane) }"
+            :disabled="isGuardPaused(sys.lane)"
             @click.stop="toggleLanePause(sys.lane)"
-            :title="laneStates[sys.lane]?.paused ? t('controlRoom.resumeLane') : t('controlRoom.pauseLane')"
-          >{{ laneStates[sys.lane]?.paused ? '▶' : '⏸' }}</button>
+            :title="isGuardPaused(sys.lane) ? t('controlRoom.gpuGuardTooltip') : laneStates[sys.lane]?.paused ? t('controlRoom.resumeLane') : t('controlRoom.pauseLane')"
+          >{{ isGuardPaused(sys.lane) ? '⛨' : laneStates[sys.lane]?.paused ? '▶' : '⏸' }}</button>
         </div>
+      </div>
+
+      <!-- ── P&ID process flow diagram: Gen → Tag → Embed → Eval pipeline ── -->
+      <div class="cr-pid">
+
+        <!-- GPU interlock rail: shown while the spooler holds lanes to protect the GPU -->
+        <div v-if="guardActive" class="cr-pid-interlock-rail">
+          <span class="cr-pid-interlock-label">⛨ GPU INTERLOCK · {{ guardSourceLabel }}</span>
+        </div>
+
+        <!-- JOBS IN source terminus (all queued jobs waiting to enter the pipeline) -->
+        <div class="cr-pid-terminus">
+          <div class="cr-pid-terminus-label">JOBS IN</div>
+          <div class="cr-pid-terminus-count" :class="{ 'cr-pid-terminus-count--active': waitedJobs.length > 0 }">
+            {{ waitedJobs.length }}
+          </div>
+        </div>
+
+        <template v-for="(unit, i) in pidUnits" :key="unit.key">
+          <!-- pipe into this unit -->
+          <div class="cr-pid-pipe" :class="{ 'cr-pid-pipe--xfer': i > 0 }">
+            <div class="cr-pid-pipe-line" :class="pipeFlowing(i) ? 'cr-pid-pipe--flowing' : 'cr-pid-pipe--idle'" />
+            <span v-if="i > 0" class="cr-pid-pipe-arrow">▶</span>
+          </div>
+
+          <div class="cr-pid-unit-wrap">
+            <!-- interlock taps: ● on the active trigger lane, shield (⛨) on guarded lanes -->
+            <span v-if="guardActive && unit.trigger && unit.job" class="cr-pid-tap cr-pid-tap--source">●</span>
+            <span v-else-if="unit.status === 'guard'" class="cr-pid-tap cr-pid-tap--shield">⛨</span>
+
+            <div class="cr-pid-unit" :class="[`cr-pid-unit--${unit.key}`, `cr-pid-state--${unit.status || 'standby'}`]">
+              <div class="cr-pid-unit-header">
+                <span class="cr-lamp" :class="`cr-lamp--${unit.status || 'standby'}`" />
+                <span class="cr-pid-unit-name">{{ unit.name }}</span>
+                <span v-if="unit.cpuOnly" class="cr-pid-cpu-chip" :title="t('controlRoom.cpuLaneTooltip')">CPU</span>
+                <span class="cr-pid-unit-state">{{ unit.status === 'guard' ? '⛨ GUARD' : (unit.status || 'standby').toUpperCase() }}</span>
+                <button
+                  class="cr-pid-valve-btn"
+                  :class="{ 'is-paused': laneStates[unit.lane]?.paused, 'is-guard': isGuardPaused(unit.lane) }"
+                  :disabled="isGuardPaused(unit.lane)"
+                  @click="toggleLanePause(unit.lane)"
+                  :title="isGuardPaused(unit.lane) ? t('controlRoom.gpuGuardTooltip') : laneStates[unit.lane]?.paused ? t('controlRoom.resumeLane') : t('controlRoom.pauseLane')"
+                >{{ isGuardPaused(unit.lane) ? '⛨' : laneStates[unit.lane]?.paused ? '▶' : '⏸' }}</button>
+              </div>
+              <div class="cr-pid-unit-body">
+                <div class="cr-pid-tank" :title="`${unit.depth} queued`">
+                  <div class="cr-pid-tank-fill" :class="`cr-pid-tank-fill--${unit.key}`"
+                    :style="{ height: `${Math.min(100, unit.depth * 20)}%` }" />
+                  <span class="cr-pid-tank-label">{{ unit.depth }}</span>
+                </div>
+                <div class="cr-pid-reactor">
+                  <div class="cr-pid-reactor-track">
+                    <div class="cr-pid-reactor-fill" :class="`cr-pid-reactor-fill--${unit.key}`"
+                      :style="{ transform: `scaleX(${unit.job ? (unit.job.progress ?? 0) : 0})` }" />
+                  </div>
+                  <span class="cr-pid-reactor-label" :class="{ 'cr-pid-reactor-label--guard': !unit.job && unit.status === 'guard' }">
+                    {{ unit.job
+                      ? `${Math.round((unit.job.progress ?? 0) * 100)}%`
+                      : unit.status === 'guard' ? `HELD BY ${guardSourceLabel}` : '—' }}
+                  </span>
+                </div>
+              </div>
+              <div class="cr-pid-resbar">
+                <template v-if="unit.resource?.kind === 'local'">
+                  <span class="cr-pid-resbar-name">{{ unit.resource.name }}</span>
+                  <div class="cr-pid-resbar-gauge">
+                    <div class="cr-pid-resbar-fill" :class="`cr-pid-resbar-fill--${unit.key}`"
+                      :style="{ width: `${Math.round((unit.metric === 'gpu' ? unit.resource.gpu_util_pct : unit.resource.cpu_pct) ?? 0)}%` }" />
+                  </div>
+                  <span class="cr-pid-resbar-val">
+                    {{ unit.metric === 'gpu' ? 'GPU' : 'CPU' }}
+                    {{ Math.round((unit.metric === 'gpu' ? unit.resource.gpu_util_pct : unit.resource.cpu_pct) ?? 0) }}%
+                  </span>
+                  <span class="cr-pid-resbar-vram" v-if="unit.metric === 'gpu' && unit.resource.vram_total_gb">
+                    {{ Math.round(unit.resource.vram_used_gb ?? 0) }}/{{ unit.resource.vram_total_gb }}G
+                  </span>
+                  <span class="cr-pid-resbar-vram" v-else-if="unit.metric === 'cpu' && unit.resource.ram_total_gb">
+                    {{ Math.round(unit.resource.ram_used_gb ?? 0) }}/{{ unit.resource.ram_total_gb }}G
+                  </span>
+                </template>
+                <template v-else-if="unit.resource">
+                  <span class="cr-lamp cr-lamp--xs"
+                    :class="unit.resource.reachable ? 'cr-lamp--nominal' : (unit.resource.last_checked == null ? 'cr-lamp--starting' : 'cr-lamp--fault')" />
+                  <span class="cr-pid-resbar-name">{{ unit.resource.name }}</span>
+                  <span class="cr-pid-resbar-slots" v-if="unit.resource.concurrency" :title="t('controlRoom.slotsTooltip')">×{{ unit.resource.concurrency }}</span>
+                  <span class="cr-pid-resbar-latency" v-if="unit.resource.reachable && unit.resource.latency_ms != null">~{{ Math.round(unit.resource.latency_ms) }}ms</span>
+                  <span class="cr-pid-resbar-starting" v-else-if="!unit.resource.reachable && unit.resource.last_checked == null">STARTING</span>
+                  <span class="cr-pid-resbar-fault" v-else-if="!unit.resource.reachable">UNREACHABLE</span>
+                </template>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <!-- pipe: EVAL → VECTOR STORE -->
+        <div class="cr-pid-pipe">
+          <div class="cr-pid-pipe-line"
+            :class="evalActiveJob ? 'cr-pid-pipe--flowing' : 'cr-pid-pipe--idle'" />
+        </div>
+
+        <!-- VECTOR STORE drain terminus -->
+        <div class="cr-pid-terminus">
+          <div class="cr-pid-terminus-label">VECTOR<br>STORE</div>
+          <span class="cr-lamp"
+            :class="systemStatus.vectorStore === 'fault'
+              ? 'cr-lamp--fault'
+              : systemStatus.vectorStore === 'nominal' || systemStatus.vectorStore === 'active'
+              ? 'cr-lamp--nominal'
+              : 'cr-lamp--standby'" />
+        </div>
+
       </div>
 
       <div class="cr-body">
@@ -98,6 +211,7 @@
               <div class="cr-resource-header">
                 <span class="cr-lamp" :class="res.reachable ? 'cr-lamp--nominal' : (res.last_checked == null ? 'cr-lamp--starting' : 'cr-lamp--fault')" />
                 <span class="cr-resource-name">{{ resourceLabel(res.name) }}</span>
+                <span class="cr-remote-slots" v-if="res.concurrency" :title="t('controlRoom.slotsTooltip')">×{{ res.concurrency }}</span>
                 <span class="cr-remote-version" v-if="res.version">v{{ res.version }}</span>
                 <span class="cr-remote-latency" v-if="res.reachable && res.latency_ms != null">
                   ~{{ Math.round(res.latency_ms) }}ms
@@ -155,7 +269,7 @@
             >
               <div class="cr-job-row1">
                 <span class="cr-job-id-dim">{{ job.id }}</span>
-                <span class="cr-job-title">{{ job.title }}</span>
+                <span class="cr-job-title" :title="job.title">{{ taskLabel(job.title) }}</span>
                 <div class="cr-job-actions">
                   <!-- RUNNING: Pause -->
                   <button
@@ -171,9 +285,10 @@
                     @click="resumeJob(job.id)"
                     :title="t('controlRoom.resume')"
                   >▶</button>
-                  <!-- Cancel -->
+                  <!-- Cancel. A queued job can be stopped too (`spooler.cancel`
+                       has always handled QUEUED; only the button was missing). -->
                   <button
-                    v-if="['running', 'paused'].includes(job.state)"
+                    v-if="['running', 'paused', 'queued'].includes(job.state)"
                     class="cr-cancel-btn"
                     @click="$emit('cancel', job.id)"
                     :title="t('controlRoom.cancel')"
@@ -184,6 +299,15 @@
                     class="cr-retry-btn"
                     @click="$emit('retry', job.id)"
                   >retry</button>
+                  <!-- Clear away a failed job. There is nothing left to stop, so
+                       this is a dismissal rather than a cancel (dismiss on the
+                       server side). -->
+                  <button
+                    v-if="['failed', 'cancelled', 'succeeded'].includes(job.state)"
+                    class="cr-cancel-btn"
+                    @click="$emit('cancel', job.id)"
+                    :title="t('controlRoom.dismiss')"
+                  >✕</button>
                   <span v-else-if="job.state === 'cancelling'" class="cr-job-status">cancelling…</span>
                 </div>
               </div>
@@ -192,14 +316,17 @@
                 <ProgressBar
                   class="cr-job-progress"
                   :progress="job.progress || 0"
-                  :progress-text="job.progress_indeterminate ? '…' : (job.progress_text || null)"
+                  :progress-text="job.progress_indeterminate ? '…' : (taskProgress(job) || null)"
                   :indeterminate="job.progress_indeterminate"
                   :eta="job.progress_indeterminate ? null : (job.eta_seconds ?? null)"
                 />
                 <span class="cr-job-elapsed">{{ formatElapsed(job) }}</span>
               </div>
               <div class="cr-job-row2" v-else-if="job.state === 'paused'">
-                <span class="cr-job-badge cr-job-badge--paused">
+                <span v-if="isGuardPaused(job.lane)" class="cr-job-badge cr-job-badge--guard" :title="t('controlRoom.gpuGuardTooltip')">
+                  ⛨ GPU Guard
+                </span>
+                <span v-else class="cr-job-badge cr-job-badge--paused">
                   {{ laneStates[job.lane]?.paused ? '⏸ Lane Paused' : '⏸ Paused' }}
                 </span>
                 <span class="cr-job-elapsed">{{ formatElapsed(job) }}</span>
@@ -250,8 +377,8 @@
               >
                 <span class="cr-waited-pos">{{ String(i + 1).padStart(2, ' ') }}</span>
                 <span class="cr-waited-lane" :data-lane="job.lane">{{ laneCode(job.lane) }}</span>
-                <span class="cr-waited-title" :title="job.title">{{ job.title }}</span>
-                <span v-if="job.held" class="cr-waited-tag cr-waited-tag--held">HELD</span>
+                <span class="cr-waited-title" :title="job.title">{{ taskLabel(job.title) }}</span>
+                <span v-if="job.held" class="cr-waited-tag cr-waited-tag--held" :title="t('controlRoom.heldTooltip')">HELD</span>
                 <span v-else-if="job.priority > 0" class="cr-waited-tag cr-waited-tag--pri">P{{ job.priority }}</span>
                 <div class="cr-waited-actions">
                   <template v-if="!job.held">
@@ -342,9 +469,15 @@
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useControlRoom } from '../composables/useControlRoom.js'
+import { jobLabel, jobProgress } from '../jobLabel.js'
 import ProgressBar from './ProgressBar.vue'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
+
+// The task's name is an identifier (`generate_actress_diary`); the console shows
+// what it means. Unknown names print as they stand — see `jobLabel`.
+const taskLabel = (title) => jobLabel(title, { t, te })
+const taskProgress = (job) => jobProgress(job, { t, te })
 
 const props = defineProps({
   jobsMap:      { type: Object,  required: true },
@@ -370,7 +503,29 @@ const {
   localResources,
   remoteResources,
   laneStates,
+  guardActive,
+  guardSourceLabel,
+  promptActiveJob,
+  promptQueueDepth,
+  genActiveJob,
+  genQueueDepth,
+  tagActiveJob,
+  tagQueueDepth,
+  embedActiveJob,
+  embedQueueDepth,
+  evalActiveJob,
+  evalQueueDepth,
+  promptResource,
+  genResource,
+  tagResource,
+  embedResource,
+  evalResource,
 } = props.controlRoom
+
+function isGuardPaused(lane) {
+  const ls = laneStates.value[lane]
+  return !!(ls?.paused && ls.pause_reason === 'auto')
+}
 
 async function toggleLanePause(lane) {
   const paused = laneStates.value[lane]?.paused
@@ -379,6 +534,23 @@ async function toggleLanePause(lane) {
   } catch (e) {
     console.error('Lane control error:', e)
   }
+}
+
+// ── P&ID unit descriptors (flow order: PROMPT → GEN → TAG → EMBED → EVAL) ───
+// metric picks which local gauge to show; cpuOnly marks GPU-independent lanes;
+// trigger marks priority lanes that can hold the GPU interlock
+const pidUnits = computed(() => [
+  { key: 'prompt', name: 'PROMPT',    lane: 'prompt',  status: systemStatus.value.promptEngine, job: promptActiveJob.value, depth: promptQueueDepth.value, resource: promptResource.value, metric: 'gpu', trigger: true },
+  { key: 'gen',   name: 'GENERATION', lane: 'gen',     status: systemStatus.value.generation, job: genActiveJob.value,   depth: genQueueDepth.value,   resource: genResource.value,   metric: 'gpu', trigger: true },
+  { key: 'tag',   name: 'TAGGING',    lane: 'tagging', status: systemStatus.value.tagging,    job: tagActiveJob.value,   depth: tagQueueDepth.value,   resource: tagResource.value,   metric: 'cpu', cpuOnly: true },
+  { key: 'embed', name: 'EMBEDDING',  lane: 'embed',   status: systemStatus.value.embedding,  job: embedActiveJob.value, depth: embedQueueDepth.value, resource: embedResource.value, metric: 'gpu' },
+  { key: 'eval',  name: 'ALIGNMENT',  lane: 'eval',    status: systemStatus.value.alignment,  job: evalActiveJob.value,  depth: evalQueueDepth.value,  resource: evalResource.value,  metric: 'cpu' },
+])
+
+function pipeFlowing(i) {
+  const units = pidUnits.value
+  if (i === 0) return units[0].depth > 0
+  return !!(units[i - 1].job || units[i].depth > 0)
 }
 
 // track jobs where pause was requested but state is still running (for blink control)
@@ -507,7 +679,7 @@ const failedCount = computed(() => activeJobs.value.filter(j => j.state === 'fai
 
 // ── utilities ────────────────────────────────────────────────────────────────
 
-const _LANE_CODE = { gen: 'GEN', embed: 'EMB', eval: 'ALN', prompt: 'PE', sync: 'SYN' }
+const _LANE_CODE = { gen: 'GEN', tagging: 'TAG', embed: 'EMB', eval: 'ALN', prompt: 'PE', sync: 'SYN' }
 function laneCode(lane) {
   return _LANE_CODE[lane] ?? (lane ?? '').slice(0, 3).toUpperCase()
 }
@@ -581,6 +753,8 @@ function ratioClass(used, total, caution, fault) {
   --cr-fault:         #cc3333;
   --cr-fault-glow:    rgba(204, 51, 51, 0.6);
   --cr-standby:       #2a2a3a;
+  --cr-guard:         #45c5e0;
+  --cr-guard-glow:    rgba(69, 197, 224, 0.5);
 
   /* centralized font sizes */
   --cr-font-body:  14px;
@@ -592,7 +766,7 @@ function ratioClass(used, total, caution, fault) {
 .cr-overlay {
   position: fixed;
   inset: 0;
-  z-index: 9000;
+  z-index: var(--z-system);
   background: rgba(0, 0, 0, 0.6);
   display: flex;
   flex-direction: column;
@@ -857,6 +1031,14 @@ function ratioClass(used, total, caution, fault) {
 .cr-ann--paused .cr-ann-state {
   color: #9988cc;
 }
+.cr-lamp--guard {
+  background: var(--cr-guard);
+  box-shadow: 0 0 6px var(--cr-guard-glow);
+  animation: cr-pulse 2.6s ease-in-out infinite;
+  will-change: opacity;
+}
+.cr-ann--guard { background: rgba(69, 197, 224, 0.05); }
+.cr-ann--guard .cr-ann-state { color: var(--cr-guard); }
 
 /* ── annunciator: lane pause/resume buttons ──────────────────────────────── */
 .cr-ann-ctrl-btn {
@@ -883,6 +1065,14 @@ function ratioClass(used, total, caution, fault) {
 }
 .cr-ann-ctrl-btn.is-paused:hover {
   background: rgba(102, 85, 170, 0.15);
+}
+/* guard = spooler-managed: not operable, shown as a shield */
+.cr-ann-ctrl-btn.is-guard,
+.cr-pid-valve-btn.is-guard {
+  border-color: rgba(69, 197, 224, 0.55);
+  color: var(--cr-guard);
+  cursor: default;
+  pointer-events: none;
 }
 
 /* ── resources ───────────────────────────────────────────────────────────────── */
@@ -952,6 +1142,18 @@ function ratioClass(used, total, caution, fault) {
   font-size: var(--cr-font-small);
   font-family: var(--cr-mono);
   opacity: 0.6;
+}
+
+.cr-remote-slots {
+  color: var(--cr-text-dim);
+  font-size: 10px;
+  font-family: var(--cr-mono);
+  font-variant-numeric: tabular-nums;
+  border: 1px solid rgba(100, 100, 130, 0.35);
+  border-radius: 2px;
+  padding: 0 4px;
+  line-height: 1.5;
+  flex-shrink: 0;
 }
 
 .cr-remote-endpoint {
@@ -1330,6 +1532,11 @@ function ratioClass(used, total, caution, fault) {
   color: #e8a84a;
   border: 1px solid rgba(230, 140, 40, 0.5);
 }
+.cr-job-badge--guard {
+  background: rgba(69, 197, 224, 0.12);
+  color: var(--cr-guard);
+  border: 1px solid rgba(69, 197, 224, 0.45);
+}
 
 /* ── bulk action bar ─────────────────────────────────────────────────────────── */
 .cr-bulk-bar {
@@ -1433,7 +1640,8 @@ function ratioClass(used, total, caution, fault) {
   border: 1px solid rgba(100, 100, 130, 0.3);
 }
 /* per-lane color coding (ISA-101: use subdued tints, not saturated) */
-.cr-waited-lane[data-lane="gen"]    { background: rgba(74, 124, 90, 0.18);  color: #6aaa80; border-color: rgba(74, 124, 90, 0.35); }
+.cr-waited-lane[data-lane="gen"]     { background: rgba(74, 124, 90, 0.18);  color: #6aaa80; border-color: rgba(74, 124, 90, 0.35); }
+.cr-waited-lane[data-lane="tagging"] { background: rgba(170, 125, 65, 0.18); color: #c09a60; border-color: rgba(170, 125, 65, 0.35); }
 .cr-waited-lane[data-lane="embed"]  { background: rgba(74, 110, 180, 0.18); color: #7090cc; border-color: rgba(74, 110, 180, 0.35); }
 .cr-waited-lane[data-lane="eval"]   { background: rgba(160, 100, 200, 0.18); color: #aa80cc; border-color: rgba(160, 100, 200, 0.35); }
 .cr-waited-lane[data-lane="prompt"] { background: rgba(184, 134, 11, 0.15); color: #b89040; border-color: rgba(184, 134, 11, 0.3); }
@@ -1688,4 +1896,468 @@ function ratioClass(used, total, caution, fault) {
   background: var(--cr-border);
   border-radius: 2px;
 }
+
+/* ── P&ID process flow diagram ──────────────────────────────────────────────── */
+.cr-pid {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  height: 112px;
+  background: #090910;
+  border-bottom: 1px solid var(--cr-border);
+  flex-shrink: 0;
+  overflow: hidden;
+  font-family: var(--cr-mono);
+  gap: 0;
+}
+
+/* ── GPU interlock rail (dashed bus across the top while guard is active) ──── */
+.cr-pid-interlock-rail {
+  position: absolute;
+  top: 4px;
+  left: 20px;
+  right: 20px;
+  height: 0;
+  border-top: 1px dashed rgba(69, 197, 224, 0.55);
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.cr-pid-interlock-label {
+  position: relative;
+  top: -7px;
+  background: #090910;
+  padding: 0 8px;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--cr-guard);
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+/* wrapper so interlock taps can sit above the unit (unit itself clips overflow) */
+.cr-pid-unit-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.cr-pid-tap {
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 9px;
+  line-height: 1;
+  z-index: 2;
+  pointer-events: none;
+  color: var(--cr-guard);
+  text-shadow: 0 0 4px var(--cr-guard-glow);
+}
+.cr-pid-tap--shield { animation: cr-pulse 2.6s ease-in-out infinite; }
+
+/* terminus boxes (JOBS IN / VECTOR STORE) */
+.cr-pid-terminus {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: 72px;
+  height: 82px;
+  border: 1px solid rgba(130, 80, 220, 0.22);
+  border-radius: 2px;
+  background: rgba(130, 80, 220, 0.05);
+  flex-shrink: 0;
+}
+
+.cr-pid-terminus-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--cr-text-label);
+  text-align: center;
+  line-height: 1.3;
+}
+
+.cr-pid-terminus-count {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--cr-text-dim);
+  font-variant-numeric: tabular-nums;
+  min-width: 2ch;
+  text-align: center;
+  line-height: 1;
+}
+.cr-pid-terminus-count--active { color: var(--cr-active); }
+
+/* pipe segments */
+.cr-pid-pipe {
+  flex: 1 0 16px;
+  max-width: 56px;
+  height: 82px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.cr-pid-pipe--xfer { max-width: 48px; }
+
+.cr-pid-pipe-line {
+  width: 100%;
+  height: 3px;
+  border-radius: 1px;
+  transition: background 0.5s ease, box-shadow 0.5s ease;
+}
+
+.cr-pid-pipe--flowing {
+  background: linear-gradient(90deg, var(--cr-nominal) 0%, #5ab070 100%);
+  box-shadow: 0 0 5px rgba(61, 107, 80, 0.5);
+}
+
+.cr-pid-pipe--idle { background: rgba(130, 80, 220, 0.12); }
+
+.cr-pid-pipe-arrow {
+  position: absolute;
+  font-size: 9px;
+  color: var(--cr-text-dim);
+  opacity: 0.55;
+  pointer-events: none;
+  line-height: 1;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -55%);
+  margin-top: 1px;
+}
+
+/* processing unit boxes */
+.cr-pid-unit {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  width: 164px;
+  height: 90px;
+  border: 1px solid rgba(130, 80, 220, 0.2);
+  border-radius: 2px;
+  background: #0c0c14;
+  flex-shrink: 0;
+  overflow: hidden;
+  transition: border-color 0.3s, background 0.3s;
+}
+
+/* lane base tints */
+.cr-pid-unit--gen    { border-color: rgba(74, 124, 90, 0.3); background: rgba(74, 124, 90, 0.05); }
+.cr-pid-unit--embed  { border-color: rgba(74, 110, 180, 0.3); background: rgba(74, 110, 180, 0.05); }
+.cr-pid-unit--tag    { border-color: rgba(170, 125, 65, 0.3); background: rgba(170, 125, 65, 0.05); }
+.cr-pid-unit--prompt { border-color: rgba(80, 140, 160, 0.3); background: rgba(80, 140, 160, 0.05); }
+
+.cr-pid-unit--prompt.cr-pid-state--active,
+.cr-pid-unit--prompt.cr-pid-state--nominal { border-color: rgba(80, 140, 160, 0.55); background: rgba(80, 140, 160, 0.09); }
+.cr-pid-unit--prompt.cr-pid-state--caution { border-color: rgba(184, 134, 11, 0.5); background: rgba(184, 134, 11, 0.07); }
+.cr-pid-unit--prompt.cr-pid-state--fault   { border-color: rgba(204, 51, 51, 0.5); background: rgba(204, 51, 51, 0.07); }
+.cr-pid-unit--prompt.cr-pid-state--paused  { border-color: rgba(102, 85, 170, 0.45); background: rgba(102, 85, 170, 0.06); }
+
+.cr-pid-unit--tag.cr-pid-state--active,
+.cr-pid-unit--tag.cr-pid-state--nominal { border-color: rgba(170, 125, 65, 0.55); background: rgba(170, 125, 65, 0.09); }
+.cr-pid-unit--tag.cr-pid-state--caution { border-color: rgba(184, 134, 11, 0.5); background: rgba(184, 134, 11, 0.07); }
+.cr-pid-unit--tag.cr-pid-state--fault   { border-color: rgba(204, 51, 51, 0.5); background: rgba(204, 51, 51, 0.07); }
+.cr-pid-unit--tag.cr-pid-state--paused  { border-color: rgba(102, 85, 170, 0.45); background: rgba(102, 85, 170, 0.06); }
+
+/* GPU guard state overrides the lane tint on any unit */
+.cr-pid-unit.cr-pid-state--guard {
+  border-color: rgba(69, 197, 224, 0.5);
+  background: rgba(69, 197, 224, 0.06);
+}
+
+/* ISA-101 state intensity modifiers */
+.cr-pid-unit--gen.cr-pid-state--active,
+.cr-pid-unit--gen.cr-pid-state--nominal  { border-color: rgba(74, 124, 90, 0.55); background: rgba(74, 124, 90, 0.09); }
+.cr-pid-unit--gen.cr-pid-state--caution  { border-color: rgba(184, 134, 11, 0.5); background: rgba(184, 134, 11, 0.07); }
+.cr-pid-unit--gen.cr-pid-state--fault    { border-color: rgba(204, 51, 51, 0.5); background: rgba(204, 51, 51, 0.07); }
+.cr-pid-unit--gen.cr-pid-state--paused   { border-color: rgba(102, 85, 170, 0.45); background: rgba(102, 85, 170, 0.06); }
+
+.cr-pid-unit--embed.cr-pid-state--active,
+.cr-pid-unit--embed.cr-pid-state--nominal { border-color: rgba(74, 110, 180, 0.55); background: rgba(74, 110, 180, 0.09); }
+.cr-pid-unit--embed.cr-pid-state--caution { border-color: rgba(184, 134, 11, 0.5); background: rgba(184, 134, 11, 0.07); }
+.cr-pid-unit--embed.cr-pid-state--fault   { border-color: rgba(204, 51, 51, 0.5); background: rgba(204, 51, 51, 0.07); }
+.cr-pid-unit--embed.cr-pid-state--paused  { border-color: rgba(102, 85, 170, 0.45); background: rgba(102, 85, 170, 0.06); }
+
+.cr-pid-unit-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 7px 4px;
+  background: rgba(0,0,0,0.2);
+  border-bottom: 1px solid rgba(130, 80, 220, 0.1);
+  flex-shrink: 0;
+}
+
+.cr-pid-unit-header .cr-lamp { width: 8px; height: 8px; flex-shrink: 0; }
+
+.cr-pid-unit-name {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--cr-text);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cr-pid-unit-state {
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  color: var(--cr-text-dim);
+  flex-shrink: 0;
+}
+
+.cr-pid-state--active  .cr-pid-unit-state { color: var(--cr-active); }
+.cr-pid-state--nominal .cr-pid-unit-state { color: #4a8060; }
+.cr-pid-state--caution .cr-pid-unit-state { color: var(--cr-caution); }
+.cr-pid-state--fault   .cr-pid-unit-state { color: var(--cr-fault); }
+.cr-pid-state--paused  .cr-pid-unit-state { color: #8877bb; }
+.cr-pid-state--guard   .cr-pid-unit-state { color: var(--cr-guard); font-weight: 700; }
+
+/* CPU-only lane chip (TAGGING keeps running during GPU guard) */
+.cr-pid-cpu-chip {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 0 4px;
+  line-height: 1.5;
+  border: 1px solid rgba(170, 125, 65, 0.4);
+  border-radius: 1px;
+  color: #c09a60;
+  flex-shrink: 0;
+}
+
+/* valve button */
+.cr-pid-valve-btn {
+  background: none;
+  border: 1px solid rgba(100, 100, 150, 0.3);
+  color: var(--cr-text-dim);
+  border-radius: 2px;
+  padding: 1px 5px;
+  font-size: 9px;
+  cursor: pointer;
+  line-height: 1.4;
+  flex-shrink: 0;
+  font-family: inherit;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.cr-pid-valve-btn:hover { background: rgba(100, 100, 150, 0.15); color: var(--cr-text); }
+.cr-pid-valve-btn.is-paused { border-color: rgba(102, 85, 170, 0.55); color: #9988cc; }
+.cr-pid-valve-btn.is-paused:hover { background: rgba(102, 85, 170, 0.15); }
+
+/* unit body */
+.cr-pid-unit-body {
+  display: flex;
+  align-items: stretch;
+  gap: 7px;
+  padding: 6px 8px 5px;
+  flex: 1;
+  min-height: 0;
+}
+
+/* vertical tank (queue depth level indicator) */
+.cr-pid-tank {
+  width: 14px;
+  flex-shrink: 0;
+  border: 1px solid rgba(130, 80, 220, 0.15);
+  border-radius: 1px;
+  background: rgba(0,0,0,0.35);
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.cr-pid-tank-fill {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  border-radius: 1px;
+  transition: height 0.5s ease;
+}
+
+.cr-pid-tank-fill--prompt { background: rgba(80, 140, 160, 0.65); }
+.cr-pid-tank-fill--gen   { background: rgba(74, 124, 90, 0.65); }
+.cr-pid-tank-fill--tag   { background: rgba(170, 125, 65, 0.65); }
+.cr-pid-tank-fill--embed { background: rgba(74, 110, 180, 0.65); }
+.cr-pid-tank-fill--eval  { background: rgba(160, 100, 200, 0.65); }
+
+.cr-pid-tank-label {
+  font-size: 8px;
+  color: var(--cr-text-dim);
+  position: relative;
+  z-index: 1;
+  line-height: 1;
+  padding-bottom: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* horizontal reactor bar (active job progress) */
+.cr-pid-reactor {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.cr-pid-reactor-track {
+  height: 9px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(130, 80, 220, 0.12);
+  border-radius: 1px;
+  overflow: hidden;
+}
+
+.cr-pid-reactor-fill {
+  height: 100%;
+  width: 100%;
+  border-radius: 1px;
+  transform-origin: left center;
+  transform: scaleX(0);
+  will-change: transform;
+  transition: transform 0.4s ease;
+}
+
+.cr-pid-reactor-fill--prompt { background: linear-gradient(90deg, #3a7080 0%, #60aacc 100%); }
+.cr-pid-reactor-fill--gen   { background: linear-gradient(90deg, var(--cr-nominal) 0%, #6aaa80 100%); }
+.cr-pid-reactor-fill--tag   { background: linear-gradient(90deg, #8a6a30 0%, #c09a60 100%); }
+.cr-pid-reactor-fill--embed { background: linear-gradient(90deg, #3a5ea8 0%, #7090cc 100%); }
+.cr-pid-reactor-fill--eval  { background: linear-gradient(90deg, #7040a0 0%, #aa80cc 100%); }
+
+.cr-pid-reactor-label {
+  font-size: 10px;
+  color: var(--cr-text-dim);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  line-height: 1;
+}
+
+.cr-pid-reactor-label--guard {
+  font-size: 8px;
+  letter-spacing: 0.06em;
+  color: var(--cr-guard);
+  white-space: nowrap;
+}
+
+/* eval unit lane tint */
+.cr-pid-unit--eval  { border-color: rgba(160, 100, 200, 0.3); background: rgba(160, 100, 200, 0.05); }
+.cr-pid-unit--eval.cr-pid-state--active,
+.cr-pid-unit--eval.cr-pid-state--nominal { border-color: rgba(160, 100, 200, 0.55); background: rgba(160, 100, 200, 0.09); }
+.cr-pid-unit--eval.cr-pid-state--caution { border-color: rgba(184, 134, 11, 0.5); background: rgba(184, 134, 11, 0.07); }
+.cr-pid-unit--eval.cr-pid-state--fault   { border-color: rgba(204, 51, 51, 0.5); background: rgba(204, 51, 51, 0.07); }
+.cr-pid-unit--eval.cr-pid-state--paused  { border-color: rgba(102, 85, 170, 0.45); background: rgba(102, 85, 170, 0.06); }
+
+/* resource bar footer */
+.cr-pid-resbar {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 7px 3px;
+  border-top: 1px solid rgba(130, 80, 220, 0.1);
+  background: rgba(0,0,0,0.18);
+  flex-shrink: 0;
+  min-height: 18px;
+  overflow: hidden;
+}
+
+.cr-pid-resbar-name {
+  font-size: 8px;
+  color: var(--cr-text-dim);
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+  font-family: var(--cr-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 70px;
+}
+
+.cr-pid-resbar-gauge {
+  flex: 1;
+  height: 4px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 1px;
+  overflow: hidden;
+  min-width: 20px;
+}
+
+.cr-pid-resbar-fill {
+  height: 100%;
+  border-radius: 1px;
+  transition: width 0.5s ease;
+}
+.cr-pid-resbar-fill--prompt { background: rgba(80, 140, 160, 0.75); }
+.cr-pid-resbar-fill--gen   { background: rgba(74, 124, 90, 0.75); }
+.cr-pid-resbar-fill--tag   { background: rgba(170, 125, 65, 0.75); }
+.cr-pid-resbar-fill--embed { background: rgba(74, 110, 180, 0.75); }
+.cr-pid-resbar-fill--eval  { background: rgba(160, 100, 200, 0.75); }
+
+.cr-pid-resbar-val {
+  font-size: 8px;
+  color: var(--cr-text-dim);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+  font-family: var(--cr-mono);
+  white-space: nowrap;
+}
+
+.cr-pid-resbar-vram {
+  font-size: 8px;
+  color: var(--cr-text-dim);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+  font-family: var(--cr-mono);
+  opacity: 0.6;
+  white-space: nowrap;
+}
+
+.cr-pid-resbar-latency {
+  font-size: 8px;
+  color: var(--cr-active);
+  font-variant-numeric: tabular-nums;
+  font-family: var(--cr-mono);
+  flex-shrink: 0;
+}
+
+.cr-pid-resbar-fault {
+  font-size: 8px;
+  color: var(--cr-fault);
+  letter-spacing: 0.05em;
+  font-family: var(--cr-mono);
+  flex-shrink: 0;
+}
+
+.cr-pid-resbar-starting {
+  font-size: 8px;
+  color: #4aa8cc;
+  letter-spacing: 0.05em;
+  font-family: var(--cr-mono);
+  flex-shrink: 0;
+}
+
+.cr-pid-resbar-slots {
+  font-size: 8px;
+  color: var(--cr-text-dim);
+  border: 1px solid rgba(100, 100, 130, 0.35);
+  border-radius: 1px;
+  padding: 0 3px;
+  font-family: var(--cr-mono);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.cr-lamp--xs { width: 6px !important; height: 6px !important; flex-shrink: 0; }
 </style>

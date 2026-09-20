@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 
 logger = logging.getLogger(__name__)
@@ -155,12 +156,18 @@ async def get_vocab_hints(
     axis_tags: list[str],
     stranger_count: int = 1,
     lunatic_count: int = 2,
+    wildness: int = 1,
 ) -> dict[str, list[str]]:
     """Return {"stranger": [...], "lunatic": [...]} using Qdrant semantic search.
 
     Stranger: tags semantically related to the axis, medium Danbooru frequency.
     Lunatic: tags semantically distant from the axis, high Danbooru frequency,
              absent from the user's personal library.
+
+    wildness widens the pools:
+      1 — default counts and frequency bands
+      2 — lunatic pool widens to min_freq 0.10 and gets 3 wild tags
+      3 — level 2 + one rare-band tag (freq 0.005–0.05) + 2 stranger guests
 
     Falls back to empty lists if vocab is not imported yet.
     """
@@ -171,6 +178,13 @@ async def get_vocab_hints(
             "to enable stranger/lunatic tag hints"
         )
         return {"stranger": [], "lunatic": []}
+
+    wildness = max(1, min(3, wildness))
+    lunatic_min_freq = 0.40 if wildness == 1 else 0.10
+    if wildness >= 2:
+        lunatic_count = max(lunatic_count, 3)
+    if wildness >= 3:
+        stranger_count = max(stranger_count, 2)
 
     axis_set = {t.lower().replace(" ", "_") for t in axis_tags}
     axis_text = " ".join(axis_tags) or "general anime artwork"
@@ -206,7 +220,7 @@ async def get_vocab_hints(
     # ── Lunatic: high Danbooru frequency, absent from user library, DISTANT from axis ──
     try:
         lunatic_hits = await db.search_wd14_vocab(
-            axis_vec, min_freq=0.40, max_freq=1.0, category=0, limit=200
+            axis_vec, min_freq=lunatic_min_freq, max_freq=1.0, category=0, limit=200
         )
         # Filter: axis exclusion + absent from user library
         lunatic_pool = [
@@ -221,6 +235,25 @@ async def get_vocab_hints(
     except Exception as e:
         logger.warning("lunatic hint failed: %s", e)
         lunatic = []
+
+    # ── Wildness 3: add one genuinely exotic rare-band tag ──
+    if wildness >= 3:
+        try:
+            rare_hits = await db.search_wd14_vocab(
+                axis_vec, min_freq=0.005, max_freq=0.05, category=0, limit=60
+            )
+            rare_pool = [
+                h for h in rare_hits
+                if h["name"] not in axis_set
+                and h["name"] not in lunatic
+                and lib_freq.get(h["name"], 0) <= 2
+                and not _is_species_tag(h["name"])
+            ]
+            rare_pool.sort(key=lambda h: h["score"])
+            if rare_pool:
+                lunatic.append(rare_pool[0]["name"])
+        except Exception as e:
+            logger.warning("rare hint failed: %s", e)
 
     return {"stranger": stranger, "lunatic": lunatic}
 
@@ -271,8 +304,9 @@ def _classify_hint_tag(tag: str) -> str | None:
         return "pose"
     if tag in _ACCESSORY_EXACT:
         return "accessories"
-    # scene カテゴリは character hints に含めない — slogan から axis decomposer が自由に生成すべきで
-    # ここで先入れすると特定キーワードが全スピリットに固着する
+    # The scene category is not included in the character hints — the axis
+    # decomposer should generate freely from the slogan, and seeding it here sticks
+    # particular keywords to every spirit
     return None
 
 
@@ -357,13 +391,14 @@ async def get_recent_adopted_tags(db, days: int = 7, limit: int = 200) -> dict[s
     return freq
 
 
-# ── Pro mode: お題ドリブン WD14 タグ取得 ────────────────────────────────────
+# ── Pro mode: topic-driven WD14 tag retrieval ───────────────────────────────
 
 _PRO_SECTION_ORDER = ("character", "background", "props", "action", "mood", "camera")
 
 
 def _section_pairs(pro_sections: dict | None) -> list[tuple[str, str]]:
-    """pro_sections から (section_name, value) ペアを定義済み順で返す。空値はスキップ。"""
+    """(section_name, value) pairs from pro_sections in declaration order. Empty
+    values are skipped."""
     if not pro_sections:
         return []
     return [
@@ -372,18 +407,45 @@ def _section_pairs(pro_sections: dict | None) -> list[tuple[str, str]]:
     ]
 
 
+def popularity_score(count: int) -> float:
+    """0..1 "can the model actually draw this", from the Danbooru post count.
+
+    Log-scaled, because post counts span six orders of magnitude and the
+    interesting distinction is between a tag with 40 examples and one with
+    40,000 — not between 40,000 and 400,000.
+    """
+    if count <= 0:
+        return 0.0
+    # ~1.8M is the most common tag; anything past ~100k is equally "well known".
+    return min(math.log10(count + 1) / 5.0, 1.0)
+
+
 async def get_topic_tags(
     db,
     ollama,
     topic: str,
     pro_sections: dict | None = None,
     limit: int = 25,
+    *,
+    query_vec: list[float] | None = None,
+    popularity_weight: float = 0.0,
+    model: str = "",
 ) -> list[str]:
-    """お題テキスト + sections から WD14 ベクトル検索し、VLM でお題に特徴的なタグを返す。
+    """Vector-search WD14 from the topic text plus the sections, then have the VLM
+    return the tags characteristic of that topic.
 
-    limit=25 で返すことでスピリット別にティア分配できる（上位がコア、下位が発散的）。
+    Returning limit=25 lets the spirits be given tiers (the top is the core, the
+    tail is the divergent end).
     Falls back to raw candidates when VLM call fails.
     Returns [] when WD14 vocab is not imported.
+
+    ``query_vec`` skips the internal embed. Pass one when the query is composed
+    rather than a single string — e.g. "background minus people".
+
+    ``popularity_weight`` mixes the Danbooru post count into the ranking, so a
+    tag that is semantically perfect but has forty examples in the training data
+    loses to one the model has actually seen. Leave it at 0 to rank on semantic
+    distance alone (the historical behaviour).
     """
     count = await _get_vocab_count(db)
     if not topic or count == 0:
@@ -392,11 +454,13 @@ async def get_topic_tags(
     pairs = _section_pairs(pro_sections)
     query_parts = [topic] + [v for _, v in pairs]
 
-    try:
-        vec = await ollama.embed(" ".join(query_parts))
-    except Exception as e:
-        logger.warning("get_topic_tags embed failed: %s", e)
-        return []
+    vec = query_vec
+    if vec is None:
+        try:
+            vec = await ollama.embed(" ".join(query_parts))
+        except Exception as e:
+            logger.warning("get_topic_tags embed failed: %s", e)
+            return []
 
     try:
         hits = await db.search_wd14_vocab(
@@ -405,6 +469,12 @@ async def get_topic_tags(
     except Exception as e:
         logger.warning("get_topic_tags search failed: %s", e)
         return []
+
+    if popularity_weight > 0:
+        hits.sort(
+            key=lambda h: h["score"] + popularity_weight * popularity_score(h.get("count", 0)),
+            reverse=True,
+        )
 
     candidates = [h["name"] for h in hits if not _is_species_tag(h["name"])]
     if not candidates:
@@ -426,7 +496,7 @@ async def get_topic_tags(
     )
 
     try:
-        raw = await ollama.generate_text(prompt, fmt="json")
+        raw = await ollama.generate_text(prompt, model=model or None, fmt="json")
         raw = re.sub(r"^```(?:json)?\s*", "", raw.strip())
         raw = re.sub(r"\s*```$", "", raw.strip())
         selected = json.loads(raw)
@@ -447,9 +517,10 @@ async def synthesize_slogan(
     topic_tags: list[str],
     ollama,
 ) -> str:
-    """お題・sections・filtered WD14 tags から vivid なスローガンを 1-2 文で生成。
+    """Generate a vivid one- or two-sentence slogan from the topic, the sections
+    and the filtered WD14 tags.
 
-    VLM 呼び出しが失敗した場合は topic をそのまま返す。
+    Returns the topic unchanged when the VLM call fails.
     """
     lines: list[str] = [
         "You are a creative director for anime illustrations.",
@@ -482,18 +553,18 @@ async def expand_pro_prompt(
     pro_sections: dict | None,
     ollama,
 ) -> dict:
-    """お題 × ユーザープロンプトからストーリー指令と追加タグを生成する。
+    """Build a story directive and supplementary tags from topic × user prompt.
 
-    ユーザーのタグはそのまま維持し、スピリットがそれを基にストーリーを
-    肉付けするための指針を作成する。
+    The user's own tags are kept as they are; what is produced is guidance the
+    spirits use to flesh a story out around them.
 
-    返り値:
-        slogan: 1-2 文: お題と pro_prompt が融合した視覚的テーマ
-        story_directive: 3-4 文: お題×pro_prompt が生み出すシーン・感情・ドラマ
-        supplement_tags: story を補完する追加 Danbooru タグのリスト (5-15 個)
-        scene_anchor: 50 words 以上・2-3 短文のシーン記述
+    Returns:
+        slogan: 1-2 sentences — the visual theme where topic and pro_prompt meet
+        story_directive: 3-4 sentences — the scene, feeling and drama they produce
+        supplement_tags: 5-15 extra Danbooru tags that complete the story
+        scene_anchor: 2-3 short sentences, 50 words or more, describing the scene
 
-    LLM 失敗時は prompt をそのまま使うフォールバックを返す。
+    Falls back to using the prompt as-is when the LLM call fails.
     """
     lines: list[str] = [
         "You are a story director for AI anime image generation.",
@@ -559,7 +630,7 @@ async def expand_pro_prompt(
     return _fallback
 
 
-# ── Pro mode: axis_tag_hints の VLM 精査 (将来用) ────────────────────────────
+# ── Pro mode: VLM scrutiny of axis_tag_hints (for future use) ───────────────
 
 async def refine_axis_tag_hints(
     raw_hints: list[str],
@@ -568,15 +639,16 @@ async def refine_axis_tag_hints(
     ollama,
     target: int = 12,
 ) -> list[str]:
-    """VLM で候補タグを精査し、ユーザー意図と整合する上位タグだけ返す。
+    """Sift the candidate tags through the VLM, returning only the top ones that
+    agree with the user's intent.
 
-    raw_hints が空か ollama が None の場合はそのまま返す。
-    VLM 呼び出しが失敗した場合も raw_hints をフォールバックとして返す。
+    Returns them unchanged when `raw_hints` is empty or `ollama` is None, and falls
+    back to `raw_hints` when the VLM call fails.
     """
     if not raw_hints or not ollama:
         return raw_hints
 
-    # 軸サマリー（プロンプトに収める）
+    # The axis summary (to fit into the prompt)
     axis_lines: list[str] = []
     for k in ("subject", "character_detail", "action", "scene",
               "mood", "lighting", "style", "accessories", "palette"):
@@ -586,7 +658,7 @@ async def refine_axis_tag_hints(
         if v:
             axis_lines.append(f"  {k}: {v}")
 
-    # Pro セクション（空でない場合のみ）
+    # The Pro section (only when it is not empty)
     section_lines: list[str] = []
     if pro_sections:
         for sect in ("character", "background", "props", "action"):
@@ -635,3 +707,235 @@ async def refine_axis_tag_hints(
         logger.warning("refine_axis_tag_hints VLM failed: %s", e)
 
     return raw_hints
+
+
+# ── Emotion register (12 dimensions shared with the emotion tagger) ──────────
+
+_EMOTION_QUERIES = {
+    "loneliness": "loneliness solitude isolated empty distant quiet alone",
+    "nostalgia":  "nostalgia bittersweet memory faded old times sepia longing",
+    "ephemeral":  "ephemeral fleeting transient fragile passing moment petals",
+    "melancholy": "melancholy sorrow wistful gloomy rain grey subdued",
+    "serenity":   "serenity calm peaceful still tranquil gentle quiet morning",
+    "wonder":     "wonder awe marvel vast breathtaking grand celestial",
+    "joy":        "joy happy cheerful bright playful laughter sunny",
+    "tension":    "tension suspense unease sharp dramatic edge storm",
+    "warmth":     "warmth cozy soft tender comfort golden hearth",
+    "mystery":    "mystery enigmatic hidden shadow secret fog veiled",
+    "desolation": "desolation ruin abandoned decay barren wasteland dust",
+    "vitality":   "vitality energy dynamic vivid alive motion bloom",
+}
+
+
+async def get_emotion_hints(db, ollama, emotion: str, n_tags: int = 6) -> list[str]:
+    """Return Danbooru mood/lighting tags semantically close to an emotion dimension.
+
+    Returns [] for unknown emotions, when the vocab bank is not imported, or on error.
+    """
+    query = _EMOTION_QUERIES.get(emotion)
+    if not query:
+        return []
+    count = await _get_vocab_count(db)
+    if count == 0:
+        return []
+
+    try:
+        vec = await ollama.embed(query)
+        hits = await db.search_wd14_vocab(vec, min_freq=0.01, max_freq=0.6, category=0, limit=n_tags * 4)
+    except Exception as e:
+        logger.warning("get_emotion_hints failed for %s: %s", emotion, e)
+        return []
+
+    return [h["name"] for h in hits if not _is_species_tag(h["name"])][:n_tags]
+
+
+# ── Echoes of Resonance ────────────────────────────────────────────────────────
+
+_CHARACTER_KEYWORDS = frozenset({
+    "_hair", "_eyes", "dress", "uniform", "outfit", "shirt", "skirt", "school",
+    "jacket", "coat", "blouse", "sweater", "hoodie", "kimono", "yukata", "leotard",
+    "bikini", "swimsuit", "hat", "ribbon", "bow", "braid", "twintail", "ponytail",
+    "short_hair", "long_hair", "medium_hair",
+})
+_SCENE_KEYWORDS = frozenset({
+    "room", "street", "forest", "beach", "city", "garden", "sky", "water",
+    "building", "park", "school", "library", "cafe", "bar", "mountain", "ocean",
+    "river", "lake", "field", "house", "rooftop", "corridor", "hallway", "bridge",
+    "train", "station", "window", "door", "indoor", "outdoor",
+})
+
+
+def _classify_resonance_tag(tag: str) -> str:
+    """Classify a wd14 tag into character/scene/mood hint category."""
+    for kw in _CHARACTER_KEYWORDS:
+        if kw in tag:
+            return "character"
+    for kw in _SCENE_KEYWORDS:
+        if kw in tag:
+            return "scene"
+    return "mood"
+
+
+async def _taste_centroid(db) -> list[float] | None:
+    """Weighted embedding centroid of high-rated (≥4★) images (star4=1.0, star5=2.0).
+
+    Returns the normalized centroid vector, or None when no starred images exist.
+    """
+    import math
+    from qdrant_client import models as qm
+
+    # Scroll all images rated ≥4 and retrieve their full embeddings
+    points: list = []
+    offset = None
+    try:
+        while True:
+            pts, next_offset = await db._qc.scroll(
+                collection_name="images",
+                scroll_filter=qm.Filter(must=[
+                    qm.FieldCondition(
+                        key="star_rating",
+                        range=qm.Range(gte=4),
+                    ),
+                    qm.FieldCondition(
+                        key="embedding_status",
+                        match=qm.MatchValue(value="done"),
+                    ),
+                ]),
+                limit=500,
+                offset=offset,
+                with_payload=qm.PayloadSelectorInclude(include=["star_rating"]),
+                with_vectors=["embedding"],
+            )
+            points.extend(pts)
+            if next_offset is None or len(points) >= 500:
+                break
+            offset = next_offset
+    except Exception as e:
+        logger.warning("_taste_centroid scroll failed: %s", e)
+        return None
+
+    if not points:
+        return None
+
+    dim: int | None = None
+    centroid: list[float] = []
+    total_weight = 0.0
+
+    for p in points:
+        vec = p.vector.get("embedding") if isinstance(p.vector, dict) else None
+        if not vec:
+            continue
+        rating = (p.payload or {}).get("star_rating", 4)
+        weight = 2.0 if rating >= 5 else 1.0
+        if dim is None:
+            dim = len(vec)
+            centroid = [0.0] * dim
+        if len(vec) != dim:
+            continue
+        for i, v in enumerate(vec):
+            centroid[i] += v * weight
+        total_weight += weight
+
+    if total_weight == 0.0 or dim is None:
+        return None
+
+    centroid = [v / total_weight for v in centroid]
+    norm = math.sqrt(sum(v * v for v in centroid))
+    if norm > 0.0:
+        centroid = [v / norm for v in centroid]
+    return centroid
+
+
+async def compute_resonance_hints(db, *, n_tags: int = 20) -> dict[str, list[str]]:
+    """Compute aesthetic taste hints from high-rated (≥4★) images.
+
+    Searches wd14_vocab for the n_tags nearest tags to the taste centroid and
+    returns them classified as character_hints compatible with decompose_axes().
+    Returns {} when no starred images exist or wd14_vocab is empty.
+    """
+    vocab_count = await _get_vocab_count(db)
+    if vocab_count == 0:
+        return {}
+
+    centroid = await _taste_centroid(db)
+    if centroid is None:
+        return {}
+
+    # Find nearest wd14 tags to the centroid
+    raw_tags = await db.search_wd14_vocab(
+        centroid,
+        min_freq=0.005,
+        max_freq=0.8,
+        category=0,
+        limit=n_tags,
+    )
+    if not raw_tags:
+        return {}
+
+    # Classify into hint categories
+    hints: dict[str, list[str]] = {"character": [], "scene": [], "mood": []}
+    for entry in raw_tags:
+        cat = _classify_resonance_tag(entry["name"])
+        hints[cat].append(entry["name"])
+
+    logger.debug(
+        "compute_resonance_hints: %d tags (c=%d s=%d m=%d)",
+        len(raw_tags),
+        len(hints["character"]), len(hints["scene"]), len(hints["mood"]),
+    )
+    return {k: v for k, v in hints.items() if v}
+
+
+async def compute_frontier_hints(db, *, n_tags: int = 20) -> dict[str, list[str]]:
+    """Mirror of compute_resonance_hints: tags the user's library has never touched.
+
+    Searches wd14_vocab near the taste centroid with a wide net, keeps only tags
+    absent from the library, and sorts ASCENDING by score so the semantically
+    farthest tags from the user's taste come first (same trick as lunatic hints).
+    Returns {} when no starred images exist or wd14_vocab is empty.
+    """
+    vocab_count = await _get_vocab_count(db)
+    if vocab_count == 0:
+        return {}
+
+    centroid = await _taste_centroid(db)
+    if centroid is None:
+        return {}
+
+    try:
+        hits = await db.search_wd14_vocab(
+            centroid,
+            min_freq=0.02,
+            max_freq=0.6,
+            category=0,
+            limit=300,
+        )
+    except Exception as e:
+        logger.warning("compute_frontier_hints search failed: %s", e)
+        return {}
+    if not hits:
+        return {}
+
+    lib_freq = await _get_library_tag_freq(db)
+    pool = [
+        h for h in hits
+        if lib_freq.get(h["name"], 0) == 0 and not _is_species_tag(h["name"])
+    ]
+    # Low score = far from the taste centroid = most "frontier"
+    pool.sort(key=lambda h: h["score"])
+
+    hints: dict[str, list[str]] = {"character": [], "scene": [], "mood": []}
+    taken = 0
+    for entry in pool:
+        if taken >= n_tags:
+            break
+        cat = _classify_resonance_tag(entry["name"])
+        hints[cat].append(entry["name"])
+        taken += 1
+
+    logger.debug(
+        "compute_frontier_hints: %d candidates → %d tags (c=%d s=%d m=%d)",
+        len(pool), taken,
+        len(hints["character"]), len(hints["scene"]), len(hints["mood"]),
+    )
+    return {k: v for k, v in hints.items() if v}

@@ -18,17 +18,6 @@ def detect_format(png_info: dict) -> str:
     return "unknown"
 
 
-def find_nodes_by_class(workflow: dict, classes: list[str]) -> list[dict]:
-    """Return all nodes whose class_type is in *classes*."""
-    result: list[dict] = []
-    for node_id, node in workflow.items():
-        if not isinstance(node, dict):
-            continue
-        if node.get("class_type") in classes:
-            result.append({"_id": node_id, **node})
-    return result
-
-
 def get_text_from_node(node: dict) -> str | None:
     """Extract text from a node's inputs, trying TEXT_INPUT_FIELDS in priority order."""
     inputs = node.get("inputs") or {}
@@ -134,12 +123,6 @@ def extract_model_from_visual_workflow(workflow: dict) -> str:
             from ._utils import basename
             return basename(str(widgets[0]))
     return ""
-
-
-def is_text_node(node: dict) -> bool:
-    """Return True if this node can yield a text string."""
-    cls = node.get("class_type", "")
-    return cls in CLIP_TEXT_ENCODE_CLASSES or cls in WILDCARD_ENCODE_CLASSES
 
 
 def _resolve_scalar(workflow: dict, link, visited: frozenset | None = None):

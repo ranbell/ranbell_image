@@ -47,11 +47,28 @@ async def list_jobs(request: Request):
 
 @router.post("/{job_id}/cancel")
 async def cancel_job(job_id: str, request: Request):
+    """Stop a running job. **Finished ones go to `dismiss`.**
+
+    A failed job is not in `_registry` (the history is the source of truth), so it
+    404s here. There is nothing left to stop, so what is wanted is not a cancel but
+    a tidy-up — that is `dismiss` below.
+    """
     spooler = request.app.state.spooler
     ok = await spooler.cancel(job_id)
     if not ok:
+        if spooler.dismiss(job_id):
+            return {"status": "dismissed", "job_id": job_id}
         raise HTTPException(404, f"Job {job_id!r} not found or not cancellable")
     return {"status": "cancel_requested", "job_id": job_id}
+
+
+@router.delete("/{job_id}")
+async def dismiss_job(job_id: str, request: Request):
+    """Remove a finished job from the history (the × on screen)."""
+    spooler = request.app.state.spooler
+    if not spooler.dismiss(job_id):
+        raise HTTPException(404, f"Job {job_id!r} not found or still running")
+    return {"status": "dismissed", "job_id": job_id}
 
 
 class ReorderBody(BaseModel):
@@ -89,6 +106,22 @@ async def retry_job(job_id: str, request: Request):
     except ValueError as exc:
         raise HTTPException(409, str(exc))
     return {"status": "queued", "job_id": new_id, "retried_from": job_id}
+
+
+# ── Task groups ───────────────────────────────────────────────────────────────
+
+@router.post("/groups/{group_id}/cancel")
+async def cancel_group(group_id: str, request: Request):
+    """Cancel all active jobs whose meta.group_id matches."""
+    cancelled = await request.app.state.spooler.cancel_group(group_id)
+    return {"status": "cancel_requested", "group_id": group_id, "cancelled": cancelled}
+
+
+@router.delete("/groups/{group_id}")
+async def delete_group(group_id: str, request: Request):
+    """Cancel active group jobs and remove finished group records from history."""
+    result = await request.app.state.spooler.delete_group(group_id)
+    return {"status": "deleted", "group_id": group_id, **result}
 
 
 # ── Lane pause / resume ───────────────────────────────────────────────────────

@@ -3,6 +3,7 @@ display_name_en: "Wander"
 display_name_ja: "漂"
 kanji: "漂"
 needs_vocab_hint: true
+temperature: 0.95
 system_prompt: |
   You are Wander. Your role is to introduce an unexpected guest into the scene.
 

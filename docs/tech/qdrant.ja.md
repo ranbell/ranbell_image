@@ -62,7 +62,7 @@ Qdrant データベースが破損・不整合・陳腐化した場合の復旧�
 
 Ranbell Image プロジェクトで使用しているすべての Qdrant 機能を説明します。コレクション設計、名前付きベクトル、ペイロードスキーマ、検索パターン、ジョブステータス管理、高度な機能をカバーします。
 
-- **Qdrant バージョン:** 1.18.0
+- **Qdrant バージョン:** 1.19.1
 - **クライアント:** Python SDK `qdrant-client` の `AsyncQdrantClient`
 - **主要実装:** `backend/app/db/qdrant_client.py`
 - **設定:** `backend/app/config.py`
@@ -184,6 +184,27 @@ HSV / L\*a\*b\* 空間での 5 クラスター KMeans で抽出されます。
 | `star_rating` | INTEGER | ユーザーのスター評価（0〜5） |
 | `creation_record` | — | 作成方法・元画像参照・インスパイアコンテキスト・生成パラメータを含む辞書 |
 | `creation_record.method` | KEYWORD | 作成方法識別子（フィルタリング用にインデックス済み） |
+
+#### 感情スコア（Subjective Emotion）
+
+Ollama が `positive_prompt` + `wd14_tags` を解析して付与する 12 次元の主観的感情スコアです。`run_emotion_tag` ランナー（EMBEDDING レーン）が処理し、`POST /api/ai/emotion-tag` でトリガーできます。フィールド名はネスト構造ではなくフラットキー形式を採用しています（`FieldCondition` との確実な互換性のため）。
+
+| フィールド | インデックス種別 | 感情次元 |
+|---|---|---|
+| `emotion_loneliness` | FLOAT | 孤独感 |
+| `emotion_nostalgia` | FLOAT | 郷愁・懐かしさ |
+| `emotion_ephemeral` | FLOAT | 儚さ・一瞬性 |
+| `emotion_melancholy` | FLOAT | メランコリー・哀愁 |
+| `emotion_serenity` | FLOAT | 静けさ・平穏 |
+| `emotion_wonder` | FLOAT | 驚嘆・畏敬 |
+| `emotion_joy` | FLOAT | 喜び・明るさ |
+| `emotion_tension` | FLOAT | 緊張感・不安 |
+| `emotion_warmth` | FLOAT | 温もり・親しみ |
+| `emotion_mystery` | FLOAT | 神秘・謎 |
+| `emotion_desolation` | FLOAT | 荒廃・虚無感 |
+| `emotion_vitality` | FLOAT | 生命力・躍動感 |
+
+すべて 0.0〜1.0 の範囲。フィールドが存在しない画像は未処理（`IsEmptyCondition` で検出可能）。感情タグが付与された画像は `POST /api/ai/emotion-search` で次元別スコア閾値検索が可能です。
 
 ### `alignment` コレクション
 
@@ -407,7 +428,7 @@ Qdrant サービスは `docker-compose.yml` で定義されています。
 
 ```yaml
 qdrant:
-  image: qdrant/qdrant:v1.18.0
+  image: qdrant/qdrant:v1.19.1
   environment:
     QDRANT__TELEMETRY_DISABLED: "true"
 ```

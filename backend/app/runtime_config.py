@@ -11,6 +11,7 @@ CONFIG_ID = "app_config"
 _defaults = {
     "embed_model":          settings.embed_model,
     "vlm_model":            settings.vlm_model,
+    "utility_model":        settings.utility_model,
     "wd14_threshold":       settings.wd14_threshold,
     "wd14_model_dir":       settings.wd14_model_dir,
     "ollama_url":           settings.ollama_url,
@@ -28,7 +29,17 @@ _defaults = {
         "worst quality", "normal quality",
     ],
     "prompt_removal_tags": [],
+    # Shown in the Admin tag panel alongside the two lists above. It was in
+    # ConfigBody but not here, so every save read back empty.
+    "cluster_common_tags": [],
     "ollama_num_ctx":          16384,
+    # Muse's defaults (2026-09-13). The Showrunner: "empty the llm and image model
+    # too, so they are chosen before running. If a default is set in the admin
+    # screen, it should be possible to start from that default." **Empty means the
+    # screen asks to choose** — the first of the list is never applied on its own
+    # (when `muse_model` is empty, `vlm_model` is consulted).
+    "muse_model":    "",
+    "muse_workflow": "",
     "frozenset_classification": True,
     # Invoke / Genesis
     "invoke_gold_frame_threshold":     0.85,
@@ -39,20 +50,37 @@ _defaults = {
     "invoke_daily_oracle_time":          "00:00",
     "invoke_daily_oracle_timezone":      "UTC",
     "invoke_daily_oracle_topic":         "",
+    "invoke_daily_oracle_roulette":      False,
     "invoke_daily_oracle_min_free_gb":   5.0,
+    # Daily backup. On by default: the layer that matters most is a few hundred
+    # kilobytes of gzipped JSONL, and someone who has never thought about
+    # backups is exactly who needs it.
+    "backup_enabled":                    True,
+    "backup_time":                       "04:30",
+    "backup_timezone":                   "UTC",
+    "backup_retain_days":                7,     # snapshot generations kept
+    "backup_dir":                        "/mnt/backup",
     # Disk gauge thresholds (used_pct %)
     "disk_caution_pct":                  75,
     "disk_fault_pct":                    90,
     # GPU priority control
     "auto_pause_on_generation": True,
     "auto_pause_lanes":         ["embed", "eval"],
+    # tier2: pause EVALUATION while gen/prompt/embed are active.
+    # Set False only when Ollama runs on a different GPU than ComfyUI.
+    "eval_auto_pause":          True,
     "auto_alignment_evaluate":  False,
     # WD14 tag weighting for refine (common/unique decomposition)
     "wd14_common_ratio":         0.3,
     "wd14_unique_count":         20,
     # Processing parallelism
-    "alignment_concurrency":    1,
+    "alignment_concurrency":    2,
     "pipeline_auto_continue":   True,
+    "scan_concurrency":         8,
+    "umap_max_points":          20_000,
+    # Max results returned by natural-language semantic search
+    "semantic_search_limit":    100,
+    "muse_block_nsfw":          True,
 }
 
 _cache: RuntimeConfigCache | None = None

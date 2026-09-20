@@ -7,7 +7,7 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
-SPIRIT_NAMES = ["faithful", "rebel", "stranger", "lunatic", "oracle"]
+SPIRIT_NAMES = ["faithful", "rebel", "stranger", "lunatic", "oracle", "sorrow"]
 _SPIRITS_DIR = Path(__file__).parent / "spirits"
 
 _cache: dict[str, dict] = {}
@@ -21,10 +21,6 @@ def load_spirit(name: str) -> dict:
         data = yaml.safe_load(f)
     _cache[name] = data
     return data
-
-
-def list_spirits() -> list[str]:
-    return SPIRIT_NAMES
 
 
 def preload_all() -> None:

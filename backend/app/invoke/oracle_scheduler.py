@@ -77,6 +77,7 @@ async def run_oracle_scheduler(app) -> None:
                 daily_oracle_date=today,
                 workflow_name=workflow,
                 topic=topic,
+                roulette=bool(cfg.get("invoke_daily_oracle_roulette", False)),
             )
             logger.info("[oracle_scheduler] job submitted for %s", today)
             await asyncio.sleep(60)  # skip past this minute

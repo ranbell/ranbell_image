@@ -13,41 +13,24 @@ Runner signature:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import math
 import re
+import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from ..spooler.models import CancelToken, JobCancelled, ProgressReporter
+from ..tags.subject_anchors import (
+    PERSON_COUNT_TAGS as _PERSON_COUNT_TAGS,
+    ensure_subject_anchor as _ensure_subject_anchor,
+)
 
 _PRIORITY_ALIGNMENT = -10
 
 logger = logging.getLogger(__name__)
-
-# Person/subject count tags used as safety-net anchors in refine output.
-_PERSON_COUNT_TAGS = frozenset({
-    "1girl", "1boy", "solo", "2girls", "2boys", "3girls", "3boys",
-    "multiple_girls", "multiple_boys", "6+girls", "6+boys",
-    "1other", "2others", "multiple_others",
-})
-
-
-def _ensure_subject_anchor(tags_positive: str, raw_docs: list, wd14_scores_key: str = "wd14_tags_scores") -> str:
-    """If Pass 1 output lacks a subject count tag, prepend the highest-confidence one from WD14."""
-    tag_set = {t.strip().lower() for t in tags_positive.split(",") if t.strip()}
-    if tag_set & _PERSON_COUNT_TAGS:
-        return tags_positive
-    best_tag, best_score = "", 0.0
-    for doc, _idx in raw_docs:
-        wd14 = doc.get("wd14_tags", [])
-        scores = doc.get(wd14_scores_key) or []
-        for tag, score in zip(wd14, scores):
-            if tag in _PERSON_COUNT_TAGS and score > best_score:
-                best_tag, best_score = tag, score
-    if best_tag and best_score >= 0.40:
-        return f"{best_tag}, {tags_positive}"
-    return tags_positive
 
 
 # Quality meta-tags that must never appear in invoke positive/negative prompts.
@@ -85,6 +68,7 @@ async def run_scan_heal(
             reporter.update(
                 scan_state.processed / scan_state.total,
                 f"{scan_state.processed}/{scan_state.total} files",
+                key="files", done=scan_state.processed, total=scan_state.total,
             )
         await asyncio.sleep(0.5)
 
@@ -93,14 +77,15 @@ async def run_scan_heal(
     except asyncio.CancelledError:
         raise JobCancelled()
 
-    # auto-start AI pipeline if new files were registered
+    # auto-start AI pipeline if new files were registered (CPU tagging stage
+    # first; it chains the embed stage on the EMBEDDING lane)
     if spooler is not None and ollama is not None and scan_state.added > 0:
         from ..spooler.models import JobLane
-        if spooler.is_lane_active(JobLane.EMBEDDING):
+        if spooler.is_lane_active(JobLane.TAGGING):
             spooler.submit(
-                JobLane.EMBEDDING,
-                "ai_pipeline_post_scan",
-                run_pipeline,
+                JobLane.TAGGING,
+                "ai_tagging_post_scan",
+                run_pipeline_tagging,
                 db=db,
                 ollama=ollama,
                 spooler=spooler,
@@ -117,8 +102,10 @@ async def run_scan_full(
     spooler=None,
 ) -> None:
     from ..scanner.scanner import run_scan, scan_state
+    from ..runtime_config import get_runtime_config
+    cfg = await get_runtime_config(db)
     reporter.indeterminate()
-    task = asyncio.create_task(run_scan(db))
+    task = asyncio.create_task(run_scan(db, concurrency=int(cfg.get("scan_concurrency", 8))))
     cancel.on_cancel(task.cancel)
 
     while not task.done():
@@ -126,6 +113,7 @@ async def run_scan_full(
             reporter.update(
                 scan_state.processed / scan_state.total,
                 f"{scan_state.processed}/{scan_state.total} files",
+                key="files", done=scan_state.processed, total=scan_state.total,
             )
         await asyncio.sleep(0.5)
 
@@ -136,11 +124,11 @@ async def run_scan_full(
 
     if spooler is not None and ollama is not None and scan_state.added > 0:
         from ..spooler.models import JobLane
-        if spooler.is_lane_active(JobLane.EMBEDDING):
+        if spooler.is_lane_active(JobLane.TAGGING):
             spooler.submit(
-                JobLane.EMBEDDING,
-                "ai_pipeline_post_scan",
-                run_pipeline,
+                JobLane.TAGGING,
+                "ai_tagging_post_scan",
+                run_pipeline_tagging,
                 db=db,
                 ollama=ollama,
                 spooler=spooler,
@@ -164,6 +152,7 @@ async def run_scan_refresh_metadata(
             reporter.update(
                 scan_state.processed / scan_state.total,
                 f"{scan_state.processed}/{scan_state.total} files",
+                key="files", done=scan_state.processed, total=scan_state.total,
             )
         await asyncio.sleep(0.5)
 
@@ -215,10 +204,10 @@ async def run_color_backfill(
                 collection_name=IMAGES_COLLECTION,
                 scroll_filter=qm.Filter(
                     should=[
-                        # avg_saturation が absent（未処理）または < 0（失敗済み）
+                        # avg_saturation is absent (unprocessed) or < 0 (already failed)
                         qm.IsEmptyCondition(is_empty=qm.PayloadField(key="avg_saturation")),
                         qm.FieldCondition(key="avg_saturation", range=qm.Range(lt=0.0)),
-                        # color_lab payload が残っている（color_vector への移行待ち）
+                        # a color_lab payload remains (awaiting migration to color_vector)
                         qm.Filter(must_not=[
                             qm.IsEmptyCondition(is_empty=qm.PayloadField(key="color_lab"))
                         ]),
@@ -257,8 +246,9 @@ async def run_color_backfill(
                 if db.has_color_vector:
                     await db.set_color_vectors_batch(fast_items)
                 await db.delete_payload_keys_batch([s for s, _ in fast_items], ["color_lab"])
-                # avg_saturation が未設定のまま残ると analyzer が pending と誤検知するため、
-                # color_lab から Lab chroma を求めて proxy avg_saturation をセットする。
+                # An unset avg_saturation makes the analyzer misread the image as
+                # pending, so a proxy avg_saturation is set from the Lab chroma
+                # derived from color_lab.
                 async def _set_proxy_sat(sha256: str, lab: list) -> None:
                     if len(lab) >= 3:
                         chroma = math.sqrt(lab[1] ** 2 + lab[2] ** 2)
@@ -280,7 +270,9 @@ async def run_color_backfill(
                             color_lab = color_data.pop("color_lab", None)
                             await db.set_payload(sha256, color_data)
                             if color_lab and db.has_color_vector:
-                                await db.set_color_vector(sha256, color_lab)
+                                await db.set_color_vector(
+                                    sha256, color_lab, payload=color_data,
+                                )
                         else:
                             logger.warning("color_extractor returned empty for %s — marking failed", sha256)
                             await db.set_payload(sha256, {"avg_saturation": -1.0})
@@ -300,7 +292,8 @@ async def run_color_backfill(
                 )
 
             if total > 0:
-                reporter.update(done / max(total, 1), f"{done}/{total} items")
+                reporter.update(done / max(total, 1), f"{done}/{total} items",
+                                key="items", done=done, total=total)
 
             if next_offset is None:
                 break
@@ -337,6 +330,7 @@ async def run_analyze_umap(
             reporter.update(
                 st["done"] / st["total"],
                 f"{st.get('phase', '')} {st['done']}/{st['total']}",
+                key="phaseItems", phase=st.get("phase", ""), done=st["done"], total=st["total"],
             )
         else:
             reporter.indeterminate()
@@ -349,6 +343,71 @@ async def run_analyze_umap(
 
 
 # ── EMBEDDING lane: AI pipeline · MRL backfill ────────────────────────────────
+
+async def run_pipeline_tagging(
+    reporter: ProgressReporter,
+    cancel: CancelToken,
+    *,
+    db,
+    ollama=None,
+    sha256s: list[str] | None = None,
+    spooler=None,
+) -> dict:
+    """TAGGING lane (CPU only, never auto-paused). WD14 + colors for pending docs,
+    then chains the embed stage on the EMBEDDING lane."""
+    from ..ai.pipeline import tagging_state, run_ai_pipeline
+    from ..spooler.models import JobLane
+
+    def _on_cancel() -> None:
+        tagging_state.cancelled = True
+
+    cancel.on_cancel(_on_cancel)
+    reporter.indeterminate()
+
+    task = asyncio.create_task(
+        run_ai_pipeline(db, ollama, sha256s, pause_checkpoint=cancel.pause_checkpoint, stage="tagging")
+    )
+    cancel.on_cancel(task.cancel)
+
+    while not task.done():
+        total = tagging_state.total
+        processed = tagging_state.processed
+        if total > 0:
+            reporter.update(processed / total, f"{processed}/{total} tagged",
+                            key="tagged", done=processed, total=total)
+        else:
+            reporter.indeterminate()
+        await asyncio.sleep(0.5)
+
+    try:
+        await task
+    except asyncio.CancelledError:
+        raise JobCancelled()
+
+    if cancel._event.is_set():
+        raise JobCancelled()
+
+    # Chain the embed stage. Submit even while EMBEDDING is auto-paused — the job
+    # waits at the pause gate and runs when generation finishes (that overlap is
+    # the whole point of the tagging stage). Dedup against an existing queued job.
+    if spooler is not None and ollama is not None:
+        _already_queued = any(
+            j["lane"] == "embed" and j["state"] == "queued" and j["title"].startswith("ai_pipeline")
+            for j in spooler.snapshot()
+        )
+        if not _already_queued:
+            spooler.submit(
+                JobLane.EMBEDDING,
+                "ai_pipeline",
+                run_pipeline,
+                db=db,
+                ollama=ollama,
+                sha256s=sha256s,
+                spooler=spooler,
+            )
+
+    return {"processed": tagging_state.processed, "errors": tagging_state.errors}
+
 
 async def run_pipeline(
     reporter: ProgressReporter,
@@ -367,8 +426,11 @@ async def run_pipeline(
     cancel.on_cancel(_on_cancel)
     reporter.indeterminate()
 
+    # stage="embed" reuses tags written by the tagging stage and falls back to
+    # the full per-doc path when tags are missing — behaviorally equivalent to
+    # the old full pipeline for untagged docs.
     task = asyncio.create_task(
-        run_ai_pipeline(db, ollama, sha256s, pause_checkpoint=cancel.pause_checkpoint)
+        run_ai_pipeline(db, ollama, sha256s, pause_checkpoint=cancel.pause_checkpoint, stage="embed")
     )
     cancel.on_cancel(task.cancel)
 
@@ -376,7 +438,8 @@ async def run_pipeline(
         total = pipeline_state.total
         processed = pipeline_state.processed
         if total > 0:
-            reporter.update(processed / total, f"{processed}/{total} processed")
+            reporter.update(processed / total, f"{processed}/{total} processed",
+                            key="processed", done=processed, total=total)
         else:
             reporter.indeterminate()
         await asyncio.sleep(0.5)
@@ -420,23 +483,8 @@ async def run_pipeline(
             else:
                 logger.info("Auto-alignment skipped: EVALUATION lane is paused")
 
-    # auto-continue: if the batch was full, re-submit for the remaining items
-    if spooler is not None and not cancel._event.is_set():
-        from ..runtime_config import get_runtime_config
-        from ..spooler.models import JobLane
-        cfg2 = await get_runtime_config(db)
-        if cfg2.get("pipeline_auto_continue", True):
-            batch_size = int(cfg2.get("pipeline_batch_size", 5000))
-            if pipeline_state.total >= batch_size and spooler.is_lane_active(JobLane.EMBEDDING):
-                spooler.submit(
-                    JobLane.EMBEDDING,
-                    "ai_pipeline_continue",
-                    run_pipeline,
-                    db=db,
-                    ollama=ollama,
-                    spooler=spooler,
-                )
-                logger.info("Auto-continue pipeline submitted (batch_size=%d reached)", batch_size)
+    # auto-continue: pipeline now processes all pending items in one run via Queue,
+    # so re-submission is no longer needed.
 
     return result
 
@@ -450,6 +498,111 @@ async def run_mrl_backfill(
     reporter.indeterminate()
     count = await db.backfill_small_embeddings()
     return {"done": count}
+
+
+async def run_backup(
+    reporter: ProgressReporter,
+    cancel: CancelToken,
+    *,
+    db,
+    lineage_only: bool = False,
+) -> dict:
+    """Daily backup: the lineage ledger first, then Qdrant snapshots.
+
+    Ledger first on purpose. It is the layer that survives losing Qdrant, it is
+    cheap, and if the directory turns out to be unwritable the job should say so
+    before spending time on snapshots.
+    """
+    from ..backup.service import run_lineage_backup, run_snapshots
+    from ..runtime_config import get_runtime_config
+
+    cfg = await get_runtime_config(db)
+    root = str(cfg.get("backup_dir") or "/mnt/backup")
+
+    reporter.update(0.1, "lineage ledger", key="lineageLedger")
+    ledger = await run_lineage_backup(db, root)
+    cancel.raise_if_set()
+    if lineage_only:
+        reporter.update(1.0, "done", key="done")
+        return {"ledger": ledger}
+
+    reporter.update(0.5, "qdrant snapshots", key="qdrantSnapshots")
+    keep = int(cfg.get("backup_retain_days", 7) or 7)
+    snaps = await run_snapshots(db, keep=keep)
+    reporter.update(1.0, "done", key="done")
+    return {"ledger": ledger, "snapshots": snaps}
+
+
+async def run_schema_apply(
+    reporter: ProgressReporter,
+    cancel: CancelToken,
+    *,
+    db,
+    ollama=None,
+    spooler=None,
+    embed_dim: int,
+    embed_dim_small: int,
+) -> dict:
+    """Move the images collection to a new vector width.
+
+    Qdrant cannot resize a vector in place, so this builds a new collection,
+    copies every payload into it, and moves the `images` alias once the counts
+    agree. The old collection is left behind on purpose: matching counts prove
+    the copy was complete, not that it was correct, and that is a judgement for
+    whoever can look at the pictures.
+
+    Vectors are only carried over when they still mean something. A narrower
+    `embedding_small` can be re-derived by truncating the full embedding, but a
+    changed `embed_dim` means a different model, so those points come across
+    marked pending and are re-embedded afterwards — in the background, with the
+    app up.
+    """
+    from ..db.qdrant_client import SCHEMA_KEY
+
+    reporter.indeterminate()
+    state = dict(db.schema_state or {})
+    source = state.get("physical") or "images"
+    same_full_width = int(embed_dim) == int(db.embed_dim)
+
+    reporter.update(0.05, "backing up lineage first", key="backupLineageFirst")
+    await run_backup(reporter, cancel, db=db, lineage_only=True)
+    cancel.raise_if_set()
+
+    reporter.update(0.1, f"building a {embed_dim}/{embed_dim_small} collection",
+                    key="buildingCollection", dim=embed_dim, small=embed_dim_small)
+    transform = db._transform_small_dim(embed_dim_small)
+    target = await db._rebuild_images(
+        source=source,
+        small_dim=embed_dim_small,
+        embed_dim=embed_dim,
+        transform=transform,
+        with_vectors=["embedding"] if same_full_width else [],
+        reason=f"dimension change to {embed_dim}/{embed_dim_small}",
+        cancel=cancel,
+        reporter=reporter,
+    )
+
+    doc = await db.get_config()
+    schema = dict(doc.get(SCHEMA_KEY) or {})
+    schema |= {"embed_dim": int(embed_dim), "embed_dim_small": int(embed_dim_small)}
+    await db.put_config({SCHEMA_KEY: schema})
+
+    reset = getattr(transform, "stats", {}).get("reset", 0)
+    if reset and spooler is not None and ollama is not None:
+        # Re-embedding is a separate job so this one can finish and the alias is
+        # already live: searches are incomplete until it lands, never broken.
+        from ..spooler.models import JobLane
+        spooler.submit(
+            JobLane.EMBEDDING, "ai_embedding_after_schema", run_pipeline,
+            db=db, ollama=ollama, spooler=spooler,
+        )
+        logger.info("queued re-embedding for %d points after schema change", reset)
+    elif not reset:
+        # Full embeddings survived; only the truncation needs redoing.
+        await db.backfill_small_embeddings()
+
+    reporter.update(1.0, "done", key="done")
+    return {"collection": target, "reembedding": reset}
 
 
 # ── EVALUATION lane: alignment evaluation ─────────────────────────────────────
@@ -473,7 +626,8 @@ async def run_alignment_evaluate(
 
     def _on_progress(done: int, total: int) -> None:
         if total > 0:
-            reporter.update(done / total, f"{done}/{total} images")
+            reporter.update(done / total, f"{done}/{total} images",
+                            key="images", done=done, total=total)
         else:
             reporter.indeterminate()
 
@@ -562,7 +716,8 @@ async def run_tag_taxonomy(
         except Exception as e:
             logger.warning("Tag taxonomy chunk failed: %s", e)
         done += len(chunk)
-        reporter.update(done / max(total, 1), f"{done}/{total} tags")
+        reporter.update(done / max(total, 1), f"{done}/{total} tags",
+                            key="tags", done=done, total=total)
 
     return {"taxonomy": taxonomy}
 
@@ -591,6 +746,24 @@ async def run_is_reference_backfill(
     return {"done": count}
 
 
+async def run_model_name_backfill(
+    reporter: ProgressReporter,
+    cancel: CancelToken,
+    *,
+    db,
+) -> dict:
+    """Repair pass — ingest already writes model_name for every image.
+
+    It exists because the model dropdown is built from params.Model while the
+    filter matches on model_name; a row where those disagree is listed but never
+    returned. Finding anything to do here means something upstream skipped a
+    write, which is worth looking at rather than silently papering over.
+    """
+    reporter.indeterminate()
+    count = await db.backfill_model_name()
+    return {"done": count}
+
+
 # ── GENERATION lane: ComfyUI generation ───────────────────────────────────────
 
 async def run_generation(
@@ -611,7 +784,7 @@ async def run_generation(
     import asyncio as _asyncio
     import random as _random
 
-    from ..api.ai import _save_and_register_comfy_image
+    from ..scanner.save import save_generated_image
     from ..creation.schema import CreationRecord, InspireContext, SourceImageRef
 
     reporter.indeterminate()
@@ -658,8 +831,10 @@ async def run_generation(
     )
 
     # submit to ComfyUI
-    prompt_id = await comfy.queue_prompt(patched)
-    reporter.update(0.0, "Waiting in ComfyUI queue...")
+    # A separate clientId per render (a retake otherwise drops the previous socket)
+    client_id = comfy.new_client_id()
+    prompt_id = await comfy.queue_prompt(patched, client_id=client_id)
+    reporter.update(0.0, "Waiting in ComfyUI queue...", key="comfyQueue")
 
     # cancel handler: delete from queue if not yet started, interrupt if running
     queued = True
@@ -680,14 +855,14 @@ async def run_generation(
     saved_sha256s: list[str] = []
     saved_filenames: set[str] = set()
 
-    async for event in comfy.stream_progress(prompt_id):
+    async for event in comfy.stream_progress(prompt_id, client_id=client_id):
         cancel.raise_if_set()
         queued = False
 
         if event["type"] == "comfy_progress":
             v = event.get("value", 0)
             m = event.get("max", 1)
-            reporter.update(v / max(m, 1), f"Step {v}/{m}")
+            reporter.update(v / max(m, 1), f"Step {v}/{m}", key="step", v=v, m=m)
 
         elif event["type"] == "comfy_output":
             for img_ref in event.get("images", []):
@@ -698,8 +873,8 @@ async def run_generation(
                         img_ref.get("subfolder", ""),
                         img_ref.get("type", "output"),
                     )
-                    sha256 = await _save_and_register_comfy_image(
-                        img_bytes, img_ref["filename"], db
+                    sha256 = await save_generated_image(
+                        img_bytes, img_ref["filename"], db, prefix="comfy"
                     )
                     if sha256:
                         saved_sha256s.append(sha256)
@@ -719,8 +894,8 @@ async def run_generation(
                 img_ref.get("subfolder", ""),
                 img_ref.get("type", "output"),
             )
-            sha256 = await _save_and_register_comfy_image(
-                img_bytes, img_ref["filename"], db
+            sha256 = await save_generated_image(
+                img_bytes, img_ref["filename"], db, prefix="comfy"
             )
             if sha256:
                 saved_sha256s.append(sha256)
@@ -728,7 +903,8 @@ async def run_generation(
         except Exception as exc:
             logger.error("ComfyUI history image save error: %s", exc)
 
-    reporter.update(1.0, f"{len(saved_sha256s)} images generated")
+    reporter.update(1.0, f"{len(saved_sha256s)} images generated",
+                    key="imagesGenerated", n=len(saved_sha256s))
     return {"sha256s": saved_sha256s, "prompt_id": prompt_id}
 
 
@@ -767,9 +943,13 @@ async def run_inversion(
                 if evt.get("type") == "stage":
                     p = STAGE_PROGRESS.get(evt.get("stage"), None)
                     if p is not None:
-                        reporter.update(p, evt.get("label", ""))
+                        # The six stages of the inversion have fixed meanings, so the console
+                        # names them in the reader's language; the label in the
+                        # event stays as it is for the Inspire panel.
+                        reporter.update(p, evt.get("label", ""),
+                                        key=f"inversionStage{evt.get('stage')}")
                 elif evt.get("type") == "done":
-                    reporter.update(1.0, "Done")
+                    reporter.update(1.0, "Done", key="done")
             except Exception:
                 pass
     except JobCancelled:
@@ -803,7 +983,10 @@ async def run_brainstorm(
     cancel.on_cancel(_abort.set)
 
     try:
-        async for sse_str in _brainstorm_stream(body.sha256s, body.extra_tags, db, ollama, cfg, lang=body.lang):
+        async for sse_str in _brainstorm_stream(
+            body.sha256s, body.extra_tags, db, ollama, cfg,
+            lang=body.lang, reference_tags=body.reference_tags, theme=body.theme,
+        ):
             if _abort.is_set():
                 raise JobCancelled()
             await event_queue.put(sse_str)
@@ -814,8 +997,64 @@ async def run_brainstorm(
         await event_queue.put(f'data: {{"type":"error","message":{str(exc)!r}}}\n\n')
         raise
     finally:
-        reporter.update(1.0, "Done")
+        reporter.update(1.0, "Done", key="done")
         await event_queue.put(None)
+
+
+async def run_expand_theme(
+    reporter: ProgressReporter,
+    cancel: CancelToken,
+    *,
+    body_dict: dict,
+    db,
+    ollama,
+    event_queue: asyncio.Queue,
+) -> None:
+    """PROMPT lane runner — expands a theme into 4 section tags via VLM, puts done event on event_queue."""
+    from ..api.inspire import (
+        ExpandThemeRequest, _sse, _normalize_section,
+        _EXPAND_THEME_PROMPT, _parse_json_from_llm, create_tile_image,
+    )
+    from ..runtime_config import get_runtime_config
+
+    body = ExpandThemeRequest(**body_dict)
+    cfg = await get_runtime_config(db)
+    reporter.indeterminate()
+
+    image_bytes_list: list[bytes] = []
+    for sha256 in body.sha256s[:4]:
+        doc = await db.get(sha256)
+        if doc:
+            fp = Path(doc.get("path", ""))
+            if fp.exists():
+                image_bytes_list.append(fp.read_bytes())
+    tile_bytes = create_tile_image(image_bytes_list) if image_bytes_list else None
+
+    safe_theme = body.theme.replace("{", "{{").replace("}", "}}")
+    prompt = _EXPAND_THEME_PROMPT.format(theme=safe_theme)
+
+    try:
+        if tile_bytes:
+            raw = await ollama.generate_vlm(prompt, [tile_bytes], model=cfg["vlm_model"])
+        else:
+            raw = await ollama.generate_text(prompt, model=cfg["vlm_model"])
+        data = _parse_json_from_llm(raw) or {}
+    except Exception as exc:
+        await event_queue.put(_sse({"type": "error", "message": str(exc)}))
+        await event_queue.put(None)
+        raise
+
+    await event_queue.put(_sse({
+        "type": "done",
+        "character":  _normalize_section(data.get("character", "")),
+        "background": _normalize_section(data.get("background", "")),
+        "props":      _normalize_section(data.get("props", "")),
+        "action":     _normalize_section(data.get("action", "")),
+        "mood":       _normalize_section(data.get("mood", "")),
+        "camera":     _normalize_section(data.get("camera", "")),
+    }))
+    reporter.update(1.0, "Done", key="done")
+    await event_queue.put(None)
 
 
 async def _find_conflict_tags(
@@ -902,10 +1141,12 @@ async def run_refine_prompt(
         _extract_literal_texts,
         _append_literal_texts,
         _parse_detailed_output,
+        _sample_mutation_tags,
         _REFINE_CAT_FIELDS,
     )
     from ..api.inspire import _parse_json_from_llm, _split_tags
     from ..ai.tile_image import create_tile_image
+    from ..prompt.visual_spec import clamp_prose_paragraphs
     from ..runtime_config import get_runtime_config
     from ..spooler.models import JobLane
 
@@ -916,7 +1157,7 @@ async def run_refine_prompt(
 
     def _phase(code: str, progress: float, text: str) -> None:
         reporter.update(progress, text)
-        _put({"type": "phase", "code": code})
+        _put({"type": "phase", "code": code, "progress": progress})
 
     # event for cancel signal (can be set synchronously from on_cancel handler)
     _abort = asyncio.Event()
@@ -939,11 +1180,14 @@ async def run_refine_prompt(
         negative = (body.direct_negative_prompt or "").strip()
         _put({"type": "done", "positive": positive, "negative": negative,
                "auto_submit": body.auto_submit, "prose_missing": False})
-        if body.auto_submit and body.workflow_name:
+        if body.auto_submit and not body.workflow_name:
+            _put({"type": "error", "message": "Auto-submit is on but no workflow was selected"})
+        elif body.auto_submit:
             try:
                 gen_job_id = _submit_gen_direct(spooler, comfy, db, body, positive, negative, seed=seed_for_gen)
                 _put({"type": "comfy_job_id", "job_id": gen_job_id})
             except Exception as exc:
+                logger.error("Refine direct auto-submit failed: %s", exc)
                 _put({"type": "error", "message": f"Generation job error: {exc}"})
         _put(None)
         return
@@ -1002,15 +1246,84 @@ async def run_refine_prompt(
                 nl_instruction, all_source_tags, db, ollama, cfg["vlm_model"]
             )
 
-    # 1b. build context with common/unique WD14 tag decomposition
+    # 1b. build context with common/unique WD14 tag decomposition.
+    # Transmute: divergence loosens the shared-trait lock and injects mutation tags.
+    divergence = max(0.0, min(1.0, body.divergence))
+    effective_common_ratio = body.wd14_common_ratio * (1.0 - divergence * 0.7)
+
     _phase("buildingPrompt", 0.10, "Building prompt context...")
     context, wd14_analysis = _build_weighted_wd14_context(
         raw_docs,
         weights,
         conflict_tags,
-        common_ratio=body.wd14_common_ratio,
+        common_ratio=effective_common_ratio,
         unique_count=body.wd14_unique_count,
+        roles=body.roles or None,
     )
+
+    # Emotional register shift: state the references' dominant emotion and the target
+    if body.emotion_shift:
+        from ..ai.emotion_tagger import EMOTION_DIMENSIONS
+        if body.emotion_shift in EMOTION_DIMENSIONS:
+            sums = {d: 0.0 for d in EMOTION_DIMENSIONS}
+            scored_docs = 0
+            for doc, _ in raw_docs:
+                if doc.get(f"emotion_{EMOTION_DIMENSIONS[0]}") is None:
+                    continue
+                scored_docs += 1
+                for d in EMOTION_DIMENSIONS:
+                    sums[d] += float(doc.get(f"emotion_{d}") or 0.0)
+            current_line = ""
+            if scored_docs:
+                dom = max(sums, key=sums.get)
+                current_line = f"Current dominant register: {dom} ({sums[dom] / scored_docs:.2f}).\n"
+            context += (
+                "\n\n---\n\n[EMOTIONAL REGISTER SHIFT]\n"
+                f"{current_line}"
+                f"Rewrite the mood, lighting, color, and atmosphere toward: {body.emotion_shift}. "
+                "Keep the subject, pose, and composition of the references intact."
+            )
+
+    if body.inspire_context:
+        ic = body.inspire_context if isinstance(body.inspire_context, dict) else {}
+        lines = ["\n\n---\n\n[INSPIRE CONTEXT]"]
+        mode = ic.get("mode") or ""
+        if mode:
+            lines.append(f"mode: {mode}")
+        targets = ic.get("change_targets") or ic.get("axes") or []
+        if targets:
+            lines.append(f"change_targets: {', '.join(str(t) for t in targets)}")
+        injected = ic.get("injected_tags") or []
+        if injected:
+            lines.append(f"injected_tags: {', '.join(str(t) for t in injected)}")
+        add_shas = ic.get("add_sha256s") or []
+        sub_shas = ic.get("sub_sha256s") or []
+        if add_shas:
+            lines.append(f"add_sha256s: {', '.join(str(s) for s in add_shas)}")
+        if sub_shas:
+            lines.append(f"sub_sha256s: {', '.join(str(s) for s in sub_shas)}")
+        sha_a = ic.get("sha256_a") or ""
+        sha_b = ic.get("sha256_b") or ""
+        if sha_a or sha_b:
+            lines.append(f"sha256_a: {sha_a}")
+            lines.append(f"sha256_b: {sha_b}")
+        if len(lines) > 1:
+            context += "\n".join(lines)
+
+    mutation_tags: list[str] = []
+    if divergence > 0:
+        _phase("mutatingTags", 0.14, "Sampling mutation tags...")
+        mutation_tags = await _sample_mutation_tags(db, ollama, wd14_analysis, divergence)
+        if mutation_tags:
+            pct = round(divergence * 100)
+            context += (
+                f"\n\n---\n\n[MUTATION TAGS — divergence {pct}%]\n"
+                f"{', '.join(mutation_tags)}\n"
+                f"Replace roughly {pct}% of the style / scene / lighting elements of the "
+                "references with these mutation tags. Keep the subject count, pose, and "
+                "character identity from the references intact."
+            )
+
     instruction_framing = body.instruction_mode != "none"
 
     async def _stream_vlm(
@@ -1042,11 +1355,12 @@ async def run_refine_prompt(
         phase_end: float = 1.0,
         expected_tokens: int = 200,
         phase_text: str = "",
+        options_override: dict | None = None,
     ) -> str:
         """Run a text-only LLM call (no images), forwarding tokens to token_queue."""
         tokens: list[str] = []
         async for event in ollama.generate_text_stream(
-            prompt, model=cfg["vlm_model"], options=options
+            prompt, model=cfg["vlm_model"], options=options_override or options
         ):
             if _abort.is_set():
                 raise JobCancelled()
@@ -1064,6 +1378,11 @@ async def run_refine_prompt(
     cat_tags: dict[str, list[str]] = {f: [] for f in _REFINE_CAT_FIELDS}
     _all_must = _build_all_must(wd14_analysis)
 
+    # Variation fan-out (natural style only): prose pass runs N times on a temperature ladder
+    _FANOUT_TEMPS = (0.5, 0.8, 1.1)
+    variation_count = max(1, min(3, body.variation_count)) if body.prompt_style == "natural" else 1
+    fanout_stories: list[tuple[str, float]] = []  # (story, temperature) for extra variants
+
     try:
         if body.prompt_style == "natural":
             # Pass 1: tags only — a small VLM handles one focused task reliably.
@@ -1080,17 +1399,29 @@ async def run_refine_prompt(
             tags_positive = _clean_markdown(tags_positive)
             negative = _clean_markdown(negative)
             tags_positive = _ensure_subject_anchor(tags_positive, raw_docs)
-            # Inject WD14 must_unique directly into tag line ("2回" reinforcement)
-            tags_positive = _inject_wd14_must_tags(tags_positive, wd14_analysis)
+            # Inject WD14 must_unique directly into tag line (reinforced twice).
+            # Skipped at high divergence — re-anchoring all reference tags would undo the mutation.
+            if divergence <= 0.5:
+                tags_positive = _inject_wd14_must_tags(tags_positive, wd14_analysis)
 
             # Pass 2: Visual Script — prose with inline danbooru tags + per-category labeled sections.
             _put({"type": "token", "text": "\n\n"})
+            _prose_n = clamp_prose_paragraphs(getattr(body, "prose_paragraphs", 5))
             vs_prompt = _build_natural_visual_script_prompt(
                 context, nl_instruction, tags_positive,
                 instruction_framing=instruction_framing,
+                prose_paragraphs=_prose_n,
             )
             _phase("writingDescription", 0.55, "Writing Visual Script...")
-            vs_raw = await _stream_text(vs_prompt, 0.55, 0.90, 500, "Writing Visual Script...")
+            _pass2_end = 0.90 if variation_count == 1 else 0.70
+            _main_options = (
+                {**options, "temperature": _FANOUT_TEMPS[0]} if variation_count > 1 else None
+            )
+            _vs_tokens = 350 + _prose_n * 80
+            vs_raw = await _stream_text(
+                vs_prompt, 0.55, _pass2_end, _vs_tokens, "Writing Visual Script...",
+                options_override=_main_options,
+            )
 
             # Parse visual script: split prose from labeled tag sections
             context_story, vs_cat_tags = _parse_visual_script_sections(vs_raw)
@@ -1104,8 +1435,26 @@ async def run_refine_prompt(
             if _all_must:
                 cat_tags = _enforce_wd14_on_cat_tags(cat_tags, _all_must)
 
-            prose_missing = len(context_story.split()) < 30
+            # Shorter Visual Scripts still need real prose, not a stub.
+            _min_words = max(18, 6 * _prose_n)
+            prose_missing = len(context_story.split()) < _min_words
             positive = f"{tags_positive}\n\n{context_story}"
+
+            # Extra fan-out variants: same tags, hotter prose interpretations
+            for _vi, _vt in enumerate(_FANOUT_TEMPS[1:variation_count]):
+                _put({"type": "token", "text": "\n\n---\n\n"})
+                _v_start = 0.70 + 0.10 * _vi
+                _phase("writingDescription", _v_start, f"Variant prose (temp {_vt})...")
+                _v_raw = await _stream_text(
+                    vs_prompt, _v_start, _v_start + 0.10, _vs_tokens,
+                    f"Variant prose (temp {_vt})...",
+                    options_override={**options, "temperature": _vt},
+                )
+                _v_story, _ = _parse_visual_script_sections(_v_raw)
+                _v_story = _strip_visual_script_markers(_v_story)
+                if _all_must:
+                    _v_story = _correct_prose_wd14_conflicts(_v_story, _all_must)
+                fanout_stories.append((f"{tags_positive}\n\n{_v_story}", _vt))
         else:
             vlm_prompt = _build_vlm_prompt(
                 context, nl_instruction, body.prompt_style, body.negative_prompt,
@@ -1152,8 +1501,10 @@ async def run_refine_prompt(
             else:
                 positive = _clean_markdown(_strip_stray_negative(raw_text))
                 negative = ""
+            # Subject-count safety net for danbooru/detailed (natural already does this).
+            positive = _ensure_subject_anchor(positive, raw_docs)
             # WD14 post-processing for danbooru/detailed (mirrors natural branch)
-            if body.prompt_style == "danbooru":
+            if body.prompt_style == "danbooru" and divergence <= 0.5:
                 positive = _inject_wd14_must_tags(positive, wd14_analysis)
             if _all_must:
                 if body.prompt_style == "detailed":
@@ -1166,8 +1517,10 @@ async def run_refine_prompt(
     except Exception as exc:
         logger.error("Ollama stream error in run_refine_prompt: %s", exc)
         _put({"type": "error", "message": str(exc)})
+        # Sentinel first so the SSE stream closes, then fail the job for real —
+        # reporting "Done" here is what let a dead run look like a finished one.
         _put(None)
-        return
+        raise
 
     # 5. post-process: forced-tag removal + literal directive injection
     _phase("parsingOutput", 0.90, "Parsing output...")
@@ -1182,6 +1535,22 @@ async def run_refine_prompt(
     if literal_texts:
         positive = _append_literal_texts(positive, literal_texts)
 
+    # 5c. process fan-out variants with the same post-processing as the main prompt
+    variants: list[dict] = []
+    for _v_pos, _vt in fanout_stories:
+        _v_pos, _ = _remove_forced_tags(_v_pos, removal_tags, all_lines=False)
+        if literal_texts:
+            _v_pos = _append_literal_texts(_v_pos, literal_texts)
+        variants.append({"positive": _v_pos, "temperature": _vt})
+
+    # A model that answers with nothing at all still reaches here with an empty
+    # prompt. Submitting it burns a full render on whitespace, so refuse — same
+    # shape as the direct_prompt check above.
+    if not positive.strip():
+        _put({"type": "error", "message": "The model returned an empty prompt"})
+        _put(None)
+        raise RuntimeError("run_refine_prompt produced an empty positive prompt")
+
     _put({
         "type": "done",
         "positive": positive,
@@ -1192,19 +1561,34 @@ async def run_refine_prompt(
         "injected_literals": [{"text": t} for t in literal_texts],
         "context_story": context_story,
         "wd14_analysis": wd14_analysis,
+        "divergence": divergence,
+        "mutation_tags": mutation_tags,
+        "variants": variants,
         **cat_tags,
     })
 
-    # 6. auto_submit: queue a ComfyUI generation job
-    if body.auto_submit and body.workflow_name:
+    # 6. auto_submit: queue a ComfyUI generation job (one per fan-out variant)
+    if body.auto_submit and not body.workflow_name:
+        # Silently skipping here is indistinguishable from a successful run that
+        # simply never generated anything.
+        _put({"type": "error", "message": "Auto-submit is on but no workflow was selected"})
+    elif body.auto_submit:
         try:
             _phase("queuingGeneration", 0.97, "Queuing generation job...")
             gen_job_id = _submit_gen_direct(spooler, comfy, db, body, positive, negative, seed=seed_for_gen)
             _put({"type": "comfy_job_id", "job_id": gen_job_id})
         except Exception as exc:
+            logger.error("Refine auto-submit failed: %s", exc)
             _put({"type": "error", "message": f"Generation job error: {exc}"})
+        # One bad variant must not cost the others their render.
+        for v in variants:
+            try:
+                _submit_gen_direct(spooler, comfy, db, body, v["positive"], negative, seed=seed_for_gen)
+            except Exception as exc:
+                logger.error("Refine variant submit failed: %s", exc)
+                _put({"type": "error", "message": f"Variant job error: {exc}"})
 
-    reporter.update(1.0, "Done")
+    reporter.update(1.0, "Done", key="done")
     _put(None)
 
 
@@ -1282,6 +1666,9 @@ async def run_invoke_axis_decompose(
     pro_sections: dict | None = None,
     pro_prompt: str = "",
     session_manager,
+    resonance_mode: bool = False,
+    frontier_mode: bool = False,
+    emotion: str = "",
 ) -> dict:
     """PROMPT lane. Decompose user intent into structured axes."""
     from ..invoke.axis_decomposer import decompose_axes
@@ -1296,21 +1683,22 @@ async def run_invoke_axis_decompose(
     pro_prompt_spec: dict | None = None
 
     if pro_prompt:
-        # pro_prompt 指定時: まずビジュアル仕様に展開し、そのスローガンを使用
+        # With pro_prompt: expand into a visual specification first and use its
+        # slogan
         from ..invoke.vocab_bank import expand_pro_prompt, get_topic_tags
         pro_prompt_spec = await expand_pro_prompt(pro_prompt, pro_topic, pro_sections, ollama)
         effective_slogan = pro_prompt_spec["slogan"]
-        # topic_tags は引き続き取得（テーマ整合の WD14 補完用）
+        # topic_tags are still fetched (to supplement WD14 for theme consistency)
         anchor_text = pro_topic or pro_prompt
         topic_tags = await get_topic_tags(db, ollama, anchor_text, pro_sections) if anchor_text else []
     elif pro_topic:
-        # pro_topic のみ: 従来通り topic_tags + slogan を合成
+        # pro_topic only: compose topic_tags + slogan as before
         from ..invoke.vocab_bank import get_topic_tags, synthesize_slogan
         topic_tags = await get_topic_tags(db, ollama, pro_topic, pro_sections)
         effective_slogan = await synthesize_slogan(pro_topic, pro_sections, topic_tags, ollama)
     else:
         topic_tags = []
-        effective_slogan = user_intent  # Light mode: determine_slogan が通常通り実行
+        effective_slogan = user_intent  # Light mode: determine_slogan runs as usual
 
     hint_query = effective_slogan or " ".join(
         _EMOJI_MEANINGS.get(e, e) for e in (emoji_codes or [])
@@ -1323,12 +1711,58 @@ async def run_invoke_axis_decompose(
         logger.debug("[invoke] character_hints failed: %s", _e)
         character_hints = {}
 
+    # Echoes of Resonance: blend starred-image taste hints into character_hints
+    if resonance_mode:
+        from ..invoke.vocab_bank import compute_resonance_hints
+        try:
+            resonance = await compute_resonance_hints(db)
+            for cat, tags in resonance.items():
+                seen = set(character_hints.get(cat, []))
+                character_hints[cat] = character_hints.get(cat, []) + [
+                    t for t in tags if t not in seen
+                ]
+            logger.debug("[invoke] resonance hints merged: %s", {k: len(v) for k, v in resonance.items()})
+        except Exception as _re:
+            logger.warning("[invoke] resonance_hints failed: %s", _re)
+    # Frontier: blend never-seen vocabulary far from the taste centroid (exclusive with resonance)
+    elif frontier_mode:
+        from ..invoke.vocab_bank import compute_frontier_hints
+        try:
+            frontier = await compute_frontier_hints(db)
+            for cat, tags in frontier.items():
+                seen = set(character_hints.get(cat, []))
+                character_hints[cat] = character_hints.get(cat, []) + [
+                    t for t in tags if t not in seen
+                ]
+            logger.debug("[invoke] frontier hints merged: %s", {k: len(v) for k, v in frontier.items()})
+        except Exception as _fe:
+            logger.warning("[invoke] frontier_hints failed: %s", _fe)
+
+    # Emotion register: bias the mood axis toward the chosen emotional dimension
+    emotion_hint: str | None = None
+    if emotion:
+        from ..invoke.vocab_bank import get_emotion_hints
+        try:
+            em_tags = await get_emotion_hints(db, ollama, emotion)
+            if em_tags:
+                seen = set(character_hints.get("mood", []))
+                character_hints["mood"] = character_hints.get("mood", []) + [
+                    t for t in em_tags if t not in seen
+                ]
+            emotion_hint = (
+                f"Target emotional register: {emotion}. "
+                "Infuse the mood and lighting axes with this feeling."
+            )
+        except Exception as _ee:
+            logger.warning("[invoke] emotion_hints failed: %s", _ee)
+
     axes = await decompose_axes(
         ollama,
         user_intent=effective_slogan,
         emoji_codes=emoji_codes,
         mood_sliders=mood_sliders,
         color_hex=color_hex,
+        context_hint=emotion_hint,
         person_gender=person_gender,
         person_count=person_count,
         camera_shot=camera_shot,
@@ -1337,7 +1771,8 @@ async def run_invoke_axis_decompose(
         pro_sections=pro_sections or {},
         pro_prompt_spec=pro_prompt_spec,
     )
-    # スピリットが元の NL テキストを参照できるよう _user_intent を元お題に上書き
+    # Overwrite _user_intent with the original topic so the spirits can refer to
+    # the original NL text
     axes['_user_intent'] = pro_topic or pro_prompt or user_intent
     if topic_tags:
         axes['_topic_tags'] = topic_tags
@@ -1345,21 +1780,24 @@ async def run_invoke_axis_decompose(
         axes['_story_directive']  = pro_prompt_spec.get("story_directive", "")
         axes['_supplement_tags']  = pro_prompt_spec.get("supplement_tags", [])
     if pro_prompt:
-        axes['_pro_prompt_raw'] = pro_prompt  # ベースタグを生値で保存（スピリットに verbatim 渡し）
+        axes['_pro_prompt_raw'] = pro_prompt  # keep the base tags raw (passed verbatim to the spirits)
 
-    # Pro mode: スピリット別シーン多様性のため N バリアントを生成
-    if pro_topic or pro_prompt:
+    # Generate N variants for per-spirit scene diversity (Light mode uses the slogan
+    # as the topic; the first variant stays close to the base scene, so faithful
+    # largely keeps the original scene)
+    variant_topic = pro_topic or pro_prompt or axes.get('_slogan') or user_intent
+    if variant_topic:
         from ..invoke.axis_decomposer import generate_scene_variants
         _session = session_manager.get_session(session_id)
         enabled_count = len(_session.enabled_spirits) if _session else 5
-        # scene_anchor があれば pro_topic に付加してより具体的なベースシーンを渡す
-        variant_topic = pro_topic or pro_prompt
+        # With a scene_anchor, append it to pro_topic to hand over a more concrete
+        # base scene
         if pro_prompt_spec and pro_prompt_spec.get("scene_anchor"):
             variant_topic = f"{variant_topic}\n{pro_prompt_spec['scene_anchor']}"
         scene_variants = await generate_scene_variants(ollama, axes, variant_topic, n=enabled_count)
         axes['_scene_variants'] = scene_variants
 
-    reporter.update(1.0, "Axes ready")
+    reporter.update(1.0, "Axes ready", key="axesReady")
     await session_manager.on_axis_done(session_id, axes)
     return {"axes": axes}
 
@@ -1375,6 +1813,8 @@ async def run_invoke_spirit_compose(
     axis_tag_hints: list | None = None,
     locale: str = "en",
     rebel_inversion: bool = True,
+    avoid_tags: list | None = None,
+    respin_boost: float = 0.0,
     session_manager,
 ) -> dict:
     """PROMPT lane. Generate prompt for one Spirit via Ollama."""
@@ -1401,7 +1841,18 @@ async def run_invoke_spirit_compose(
 
     # Build user message
     style_str = ", ".join(axes.get("style", []))
-    user_msg_parts = [
+    user_msg_parts: list[str] = []
+    # Front-load the respin "don't repeat this" instruction so the LLM actually
+    # notices it — buried at the tail of a long prompt it barely lands.
+    if avoid_tags:
+        user_msg_parts.append(
+            "⚠️ RESPIN — DO NOT REPRODUCE THE PREVIOUS ATTEMPT ⚠️\n"
+            f"Previously used tags: [{', '.join(avoid_tags)}]\n"
+            "Pick a genuinely different scene interpretation, pose, lighting, "
+            "palette, and supporting tag set. Keep the character identity and "
+            "the locked axes intact."
+        )
+    user_msg_parts.extend([
         f"slogan: {axes.get('_slogan', '')}",
         f"user_intent: {axes.get('_user_intent', '')}",
         f"axes:",
@@ -1415,7 +1866,7 @@ async def run_invoke_spirit_compose(
         f"  style: [{style_str}]",
         f"  palette: {axes.get('palette', '')}",
         f"  accessories: {axes.get('accessories', '')}",
-    ]
+    ])
     if spirit.get("needs_vocab_hint"):
         stranger_tags = ", ".join(vocab_hints.get("stranger", []))
         lunatic_tags = ", ".join(vocab_hints.get("lunatic", []))
@@ -1430,20 +1881,20 @@ async def run_invoke_spirit_compose(
             f"use these as Danbooru vocabulary hints; include only those consistent with the scene axes, "
             f"skip any that would over-anchor a specific location): [{', '.join(axis_tag_hints)}]"
         )
-    # BASE TAGS: ユーザー指定の Danbooru タグ — verbatim で全て含める
+    # BASE TAGS: the user's Danbooru tags — all included verbatim
     if axes.get("_pro_prompt_raw"):
         user_msg_parts.append(
             "BASE TAGS (the user's own Danbooru tags — include ALL of these verbatim, unchanged, "
             "as the foundation of your danbooru_tags output. Do NOT omit, rename, or substitute any): "
             f"[{axes['_pro_prompt_raw']}]"
         )
-    # STORY DIRECTIVE: お題 × pro_prompt から生成したナラティブ指令
+    # STORY DIRECTIVE: the narrative directive generated from topic x pro_prompt
     if axes.get("_story_directive"):
         user_msg_parts.append(
             f"STORY DIRECTIVE (narrative context from topic × user prompt — add tags that develop "
             f"this story ON TOP of the BASE TAGS): {axes['_story_directive']}"
         )
-    # SUPPLEMENT TAGS: story 分析から提案された追加タグ
+    # SUPPLEMENT TAGS: the extra tags proposed by the story analysis
     supplement = axes.get("_supplement_tags", [])
     if supplement:
         user_msg_parts.append(
@@ -1478,9 +1929,22 @@ async def run_invoke_spirit_compose(
         await session_manager.on_spirit_error(session_id, spirit_name, "Session expired")
         return {}
 
-    logger.debug("[invoke] spirit_compose start: %s", spirit_name)
+    # Spirit-native temperature × session heat (+ respin boost) drives sampling divergence
+    heat = getattr(session, "heat", 1.0) or 1.0
+    temperature = float(spirit.get("temperature", 0.8)) * heat + respin_boost
+    temperature = max(0.1, min(1.6, temperature))
+
+    # Fresh Ollama seed every compose so identical prompt text still samples
+    # a different trajectory — critical for making respins visibly different.
+    import random as _random
+    seed = _random.randint(1, (1 << 31) - 1)
+
+    logger.debug("[invoke] spirit_compose start: %s temp=%.2f seed=%d", spirit_name, temperature, seed)
     try:
-        raw = await ollama.generate_text(full_prompt, fmt="json")
+        raw = await ollama.generate_text(
+            full_prompt, fmt="json",
+            options={"temperature": temperature, "seed": seed},
+        )
     except Exception as e:
         logger.warning("[invoke] spirit_compose ollama failed (%s): %s", spirit_name, e)
         await session_manager.on_spirit_error(session_id, spirit_name, f"LLM error: {e}")
@@ -1492,16 +1956,14 @@ async def run_invoke_spirit_compose(
     try:
         result = _json.loads(raw)
     except Exception as e:
+        # Malformed JSON used to be papered over with a subject-only fallback,
+        # which produced a silently anemic prompt. Surface it instead so the
+        # user can respin (same UX path as a content_policy block).
         logger.warning("[invoke] spirit_compose JSON parse failed (%s): %s | raw=%r", spirit_name, e, raw[:200])
-        result = {
-            "spirit": spirit_name,
-            "natural_language": axes.get("subject", "a figure in a mysterious scene"),
-            "danbooru_tags": ", ".join(axes.get("style", ["anime"])),
-            "negative_supplement": "",
-            "internal_monologue": "…",
-            "inverted_axis": None,
-            "wild_tags_used": [],
-        }
+        await session_manager.on_spirit_error(
+            session_id, spirit_name, "LLM returned malformed JSON — please retry."
+        )
+        return {}
 
     # ── BM25 normalize Spirit danbooru_tags against Danbooru vocabulary ──────
     try:
@@ -1519,42 +1981,27 @@ async def run_invoke_spirit_compose(
         await session_manager.on_spirit_error(session_id, spirit_name, BLOCK_MESSAGE)
         return {}
 
+    # ── Adequacy guard: catch severely short / empty prompts and surface them
+    # the same way content_policy does, so the user sees the Retry button
+    # instead of a silently-degraded rendered image.
+    nl_len = len((result.get("natural_language") or "").strip())
+    tag_count = sum(1 for t in (result.get("danbooru_tags") or "").split(",") if t.strip())
+    if nl_len < 30 and tag_count < 15:
+        logger.warning(
+            "[invoke] spirit produced degenerate prompt: %s (nl=%d, tags=%d)",
+            spirit_name, nl_len, tag_count,
+        )
+        await session_manager.on_spirit_error(
+            session_id, spirit_name, "Prompt generation failed — please retry."
+        )
+        return {}
+
     logger.debug("[invoke] spirit_compose done: %s → nl=%r", spirit_name, str(result.get("natural_language", ""))[:60])
-    reporter.update(1.0, f"{spirit_name} composed")
+    reporter.update(1.0, f"{spirit_name} composed", key="spiritComposed", spirit=spirit_name)
 
     cancel.raise_if_set()
     await session_manager.on_spirit_composed(session_id, spirit_name, result)
     return result
-
-
-async def _save_and_register_invoke_image(img_bytes: bytes, original_name: str, db) -> str | None:
-    """Save an invoke-generated image to generated_images_dir/invoke/ (watcher skips auto-pipeline there)."""
-    import hashlib as _hl
-    from datetime import datetime as _dt
-    from pathlib import Path as _Path
-
-    from ..config import settings as _settings
-    from ..scanner.scanner import register_image as _register_image
-
-    sha256 = _hl.sha256(img_bytes).hexdigest()
-    gen_dir = _settings.generated_images_dir / "invoke"
-    gen_dir.mkdir(parents=True, exist_ok=True)
-
-    suffix = _Path(original_name).suffix or ".png"
-    ts = _dt.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"invoke_{ts}_{sha256[:8]}{suffix}"
-    path = gen_dir / filename
-
-    loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, path.write_bytes, img_bytes)
-
-    try:
-        await _register_image(path, db)
-        logger.debug("[invoke] image registered: %s", filename)
-        return sha256
-    except Exception as exc:
-        logger.error("[invoke] register_image failed: %s", exc)
-        return None
 
 
 async def run_invoke_image_generate(
@@ -1570,6 +2017,8 @@ async def run_invoke_image_generate(
 ) -> dict:
     """GEN lane. Generate image for one Spirit via ComfyUI."""
     import random as _random
+
+    from ..scanner.save import save_generated_image
 
     reporter.indeterminate()
 
@@ -1614,13 +2063,16 @@ async def run_invoke_image_generate(
     try:
         wf = comfy.load_workflow(workflow_name)
         patched = comfy.patch_workflow(wf, positive.strip(), negative.strip(), "", "", 1, seed=seed)
-        prompt_id = await comfy.queue_prompt(patched)
+        # A separate clientId per render (a retake otherwise drops the previous
+        # socket)
+        client_id = comfy.new_client_id()
+        prompt_id = await comfy.queue_prompt(patched, client_id=client_id)
     except Exception as e:
         logger.warning("[invoke] image_generate ComfyUI setup failed (%s): %s", spirit_name, e)
         await session_manager.on_spirit_error(session_id, spirit_name, f"ComfyUI setup error: {e}")
         return {}
 
-    reporter.update(0.0, "Waiting in ComfyUI queue...")
+    reporter.update(0.0, "Waiting in ComfyUI queue...", key="comfyQueue")
 
     queued = True
 
@@ -1640,14 +2092,14 @@ async def run_invoke_image_generate(
     sha256: str | None = None
 
     try:
-        async for event in comfy.stream_progress(prompt_id):
+        async for event in comfy.stream_progress(prompt_id, client_id=client_id):
             cancel.raise_if_set()
             queued = False
 
             if event["type"] == "comfy_progress":
                 v = event.get("value", 0)
                 m = event.get("max", 1)
-                reporter.update(v / max(m, 1), f"Step {v}/{m}")
+                reporter.update(v / max(m, 1), f"Step {v}/{m}", key="step", v=v, m=m)
                 await session_manager.on_spirit_progress(session_id, spirit_name, v, m)
 
             elif event["type"] == "comfy_output":
@@ -1659,7 +2111,10 @@ async def run_invoke_image_generate(
                             img_ref.get("subfolder", ""),
                             img_ref.get("type", "output"),
                         )
-                        saved = await _save_and_register_invoke_image(img_bytes, img_ref["filename"], db)
+                        saved = await save_generated_image(
+                            img_bytes, img_ref["filename"], db,
+                            subdir="invoke", prefix="invoke",
+                        )
                         if saved and not sha256:
                             sha256 = saved
                     except Exception as exc:
@@ -1672,7 +2127,7 @@ async def run_invoke_image_generate(
 
     if sha256:
         logger.debug("[invoke] image_generate done: %s sha256=%s", spirit_name, sha256[:12])
-        reporter.update(1.0, f"{spirit_name} image ready")
+        reporter.update(1.0, f"{spirit_name} image ready", key="spiritImageReady", spirit=spirit_name)
         await session_manager.on_image_done(session_id, spirit_name, sha256)
     else:
         await session_manager.on_spirit_error(session_id, spirit_name, "Image generation produced no output")
@@ -1690,14 +2145,16 @@ async def run_invoke_session_finalize(
     ollama,
     session_manager,
 ) -> dict:
-    """EMBEDDING lane. 全 invoke 生成画像に AI pipeline を一括適用後、各 spirit の alignment を submit。"""
+    """EMBEDDING lane. Applies the AI pipeline to every invoke-generated image in one
+    pass, then submits each spirit's alignment."""
     from ..ai.pipeline import run_ai_pipeline
     from ..spooler.models import JobLane
 
     reporter.indeterminate()
     sha256s = list(spirit_sha256s.values())
 
-    # run_ai_pipeline はべき等のため直接呼び出す（処理済み画像はスキップされる）
+    # run_ai_pipeline is idempotent, so it is called directly (processed images are
+    # skipped)
     try:
         task = asyncio.create_task(
             run_ai_pipeline(db, ollama, sha256s, pause_checkpoint=cancel.pause_checkpoint)
@@ -1709,10 +2166,39 @@ async def run_invoke_session_finalize(
     except Exception as exc:
         logger.warning("[invoke] session_finalize pipeline failed: %s", exc)
 
-    reporter.update(0.9, "pipeline done, submitting alignment")
+    reporter.update(0.85, "pipeline done, scoring novelty", key="scoringNovelty")
 
-    # Pipeline 完了後、各 spirit の alignment を EVALUATION ランに submit
+    # Surprise score: the embedding distance to the nearest library image (session
+    # siblings excluded). Pure vector arithmetic with no VLM — it makes lunatic's and
+    # stranger's deviation visible.
     session = session_manager.get_session(session_id)
+    sibling_set = set(spirit_sha256s.values())
+    for spirit_name, sha256 in spirit_sha256s.items():
+        cancel.raise_if_set()
+        novelty: float | None = None
+        try:
+            similar = await db.search_similar(sha256, n_results=8)
+            top_sim = next(
+                (d["_score"] for d in similar if d.get("sha256") not in sibling_set),
+                None,
+            )
+            if top_sim is not None:
+                novelty = round(max(0.0, min(1.0, 1.0 - float(top_sim))) * 100, 1)
+        except Exception as exc:
+            logger.debug("[invoke] novelty score failed for %s: %s", sha256[:12], exc)
+        if novelty is None:
+            continue
+        if session and (spirit := session.spirits.get(spirit_name)):
+            spirit.novelty_score = novelty
+        try:
+            await db.set_payload(sha256, {"genesis.novelty_at_genesis": novelty})
+        except Exception as exc:
+            logger.debug("[invoke] novelty payload write failed for %s: %s", sha256[:12], exc)
+
+    reporter.update(0.9, "novelty done, submitting alignment", key="submittingAlignment")
+
+    # Once the pipeline finishes, submit each spirit's alignment onto the EVALUATION
+    # lane
     if session:
         for spirit_name, sha256 in spirit_sha256s.items():
             spirit = session.spirits.get(spirit_name)
@@ -1733,7 +2219,7 @@ async def run_invoke_session_finalize(
             if spirit:
                 spirit.job_ids.append(job_id)
 
-    reporter.update(1.0, "finalize done")
+    reporter.update(1.0, "finalize done", key="finalizeDone")
     return {"processed": len(sha256s)}
 
 
@@ -1762,7 +2248,10 @@ async def run_invoke_alignment_score(
     except Exception as e:
         logger.warning("invoke alignment failed for %s: %s", sha256, e)
 
-    reporter.update(1.0, f"score={score:.2f}" if score is not None else "scored")
+    if score is not None:
+        reporter.update(1.0, f"score={score:.2f}", key="scored", score=f"{score:.2f}")
+    else:
+        reporter.update(1.0, "scored", key="scoredPlain")
     await session_manager.on_spirit_done(session_id, spirit_name, score)
     return {"score": score}
 
@@ -1794,7 +2283,7 @@ async def run_invoke_respin(
             axis_tags.extend(v.replace(",", " ").split())
 
     _vh, _ah = await _asyncio.gather(
-        get_vocab_hints(session.db, session.ollama, axis_tags),
+        get_vocab_hints(session.db, session.ollama, axis_tags, wildness=session.wildness),
         get_axis_semantic_tags(session.db, session.ollama, session.axes or {}),
         return_exceptions=True,
     )
@@ -1803,8 +2292,45 @@ async def run_invoke_respin(
 
     spirit_vocab = vocab_hints if spirit_name in ("stranger", "lunatic") else {"stranger": [], "lunatic": []}
 
-    reporter.update(0.25, f"Hints ready — composing {spirit_name}")
+    # Respin memory: steer away from previous attempts instead of re-rolling the same dice
+    avoid_tags: list[str] = []
+    spirit_state = session.spirits.get(spirit_name)
+    history = spirit_state.history if spirit_state else []
+    if history:
+        prev_wild: set[str] = set()
+        seen: set[str] = set()
+        for prev in history:
+            prev_wild.update(prev.get("wild_tags_used") or [])
+            for f in ("background_tags", "object_tags", "lighting_tags", "pose_tags"):
+                for t in (prev.get(f) or "").split(","):
+                    t = t.strip()
+                    if t and t.lower() not in seen:
+                        avoid_tags.append(t)
+                        seen.add(t.lower())
+        avoid_tags = avoid_tags[-15:]  # most recent attempts matter most
+        # Draw fresh vocabulary: drop guest/wild tags already tried
+        if prev_wild:
+            spirit_vocab = {
+                k: [t for t in v if t not in prev_wild]
+                for k, v in spirit_vocab.items()
+            }
+
+    reporter.update(0.25, f"Hints ready — composing {spirit_name}",
+                        key="hintsReady", spirit=spirit_name)
     cancel.raise_if_set()
+
+    # Stepped respin temperature ramp. The previous +0.1 * len(history) was
+    # too gentle to visibly reroll on the first respin — this jumps to +0.25
+    # immediately so the user sees a genuinely different sampling trajectory.
+    n = len(history)
+    if n == 0:
+        respin_boost = 0.0
+    elif n == 1:
+        respin_boost = 0.25
+    elif n == 2:
+        respin_boost = 0.40
+    else:
+        respin_boost = 0.55
 
     return await run_invoke_spirit_compose(
         reporter,
@@ -1816,6 +2342,8 @@ async def run_invoke_respin(
         axis_tag_hints=axis_tag_hints,
         locale=session.locale,
         rebel_inversion=session.rebel_inversion if spirit_name == "rebel" else True,
+        avoid_tags=avoid_tags,
+        respin_boost=respin_boost,
         session_manager=session_manager,
     )
 
@@ -1828,24 +2356,25 @@ async def run_invoke_enhance_prompt(
     ollama,
     text: str,
     tag_count: int = 25,
-) -> dict:
-    """PROMPT lane. Embed text, find semantic WD14 tags, refine via LLM."""
+    event_queue: asyncio.Queue,
+) -> None:
+    """PROMPT lane. Embed text, find semantic WD14 tags, refine via LLM. Puts done event on event_queue."""
     import json as _json
     import re as _re
     from ..invoke.vocab_bank import _is_species_tag
 
-    reporter.update(0.1, "Embedding text...")
+    reporter.update(0.1, "Embedding text...", key="embeddingText")
     cancel.raise_if_set()
 
     vec = await ollama.embed(text)
 
-    reporter.update(0.4, "Searching vocab...")
+    reporter.update(0.4, "Searching vocab...", key="searchingVocab")
     cancel.raise_if_set()
 
     hits = await db.search_wd14_vocab(vec, min_freq=0.005, max_freq=1.0, limit=tag_count * 2)
     candidate_names = [h["name"] for h in hits if not _is_species_tag(h["name"])]
 
-    reporter.update(0.6, "Refining tags...")
+    reporter.update(0.6, "Refining tags...", key="refiningTags")
     cancel.raise_if_set()
 
     system_prompt = (
@@ -1879,35 +2408,68 @@ async def run_invoke_enhance_prompt(
     raw_tags = [t.strip() for t in result.get("tags", "").split(",")]
     result["tags"] = ", ".join(t for t in raw_tags if t and not _is_species_tag(t))
 
-    reporter.update(1.0, "Done")
-    return {
+    result_dict = {
+        "type":             "done",
         "tags":             result.get("tags", ""),
         "natural_language": result.get("natural_language", ""),
         "vocab_hits":       [h for h in hits[:tag_count] if not _is_species_tag(h["name"])],
     }
+    reporter.update(1.0, "Done", key="done")
+    await event_queue.put(f"data: {json.dumps(result_dict)}\n\n")
+    await event_queue.put(None)
 
 
-async def run_invoke_daily_oracle(
+async def run_invoke_oracle_compose(
     reporter: ProgressReporter,
     cancel: CancelToken,
     *,
     db,
     ollama,
-    comfy,
-    spooler,
-    session_manager,
-    daily_oracle_date: str,
-    workflow_name: str = "",
     topic: str = "",
+    roulette: bool = False,
+    daily_oracle_date: str = "",
 ) -> dict:
-    """SYNC lane (low priority). Generate today's 5 oracle images."""
+    """PROMPT lane. Draw the oracle's daily theme and decompose axes.
+
+    All Ollama (GPU) work of the daily oracle lives here so the SYNC lane
+    stays CPU/I-O only."""
     from ..invoke.axis_decomposer import decompose_axes
-    from ..invoke.session_manager import SPIRIT_ORDER
     from ..invoke.vocab_bank import get_recent_adopted_tags
-    from ..spooler.models import JobLane
 
     reporter.indeterminate()
     cancel.raise_if_set()
+
+    # Roulette: draw today's theme instead of repeating a static topic.
+    # Alternates "comfort day" (recent taste) and "frontier day" (unexplored vocabulary).
+    if not topic and roulette:
+        from datetime import date as _date
+        from ..invoke.vocab_bank import compute_frontier_hints, synthesize_slogan
+
+        try:
+            day = _date.fromisoformat(daily_oracle_date)
+        except ValueError:
+            day = _date.today()
+        season = ("winter", "winter", "spring", "spring", "spring", "summer",
+                  "summer", "summer", "autumn", "autumn", "autumn", "winter")[day.month - 1]
+
+        drawn_tags: list[str] = []
+        if day.timetuple().tm_yday % 2 == 0:
+            mode = "a comforting scene close to the user's recent taste"
+            try:
+                recent = await get_recent_adopted_tags(db, days=14)
+                drawn_tags = [t for t, _ in sorted(recent.items(), key=lambda x: -x[1])[:4]]
+            except Exception as e:
+                logger.warning("oracle roulette comfort tags failed: %s", e)
+        else:
+            mode = "an unexplored frontier scene unlike anything in the user's library"
+            try:
+                fh = await compute_frontier_hints(db, n_tags=8)
+                drawn_tags = (fh.get("mood", []) + fh.get("scene", []) + fh.get("character", []))[:3]
+            except Exception as e:
+                logger.warning("oracle roulette frontier tags failed: %s", e)
+
+        topic = await synthesize_slogan(f"A {season} day — {mode}", None, drawn_tags, ollama)
+        logger.info("[invoke] oracle roulette topic: %r (tags=%s)", topic[:80], drawn_tags)
 
     context_hint = None
     if not topic:
@@ -1924,15 +2486,61 @@ async def run_invoke_daily_oracle(
         except Exception as e:
             logger.warning("daily oracle context hint failed: %s", e)
 
+    cancel.raise_if_set()
     axes = await decompose_axes(ollama, user_intent=topic, context_hint=context_hint)
-    axes["_daily_oracle_date"] = daily_oracle_date
+    reporter.update(1.0, "Oracle axes ready", key="oracleAxesReady")
+    return {"axes": axes, "topic": topic}
 
-    reporter.update(0.1, "Axes ready — launching oracle spirits")
+
+async def run_invoke_daily_oracle(
+    reporter: ProgressReporter,
+    cancel: CancelToken,
+    *,
+    db,
+    ollama,
+    comfy,
+    spooler,
+    session_manager,
+    daily_oracle_date: str,
+    workflow_name: str = "",
+    topic: str = "",
+    roulette: bool = False,
+) -> dict:
+    """SYNC lane (low priority). Generate today's 5 oracle images.
+
+    LLM work (theme + axis decomposition) is delegated to a PROMPT lane job so
+    this SYNC job stays CPU/I-O only; cross-lane waiting cannot deadlock (the
+    PROMPT worker is independent of SYNC)."""
+    from ..invoke.session_manager import SPIRIT_ORDER
+    from ..spooler.models import JobLane
+
+    reporter.indeterminate()
     cancel.raise_if_set()
 
     if not workflow_name:
-        reporter.update(1.0, "Skipped: no oracle workflow configured")
+        reporter.update(1.0, "Skipped: no oracle workflow configured", key="oracleNoWorkflow")
         return {"skipped": True, "reason": "no workflow"}
+
+    compose_job_id = spooler.submit(
+        JobLane.PROMPT,
+        "invoke.oracle_compose",
+        run_invoke_oracle_compose,
+        meta={"daily_oracle_date": daily_oracle_date},
+        db=db,
+        ollama=ollama,
+        topic=topic,
+        roulette=roulette,
+        daily_oracle_date=daily_oracle_date,
+    )
+    cancel.on_cancel(lambda: asyncio.create_task(spooler.cancel(compose_job_id)))
+    reporter.update(0.05, "Composing oracle axes (PROMPT lane)...", key="composingOracleAxes")
+    compose_result = await spooler.wait(compose_job_id)
+
+    axes = compose_result["axes"]
+    axes["_daily_oracle_date"] = daily_oracle_date
+
+    reporter.update(0.1, "Axes ready — launching oracle spirits", key="axesReadyLaunching")
+    cancel.raise_if_set()
 
     session = session_manager.create_session(
         user_intent="[daily oracle]",
@@ -1946,13 +2554,122 @@ async def run_invoke_daily_oracle(
     )
 
     await session_manager.on_axis_done(session.session_id, axes)
-    reporter.update(0.15, f"Oracle session {session.session_id} launched — awaiting spirits")
+    reporter.update(0.15,
+                    f"Oracle session {session.session_id} launched — awaiting spirits",
+                    key="oracleLaunched", session=session.session_id)
 
-    # Wait until all spirits finish (queue receives None on session_complete / all errors)
-    await session.event_queue.get()
+    # Wait until the session reaches a terminal state (complete / all-error / cancelled)
+    waiter = asyncio.create_task(session.completion.wait())
+    cancel.on_cancel(waiter.cancel)
+    try:
+        await waiter
+    except asyncio.CancelledError:
+        raise JobCancelled()
 
-    reporter.update(1.0, "Daily oracle complete")
+    reporter.update(1.0, "Daily oracle complete", key="dailyOracleComplete")
     return {"session_id": session.session_id, "axes": axes}
+
+
+_LINEAGE_MUTABLE_AXES = ("scene", "mood", "lighting", "palette", "composition", "accessories", "action")
+
+
+async def run_invoke_lineage(
+    reporter: ProgressReporter,
+    cancel: CancelToken,
+    *,
+    db,
+    ollama,
+    session_id: str,
+    parent_axes: list[dict],
+    mode: str,               # 'evolve' | 'breed'
+    mutation: float = 0.3,
+    session_manager,
+) -> dict:
+    """PROMPT lane. Synthesize axes from parent genesis snapshots, then launch spirits.
+
+    evolve — single parent: jitter a `mutation` fraction of the mutable axes by swapping in
+             semantic-neighbor tags from the wd14 vocab bank.
+    breed  — two parents: merge their axes via a small JSON-in/JSON-out VLM task
+             (random per-axis pick as fallback).
+    """
+    import json as _json
+    import random as _random
+    import re as _re
+
+    from ..invoke.vocab_bank import _is_species_tag
+
+    reporter.indeterminate()
+    cancel.raise_if_set()
+
+    session = session_manager.get_session(session_id)
+    if not session:
+        raise ValueError(f"Session {session_id} not found or expired")
+
+    axes: dict = dict(parent_axes[0])
+
+    if mode == "breed" and len(parent_axes) >= 2:
+        axes_a, axes_b = parent_axes[0], parent_axes[1]
+        keys = ("subject", "character_detail", "action", "scene", "mood",
+                "lighting", "composition", "style", "palette", "accessories")
+
+        def _axis_str(a: dict, k: str) -> str:
+            v = a.get(k, "")
+            return ", ".join(v) if isinstance(v, list) else str(v or "")
+
+        prompt = "\n".join([
+            "You are merging two image concepts into one child concept.",
+            "For each axis, choose the value from A, from B, or write a short fusion of both.",
+            "Keep every value concise and Danbooru-compatible. The child must be a coherent single scene.",
+            "",
+            "AXES A: " + _json.dumps({k: _axis_str(axes_a, k) for k in keys}, ensure_ascii=False),
+            "AXES B: " + _json.dumps({k: _axis_str(axes_b, k) for k in keys}, ensure_ascii=False),
+            "",
+            "Output ONLY valid JSON with exactly these keys, no markdown fences:",
+            _json.dumps({k: "<value>" for k in keys}),
+        ])
+        merged: dict = {}
+        try:
+            raw = await ollama.generate_text(prompt, fmt="json")
+            raw = _re.sub(r"^```(?:json)?\s*", "", raw.strip())
+            raw = _re.sub(r"\s*```$", "", raw.strip())
+            parsed = _json.loads(raw)
+            if isinstance(parsed, dict):
+                merged = {k: str(parsed.get(k, "")).strip() for k in keys}
+        except Exception as e:
+            logger.warning("[invoke] breed merge VLM failed, falling back to random pick: %s", e)
+        if not merged or not any(merged.values()):
+            merged = {k: _axis_str(_random.choice((axes_a, axes_b)), k) for k in keys}
+
+        axes = merged
+        # style axis is a list downstream
+        axes["style"] = [s.strip() for s in str(axes.get("style", "")).split(",") if s.strip()]
+
+    elif mode == "evolve":
+        cancel.raise_if_set()
+        n_mut = max(1, round(max(0.0, min(1.0, mutation)) * len(_LINEAGE_MUTABLE_AXES)))
+        chosen = _random.sample(_LINEAGE_MUTABLE_AXES, n_mut)
+        for axis in chosen:
+            val = axes.get(axis) or ""
+            text = ", ".join(val) if isinstance(val, list) else str(val)
+            if not text.strip():
+                continue
+            try:
+                vec = await ollama.embed(text)
+                hits = await db.search_wd14_vocab(vec, min_freq=0.01, max_freq=0.8, category=0, limit=30)
+                # Skip the nearest hits — they are near-synonyms that barely mutate anything
+                pool = [h["name"] for h in hits[10:] if not _is_species_tag(h["name"])]
+                if pool:
+                    axes[axis] = ", ".join(_random.sample(pool, min(2, len(pool))))
+            except Exception as e:
+                logger.warning("[invoke] evolve mutation failed for axis %s: %s", axis, e)
+        logger.debug("[invoke] evolve mutated axes: %s", chosen)
+
+    axes["_slogan"] = session.user_intent
+    axes["_user_intent"] = session.user_intent
+
+    reporter.update(1.0, f"{mode} axes ready", key="modeAxesReady", mode=mode)
+    await session_manager.on_axis_done(session_id, axes)
+    return {"axes": axes, "mode": mode}
 
 
 # ── SYNC lane: WD14 vocab import ───────────────────────────────────────────────
@@ -2024,13 +2741,108 @@ async def run_import_wd14_vocab(
             })
 
         done += len(batch)
-        reporter.update(done / total, f"埋め込み中 {done}/{total}")
+        reporter.update(done / total, f"埋め込み中 {done}/{total}",
+                            key="embedding", done=done, total=total)
 
-    reporter.update(0.95, "Qdrantに登録中...")
+    reporter.update(0.95, "Qdrantに登録中...", key="registeringQdrant")
     await db.upsert_wd14_vocab(points)
 
     invalidate_vocab_cache()
 
-    reporter.update(1.0, f"完了: {len(points)} タグを登録")
+    reporter.update(1.0, f"完了: {len(points)} タグを登録", key="tagsRegistered", n=len(points))
     logger.info("[import_wd14_vocab] done: %d tags", len(points))
     return {"imported": len(points)}
+
+
+async def run_emotion_tag(
+    reporter: ProgressReporter,
+    cancel: CancelToken,
+    *,
+    db,
+    ollama,
+    sha256s: list[str] | None = None,
+) -> dict:
+    """EMBEDDING lane. Assign 12 emotion dimension scores to images using Ollama LLM.
+
+    When sha256s is None, processes all images that lack emotion scores (no emotion_loneliness
+    payload field). Results are stored as flat keys: emotion_loneliness, emotion_nostalgia, ...
+    """
+    from ..ai.emotion_tagger import score_emotions, EMOTION_DIMENSIONS
+    from qdrant_client import models as qm
+
+    reporter.indeterminate()
+    cancel.raise_if_set()
+
+    if sha256s:
+        docs = []
+        for sha256 in sha256s:
+            cancel.raise_if_set()
+            doc = await db.get(sha256)
+            if doc:
+                docs.append(doc)
+    else:
+        docs = []
+        offset = None
+        while True:
+            cancel.raise_if_set()
+            pts, next_offset = await db._qc.scroll(
+                collection_name="images",
+                scroll_filter=qm.Filter(must=[
+                    qm.IsEmptyCondition(
+                        is_empty=qm.PayloadField(key="emotion_loneliness")
+                    ),
+                ]),
+                limit=500,
+                offset=offset,
+                with_payload=qm.PayloadSelectorInclude(
+                    include=["sha256", "positive_prompt", "wd14_tags"]
+                ),
+                with_vectors=False,
+            )
+            docs.extend(p.payload for p in pts if p.payload)
+            if next_offset is None:
+                break
+            offset = next_offset
+
+    total = len(docs)
+    done = 0
+    errors = 0
+    reporter.indeterminate()
+
+    cfg = {}
+    try:
+        from ..runtime_config import get_runtime_config
+        cfg = await get_runtime_config(db)
+    except Exception:
+        pass
+    concurrency = int(cfg.get("pipeline_concurrency", 4))
+    vlm_model: str | None = cfg.get("vlm_model") or None
+
+    sem = asyncio.Semaphore(concurrency)
+
+    async def process_one(doc: dict) -> None:
+        nonlocal done, errors
+        sha256 = doc.get("sha256")
+        if not sha256:
+            return
+        async with sem:
+            cancel.raise_if_set()
+            scores = await score_emotions(
+                doc.get("positive_prompt") or "",
+                doc.get("wd14_tags") or [],
+                ollama,
+                model=vlm_model,
+            )
+            if scores:
+                payload = {f"emotion_{dim}": scores[dim] for dim in EMOTION_DIMENSIONS}
+                await db.set_payload(sha256, payload)
+                done += 1
+            else:
+                errors += 1
+            if total > 0:
+                reporter.update(done / total, f"感情タグ付け {done}/{total}",
+                            key="emotionTagging", done=done, total=total)
+
+    await asyncio.gather(*(process_one(doc) for doc in docs), return_exceptions=True)
+    logger.info("[emotion_tag] done=%d errors=%d total=%d", done, errors, total)
+    return {"done": done, "errors": errors, "total": total}

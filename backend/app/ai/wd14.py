@@ -165,17 +165,6 @@ def _predict_sync_scored(
     return results
 
 
-async def predict_tags(
-    image_path: Path,
-    threshold: float | None = None,
-    model_dir: str | None = None,
-) -> list[str]:
-    t = threshold if threshold is not None else settings.wd14_threshold
-    d = model_dir if model_dir is not None else settings.wd14_model_dir
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _predict_sync, image_path, t, d)
-
-
 async def predict_tags_scored(
     image_path: Path,
     threshold: float | None = None,
@@ -185,3 +174,104 @@ async def predict_tags_scored(
     d = model_dir if model_dir is not None else settings.wd14_model_dir
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, _predict_sync_scored, image_path, t, d)
+
+
+# ── Category-aware scanning ──────────────────────────────────────────────────
+# selected_tags.csv carries a category per tag: 0 general, 4 named character,
+# 9 rating (general/sensitive/questionable/explicit). The model emits all three
+# in one flat list, and nothing downstream used to tell them apart — so a run
+# could quietly pick up a copyrighted character name off its own draft, or leak
+# a rating token into the positive prompt.
+CATEGORY_GENERAL = 0
+CATEGORY_CHARACTER = 4
+CATEGORY_RATING = 9
+
+
+def _predict_sync_typed(
+    image_path: Path, threshold: float, model_dir: str
+) -> list[tuple[str, float, int]]:
+    _load_model(model_dir)
+
+    with Image.open(image_path) as img:
+        img = img.convert("RGB").resize((MODEL_INPUT_SIZE, MODEL_INPUT_SIZE), Image.BICUBIC)
+
+    arr = np.array(img, dtype=np.float32)
+    arr = arr[:, :, ::-1]
+    arr = np.expand_dims(arr, 0)
+
+    input_name = _session.get_inputs()[0].name
+    probs = _session.run(None, {input_name: arr})[0][0]
+
+    has_category = "category" in _tags_df.columns
+    out: list[tuple[str, float, int]] = []
+    for i, p in enumerate(probs):
+        if p < threshold:
+            continue
+        row = _tags_df.iloc[i]
+        category = int(row["category"]) if has_category else CATEGORY_GENERAL
+        out.append((str(row["name"]).replace("_", " "), float(p), category))
+    out.sort(key=lambda x: x[1], reverse=True)
+    return out
+
+
+def _normalize_tag_names(scored: list[tuple[str, float]]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for tag, _score in scored:
+        name = str(tag).strip().replace(" ", "_")
+        key = name.lower()
+        if name and key not in seen:
+            seen.add(key)
+            out.append(name)
+    return out
+
+
+async def tags_from_path(
+    image_path: Path,
+    *,
+    threshold: float | None = None,
+    model_dir: str | None = None,
+    db=None,
+) -> list[str]:
+    """WD14-scan a file path → underscore Danbooru tag names (no DB register).
+
+    When ``db`` is given and threshold/model_dir omitted, reads runtime config.
+    """
+    if db is not None and (threshold is None or model_dir is None):
+        from ..runtime_config import get_runtime_config
+        cfg = await get_runtime_config(db)
+        if threshold is None:
+            threshold = float(cfg.get("wd14_threshold", 0.35))
+        if model_dir is None:
+            model_dir = cfg.get("wd14_model_dir")
+    scored = await predict_tags_scored(
+        image_path, threshold=threshold, model_dir=model_dir,
+    )
+    return _normalize_tag_names(scored)
+
+
+async def tags_from_bytes(
+    img_bytes: bytes,
+    *,
+    threshold: float | None = None,
+    model_dir: str | None = None,
+    db=None,
+    suffix: str = ".png",
+) -> list[str]:
+    """WD14-scan image bytes via a throwaway tempfile (never registered)."""
+    import tempfile
+
+    path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp.write(img_bytes)
+            path = Path(tmp.name)
+        return await tags_from_path(
+            path, threshold=threshold, model_dir=model_dir, db=db,
+        )
+    finally:
+        if path is not None:
+            try:
+                path.unlink(missing_ok=True)
+            except Exception as exc:
+                logger.warning("WD14 tempfile cleanup failed: %s", exc)

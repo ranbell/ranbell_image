@@ -10,8 +10,101 @@ import httpx
 
 from ..config import settings
 
+# How long the render websocket may say nothing at all before we give up on it.
+# ComfyUI emits progress every step, so silence this long means the far end is
+# gone rather than busy.
+STREAM_IDLE_TIMEOUT = 600.0
+
+
+async def _with_idle_timeout(ws, timeout: float):
+    """Iterate a websocket, raising if it goes quiet for too long."""
+    it = ws.__aiter__()
+    while True:
+        try:
+            yield await asyncio.wait_for(it.__anext__(), timeout=timeout)
+        except StopAsyncIteration:
+            return
+        except asyncio.TimeoutError as exc:
+            raise TimeoutError(
+                f"ComfyUI sent nothing for {timeout:.0f}s — assuming it died"
+            ) from exc
+
 logger = logging.getLogger(__name__)
 
+
+# Eight bytes in the documented layout; a few dozen more once a metadata blob is
+# in front of the image.
+_PREVIEW_HEADER_MAX = 256
+
+
+def _preview_image(payload: bytes) -> bytes | None:
+    """Strip the binary header off a websocket preview frame.
+
+    The frame is a 4-byte event type, a 4-byte image format and then the image,
+    but newer builds can put a metadata blob in between. Looking for the magic
+    survives both layouts; anything without one is not a preview.
+
+    The search is bounded to the header: unbounded, a byte pair deep inside some
+    other binary message would be read as the start of an image.
+    """
+    for magic in (b"\xff\xd8\xff", b"\x89PNG"):
+        idx = payload.find(magic, 0, _PREVIEW_HEADER_MAX)
+        if idx >= 0:
+            return payload[idx:]
+    return None
+
+
+
+def rejection_message(response) -> str:
+    """What ComfyUI actually objected to, as one line.
+
+    **`raise_for_status()` threw the body away, and the body is the whole answer.**
+    ComfyUI validates a graph before queueing it and says which node, which input
+    and why — a checkpoint that is not installed, a LoRA that moved, a value out of
+    range. Without it the screen said `Client error '400 Bad Request' for url …` and
+    nothing else, which is a dead end for whoever is holding the camera.
+    """
+    status = getattr(response, "status_code", "?")
+    try:
+        data = response.json()
+    except Exception:
+        text = str(getattr(response, "text", "") or "").strip()
+        return f"ComfyUI refused the graph ({status}): {text[:300]}" if text else \
+               f"ComfyUI refused the graph ({status})"
+    if not isinstance(data, dict):
+        return f"ComfyUI refused the graph ({status}): {str(data)[:300]}"
+
+    err = data.get("error")
+    head = ""
+    if isinstance(err, dict):
+        head = str(err.get("message") or "").strip()
+        detail = str(err.get("details") or "").strip()
+        if detail and detail not in head:
+            head = f"{head} — {detail}" if head else detail
+    elif err:
+        head = str(err).strip()
+
+    # `node_errors` is keyed by node id and carries the useful part: which input
+    # was refused and what was expected.
+    parts: list[str] = []
+    nodes = data.get("node_errors")
+    if isinstance(nodes, dict):
+        for node_id, info in list(nodes.items())[:4]:
+            if not isinstance(info, dict):
+                continue
+            kind = str(info.get("class_type") or "").strip()
+            for item in (info.get("errors") or [])[:3]:
+                if not isinstance(item, dict):
+                    continue
+                said = str(item.get("details") or item.get("message") or "").strip()
+                if said:
+                    where = f"node {node_id}" + (f" ({kind})" if kind else "")
+                    parts.append(f"{where}: {said}")
+
+    said = " / ".join(parts)
+    if head and said:
+        return f"ComfyUI refused the graph: {head} — {said}"[:600]
+    return f"ComfyUI refused the graph ({status}): {head or said or 'no reason given'}"[:600]
 
 class ComfyUIClient:
     def __init__(self) -> None:
@@ -56,6 +149,17 @@ class ComfyUIClient:
         "KSampler", "KSamplerAdvanced", "KSamplerSelect", "KSamplerCustom",
         "KSamplerCustomAdvanced",
     }
+    # Turbo / Lightning graphs split sampling apart: the KSampler node has no
+    # `steps` at all and the step count lives on a scheduler feeding it. Patching
+    # only _KSAMPLER_TYPES silently did nothing on those workflows, so a caller
+    # asking for a cheap 2-step draft got a full-price render and no warning.
+    _SCHEDULER_TYPES = {
+        "BasicScheduler", "KarrasScheduler", "ExponentialScheduler",
+        "PolyexponentialScheduler", "VPScheduler", "BetaSamplingScheduler",
+        "SDTurboScheduler", "AlignYourStepsScheduler", "LTXVScheduler",
+        "LaplaceScheduler", "GITSScheduler",
+    }
+    _STEP_NODE_TYPES = _KSAMPLER_TYPES | _SCHEDULER_TYPES
     _CLIP_ENCODE_TYPES = {
         "CLIPTextEncode", "CLIPTextEncodeSDXL", "CLIPTextEncodeSDXLRefiner",
         "BNK_CLIPTextEncodeAdvanced", "smZ CLIPTextEncode",
@@ -94,6 +198,115 @@ class ComfyUIClient:
                 return pos_id, neg_id
         return None, None
 
+    @classmethod
+    def _resolve_latent_node(cls, wf: dict, start_id: str) -> str | None:
+        """BFS from start_id through wire connections to find an EmptyLatent* node.
+
+        Mirrors ``_resolve_clip_node``: follow upstream links from a KSampler's
+        ``latent_image`` input until a known latent creator is found.
+        """
+        visited: set[str] = set()
+        queue = [start_id]
+        while queue:
+            nid = queue.pop(0)
+            if nid in visited:
+                continue
+            visited.add(nid)
+            node = wf.get(nid, {})
+            if node.get("class_type") in cls._LATENT_NODE_TYPES:
+                return nid
+            for v in node.get("inputs", {}).values():
+                if isinstance(v, list) and len(v) >= 1:
+                    queue.append(str(v[0]))
+        return None
+
+    @classmethod
+    def _find_latent_nodes_via_ksampler(cls, wf: dict) -> list[str]:
+        """Latent node ids reached from each KSampler's ``latent_image`` input."""
+        found: list[str] = []
+        seen: set[str] = set()
+        for node in wf.values():
+            if node.get("class_type") not in cls._KSAMPLER_TYPES:
+                continue
+            ref = (node.get("inputs") or {}).get("latent_image")
+            if not isinstance(ref, list) or not ref:
+                continue
+            lid = cls._resolve_latent_node(wf, str(ref[0]))
+            if lid and lid not in seen:
+                seen.add(lid)
+                found.append(lid)
+        return found
+
+    @classmethod
+    def _patch_node_int_field(
+        cls, wf: dict, node_id: str, key: str, value: int
+    ) -> bool:
+        """Set an int field on a node, or follow a wire to a Primitive and set it.
+
+        Replacing a wire ``[upstream, idx]`` with a bare int is also valid in
+        ComfyAPI graphs; we prefer patching the upstream Primitive when present
+        so other consumers of that Primitive stay consistent.
+        """
+        node = wf.get(node_id)
+        if not node:
+            return False
+        inputs = node.setdefault("inputs", {})
+        cur = inputs.get(key)
+        if isinstance(cur, bool):
+            return False
+        if isinstance(cur, (int, float)):
+            inputs[key] = int(value)
+            return True
+        if isinstance(cur, list) and len(cur) >= 1:
+            up_id = str(cur[0])
+            up = wf.get(up_id)
+            if not up:
+                # Dangling wire — replace with scalar so the graph still runs.
+                inputs[key] = int(value)
+                return True
+            up_inputs = up.setdefault("inputs", {})
+            up_type = up.get("class_type") or ""
+            if "value" in up_inputs and isinstance(up_inputs["value"], (int, float)):
+                up_inputs["value"] = int(value)
+                return True
+            if up_type in (
+                "PrimitiveNode", "PrimitiveInt", "PrimitiveFloat", "INT", "Float",
+            ):
+                up_inputs["value"] = int(value)
+                return True
+            # Unknown upstream — break the wire and set a scalar on the latent.
+            inputs[key] = int(value)
+            return True
+        # Field missing (unusual for EmptyLatent) — set it.
+        if key in ("width", "height", "batch_size"):
+            inputs[key] = int(value)
+            return True
+        return False
+
+    @classmethod
+    def patchable_fields(cls, workflow: dict) -> dict[str, int]:
+        """How many nodes ``patch_workflow`` could write each knob to.
+
+        A zero means the corresponding argument will be accepted and then do
+        nothing — which is worth telling the user about *before* they wait for a
+        render that ignored their settings.
+        """
+        counts = {"steps": 0, "cfg": 0, "width": 0, "height": 0, "seed": 0}
+        for node in workflow.values():
+            class_type = node.get("class_type")
+            inputs = node.get("inputs", {}) or {}
+            if class_type in cls._STEP_NODE_TYPES and "steps" in inputs:
+                counts["steps"] += 1
+            if class_type in cls._KSAMPLER_TYPES and "cfg" in inputs:
+                counts["cfg"] += 1
+            if class_type in cls._LATENT_NODE_TYPES:
+                for dim in ("width", "height"):
+                    if dim in inputs:
+                        counts[dim] += 1
+            if "seed" in inputs or "noise_seed" in inputs:
+                counts["seed"] += 1
+        return counts
+
     def patch_workflow(
         self,
         workflow: dict,
@@ -103,6 +316,11 @@ class ComfyUIClient:
         neg_node_id: str = "",
         batch_count: int = 1,
         seed: int | None = None,
+        width: int | None = None,
+        height: int | None = None,
+        steps: int | None = None,
+        cfg: float | None = None,
+        append_negative: bool = False,
     ) -> dict:
         wf = copy.deepcopy(workflow)
 
@@ -112,25 +330,107 @@ class ComfyUIClient:
             if not (auto_pos or auto_neg) else []
         )
 
+        pos_target = None
         if pos_node_id and pos_node_id in wf:
-            wf[pos_node_id]["inputs"]["text"] = positive
+            pos_target = pos_node_id
         elif auto_pos:
-            wf[auto_pos]["inputs"]["text"] = positive
+            pos_target = auto_pos
         elif fallback_clips:
-            wf[fallback_clips[0]]["inputs"]["text"] = positive
+            pos_target = fallback_clips[0]
+        if pos_target:
+            wf[pos_target]["inputs"]["text"] = positive
 
         if negative:
+            neg_target = None
             if neg_node_id and neg_node_id in wf:
-                wf[neg_node_id]["inputs"]["text"] = negative
+                neg_target = neg_node_id
             elif auto_neg:
-                wf[auto_neg]["inputs"]["text"] = negative
+                neg_target = auto_neg
             elif len(fallback_clips) >= 2:
-                wf[fallback_clips[1]]["inputs"]["text"] = negative
+                neg_target = fallback_clips[1]
+            # **A graph with no negative of its own must not have the positive
+            # overwritten (2026-09-20).** A krea2 workflow zeroes the negative out
+            # (`KSampler.negative` → `ConditioningZeroOut` → the one and only
+            # `CLIPTextEncode`), so tracing the negative wire lands on the node
+            # that has just been given the positive. Measured on the real graph
+            # (`API_Krea2_JANK2.json`): the positive came back as
+            # "1girl, park, smile, bad quality, border". Muse sends no negative
+            # for that family at all, but every other caller still can.
+            if neg_target and neg_target == pos_target:
+                logger.info(
+                    "[comfy] node %s carries the positive and the negative traces "
+                    "back to it (a zeroed-out negative) — the negative is not written",
+                    neg_target,
+                )
+                neg_target = None
+            if neg_target:
+                # append_negative extends the workflow's baked negative instead of
+                # replacing it, so caller-supplied tags add to (not wipe) the default.
+                if append_negative:
+                    raw = wf[neg_target]["inputs"].get("text")
+                    # An API-format input is either a literal or a link
+                    # ["<node_id>", <slot>]. str() on a link used to paste
+                    # "['99', 0]" into the prompt, and the assignment below
+                    # severs the link anyway — so treat a link as "nothing to
+                    # keep" and say so rather than losing it silently.
+                    if isinstance(raw, str):
+                        existing = raw.strip()
+                    else:
+                        existing = ""
+                        if raw is not None:
+                            logger.info(
+                                "[comfy] node %s negative text is wired from %s; "
+                                "its content cannot be appended to",
+                                neg_target, raw,
+                            )
+                    wf[neg_target]["inputs"]["text"] = (
+                        f"{existing}, {negative}" if existing else negative
+                    )
+                else:
+                    wf[neg_target]["inputs"]["text"] = negative
 
-        if batch_count > 1:
-            for node in wf.values():
-                if node.get("class_type") in self._LATENT_NODE_TYPES:
-                    node["inputs"]["batch_size"] = batch_count
+        # Size / batch: only touch EmptyLatent* nodes that are actually wired
+        # into a KSampler.latent_image (same connection-tracing pattern as CLIP).
+        # Fall back to every EmptyLatent* only when no connected latent is found.
+        if batch_count > 1 or width is not None or height is not None:
+            latent_ids = self._find_latent_nodes_via_ksampler(wf)
+            if not latent_ids:
+                latent_ids = [
+                    k for k, v in wf.items()
+                    if v.get("class_type") in self._LATENT_NODE_TYPES
+                ]
+            for lid in latent_ids:
+                if batch_count > 1:
+                    self._patch_node_int_field(wf, lid, "batch_size", batch_count)
+                if width is not None:
+                    self._patch_node_int_field(wf, lid, "width", int(width))
+                if height is not None:
+                    self._patch_node_int_field(wf, lid, "height", int(height))
+
+        if steps is not None or cfg is not None:
+            for node_id, node in wf.items():
+                class_type = node.get("class_type")
+                if class_type not in self._STEP_NODE_TYPES:
+                    continue
+                inputs = node.setdefault("inputs", {})
+                if steps is not None and "steps" in inputs:
+                    cur = inputs["steps"]
+                    if isinstance(cur, list) and len(cur) >= 1:
+                        # Follow Primitive wire when present; else replace link.
+                        self._patch_node_int_field(wf, node_id, "steps", int(steps))
+                    elif isinstance(cur, (int, float)):
+                        inputs["steps"] = int(steps)
+                # cfg belongs to the sampler, never to a scheduler.
+                if cfg is not None and class_type in self._KSAMPLER_TYPES and "cfg" in inputs:
+                    cur = inputs["cfg"]
+                    if isinstance(cur, list) and len(cur) >= 1:
+                        up = wf.get(str(cur[0]))
+                        if up and "value" in up.get("inputs", {}):
+                            up["inputs"]["value"] = float(cfg)
+                        else:
+                            inputs["cfg"] = float(cfg)
+                    elif isinstance(cur, (int, float)):
+                        inputs["cfg"] = float(cfg)
 
         if seed is not None:
             patched: set[str] = set()
@@ -168,6 +468,229 @@ class ComfyUIClient:
 
         return wf
 
+    _LOAD_IMAGE_TYPES = frozenset({
+        "LoadImage",
+        "LoadImageMask",
+        "LoadImageOutput",
+        "LoadImageFromUrl",
+        "VHS_LoadImagePath",
+        "Image Load",
+        "LoadImageBatch",
+    })
+
+    # Nodes that take a photo and emit an OpenPose / DWPose map.
+    _POSE_PREPROCESS_HINTS = (
+        "openpose", "dwpose", "dwpreprocessor", "openposepreprocessor",
+        "animalpose", "poseestimator", "densepose",
+    )
+    _CONTROLNET_HINTS = (
+        "controlnetapply", "controlnetloader", "controlnet",
+        "acompatiblecontrolnet", "setunioncontrolnet",
+    )
+
+    @classmethod
+    def _class_norm(cls, class_type: str) -> str:
+        return str(class_type or "").lower().replace(" ", "").replace("_", "").replace("-", "")
+
+    @classmethod
+    def _is_pose_preprocessor(cls, class_type: str) -> bool:
+        n = cls._class_norm(class_type)
+        if not n:
+            return False
+        # AIO_Preprocessor can do many things; count it only with pose-ish name.
+        if "aio" in n and "preprocessor" in n:
+            return True
+        return any(h in n for h in cls._POSE_PREPROCESS_HINTS)
+
+    @classmethod
+    def _is_controlnet_node(cls, class_type: str) -> bool:
+        n = cls._class_norm(class_type)
+        return any(h in n for h in cls._CONTROLNET_HINTS)
+
+    @classmethod
+    def _resolve_load_image(cls, wf: dict, start_id: str) -> str | None:
+        """BFS upstream from start_id to a LoadImage-like node."""
+        visited: set[str] = set()
+        queue = [str(start_id)]
+        while queue:
+            nid = queue.pop(0)
+            if nid in visited:
+                continue
+            visited.add(nid)
+            node = wf.get(nid) or {}
+            if node.get("class_type") in cls._LOAD_IMAGE_TYPES:
+                return nid
+            for v in (node.get("inputs") or {}).values():
+                if isinstance(v, list) and len(v) >= 1:
+                    queue.append(str(v[0]))
+        return None
+
+    @classmethod
+    def _read_node_int_field(cls, wf: dict, node_id: str, key: str) -> int | None:
+        """The value a node's int field holds, following one wire when it is one.
+
+        The mirror of `_patch_node_int_field`, for saying what a graph is set to
+        without changing it — a workflow whose canvas Muse leaves alone still has
+        to be able to say what that canvas is.
+        """
+        node = (wf or {}).get(node_id)
+        if not isinstance(node, dict):
+            return None
+        cur = (node.get("inputs") or {}).get(key)
+        if isinstance(cur, bool):
+            return None
+        if isinstance(cur, (int, float)):
+            return int(cur)
+        if isinstance(cur, list) and len(cur) >= 1:
+            up = (wf or {}).get(str(cur[0]))
+            if isinstance(up, dict):
+                for field in ("value", "int", key):
+                    val = (up.get("inputs") or {}).get(field)
+                    if isinstance(val, (int, float)) and not isinstance(val, bool):
+                        return int(val)
+        return None
+
+    def workflow_canvas(self, workflow: dict) -> dict | None:
+        """The size the graph itself is set to render, or None when unreadable.
+
+        Read from the latent that feeds the sampler, the same node
+        `patch_workflow` would write to — so what is reported is what would run
+        if Muse wrote nothing.
+        """
+        latent_ids = self._find_latent_nodes_via_ksampler(workflow or {}) or [
+            k for k, v in (workflow or {}).items()
+            if isinstance(v, dict) and v.get("class_type") in self._LATENT_NODE_TYPES
+        ]
+        for lid in latent_ids:
+            width = self._read_node_int_field(workflow, lid, "width")
+            height = self._read_node_int_field(workflow, lid, "height")
+            if width and height:
+                return {"width": width, "height": height}
+        return None
+
+    def inspect_workflow(self, workflow: dict) -> dict:
+        """Detect OpenPose / ControlNet lineage and a safe LoadImage injection point.
+
+        ``can_inject_image`` is True only when a LoadImage feeds a pose
+        preprocessor (photo → OpenPose map). ControlNet-only graphs that expect
+        a pre-baked skeleton are reported but not auto-injected.
+        """
+        pose_nodes: list[dict[str, str]] = []
+        controlnet_nodes: list[dict[str, str]] = []
+        load_image_nodes: list[str] = []
+        for nid, node in (workflow or {}).items():
+            if not isinstance(node, dict):
+                continue
+            ct = str(node.get("class_type") or "")
+            if ct in self._LOAD_IMAGE_TYPES:
+                load_image_nodes.append(str(nid))
+            if self._is_pose_preprocessor(ct):
+                pose_nodes.append({"id": str(nid), "class_type": ct})
+            if self._is_controlnet_node(ct):
+                controlnet_nodes.append({"id": str(nid), "class_type": ct})
+
+        image_node_id: str | None = None
+        for p in pose_nodes:
+            found = self._resolve_load_image(workflow, p["id"])
+            if found:
+                image_node_id = found
+                break
+        # Fallback: sole LoadImage in a graph that has pose preprocess.
+        if image_node_id is None and pose_nodes and len(load_image_nodes) == 1:
+            image_node_id = load_image_nodes[0]
+
+        has_pose = bool(pose_nodes)
+        has_cn = bool(controlnet_nodes)
+        return {
+            "has_openpose": has_pose or has_cn,
+            "has_pose_preprocessor": has_pose,
+            "can_inject_image": bool(has_pose and image_node_id),
+            "image_node_id": image_node_id if has_pose else None,
+            "pose_nodes": pose_nodes,
+            "controlnet_nodes": controlnet_nodes,
+            "load_image_nodes": load_image_nodes,
+            # What the graph renders at when nobody writes a canvas into it.
+            "canvas": self.workflow_canvas(workflow or {}),
+        }
+
+    def patch_load_image_nodes(self, workflow: dict, image_name: str) -> tuple[dict, int]:
+        """Set ``inputs.image`` on every LoadImage-like node. Returns (wf, count)."""
+        wf = copy.deepcopy(workflow)
+        n = 0
+        for node in wf.values():
+            if node.get("class_type") in self._LOAD_IMAGE_TYPES:
+                node.setdefault("inputs", {})["image"] = image_name
+                n += 1
+        return wf, n
+
+    def patch_load_image_node(
+        self, workflow: dict, node_id: str, image_name: str,
+    ) -> dict:
+        """Set ``inputs.image`` on one LoadImage-like node (deepcopy)."""
+        wf = copy.deepcopy(workflow)
+        node = wf.get(str(node_id))
+        if isinstance(node, dict) and node.get("class_type") in self._LOAD_IMAGE_TYPES:
+            node.setdefault("inputs", {})["image"] = image_name
+        return wf
+
+    async def apply_openpose_reference(
+        self, workflow: dict, image_bytes: bytes, *, filename: str = "muse_direction.jpg",
+    ) -> tuple[dict, dict]:
+        """If the graph can take a photo for OpenPose, upload + patch LoadImage.
+
+        Returns ``(workflow, info)`` where ``info`` includes inspect result and
+        ``injected`` / ``comfy_name`` when applied. Never raises for inspect miss —
+        returns the original workflow when injection is not possible.
+        """
+        info = self.inspect_workflow(workflow)
+        info = {**info, "injected": False, "comfy_name": ""}
+        if not info.get("can_inject_image") or not image_bytes:
+            return workflow, info
+        node_id = str(info.get("image_node_id") or "")
+        try:
+            name = await self.upload_image(image_bytes, filename)
+            patched = self.patch_load_image_node(workflow, node_id, name)
+            info["injected"] = True
+            info["comfy_name"] = name
+            return patched, info
+        except Exception:
+            logger.warning("[comfy] openpose reference inject failed", exc_info=True)
+            return workflow, info
+
+    async def upload_image(
+        self,
+        data: bytes,
+        filename: str,
+        *,
+        overwrite: bool = True,
+        image_type: str = "input",
+    ) -> str:
+        """Upload bytes to Comfy ``/upload/image``.
+
+        Returns the filename string suitable for ``LoadImage.inputs.image``
+        (``subfolder/name`` when Comfy stores under a subfolder).
+        """
+        files = {"image": (filename, data, "application/octet-stream")}
+        form = {
+            "overwrite": "true" if overwrite else "false",
+            "type": image_type,
+        }
+        r = await self._http.post(
+            f"{settings.comfyui_url}/upload/image",
+            files=files,
+            data=form,
+            timeout=120.0,
+        )
+        r.raise_for_status()
+        body = r.json() if r.content else {}
+        if not isinstance(body, dict):
+            return filename
+        name = str(body.get("name") or filename)
+        sub = str(body.get("subfolder") or "").strip().strip("/")
+        if sub:
+            return f"{sub}/{name}"
+        return name
+
     async def fetch_image(self, filename: str, subfolder: str = "", type_: str = "output") -> bytes:
         r = await self._http.get(
             f"{settings.comfyui_url}/view",
@@ -177,15 +700,43 @@ class ComfyUIClient:
         r.raise_for_status()
         return r.content
 
-    async def queue_prompt(self, workflow: dict) -> str:
-        r = await self._http.post(
-            f"{settings.comfyui_url}/prompt",
-            json={"prompt": workflow, "client_id": self.client_id},
-        )
-        r.raise_for_status()
+    async def queue_prompt(
+        self, workflow: dict, *, preview: bool = False, client_id: str = "",
+    ) -> str:
+        """Queue a graph. ``preview`` turns on in-flight latent previews.
+
+        ComfyUI takes the preview method **per prompt**, not per server — the web
+        UI sends it on every queue call, which is why previews appear there while
+        an API client that omits it sees none, however the server was started.
+        It is opt-in because the frames are one JPEG per sampler step and only
+        Muse, which lets you watch a draft form and abort it, has any use for them.
+        """
+        # **A separate clientId per render.** They used to share one, so continuing
+        # a shoot with a retake opened a second websocket on the same clientId while
+        # the previous render was still alive, ComfyUI dropped the older one and the
+        # streaming broke off.
+        #
+        # Mixed-up previews have the same root — a preview frame carries no
+        # `prompt_id`, so `stream_progress` can only take it as "whatever this client
+        # is waiting for right now". **Separate the clientIds and that assumption
+        # becomes true.**
+        body: dict = {"prompt": workflow, "client_id": client_id or self.client_id}
+        if preview:
+            body["extra_data"] = {"preview_method": "auto"}
+        r = await self._http.post(f"{settings.comfyui_url}/prompt", json=body)
+        if r.status_code >= 400:
+            raise RuntimeError(rejection_message(r))
         return r.json()["prompt_id"]
 
-    async def stream_progress(self, prompt_id: str) -> AsyncGenerator[dict, None]:
+    @staticmethod
+    def new_client_id() -> str:
+        """A clientId for one render."""
+        return str(uuid.uuid4())
+
+    async def stream_progress(
+        self, prompt_id: str, *, idle_timeout: float = STREAM_IDLE_TIMEOUT,
+        client_id: str = "",
+    ) -> AsyncGenerator[dict, None]:
         try:
             import websockets  # type: ignore
         except ImportError:
@@ -197,14 +748,29 @@ class ComfyUIClient:
             .replace("http://", "ws://")
             .replace("https://", "wss://")
         )
-        ws_url = f"{ws_url}/ws?clientId={self.client_id}"
+        # Wait on **the same** clientId that was passed to `queue_prompt`. With a
+        # different one, ComfyUI sends nothing this way.
+        ws_url = f"{ws_url}/ws?clientId={client_id or self.client_id}"
 
         import time
         last_progress_time = 0.0
 
         try:
-            async with websockets.connect(ws_url) as ws:
-                async for raw in ws:
+            async with websockets.connect(ws_url, max_size=None) as ws:
+                # Last resort. `execution_error` covers the failures ComfyUI
+                # announces; this covers the ones it does not — a hard crash, a
+                # killed worker, a dropped socket that never raises. Generous,
+                # because a slow sampler is normal and a wrong guess here kills
+                # a good render. Holding the GPU forever is still worse.
+                async for raw in _with_idle_timeout(ws, idle_timeout):
+                    if isinstance(raw, (bytes, bytearray)):
+                        jpeg = _preview_image(bytes(raw))
+                        if jpeg is not None:
+                            # Preview frames carry no prompt_id. ComfyUI runs one
+                            # graph at a time, so the frame belongs to whatever
+                            # this client is currently waiting on.
+                            yield {"type": "comfy_preview", "image": jpeg}
+                        continue
                     try:
                         msg = json.loads(raw)
                     except Exception:
@@ -243,6 +809,28 @@ class ComfyUIClient:
                         images = output.get("images", [])
                         if images:
                             yield {"type": "comfy_output", "images": images}
+
+                    elif mtype in ("execution_error", "execution_interrupted"):
+                        # ComfyUI reports a failure and then goes quiet — no
+                        # `executing: None` ever arrives. Without this the loop
+                        # waits forever, the job stays `running`, and it holds
+                        # the GPU resource until the process restarts. An OOM
+                        # took the whole app down that way.
+                        node = data.get("node_type") or data.get("node_id") or "?"
+                        detail = (
+                            data.get("exception_message")
+                            or data.get("exception_type")
+                            or mtype
+                        )
+                        logger.error(
+                            "ComfyUI %s at node %s: %s", mtype, node, detail,
+                        )
+                        yield {
+                            "type": "comfy_failed",
+                            "message": f"{node}: {detail}",
+                            "node": str(node),
+                        }
+                        return
 
         except asyncio.CancelledError:
             raise

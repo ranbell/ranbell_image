@@ -36,6 +36,7 @@ const inversionVolatileTagsGrouped = ref({})
 const inversionNewTagsGrouped      = ref({})
 const inversionLlmClassification   = ref({})
 const inversionStep2RawResult      = ref({})
+const inversionSubjectTags     = ref([])
 const inversionHairTags        = ref([])
 const inversionClothingTags    = ref([])
 const inversionAccessoryTags   = ref([])
@@ -56,6 +57,12 @@ const inspireGroupedResults   = ref([])
 const blendWeights            = ref({})
 const outlierMode             = ref('antipode')
 const textSearchQuery         = ref('')
+
+// Emotion search
+const emotionSearchDimension  = ref('melancholy')
+const emotionSearchMinScore   = ref(0.5)
+const emotionSearchResults    = ref([])
+const emotionSearchLoading    = ref(false)
 
 const inversionJobId = ref(null)
 const brainstormJobId = ref(null)
@@ -79,15 +86,17 @@ const hasSession = computed(() =>
 // ── Actions ────────────────────────────────────────────────────────────────
 function resetSession(initialSlots = []) {
   if (_activeReader) {
-    _activeReader.cancel().catch(() => {})
+    _activeReader.cancel().catch(err => console.debug('[inspire] reader cancel failed', err))
     _activeReader = null
   }
   if (inversionJobId.value) {
-    fetch(`/api/jobs/${inversionJobId.value}/cancel`, { method: 'POST' }).catch(() => {})
+    fetch(`/api/jobs/${inversionJobId.value}/cancel`, { method: 'POST' })
+      .catch(err => console.debug('[inspire] inversion job cancel failed', err))
     inversionJobId.value = null
   }
   if (brainstormJobId.value) {
-    fetch(`/api/jobs/${brainstormJobId.value}/cancel`, { method: 'POST' }).catch(() => {})
+    fetch(`/api/jobs/${brainstormJobId.value}/cancel`, { method: 'POST' })
+      .catch(err => console.debug('[inspire] brainstorm job cancel failed', err))
     brainstormJobId.value = null
   }
   const shas = initialSlots.slice(0, 6)
@@ -121,6 +130,7 @@ function resetSession(initialSlots = []) {
   inversionNewTagsGrouped.value      = {}
   inversionLlmClassification.value   = {}
   inversionStep2RawResult.value      = {}
+  inversionSubjectTags.value     = []
   inversionHairTags.value        = []
   inversionClothingTags.value    = []
   inversionAccessoryTags.value   = []
@@ -140,6 +150,8 @@ function resetSession(initialSlots = []) {
   inspireGroupedResults.value   = []
   outlierMode.value             = 'antipode'
   textSearchQuery.value         = ''
+  emotionSearchResults.value    = []
+  emotionSearchLoading.value    = false
   inspireResultSelection.value  = new Set()
   const roles = {}
   const weights = {}
@@ -179,6 +191,29 @@ function setActiveReader(reader) {
   _activeReader = reader
 }
 
+async function runEmotionSearch(token) {
+  emotionSearchLoading.value = true
+  emotionSearchResults.value = []
+  try {
+    const r = await fetch('/api/ai/emotion-search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-API-Token': token },
+      body: JSON.stringify({
+        emotion: emotionSearchDimension.value,
+        min_score: emotionSearchMinScore.value,
+        limit: 50,
+      }),
+    })
+    if (!r.ok) throw new Error(await r.text())
+    const data = await r.json()
+    emotionSearchResults.value = data.results || []
+  } catch (e) {
+    console.error('Emotion search failed:', e)
+  } finally {
+    emotionSearchLoading.value = false
+  }
+}
+
 export function useInspireSession() {
   return {
     inspireTab,
@@ -214,6 +249,7 @@ export function useInspireSession() {
     inversionNewTagsGrouped,
     inversionLlmClassification,
     inversionStep2RawResult,
+    inversionSubjectTags,
     inversionHairTags,
     inversionClothingTags,
     inversionAccessoryTags,
@@ -236,6 +272,10 @@ export function useInspireSession() {
     blendWeights,
     outlierMode,
     textSearchQuery,
+    emotionSearchDimension,
+    emotionSearchMinScore,
+    emotionSearchResults,
+    emotionSearchLoading,
     inspireResultSelection,
     toggleInspireResultSelection,
     addToInspireSlots,
@@ -244,5 +284,6 @@ export function useInspireSession() {
     hasSession,
     resetSession,
     setActiveReader,
+    runEmotionSearch,
   }
 }

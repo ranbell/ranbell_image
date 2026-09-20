@@ -8,6 +8,7 @@ from .config import settings
 
 from .db.qdrant_client import QdrantDBClient
 from .ai.ollama import OllamaClient
+from .ai.llm import LlmGateway, apply_llm_runtime_config
 from .ai.comfy import ComfyUIClient
 from .core.runtime_cache import RuntimeConfigCache
 from . import runtime_config as _runtime_config
@@ -22,10 +23,17 @@ from .api.health import router as health_router
 from .api.admin import router as admin_router
 from .api.comfy import router as comfy_router
 from .api.inspire import router as inspire_router
+from .muse.api import router as muse_router
 from .api.jobs import router as jobs_router
 from .api.analyzer import router as analyzer_router
 from .api.alignment import router as alignment_router
 from .api.invoke import router as invoke_router
+from .characters.api import router as characters_router
+# **Muse Classic retired (2026-09-12).** There is one studio, Muse Refine. Only the
+# green room and the notebook shared classic's router, so those were made
+# independent (the URLs stay `/api/muse/lounge/...` — that is how the screen calls
+# them).
+from .muse.lounge_api import router as muse_lounge_router
 
 
 def _abort(msg: str) -> None:
@@ -33,8 +41,12 @@ def _abort(msg: str) -> None:
     sep = "=" * 60
     print(f"\n{sep}\nSTARTUP ERROR: {msg}\n{sep}\n", file=sys.stderr, flush=True)
     print("Fix the config above, then: docker compose restart backend", file=sys.stderr, flush=True)
-    # Block here — HTTP server never starts, container stays alive without restart-looping.
-    time.sleep(float("inf"))
+    # Block here — HTTP server never starts, container stays alive without
+    # restart-looping. `sleep(inf)` raised OverflowError on some platforms
+    # (timestamp out of range for time_t), which crashed the process and put the
+    # container into exactly the restart loop this is here to avoid.
+    while True:
+        time.sleep(3600)
 
 
 def _check_generated_dir(warnings: list[str]) -> None:
@@ -66,11 +78,63 @@ def _check_generated_dir(warnings: list[str]) -> None:
         )
 
 
+async def _check_backup_dir(db, warnings: list) -> None:
+    """Say so when nothing is being kept.
+
+    The daily backup has two layers: a Qdrant snapshot per collection, and a
+    lineage ledger the backend writes under `backup_dir`. **Neither directory is
+    mounted by default**, and a backup that cannot be written looks exactly like
+    one that can — so this is announced rather than logged.
+
+    The fix is almost always the same: take the current `docker-compose.yml` and
+    `docker-compose.override.yml.example`, which carry the two mounts
+    (`./qdrant_snapshots` on qdrant, `/mnt/backup` on backend). Upgrades pull new
+    images but leave an old compose file in place, which is how an instance ends
+    up running new code with yesterday's volumes.
+
+    A warning, never an abort: a studio without backups still takes pictures.
+    """
+    import os
+    from pathlib import Path as _Path
+
+    from .backup.ledger import Ledger
+    from .runtime_config import get_runtime_config
+
+    try:
+        cfg = await get_runtime_config(db)
+    except Exception:
+        cfg = {}
+    if not cfg.get("backup_enabled", True):
+        return
+    root = _Path(str(cfg.get("backup_dir") or "/mnt/backup"))
+
+    def _say(key: str, text: str) -> None:
+        warnings.append({"key": key, "params": {"path": str(root)}, "text": text})
+
+    compose = ("Fix: update docker-compose.yml / docker-compose.override.yml to the "
+               "current version — it mounts ./qdrant_snapshots on qdrant and "
+               f"{root} on backend.")
+    if not root.exists():
+        _say("backupDirMissing",
+             f"Backups are not being kept: '{root}' is not mounted. {compose}")
+        return
+    ok, why = Ledger(root).writable()
+    if not ok:
+        _say("backupDirUnwritable",
+             f"Backups cannot be written to '{root}': {why}. {compose}")
+        return
+    if not os.path.ismount(root):
+        _say("backupDirEphemeral",
+             f"'{root}' is inside the container, so backups vanish with it. {compose}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     import asyncio
 
-    startup_warnings: list[str] = []
+    # Either a plain string (older checks) or {key, params, text} so the screen
+    # can say it in the reader's language and fall back to the text.
+    startup_warnings: list = []
     _check_generated_dir(startup_warnings)
     if not settings.source_images_dir.exists():
         startup_warnings.append(
@@ -81,13 +145,18 @@ async def lifespan(app: FastAPI):
 
     db = QdrantDBClient()
     await db.start()
+    # After the database is up: the backup directory is named in the runtime
+    # config, which lives in Qdrant.
+    await _check_backup_dir(db, startup_warnings)
 
-    ollama = OllamaClient()
+    ollama = LlmGateway(OllamaClient())
     comfy = ComfyUIClient()
 
     from .config import settings as _settings
-    resources, lane_resource = build_resources(_settings)
+    resources, lane_resource, topology = build_resources(_settings)
     spooler = JobSpooler(resources=resources, lane_resource=lane_resource)
+    # Throttle all LLM traffic (every lane) at the client, per HTTP request
+    ollama.set_resource(resources.get("remote-ollama"))
 
     app.state.db = db
     app.state.ollama = ollama
@@ -101,25 +170,37 @@ async def lifespan(app: FastAPI):
     app.state.refine_token_queues: dict[str, asyncio.Queue] = {}
     app.state.inspire_event_queues: dict[str, asyncio.Queue] = {}
     app.state.invoke_event_queues: dict[str, asyncio.Queue] = {}
+    app.state.story_token_queues: dict[str, asyncio.Queue] = {}
 
     from .invoke.session_manager import InvokeSessionManager
     from .invoke.spirit_loader import preload_all as _preload_spirits
     _preload_spirits()
     app.state.invoke_session_manager = InvokeSessionManager()
 
-    asyncio.ensure_future(db.backfill_model_name())
-
     await spooler.start()
 
     # On startup: apply pause settings saved in the DB to the spooler
     from .runtime_config import _defaults as _rc_defaults
     _saved_cfg = await db.get_config()
+    apply_llm_runtime_config(ollama, {**_rc_defaults, **_saved_cfg})
+    # Topology-aware defaults — overridden by any value the user has saved in the DB.
+    _default_pause_lanes = list(_rc_defaults["auto_pause_lanes"])  # ["embed", "eval"]
+    if topology["tagging_local"] and (topology["ollama_local"] or topology["comfyui_local"]):
+        # WD14 CPU inference competes with local GPU workloads — pause during gen/prompt
+        if "tagging" not in _default_pause_lanes:
+            _default_pause_lanes.append("tagging")
+    # EVALUATION uses Ollama VLM; if Ollama is remote it doesn't contend with local GPU
+    _default_eval_pause = topology["ollama_local"]
+
     spooler.update_pause_settings(
         auto_pause_on_priority=_saved_cfg.get(
             "auto_pause_on_generation", _rc_defaults["auto_pause_on_generation"]
         ),
         auto_pause_target_lanes=_saved_cfg.get(
-            "auto_pause_lanes", _rc_defaults["auto_pause_lanes"]
+            "auto_pause_lanes", _default_pause_lanes
+        ),
+        eval_auto_pause=_saved_cfg.get(
+            "eval_auto_pause", _default_eval_pause
         ),
     )
 
@@ -136,6 +217,9 @@ async def lifespan(app: FastAPI):
     from .invoke.oracle_scheduler import run_oracle_scheduler
     app.state.oracle_scheduler_task = asyncio.create_task(run_oracle_scheduler(app))
 
+    from .backup.scheduler import run_backup_scheduler
+    app.state.backup_scheduler_task = asyncio.create_task(run_backup_scheduler(app))
+
     watcher = ImageDirectoryWatcher(
         db, ollama, spooler,
         debounce_seconds=_settings.watch_debounce_seconds,
@@ -147,13 +231,20 @@ async def lifespan(app: FastAPI):
     yield
 
     watcher.stop()
+    for task in (app.state.oracle_scheduler_task, app.state.backup_scheduler_task):
+        task.cancel()
+    await asyncio.gather(
+        app.state.oracle_scheduler_task,
+        app.state.backup_scheduler_task,
+        return_exceptions=True,
+    )
     await spooler.stop()
     await comfy.close()
     await db.close()
     await ollama.close()
 
 
-app = FastAPI(title="Ranbell Image", version="0.3.1", lifespan=lifespan)
+app = FastAPI(title="Ranbell Image", version="0.4.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -191,6 +282,9 @@ app.include_router(jobs_router)
 app.include_router(analyzer_router)
 app.include_router(alignment_router)
 app.include_router(invoke_router)
+app.include_router(characters_router)
+app.include_router(muse_lounge_router)
+app.include_router(muse_router)
 
 
 @app.get("/api/token")
@@ -218,4 +312,16 @@ async def health(request: Request):
                 "progress": j["progress"],
             } for j in running_jobs],
         }
+        # **What the database is still building (2026-09-21).** Payload indexes are
+        # asked for with `wait=False`, so the app answers while Qdrant is still
+        # working through them. Reported on this probe — the one the screen already
+        # polls — rather than on `/health/detail`, which also calls out to Ollama
+        # and ComfyUI. Only while something is missing, so a settled instance pays
+        # nothing for it.
+        try:
+            indexes = await request.app.state.db.index_progress()
+            if indexes.get("ok") and indexes.get("ready", 0) < indexes.get("total", 0):
+                result["indexes"] = indexes
+        except Exception:
+            pass
     return result

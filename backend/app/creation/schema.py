@@ -41,3 +41,11 @@ class CreationRecord(BaseModel):
     text_directives: list[dict] = []
     parent_job_id: str = ""
     seed: int | None = None
+    # Sampler settings, when the feature chose them rather than taking the
+    # workflow's. A Muse board and its final render use the same workflow at
+    # very different settings, so without these the record cannot tell a
+    # 512px 16-step draft from the full-price image beside it.
+    steps: int | None = None
+    cfg: float | None = None
+    width: int | None = None
+    height: int | None = None
