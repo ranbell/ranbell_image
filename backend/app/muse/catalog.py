@@ -215,7 +215,6 @@ async def build_muse_catalog(
             "character": "POST /api/muse/sessions/{session_id}/character",
             "chat": "POST /api/muse/sessions/{session_id}/chat",
             "board": "POST /api/muse/sessions/{session_id}/board",
-            "cancel_board": "POST /api/muse/sessions/{session_id}/board/cancel",
             "approve": "POST /api/muse/sessions/{session_id}/approve",
             "finish": "POST /api/muse/sessions/{session_id}/finish",
             "stream": "GET /api/muse/sessions/{session_id}/stream",

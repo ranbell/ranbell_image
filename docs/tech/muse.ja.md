@@ -53,7 +53,8 @@ flowchart TD
 - 班が居ても居なくても、台帳に書くのは `write_patch` 一箇所（着地の `field_land` は監督が触らなかった質感欄に限る）
 - `scrub_patch` は入口の一つきり。席の経路でもカードの経路でも同じ掃除が効く
 - 会話中は `touch_craft` のみ。Comfy に渡す文字列は試し撮り／本番の直前に `assemble.rebuild_craft`
-- 試し撮りと本番は種でつながっている（§8）
+- 開幕のお題も同じ道を通る。`open_session` が `write_patch` を一度呼び、場所と芝居を台帳に置いてから彼女が喋る（§4）
+- 試し撮りと本番は種でつながっている（§7）
 
 同じ一周でも、走る段は撮影版で違います。
 
@@ -99,7 +100,7 @@ W 用 `_b` 欄は `has_partner` で gate します。門（gate 席）も `mode`
 | `session_db.py` | Qdrant `muse_sessions`。payload のみ。load 時 `notebook.migrate` |
 | `writer.py` | `write_patch`、女優ターン、verify / repair |
 | `crew_room.py` | スタジオ撮りの欄ごと会議 → writer への craft 材料 |
-| `crew.py` | 17 職・30 人・6 プリセット、プロンプト文、楽屋／日記用テンプレ |
+| `crew.py` | 18 役職・30 人・6 プリセット、プロンプト文、楽屋／日記用テンプレ |
 | `ledger.py` | 絶対ショット台帳。patch 正規化・sticky・UI chips |
 | `assemble.py` | ledger → `craft.prompt`。任意 quality / densify |
 | `identity.py` | キャラ identity タグの硬ロック、positive / negative 合成、framing |
@@ -212,24 +213,34 @@ W 用 `_b` 欄は `has_partner` で gate します。門（gate 席）も `mode`
 2. `persona.note_standing` — 常設指示なら台帳を動かさず ack して終わる
 3. `anima.extract_lettering` — 画面内文字は writer より前に台帳へ（VLM に字形を発明させない）
 4. 判定係 `persona.contract_check_with_db` — 止めた行は struck。彼女は固定の柔らかな一文だけ
-5. スタジオなら `crew_room.run_table`（`crew_open` が立つまで回らない）
-6. `writer.write_patch` — 監督の一行 + 班の `craft_block`。絵の指示なのに patch が空なら 1 回リトライ
-7. `talk.cue_atmosphere_look` を patch にマージ
-8. `ledger.scrub_patch`
-9. 監督が動かした欄を `apply_patch`。動かさず絵の指示に見えるときは `missed` を chat に出す
-10. `crew_room.field_land` — 監督が名指ししなかった `bg` / `light` / `frame` / `atmosphere` / `look` だけ。消せるのは班が自分で置いた語（`crew_words`）
-11. `assemble.touch_craft`（フル assemble しない）
-12. `writer.actress_turn` — board 画像があれば `vision_model`（空なら `model`）。非 VLM は空応答 → 画像なしで 1 回リトライし chat に告知（`_note_blind`）
-13. PROPOSE は `guard_muse_propose`（服・場所は空欄埋めのみ。表情は監督が顔を名指ししていないときだけ）
-14. `verify_and_repair` — **監督が動かした欄があるとき、または missed のときだけ**。彼女の propose だけでは走らない
+5. 監督の一行を SSE `chat` に**行ごと**流す（`role: "user"`・本文・時刻）。画面は POST
+   が返るまで再取得しない決まりなので、取りに行かずにその行を足す。**判定係の後**に
+   流すので、止められた行が一度出てから消えることはない
+6. スタジオなら `crew_room.run_table`（`crew_open` が立つまで回らない）
+7. `writer.write_patch` — 監督の一行 + 班の `craft_block`。絵の指示なのに patch が空なら 1 回リトライ
+8. `talk.cue_atmosphere_look` を patch にマージ
+9. `ledger.scrub_patch`
+10. 監督が動かした欄を `apply_patch`。動かさず絵の指示に見えるときは `missed` を chat に出す
+11. `crew_room.field_land` — 監督が名指ししなかった `bg` / `light` / `frame` / `atmosphere` / `look` だけ。消せるのは班が自分で置いた語（`crew_words`）
+12. `assemble.touch_craft`（フル assemble しない）
+13. `writer.actress_turn` — board 画像があれば `vision_model`（空なら `model`）。非 VLM は空応答 → 画像なしで 1 回リトライし chat に告知（`_note_blind`）
+14. PROPOSE は `guard_muse_propose`（服・場所は空欄埋めのみ。表情は監督が顔を名指ししていないときだけ）
+15. `verify_and_repair` — **監督が動かした欄があるとき、または missed のときだけ**。彼女の propose だけでは走らない
 
 女優の出力契約は `SAY` / `ASIDE` / `CARD` / `PROPOSE` / `MY_FEEL` / `PITCH`。
 画面に出すのは SAY（と ASIDE）。欄名の漏洩は `identity.sanitize_muse_say` が切る。
 
 開幕は撮影版で入口が分かれる。
 
-- 主演／W: `POST .../open` → `open_session`（彼女が先に話す。空の `wearing` には signature 衣装）
-- スタジオ: `POST .../table` → `open_table`。`crew_preset` が空なら拒否（黙って `standard` にしない）。**開幕の 3 席より前に `talk.dress_from_signature`**（空の `wearing` にだけ入る）—— 衣装の席は入っている値に質感を足す仕事なので、空欄を見せると一から作り始める。席は衣装 → 撮影 → 主演（`OPENING_SEQUENCE`）
+- 主演／W: `POST .../open` → `open_session`。順は **お題 → 衣装 → 彼女の第一声**。
+  - **お題は画の指示なので、台本係を通して台帳へ**（`service._theme_into_ledger`）。
+    台帳に書く手は `write_patch` 一つという原則は開幕でも同じ。空が返ったら
+    **無条件にもう一度訊く**（会話ターンの当て推量の門は、お題には合わない）。
+    二度とも空なら `missed` を会話に出す
+  - そのあと `talk.dress_from_signature` が**空の欄だけ**埋めるので、衣装を名指しした
+    お題（「夏祭り、浴衣で」）は取られない
+  - 彼女の第一声は、埋まった台帳を見て書かれる
+- スタジオ: `POST .../table` → `open_table`。`crew_preset` が空なら拒否（黙って `standard` にしない）。**開幕の 3 席より前に `talk.dress_from_signature`**（空の `wearing` にだけ入る）—— 衣装の席は入っている値に質感を足す仕事なので、空欄を見せると一から作り始める。席は衣装 → 撮影 → 主演（`OPENING_SEQUENCE`）。お題はここでも台帳へ入る —— 3 席の結論（`craft_block`）と一緒に `write_patch` へ渡る
 
 画面の「開始」はスタジオのとき `/table`、それ以外は `/open`（`MusePanel.vue` の `door`）。
 
@@ -256,15 +267,20 @@ framing は `auto` / `full_body` / `upper_body` / `face_closeup` / `from_behind`
 positive には一つの作物だけを置く（同義語を積まない）。
 
 `runtime.style_for` は監督の style、named look、なければ班の平均味
-（`crew.base_style_for`）。`runtime.negative_for` は workflow の negative に
-`look_negative` と identity の反対語を足す。人物の体型や年齢は negative で
-争わず、positive から外すことでロックする。
+（`crew.base_style_for`）。`runtime.negative_for` が組むのは 4 つだけ ——
+`inputs.negative_prompt`、`identity.framing_negative`、選んだ画風が否定する描き方
+（`crew.look_negative`）、監督が禁じた語（`session["banned"]`）。
+
+**体型と年齢は negative で争わない。** `identity.assemble_positive` がその語を
+positive に入れないことでロックする（サンプラーに「描くな」と頼むより、はじめから
+頼まないほうが強い）。系統が negative を取らないとき、この文字列は空になる
+（→ [§7.1](#71-ワークフローの系統anima--krea2)）。
 
 ---
 
 ## 6. 班（スタジオ撮り）
 
-**席順ではなく、欄ごとに回る**（2026-09-14）。同じ台帳の欄を持つ席は一つの会議に
+**席順ではなく、欄ごとに回る。** 同じ台帳の欄を持つ席は一つの会議に
 束ねられ、いまの値を告知されてから、欄ぜんぶの値を一つ決める。
 
 ```mermaid
@@ -306,12 +322,13 @@ sequenceDiagram
 （`bg` `light` `frame` `atmosphere` `look`）だけ。姿勢・表情・服は `craft_block`
 経由で台本係へ渡り、`ledger.one_body` の掃除を通る。
 
-**なぜ束ねたか。** 実機で `look` が 12 語になり `amber_theme` と `magenta_theme`
-が同居した。席が二人いる欄では取り合いが、一人の欄でも言い換えの堆積が起きていた。
-台の実測（同じ材料・やじ off・n=3）:
+**欄ごとに束ねる理由。** 席ごとに回すと、二人いる欄では取り合いが、一人の欄でも
+言い換えの堆積が起きる（`look` が 12 語になり `amber_theme` と `magenta_theme` が
+同居する）。欄の会議は今の値を告知してから**その欄の値を一つ**決めるので、
+言い換えは足されずに畳まれる。同じ材料・やじ off・n=3 の実測:
 
-    席ごと   12回  一周 111.4s   総監督で開く 14%   look 4.3語  SAY 96字
-    欄ごと    9回  一周  72.5s   総監督で開く  5%   look 2.3語  SAY 77字
+    席ごと   12回  一周 111.4s   総監督の語で開く 14%   look 4.3語  SAY 96字
+    欄ごと    9回  一周  72.5s   総監督の語で開く  5%   look 2.3語  SAY 77字
 
 ### 欄の持ち主
 
@@ -434,9 +451,8 @@ continuity / gate / finisher / grade。
 この値は negative 側（`crew.look_negative`）で「打ち消す描き方」に変換される。
 positive の画風は台帳の `look` が持つ。
 
-> **門は班の実体です**（2026-09-13）。`mode == "duet"` で分けていた頃は、Refine の
-> 全セッションが `duet` なので永久に閉じていて、6 プリセットとも
-> `anime illustration` だった。
+> **門は席の実体で開く**（`crew_room.has_crew`）。`mode` は全セッションが `"duet"`
+> なので、分岐の材料にならない。
 >
 > **`flat` は `bg` / `light` / `atmosphere` の、`bold` は `wearing` / `look` の
 > 持ち主が居ない**（その欄は台本係が監督の言葉だけで書く）。
@@ -460,7 +476,7 @@ flowchart LR
     R2 ==>|"同じ構図・高画質"| R3
 ```
 
-**撮影室がグラフに書き込むのは steps と seed だけ**です（2026-09-20）。cfg と
+**撮影室がグラフに書き込むのは steps と seed だけ**です。cfg と
 解像度はワークフローに焼かれた値をそのまま使い、negative は系統が決めます
 （→ [§7.1 ワークフローの系統](#71-ワークフローの系統anima--krea2)）。
 試し撮りと本番で変わるのは steps だけなので、種を揃えると「OK を出したのと
@@ -473,9 +489,8 @@ flowchart LR
 
 ### 7.1 ワークフローの系統（anima / krea2）
 
-同じ台本でも、画像モデルによって欲しい数値が違う。総監督（2026-09-20）「krea2 も
-ワークフローで扱いたいんだけど、negative prompt は要らないとか step は 8 でいいとかの
-違いがあります」。そこで**ワークフローがどの系統かを Muse が見分ける**
+同じ台本でも、画像モデルによって欲しい数値が違う。krea2 は 8 steps で仕上がり、
+negative prompt を取らない。そこで **Muse はワークフローがどの系統かを見分ける**
 （`backend/app/muse/family.py`）。
 
 | | steps（試し撮り / 本番） | cfg | 解像度 | negative |
@@ -485,13 +500,14 @@ flowchart LR
 | 参照画像（キャラのボード） | ワークフロー | ワークフロー | **Muse**（`board.SLOT_SIZE`） | 送る |
 
 - **anima の 20/30 は `defaults.py` から引いている**（写していない）。30 本パックで
-  validated した数字なので、出典を一つにしてある
-- **cfg と解像度はワークフローのもの。** 総監督「cfg は画像モデルで大きく異なるから
-  workflow に焼き込まれた内容をそのまま使いたい」「解像度は Muse の一覧で表示する
-  画像だけに適用して、通常のセッションではワークフローに基本任せる」。
-  `render_settings` はその欄を**返さない**ので、`patch_workflow` はグラフに触れない
-- **総監督が入れた数値は常に勝つ。** 出荷時の既定（`ALL_DEFAULTS`）から動いている欄は
-  「選んだ」と読み、系統より優先する（`runtime._untouched`）
+  validated した数字なので、出典は一つにしてある
+- **cfg と解像度はワークフローのもの。** cfg はチェックポイントごとに大きく違い、
+  krea2 は二段階を踏まずに高解像度で仕上げる。`render_settings` はその欄を**返さない**
+  ので、`patch_workflow` はグラフに触れない。Muse が canvas を書くのは名簿の参照画像
+  （`characters/board.SLOT_SIZE`）だけ —— そこは互いに揃っている必要がある
+- **明示した数値は常に勝つ。** 出荷時の既定（`ALL_DEFAULTS`）から動いている欄は
+  「選んだ」と読み、系統より優先する（`runtime._untouched`）。steps を 6 にしてから
+  krea2 のワークフローに替えても 6 のまま
 
 #### 判定
 
@@ -517,30 +533,15 @@ flowchart LR
 （それは作者の選択）。落としたことは `[muse.family] krea2 sends no negative —
 N chars dropped: …` として INFO に残す。
 
-**negative を消す形のグラフに注意**（実機で踏んだ）。krea2 のサンプルは
-`CLIPTextEncode` が一つしか無く、`KSampler.negative` は `ConditioningZeroOut`
-経由でその同じノードに戻っている。負の線を辿ると positive を書いたノードに着くので、
-negative を送ると **positive に焼き込まれる**（実測: `1girl, park, smile, bad quality,
-border`）。`patch_workflow` は宛先が positive と同じなら書かない。
+**negative を消す形のグラフがある。** `CLIPTextEncode` が一つしか無く、
+`KSampler.negative` が `ConditioningZeroOut` を経由してその同じノードへ戻っている形
+（krea2 のサンプルがこれ）。負の線を辿ると positive を書いたノードに着くので、
+negative を送ると **positive に焼き込まれる**。`patch_workflow` は宛先が positive と
+同じなら negative を書かず、`[comfy] node %s carries the positive and the negative
+traces back to it` を残す。
 
-#### 実機の確認（2026-09-20・同じ台本を両系統で）
-
-最新の撮影記録（`0d5ac337`）から台本を起こし、anima と krea2 で一度ずつ流した
-（`private/muse/crew_lab/replay_record.py --workflow …`）。値は**撮れた PNG に
-焼かれたグラフ**を読んだもの。
-
-```
-anima  試し撮り steps 20 / cfg 4.0 / latent 896x1152  / negative あり
-anima  本番     steps 30 / cfg 4.5 / latent 896x1152
-krea2  試し撮り steps  4 / cfg リンクのまま / latent 1284x1824 / negative 空
-krea2  本番     steps  8 / 同上
-       種の引き継ぎ 試し撮り = 本番（両方）、本番 45.7s（anima は 107.5s）
-```
-
-**anima の cfg と解像度は、この測定のあとに系統の表から外した**（総監督の指示）。
-いまの anima は krea2 と同じく、両方ともワークフローの値で撮る。グラフに対しては
-`tests/ai/test_zeroed_negative_workflow.py` が「cfg にも latent にも触れないこと」を
-実物のグラフで固定している。
+グラフに対する約束（cfg にも latent にも触れないこと）は
+`tests/ai/test_zeroed_negative_workflow.py` が実物のグラフで固定している。
 
 `GET /catalog` は `comfyui.workflow_caps[].family` と、そのグラフ自身の解像度
 `workflow_caps[].canvas`、系統の表 `image_families` を返す。画面はそれを札として出す。
@@ -564,7 +565,7 @@ board 後の VLM 読み戻し（手帖合わせ）は runner から外してあ�
 ### shoot（`POST .../approve` と `POST .../shoot` は同一）
 
 1. board 完了・画像必須
-2. ledger_fp 一致なら `board.prompt`、否则 `rebuild_craft`
+2. ledger_fp 一致なら `board.prompt`、違っていれば `rebuild_craft`
 3. `shoot.seed = _board_seed(board)`
 4. unload → `muse_shoot` → `finish_shoot` で continuity memory
 
@@ -636,36 +637,39 @@ PROMPT レーンへ積むジョブ:
 | `generate_handpost_habit` | 主演のみ | 監督の癖メモ。その撮影の `notes` が空なら出ない |
 | chemistry | 二人の日記が揃ったとき | 相性カード |
 
-### 日記が日本語であること（2026-09-20）
+### 日記の日本語（漢字率の見張り）
 
-総監督「gemma26 で最新撮影したんだけど、日記がひらがなのみかつ、変な日本語です」。
-実機の一本が 646 字で漢字 1 字、分かち書きまで付いていた。
-
-原因は**条文の第5項の文言**だった。「ひらがな・カタカナ・常用漢字だけで書くこと」は
-「日本語の文字だけを使え」の意図だったが、「かなで書け」とも読める。前置きに VLM の
-英語の散文（写真読み）が入っていると倒れる —— 実測 93 本:
+日記は**漢字かな交じりのふつうの日本語**で書かせる。条文（`crew.actress_diary_prompt`
+第5項）は「漢字を減らさない」と明示し、混ぜてはいけないものだけを名指しする
+（ハングル・キリル・中国語だけの漢字）。**「常用漢字だけで書くこと」のような書き方は
+使わない** —— 「かなで書け」とも読めるうえ、前置きに VLM の英語の散文（写真読み）が
+入ると、その読みのほうへ倒れる。実測 93 本:
 
 ```
-写真読み無し（タグ列）× 2モデル × 2条文   要約かな一色 0/40
-写真読み有り・現行の文言                  7/20（35%）
-写真読み有り・「漢字かな交じりの、ふつうの日本語で書くこと」  0/20
+写真読み無し（タグ列）× 2モデル × 2条文                       要約かな一色 0/40
+写真読み有り・「常用漢字だけで書くこと」                       7/20（35%）
+写真読み有り・「漢字かな交じりの、ふつうの日本語で書くこと」   0/20
 ```
 
-枠（`num_ctx`）は無関係だった —— 入力 1,455 tok ＋ 出力 851 tok＝ 32,768 の 7%、
-`done_reason` は毎回 `stop`。7% の状態で崩れている。
+枠は関係しない（入力 1,455 tok ＋ 出力 851 tok＝ 32,768 の 7%、`done_reason` は
+毎回 `stop`）。
 
-直したのは三つ:
+出口にも見張りを置く。
 
-1. 第5項を「**漢字かな交じりの、ふつうの日本語で書くこと（漢字を減らさない）**。
-   混ぜてはいけないのはハングル・キリル・中国語だけの漢字」に
-2. `diary.kana_only()` の検査 —— 本文の漢字率 8% 未満（健全は 17〜29%）、または
-   要約が 12 字以上で漢字ゼロなら**一度だけ書き直しを頼む**。最後の一回はそのまま残す
-   （日記が無いほうが損失が大きい）
-3. 頼んだ事実を `session["diary"]["entries"][<character_id>]["asked_again"]` に残す。
-   今回はログに何も残らず、追跡に半日かかった
+| 場所 | 中身 |
+|---|---|
+| `diary.kanji_ratio(text)` | 文字に占める漢字の割合。健全な日記は 17〜29% |
+| `diary.KANJI_FLOOR` | `0.08`。本文がこれを下回ると「かな一色」と読む |
+| `diary.SUMMARY_MIN_LEN` | `12`。これ以上の長さで漢字ゼロの要約も同じ |
+| `diary.kana_only()` | 倒れた側を `"content"` / `"summary"` / `""` で返す |
 
-あわせて【口調・声】が英語の `appearance.voice`（30 人全員・文が途中で切れている）を
-使っていたのを、`first_person_ja` と `talk_quirks` に替えた。
+引っかかったら**一度だけ書き直しを頼む**。二度目はそのまま残す（日記が無いほうが
+損失は大きい）。頼んだ事実は
+`session["diary"]["entries"][<character_id>]["asked_again"]` に残るので、あとから
+どの回が言い直しだったか読める。
+
+【口調・声】の材料はキャラの `first_person_ja` と `talk_quirks`。`appearance.voice`
+は英語で、文の途中で切れているものがあるため使わない。
 
 永続化は [Qdrant](qdrant.ja.md) のみ。画像本体はディスクの sha。セッションは
 `image_id` 参照。
@@ -741,10 +745,10 @@ prefix `/api/muse`。撮影は `api.py`、楽屋は `lounge_api.py`。
 | POST | `/sessions/{id}/finish` | ラップ |
 | GET | `/sessions/{id}/stream` | SSE |
 
-`InputsPatch` に `crew_preset` / `banter_mode` が無いと pydantic が黙って捨てる
-（2026-09-13 まで画面は出していたがサーバが受け取らず、スタジオは常に
-standard 18 席だった）。`public_view.inputs` も同じキーを返す。返さないと
-開き直すと `standard` に見える。
+画面が送る設定は `InputsPatch` に**欄がある分だけ**通る。pydantic は知らないキーを
+黙って捨てるので、`crew_preset` / `banter_mode` / steps / 解像度のように画面から
+動かすものは、ここと `public_view.inputs` の両方に無ければならない（返さないと、
+開き直したとき既定に見える）。
 
 ### 楽屋（読み取り）
 
@@ -766,7 +770,7 @@ standard 18 席だった）。`public_view.inputs` も同じキーを返す。�
 |---|---|
 | `ping` | タイムアウト |
 | `session_updated` | save |
-| `chat` | 監督／彼女／班の吹き出し |
+| `chat` | 監督／彼女／班の吹き出し。監督の行は本文と時刻を載せて判定係の直後に出る |
 | `chat_message` / `chat_delta` | shared 側のストリーム |
 | `muse_speaking` | 誰が打っているか |
 | `preview` | Comfy JPEG（base64） |
@@ -786,9 +790,10 @@ standard 18 席だった）。`public_view.inputs` も同じキーを返す。�
 | キー | 値 | メモ |
 |---|---|---|
 | `width` / `height` | 896 × 1152 | **セッションでは使わない**（解像度はワークフロー任せ）。上書きしたときの出発点と、参照画像の既定 |
-| `draft_steps` / `draft_cfg` | 20 / 4.0 | steps は anima の系統が引く。**cfg は書き込まない**（2026-09-20）。3 未満でテーマが滑るのは当時の実測 |
+| `draft_steps` / `draft_cfg` | 20 / 4.0 | steps は anima の系統がここから引く。**cfg はグラフに書き込まない** —— 上書きしたときの出発点 |
 | `draft_count` | 1 | バッチ 2 以上で VRAM の余裕が薄くなる。krea2 は latent が 2.3MP あるので特に |
 | `final_steps` / `final_cfg` | 30 / 4.5 | 同上。系統ごとの値は [§7.1](#71-ワークフローの系統anima--krea2) |
+| `look` | `""` | 名前付きの画風（`crew.LOOKS`）。空なら班の平均 |
 | `num_ctx` | 32768 | 全ターン同一 |
 | `vision_model` | `""` | 空なら `model` を流用 |
 | `unload_vlm` | `true` | 描画前に LLM を落とす |
@@ -797,8 +802,13 @@ standard 18 席だった）。`public_view.inputs` も同じキーを返す。�
 | `framing` | `auto` | |
 | `style` | `""` | 空なら班の平均 |
 | `negative_prompt` | 品質・枠・multiview | 体型や年齢は入れない。`simple_background` も入れない |
-| `enhance_quality` | `false` | オンで quality_enrich + densify |
 | `simple` | `false` | 旧シンプル経路。並べて比べるために残している |
+
+`ALL_DEFAULTS` には `wd14_threshold` / `drop_character_tags` / `drop_rating_tags` も
+残っているが、**Muse から WD14 を呼ぶ経路は無い**（`rebuild_craft` は LLM の
+`quality_enrich` だけ）。`enhance_quality` は `defaults.py` ではなく
+`SessionCreate` / `InputsPatch` の欄で、既定は false。オンで quality_enrich と
+densify が走る。
 
 管理画面の既定は catalog の `admin_defaults`（`muse_model` / `muse_workflow`）。
 空なら画面は選ばせる。`suggested_run` の先頭当ては外の呼び元用で、パネルは
@@ -823,17 +833,14 @@ admin_defaults を見る。
 | 試し撮り | 78.5s | ComfyUI（スケジューラ経由） |
 | 本番 | 99.2s | 同上・steps 30 |
 
-席の前置きは約 4,900 字（同日に 8,792 字から）。打ち消されていた
-`crew.OUTPUT` と、classic の機構に宛てていた `crew.CARRY` を外し、効いていた条文
-（拒否したものを名指ししない／相対指定の禁止／言語と声）だけを残した。
+席に渡す前置きは約 4,900 字。内訳のうち 380 字は `crew_room.SEAT_VOICE`（席の口調を
+保つ段）で、これが無いと席の発言の 46% が「総監督、」で始まり、42% が同じ 4 文字で
+切り出す（有りで 8% / 21%、所要時間は横ばい）。
 
-そのうち 380 字は `crew_room.SEAT_VOICE` —— 席の口調を保つ段。外していたあいだ、
-席の発言の 46% が「総監督、」で始まり、42% が同じ 4 文字で切り出していた
-（戻して 8% / 21%、時間は横ばい）。
-
-会話中に `rebuild_craft` していた頃は、会話だけの一手が約 54 秒
+会話ターンが `touch_craft` だけなのは、ここに効いている。`rebuild_craft` を毎ターン
+走らせると、会話だけの一手が約 54 秒になる
 （writer 4.5 + enrich 4.4 + densify 6.9 + actress 22 + assemble 9.6 + verify 6.8）。
-いま会話は `touch_craft` だけなので、enrich / densify / assemble は撮る時まで待つ。
+enrich / densify / assemble は撮る時まで待たせる。
 
 ---
 

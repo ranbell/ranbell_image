@@ -56,7 +56,9 @@ flowchart TD
 - `scrub_patch` is a single door. Seat path and card path get the same clean
 - During talk, `touch_craft` only. The string Comfy sees is built just before
   test / final by `assemble.rebuild_craft`
-- Test and final are tied by seed (§8)
+- The opening theme takes the same road: `open_session` calls `write_patch` once, so
+  the place and the performance are in the ledger before she speaks (§4)
+- Test and final are tied by seed (§7)
 
 The same loop, different stages depending on the kind of shoot.
 
@@ -103,7 +105,7 @@ Implementation lives in `backend/app/muse/`. The router is mounted from
 | `session_db.py` | Qdrant `muse_sessions`. Payload only. `notebook.migrate` on load |
 | `writer.py` | `write_patch`, actress turn, verify / repair |
 | `crew_room.py` | Studio meetings per field → craft material for the writer |
-| `crew.py` | 17 jobs, 30 people, 6 presets, prompt text, lounge / diary templates |
+| `crew.py` | 18 roles, 30 people, 6 presets, prompt text, lounge / diary templates |
 | `ledger.py` | Absolute shot ledger. Patch normalize, sticky, UI chips |
 | `assemble.py` | ledger → `craft.prompt`. Optional quality / densify |
 | `identity.py` | Hard lock of character identity tags, positive / negative assemble, framing |
@@ -218,16 +220,17 @@ Entry is `POST /api/muse/sessions/{id}/chat` → `service.chat`.
 2. `persona.note_standing` — a standing order acks and returns without moving the ledger
 3. `anima.extract_lettering` — in-frame letters hit the ledger before the writer (do not let the VLM invent glyphs)
 4. Gate `persona.contract_check_with_db` — stopped lines are struck. She only gets a fixed soft line
-5. If studio, `crew_room.run_table` (does not walk until `crew_open` is up)
-6. `writer.write_patch` — Showrunner's line + the crew `craft_block`. If it looks like a picture direction and the patch is empty, retry once
-7. Merge `talk.cue_atmosphere_look` into the patch
-8. `ledger.scrub_patch`
-9. `apply_patch` for fields the Showrunner moved. If it looks like a picture direction and nothing moved, put `missed` in chat
-10. `crew_room.field_land` — only `bg` / `light` / `frame` / `atmosphere` / `look` the Showrunner did not name. It may only drop words the crew placed itself (`crew_words`)
-11. `assemble.touch_craft` (not a full assemble)
-12. `writer.actress_turn` — `vision_model` if there is a board image (else `model`). A non-VLM returns empty → retry once with no image and tell chat (`_note_blind`)
-13. PROPOSE goes through `guard_muse_propose` (clothes / place only fill empty fields. Face only when the Showrunner did not name the face)
-14. `verify_and_repair` — **only when the Showrunner moved a field, or on missed**. Her propose alone does not run it
+5. Publish the Showrunner's line to SSE `chat` **as a row** (`role: "user"`, the text, the stamp). The panel refuses to refetch while the POST owns the session, so it appends this row instead of fetching. Published **after the gate**, so a line that is stopped never appears and then vanishes
+6. If studio, `crew_room.run_table` (does not walk until `crew_open` is up)
+7. `writer.write_patch` — Showrunner's line + the crew `craft_block`. If it looks like a picture direction and the patch is empty, retry once
+8. Merge `talk.cue_atmosphere_look` into the patch
+9. `ledger.scrub_patch`
+10. `apply_patch` for fields the Showrunner moved. If it looks like a picture direction and nothing moved, put `missed` in chat
+11. `crew_room.field_land` — only `bg` / `light` / `frame` / `atmosphere` / `look` the Showrunner did not name. It may only drop words the crew placed itself (`crew_words`)
+12. `assemble.touch_craft` (not a full assemble)
+13. `writer.actress_turn` — `vision_model` if there is a board image (else `model`). A non-VLM returns empty → retry once with no image and tell chat (`_note_blind`)
+14. PROPOSE goes through `guard_muse_propose` (clothes / place only fill empty fields. Face only when the Showrunner did not name the face)
+15. `verify_and_repair` — **only when the Showrunner moved a field, or on missed**. Her propose alone does not run it
 
 The actress output contract is `SAY` / `ASIDE` / `CARD` / `PROPOSE` / `MY_FEEL` / `PITCH`.
 What the screen shows is SAY (and ASIDE). Field-name leaks are cut by
@@ -235,8 +238,11 @@ What the screen shows is SAY (and ASIDE). Field-name leaks are cut by
 
 Opening splits by kind of shoot.
 
-- Just her / with a partner: `POST .../open` → `open_session` (she speaks first. Empty `wearing` gets the signature costume)
-- Studio: `POST .../table` → `open_table`. Empty `crew_preset` is refused (do not silently fall to `standard`). **`talk.dress_from_signature` before the three opening seats** (only into empty `wearing`) — wardrobe's job is to add texture to a value that is already there, so an empty field makes it invent from scratch. Seats are wardrobe → camera → lead (`OPENING_SEQUENCE`)
+- Just her / with a partner: `POST .../open` → `open_session`. The order is **theme → costume → her first line**.
+  - **The theme is a picture direction, so it goes through the Scripter** into the ledger (`service._theme_into_ledger`). One hand writes the ledger, at the opening too. An empty answer is **always asked again** — the heuristic gate a chat turn uses does not fit a theme; if neither ask lands anything, `missed` goes into the conversation
+  - `talk.dress_from_signature` then fills **only empty fields**, so a theme that names an outfit keeps it
+  - Her first line is written against the filled ledger
+- Studio: `POST .../table` → `open_table`. Empty `crew_preset` is refused (do not silently fall to `standard`). **`talk.dress_from_signature` before the three opening seats** (only into empty `wearing`) — wardrobe's job is to add texture to a value that is already there, so an empty field makes it invent from scratch. Seats are wardrobe → camera → lead (`OPENING_SEQUENCE`). The theme reaches the ledger here too — it goes to `write_patch` together with the three seats' conclusions (`craft_block`)
 
 The panel's Open is `/table` for studio, otherwise `/open` (`door` in `MusePanel.vue`).
 
@@ -264,15 +270,21 @@ Framing is `auto` / `full_body` / `upper_body` / `face_closeup` / `from_behind`.
 The positive gets one crop only (do not stack synonyms).
 
 `runtime.style_for` is the Showrunner's style, a named look, or else the crew's
-average taste (`crew.base_style_for`). `runtime.negative_for` adds `look_negative`
-and identity opposites to the workflow's negative. A person's figure and age
-are not fought in the negative; they lock by staying out of the positive.
+average taste (`crew.base_style_for`). `runtime.negative_for` builds four things
+and nothing else — `inputs.negative_prompt`, `identity.framing_negative`, the way
+of drawing the chosen look rules out (`crew.look_negative`), and what the
+Showrunner refused (`session["banned"]`).
+
+**A figure and an age are not fought in the negative.** `identity.assemble_positive`
+locks them by keeping those words out of the positive: never asking is stronger
+than asking the sampler not to. Where a family takes no negative, this string is
+empty (→ [§7.1](#71-workflow-families-anima--krea2)).
 
 ---
 
 ## 6. Crew (studio shoot)
 
-**Not seat by seat — one meeting per field** (2026-09-14). Seats that share a
+**Not seat by seat — one meeting per field.** Seats that share a
 ledger field are bundled, told the current value, then settle one value for
 the whole field.
 
@@ -315,8 +327,10 @@ the notebook (gone), other fields' CRAFT (only talk is visible).
 (`bg` `light` `frame` `atmosphere` `look`). Pose, face, and clothes go to the
 writer via `craft_block` and through `ledger.one_body`.
 
-**Why bundle.** Live, `look` grew to 12 words and `amber_theme` sat next to
-`magenta_theme`. Fields with two seats fought; fields with one piled rephrasings.
+**Why one meeting per field.** Seat by seat, a field with two seats is fought
+over and a field with one piles up rephrasings (`look` grows to 12 words with
+`amber_theme` next to `magenta_theme`). A field meeting is told the current value
+and settles **one** value for it, so a rephrasing is folded rather than added.
 Bench (same material, heckling off, n=3):
 
     per seat   12 calls  walk 111.4s   Showrunner opens 14%   look 4.3 words  SAY 96 chars
@@ -445,9 +459,8 @@ Look floor (`crew.base_style_for` → `runtime.style_for`):
 That value becomes "ways of drawing to cancel" on the negative side
 (`crew.look_negative`). The look in the positive is the ledger's `look`.
 
-> **The gate is who is actually seated** (2026-09-13). When it branched on
-> `mode == "duet"`, every Refine session is `duet`, so it stayed shut forever
-> and all six presets were `anime illustration`.
+> **The gate is who is actually seated** (`crew_room.has_crew`). `mode` is
+> `"duet"` on every session, so it cannot be the material for a branch.
 >
 > **`flat` has no owner for `bg` / `light` / `atmosphere`, `bold` has none for
 > `wearing` / `look`** (those fields the writer fills from the Showrunner's
@@ -473,7 +486,7 @@ flowchart LR
     R2 ==>|"same frame, finished"| R3
 ```
 
-**The studio writes steps and seed only into the graph** (2026-09-20). Cfg and
+**The studio writes steps and seed only into the graph.** Cfg and
 size stay the values baked into the workflow; negative is decided by family
 (→ [§7.1 Workflow families](#71-workflow-families-anima--krea2)).
 Test and final differ only in steps, so matching the seed gives "the finished
@@ -487,11 +500,9 @@ If the ledger has not moved, the prompt from approve goes to final as-is
 
 ### 7.1 Workflow families (anima / krea2)
 
-The same script wants different numbers depending on the image model. The
-Showrunner (2026-09-20): "I want krea2 handled as a workflow too, but it
-doesn't need a negative prompt, and 8 steps is enough" — that kind of
-difference. So **Muse detects which family a workflow is**
-(`backend/app/muse/family.py`).
+The same script wants different numbers depending on the image model. krea2
+finishes in 8 steps and takes no negative prompt. So **Muse detects which family
+a workflow is** (`backend/app/muse/family.py`).
 
 | | steps (test / final) | cfg | size | negative |
 |---|---|---|---|---|
@@ -501,14 +512,15 @@ difference. So **Muse detects which family a workflow is**
 
 - **Anima's 20/30 is pulled from `defaults.py`** (not copied). Those numbers
   were validated on the 30-pack, so there is one source
-- **Cfg and size belong to the workflow.** The Showrunner: "cfg differs a lot
-  by image model, so I want whatever is baked into the workflow" / "size
-  should apply only to the stills Muse shows in the roster; ordinary sessions
-  leave it to the workflow". `render_settings` **does not return** those
-  fields, so `patch_workflow` does not touch the graph
-- **A number the Showrunner typed always wins.** A field that has moved from
-  the shipped default (`ALL_DEFAULTS`) is read as "chosen" and beats the
-  family (`runtime._untouched`)
+- **Cfg and size belong to the workflow.** Cfg differs a great deal between
+  checkpoints, and krea2 reaches a high-resolution picture without the two-stage
+  process. `render_settings` **does not return** those fields, so `patch_workflow`
+  does not touch the graph. The one place Muse writes a canvas is the roster's
+  reference stills (`characters/board.SLOT_SIZE`), which have to match each other
+- **An explicit number always wins.** A field that has moved from the shipped
+  default (`ALL_DEFAULTS`) is read as "chosen" and beats the family
+  (`runtime._untouched`) — set steps to 6 and switch to a krea2 workflow and it
+  stays 6
 
 #### Detection
 
@@ -535,31 +547,16 @@ touch the negative node when empty. So **the negative baked into the workflow
 itself stays** (that is the author's choice). What was dropped is logged INFO
 as `[muse.family] krea2 sends no negative — N chars dropped: …`.
 
-**Watch graphs that "delete" the negative** (hit live). The krea2 sample has
-only one `CLIPTextEncode`, and `KSampler.negative` loops back to that same
-node through `ConditioningZeroOut`. Following the negative wire lands on the
-node that wrote the positive, so sending a negative **bakes into the
-positive** (measured: `1girl, park, smile, bad quality, border`).
-`patch_workflow` does not write if the destination is the same as positive.
+**Some graphs "delete" the negative.** One `CLIPTextEncode`, with
+`KSampler.negative` looping back to that same node through `ConditioningZeroOut`
+(the krea2 sample is built this way). Following the negative wire lands on the
+node that wrote the positive, so sending a negative **bakes it into the
+positive**. `patch_workflow` does not write the negative when its destination is
+the same node as the positive, and logs `[comfy] node %s carries the positive and
+the negative traces back to it`.
 
-#### Live check (2026-09-20, same script on both families)
-
-Took a script from the latest shoot record (`0d5ac337`) and ran it once on
-anima and once on krea2 (`private/muse/crew_lab/replay_record.py --workflow …`).
-Values are from **the graph baked into the PNG that came out**.
-
-```
-anima  test  steps 20 / cfg 4.0 / latent 896x1152  / negative present
-anima  final steps 30 / cfg 4.5 / latent 896x1152
-krea2  test  steps  4 / cfg as linked / latent 1284x1824 / negative empty
-krea2  final steps  8 / same
-       seed carry-through test = final (both), final 45.7s (anima 107.5s)
-```
-
-**Anima cfg and size were taken off the family table after this measurement**
-(Showrunner's instruction). Anima now shoots like krea2: both values from the
-workflow. Against the graph, `tests/ai/test_zeroed_negative_workflow.py` pins
-"do not touch cfg or latent" on a real graph.
+What the graph is promised — that cfg and latent are never touched — is pinned on
+a real graph by `tests/ai/test_zeroed_negative_workflow.py`.
 
 `GET /catalog` returns `comfyui.workflow_caps[].family`, that graph's own size
 `workflow_caps[].canvas`, and the family table `image_families`. The panel
@@ -662,39 +659,41 @@ Jobs stacked on the PROMPT lane:
 | `generate_handpost_habit` | Lead only | A habit note about the Showrunner. Does not fire if that shoot's `notes` are empty |
 | chemistry | When both diaries are in | A compatibility card |
 
-### Diaries stay in Japanese (2026-09-20)
+### The diary's Japanese (watching the kanji rate)
 
-The Showrunner: "shot on gemma26, and the diary is hiragana-only, weird
-Japanese." One live page was 646 characters with 1 kanji, plus word-spacing.
-
-The cause was **the wording of clause 5**. "Write using only hiragana, katakana,
-and everyday kanji" was meant as "use Japanese characters only", and could also
-be read as "write in kana". It falls over when the preamble has English VLM
-prose (photo read) — measured on 93 pages:
+A diary is written in **ordinary Japanese, kanji mixed with kana**. Clause 5 of
+the contract (`crew.actress_diary_prompt`) says "do not drop kanji" in as many
+words, and names only what must not be mixed in (Hangul, Cyrillic, Chinese-only
+kanji). **Wordings like "write using only everyday kanji" are not used** — they
+also read as "write in kana", and with English VLM prose (the photo read) in the
+preamble the model falls that way. Measured on 93 pages:
 
 ```
-no photo read (tag list) × 2 models × 2 wordings   kana-only summary 0/40
-photo read, current wording                         7/20 (35%)
-photo read, "ordinary Japanese mixed kanji and kana"  0/20
+no photo read (tag list) × 2 models × 2 wordings        kana-only summary 0/40
+photo read, "only everyday kanji"                       7/20 (35%)
+photo read, "ordinary Japanese, kanji mixed with kana"  0/20
 ```
 
-The window (`num_ctx`) was irrelevant — 1,455 tok in + 851 tok out = 7% of
-32,768, `done_reason` was `stop` every time. It was already broken at 7%.
+The window is not involved (1,455 tok in + 851 tok out = 7% of 32,768,
+`done_reason` `stop` every time).
 
-Three fixes:
+There is a guard on the way out as well.
 
-1. Clause 5 became "**ordinary Japanese mixed kanji and kana (do not drop
-   kanji)**. The only scripts not to mix are Hangul, Cyrillic, and Chinese-only
-   kanji"
-2. `diary.kana_only()` check — if body kanji rate is under 8% (healthy is
-   17–29%), or the summary is 12+ characters with zero kanji, **ask once to
-   rewrite**. The last attempt is kept as-is (no diary is the larger loss)
-3. Record that we asked in
-   `session["diary"]["entries"][<character_id>]["asked_again"]`. This time
-   nothing was in the log and tracking took half a day
+| Where | What |
+|---|---|
+| `diary.kanji_ratio(text)` | Share of characters that are kanji. A healthy diary runs 17–29% |
+| `diary.KANJI_FLOOR` | `0.08`. Below it, the body reads as kana-only |
+| `diary.SUMMARY_MIN_LEN` | `12`. A summary at least this long with zero kanji counts too |
+| `diary.kana_only()` | Returns which side fell — `"content"` / `"summary"` / `""` |
 
-Also, 【voice】 had been using English `appearance.voice` (all 30 people,
-sentences cut off mid-way). Switched to `first_person_ja` and `talk_quirks`.
+A page that trips it is **asked once to write it again**; the second answer is
+kept whatever it is (no diary is the larger loss). That it was asked is recorded
+in `session["diary"]["entries"][<character_id>]["asked_again"]`, so which pages
+were rewritten can be read back.
+
+The material for 【voice】 is the character's `first_person_ja` and `talk_quirks`.
+`appearance.voice` is English and some entries are cut off mid-sentence, so it is
+not used.
 
 Persistence is [Qdrant](qdrant.md) only. Image bytes are on disk by sha.
 Sessions hold `image_id` references.
@@ -772,10 +771,11 @@ Prefix `/api/muse`. The studio is `api.py`, the lounge is `lounge_api.py`.
 | POST | `/sessions/{id}/finish` | Wrap |
 | GET | `/sessions/{id}/stream` | SSE |
 
-If `InputsPatch` lacks `crew_preset` / `banter_mode`, pydantic drops them in
-silence (until 2026-09-13 the panel sent them and the server did not take
-them, so studio always ran standard's 18 seats). `public_view.inputs` returns
-the same keys. Without them, reopening looks like `standard`.
+A setting the panel sends gets through only as far as `InputsPatch` has a field
+for it — pydantic drops what it does not know, in silence. So anything the panel
+can move (`crew_preset`, `banter_mode`, steps, size) has to exist both there and
+in `public_view.inputs`; leave it out of the latter and reopening a session shows
+the default.
 
 ### Lounge (read)
 
@@ -797,7 +797,7 @@ the same keys. Without them, reopening looks like `standard`.
 |---|---|
 | `ping` | Timeout |
 | `session_updated` | save |
-| `chat` | Showrunner / her / crew bubbles |
+| `chat` | Showrunner / her / crew bubbles. The Showrunner's own row carries its text and stamp and goes out right after the gate |
 | `chat_message` / `chat_delta` | Stream on the shared side |
 | `muse_speaking` | Who is typing |
 | `preview` | Comfy JPEG (base64) |
@@ -818,9 +818,10 @@ record for what breaks when you do.
 | Key | Value | Note |
 |---|---|---|
 | `width` / `height` | 896 × 1152 | **Not used in a session** (size is the workflow's). Starting point when overriding, and the default for reference stills |
-| `draft_steps` / `draft_cfg` | 20 / 4.0 | Steps pulled from the anima family. **cfg is not written** (2026-09-20). Theme slipping under 3 was a measurement from then |
+| `draft_steps` / `draft_cfg` | 20 / 4.0 | The anima family pulls its steps from here. **cfg is never written into the graph** — it is the starting point for an override |
 | `draft_count` | 1 | Batch 2+ leaves little VRAM. krea2 latents are 2.3 MP, so especially |
 | `final_steps` / `final_cfg` | 30 / 4.5 | Same. Per-family values in [§7.1](#71-workflow-families-anima--krea2) |
+| `look` | `""` | A named look (`crew.LOOKS`). Empty uses the crew average |
 | `num_ctx` | 32768 | Same on every turn |
 | `vision_model` | `""` | Empty reuses `model` |
 | `unload_vlm` | `true` | Drop the LLM before drawing |
@@ -829,8 +830,13 @@ record for what breaks when you do.
 | `framing` | `auto` | |
 | `style` | `""` | Empty uses the crew average |
 | `negative_prompt` | quality, frames, multiview | Do not put figure or age in. Do not put `simple_background` either |
-| `enhance_quality` | `false` | On runs quality_enrich + densify |
 | `simple` | `false` | Old simple path. Kept so they can be compared side by side |
+
+`ALL_DEFAULTS` still carries `wd14_threshold` / `drop_character_tags` /
+`drop_rating_tags`, but **nothing in Muse calls WD14** (`rebuild_craft` runs the
+LLM's `quality_enrich` only). `enhance_quality` is not in `defaults.py` — it is a
+field on `SessionCreate` / `InputsPatch`, false by default, and on it runs
+quality_enrich and densify.
 
 Admin defaults are catalog `admin_defaults` (`muse_model` / `muse_workflow`).
 Empty and the panel asks you to pick. `suggested_run`'s first hit is for
@@ -855,19 +861,15 @@ rewrite**. Next day's bench, 14th: walk −35%.
 | Test shot | 78.5s | ComfyUI (through the scheduler) |
 | Final | 99.2s | Same, steps 30 |
 
-Seat preamble is about 4,900 characters (down from 8,792 the same day). Removed
-the cancelled `crew.OUTPUT` and `crew.CARRY` aimed at Classic machinery; kept
-only the clauses that were doing work (do not name what you refused / no
-relative framing / language and voice).
+The preamble a seat is handed is about 4,900 characters. 380 of those are
+`crew_room.SEAT_VOICE` — the stage that keeps a seat's own voice. Without it, 46%
+of seat lines start "Showrunner," and 42% cut in on the same four characters
+(with it: 8% / 21%, time flat).
 
-Of that, 380 characters are `crew_room.SEAT_VOICE` — the stage that keeps a
-seat's voice. While it was off, 46% of seat lines started "Showrunner," and
-42% cut in on the same four characters (back on: 8% / 21%, time flat).
-
-When talk still ran `rebuild_craft`, a talk-only beat was about 54 s
-(writer 4.5 + enrich 4.4 + densify 6.9 + actress 22 + assemble 9.6 + verify 6.8).
-Talk is `touch_craft` only now, so enrich / densify / assemble wait until you
-shoot.
+This is what a talk turn's `touch_craft` buys. Run `rebuild_craft` every turn and
+a talk-only beat costs about 54 s (writer 4.5 + enrich 4.4 + densify 6.9 +
+actress 22 + assemble 9.6 + verify 6.8), so enrich / densify / assemble wait
+until you shoot.
 
 ---
 
