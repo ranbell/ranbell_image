@@ -49,11 +49,11 @@ Start by picking one or two of 30 Muses (actresses).
 
 Say "walk down the park path chatting with each other" and the actress (and, if you called a crew, the crew) writes that state into a ledger, then turns it into an image prompt.
 
-![Muse ledger](docs/screenshots/JA_X2_muse_ledger.png)
+![Muse ledger](docs/screenshots/X2_muse_ledger.png)
 
 Look at the test shot — *is this okay?* If it is, go to the final with **the same seed**.
 
-![Muse take](docs/screenshots/JA_X3_muse_take.png)
+![Muse take](docs/screenshots/X3_muse_take.png)
 
 #### What else it does
 
@@ -65,7 +65,7 @@ Look at the test shot — *is this okay?* If it is, go to the final with **the s
 
 The Muse guide and technical reference are in Japanese:
 
-> 📖 [Creator's Guide — Muse](docs/guide/muse.ja.md) · [Technical Reference](docs/tech/muse.ja.md)
+> 📖 [Creator's Guide — Muse](docs/guide/muse.md) · [Technical Reference](docs/tech/muse.md)
 
 ---
 
@@ -105,8 +105,8 @@ Choose an output style to match your model:
 
 > 📖 [Creator's Guide — Prompt Alchemy](docs/guide/prompt-alchemy.md) · [Technical Reference](docs/tech/prompt-alchemy.md)
 
-![Prompt Studio-1](docs/screenshots/JA_04_01_prompting.png)
-![Prompt Studio-3](docs/screenshots/JA_04_03_prompting.png)
+![Prompt Studio-1](docs/screenshots/04_01_prompting.png)
+![Prompt Studio-3](docs/screenshots/04_03_prompting.png)
 
 ---
 
@@ -150,7 +150,7 @@ Five spirits take your mood, colors, and rough intent, and each grows a seed (pr
 
 > 📖 [Creator's Guide — Inspire & Brainstorm](docs/guide/inspire-brainstorm.md) · [Technical Reference](docs/tech/inspire-brainstorm.md)
 
-![Inspire-1](docs/screenshots/JA_05_01_inspire.png)
+![Inspire-1](docs/screenshots/05_01_inspire.png)
 ![Inspire-2](docs/screenshots/JA_05_02_inspire.png)
 
 ---
