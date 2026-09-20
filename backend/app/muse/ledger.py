@@ -288,6 +288,13 @@ def normalize_patch(
         if val is None:
             continue
         text = strip_field_label(str(val).strip())
+        if key == "lettering" and text:
+            # The sign's words, not the quotes around them — see
+            # `anima.clean_lettering`. This is the single door into the ledger,
+            # so the screen shows the same string the render gets.
+            from .anima import clean_lettering
+
+            text = clean_lettering(text)
         if key in BODY_KEYS and text:
             # **Fold into one body.** There is one entrance here, so it bites the
             # same on the seats' road and the card's road (the same judgement as

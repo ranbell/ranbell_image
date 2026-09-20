@@ -33,7 +33,10 @@ Rules:
   unless the director explicitly asked to reset/clear that axis.
 - atmosphere: mood / air (wistful, tense, cozy…). Only when they ask to change mood.
 - look: art direction / render. Only when they ask to change art style.
-- lettering: short Latin words with double quotation for a sign only when they asked for text in frame.
+- lettering: the short Latin words for a sign, only when they asked for text in
+  frame. **The words alone — no quotation marks.** The render wraps them
+  itself (`text "…", text_on_image`); a pair written here is a second pair
+  inside that one, and the checkpoint drops letters (measured: `Imge`).
 - bg: what is actually behind her. Not a single word — name the things that
   are there: `laundry machines, folded towels, coin slot panel`,
   `hanging ferns, misted glass, watering can`. Place several items when the
@@ -113,23 +116,73 @@ Rules:
 """
 
 
+def _json_objects(raw: str) -> list[dict[str, Any]]:
+    """Every top-level `{…}` in the text that parses, in the order written.
+
+    Brace counting rather than a regex, and it knows it is inside a string, so a
+    `}` in a value does not end the object early.
+    """
+    out: list[dict[str, Any]] = []
+    depth = 0
+    start = -1
+    in_str = False
+    esc = False
+    for i, ch in enumerate(raw):
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}" and depth:
+            depth -= 1
+            if depth == 0 and start >= 0:
+                try:
+                    data = json.loads(raw[start:i + 1])
+                except json.JSONDecodeError:
+                    pass
+                else:
+                    if isinstance(data, dict):
+                        out.append(data)
+                start = -1
+    return out
+
+
 def _extract_json_object(text: str) -> dict[str, Any]:
+    r"""The patch out of a model's answer, however it was wrapped.
+
+    **The greedy regex threw away whole answers (measured, 2026-09-20).** It read
+    `\{[\s\S]*\}` — the first brace to the **last** one — so a model that wrote
+    anything after its JSON handed back a span covering the prose in between,
+    which does not parse, and the turn came out empty. Live, asking for a sign
+    got back a correct object, a line of commentary, and the object again;
+    the writer returned `{}` and the ledger did not move.
+
+    So every top-level object is read, and **the last one that carries something
+    wins** — when a model corrects itself, the correction comes last.
+    """
     raw = (text or "").strip()
     if not raw:
         return {}
     try:
         data = json.loads(raw)
-        return data if isinstance(data, dict) else {}
+        if isinstance(data, dict):
+            return data
     except json.JSONDecodeError:
         pass
-    fence = re.search(r"\{[\s\S]*\}", raw)
-    if not fence:
-        return {}
-    try:
-        data = json.loads(fence.group(0))
-        return data if isinstance(data, dict) else {}
-    except json.JSONDecodeError:
-        return {}
+    found = _json_objects(raw)
+    for data in reversed(found):
+        if data:
+            return data
+    return {}
 
 
 async def write_patch(

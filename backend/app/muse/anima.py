@@ -208,9 +208,39 @@ def extract_lettering(text: str) -> tuple[list[str], str]:
     return phrases[:1], cleaned  # one sign per picture
 
 
+#: Quote marks a phrase may arrive wrapped in — the writer answers
+#: `"Ranbell Image Muse"` as often as it answers the bare words.
+_QUOTE_PAIRS = (('"', '"'), ("'", "'"), ("「", "」"), ("『", "』"), ("“", "”"))
+
+
+def clean_lettering(text: str) -> str:
+    """The words to put on the sign, without the quotes around them.
+
+    **Measured on a live shoot (2026-09-20).** The ledger held
+    `'"Ranbell Image Muse"'` — quotes and all — so the tag came out as
+
+        text ""Ranbell Image Muse"", text_on_image
+
+    and the render dropped a letter (`Imge`). The tag's own quotes are what tell
+    the checkpoint where the phrase starts and ends, so a second pair inside them
+    is noise in exactly the place the model is weakest. Stripped both here and at
+    the ledger's door (`ledger.normalize_patch`), because sessions already stored
+    with the quotes have to render right too.
+    """
+    out = str(text or "").strip()
+    while len(out) >= 2:
+        for lo, hi in _QUOTE_PAIRS:
+            if out.startswith(lo) and out.endswith(hi):
+                out = out[1:-1].strip()
+                break
+        else:
+            break
+    return out
+
+
 def append_lettering(positive: str, phrases: Iterable[str]) -> str:
     """Append Anima/alchemy literal tags at the very end."""
-    texts = [str(t).strip() for t in phrases if str(t).strip()]
+    texts = [t for t in (clean_lettering(p) for p in phrases) if t]
     if not texts:
         return positive
     # One sign — Muse LETTERING + Anima weakness on long text.
