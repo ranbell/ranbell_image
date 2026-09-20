@@ -6,7 +6,7 @@
 
 **ローカル AI 画像スタジオ — 意味で探し、感覚で錬成する。**
 
-[![Version](https://img.shields.io/badge/version-0.2.0-blue)](https://github.com/ranbell/ranbell_image/releases)
+[![Version](https://img.shields.io/badge/version-0.4.0-blue)](https://github.com/ranbell/ranbell_image/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker)](docker-compose.yml)
 [![ghcr.io](https://img.shields.io/badge/ghcr.io-ranbell%2Franbell--image-blue?logo=github)](https://github.com/ranbell/ranbell_image/pkgs/container/ranbell-image-backend)
