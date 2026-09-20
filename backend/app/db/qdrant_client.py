@@ -453,7 +453,7 @@ class QdrantDBClient:
                     if reporter is not None and total:
                         reporter.update(
                             0.1 + 0.85 * min(copied / total, 1.0),
-                            f"{copied}/{total} points",
+                            f"{copied}/{total} points", key="points", done=copied, total=total,
                         )
             if next_offset is None:
                 break

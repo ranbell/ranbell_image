@@ -1157,7 +1157,7 @@ async def run_generate_actress_diary_job(
     ``job._func(reporter, cancel_token, **kwargs)``.
     """
     sid = str(session.get("session_id") or "")
-    _report(reporter, 0.05, "日記を書いてもらっています")
+    _report(reporter, 0.05, "日記を書いてもらっています", key="diaryWriting")
     preset = await presets_db.get_preset(db, character_id)
     if not preset:
         await _record_diary_result(
@@ -1219,7 +1219,7 @@ async def run_generate_actress_diary_job(
         char, session_log=session_log, photo_desc=photo_desc,
         circle="\n".join(circle_lines), circle_who=circle_who,
     )
-    _report(reporter, 0.2, "日記を書いてもらっています")
+    _report(reporter, 0.2, "日記を書いてもらっています", key="diaryWriting")
 
     fields: dict[str, str] = {}
     stray_seen = ""
@@ -1290,7 +1290,7 @@ async def run_generate_actress_diary_job(
             # as her writing, which is how a JSON object ended up on the page.
             logger.info("[muse] diary output unusable (attempt %d), retrying",
                         attempt + 1)
-        _report(reporter, 0.5, "書き直してもらっています")
+        _report(reporter, 0.5, "書き直してもらっています", key="rewriting")
 
     if not fields.get("content_ja"):
         # Nothing survived that is safe to show. A missing diary is recoverable;
@@ -1313,7 +1313,7 @@ async def run_generate_actress_diary_job(
         character_id=character_id,
     )
 
-    _report(reporter, 0.9, "日記をしまっています")
+    _report(reporter, 0.9, "日記をしまっています", key="diaryStoring")
     inputs = _inputs(session)
     diary_entry = {
         "id": str(uuid.uuid4()),
@@ -1355,7 +1355,7 @@ async def run_generate_actress_diary_job(
             model=model,
             num_ctx=num_ctx,
         )
-    _report(reporter, 1.0, "日記が書き上がりました")
+    _report(reporter, 1.0, "日記が書き上がりました", key="diaryDone")
     return {"status": "ok", "diary_id": diary_entry["id"]}
 # The second ask restates the contract. Models that wandered off it once tend to
 # come back when told plainly what shape failed.
@@ -1409,7 +1409,7 @@ async def run_generate_chemistry_job(
     `presets_db.add_chemistry_record` — no session-side state to track once
     this returns; the dossier reads it straight off the character payload.
     """
-    _report(reporter, 0.1, "二人の相性を読み解いています")
+    _report(reporter, 0.1, "二人の相性を読み解いています", key="chemistryReading")
     preset_a = await presets_db.get_preset(db, character_a_id)
     preset_b = await presets_db.get_preset(db, character_b_id)
     if not preset_a or not preset_b:
@@ -1428,7 +1428,7 @@ async def run_generate_chemistry_job(
         presets_db.preset_to_character(preset_b),
         diary_a, diary_b, tier=compat["tier"],
     )
-    _report(reporter, 0.4, "二人の相性を読み解いています")
+    _report(reporter, 0.4, "二人の相性を読み解いています", key="chemistryReading")
 
     fields: dict[str, str] = {}
     for attempt, ask in enumerate(_CHEMISTRY_ASKS):
@@ -1449,7 +1449,7 @@ async def run_generate_chemistry_job(
         if fields.get("content_ja"):
             break
         logger.info("[muse] chemistry output unusable (attempt %d), retrying", attempt + 1)
-        _report(reporter, 0.6, "書き直してもらっています")
+        _report(reporter, 0.6, "書き直してもらっています", key="rewriting")
 
     if not fields.get("content_ja"):
         return {"status": "failed", "reason": "unreadable chemistry output"}
@@ -1478,7 +1478,7 @@ async def run_generate_chemistry_job(
         ],
     }
     await presets_db.add_chemistry_record(db, character_a_id, character_b_id, record)
-    _report(reporter, 1.0, "相性メモができました")
+    _report(reporter, 1.0, "相性メモができました", key="chemistryDone")
     events.publish(session_id, {"type": "chemistry_ready", "tier": compat["tier"]})
     return {"status": "ok"}
 _CHEMISTRY_ASKS: tuple[str, ...] = (
@@ -1615,13 +1615,24 @@ async def _read_the_photo(
         logger.info("[muse] the diary's photo read came back blind")
         return prompt_desc
     return str(raw).strip()
-def _report(reporter, progress: float, message: str) -> None:
-    """Progress for the jobs panel. The diary job used to report nothing at all."""
+def _report(reporter, progress: float, message: str, *, key: str = "") -> None:
+    """Progress for the jobs panel. The diary job used to report nothing at all.
+
+    `key` names the line in `jobProgress.*`, which is what the console renders —
+    the Japanese here is the fallback, and it is what the Showrunner was reading in
+    an English console before the keys existed (2026-09-20).
+    """
     update = getattr(reporter, "update", None)
     if update is None:
         return
     try:
-        update(progress, message)
+        update(progress, message, key=key)
+    except TypeError:
+        # A reporter from before keys existed (a stub in a test, an older caller).
+        try:
+            update(progress, message)
+        except Exception:
+            logger.debug("[muse] reporter failed", exc_info=True)
     except Exception:
         logger.debug("[muse] diary reporter failed", exc_info=True)
 async def _record_diary_result(
@@ -1809,7 +1820,7 @@ async def run_generate_lounge_share_job(
 ):
     """Friend-facing wrap post to the lounge (not the secret diary)."""
     sid = str(session.get("session_id") or "")
-    _report(reporter, 0.05, "楽屋に書き込んでいます")
+    _report(reporter, 0.05, "楽屋に書き込んでいます", key="loungeWriting")
     preset = await presets_db.get_preset(db, character_id)
     if not preset:
         return {"status": "skipped", "reason": "character not found"}
@@ -1871,7 +1882,7 @@ async def run_generate_lounge_share_job(
     }
     await lounge_db.save_thread(db, thread)
     events.publish(sid, {"type": "lounge_status", "status": "shared", "thread_id": thread["id"]})
-    _report(reporter, 0.6, "親友の反応を待っています")
+    _report(reporter, 0.6, "親友の反応を待っています", key="loungeWaiting")
     if spooler is not None:
         spooler.submit(
             JobLane.PROMPT,
@@ -1884,7 +1895,7 @@ async def run_generate_lounge_share_job(
             model=model,
             num_ctx=num_ctx,
         )
-    _report(reporter, 1.0, "楽屋に投稿しました")
+    _report(reporter, 1.0, "楽屋に投稿しました", key="loungePosted")
     return {"status": "ok", "thread_id": thread["id"]}
 # How many shoots move their life on by one event. Their lives run slower than the
 # shoots do.
@@ -1935,7 +1946,7 @@ async def run_generate_outing_job(
     handed the people and an everyday occasion, and nothing else, so what comes
     back is the part of her life the camera was not there for.
     """
-    _report(reporter, 0.1, "お出かけの話を書いています")
+    _report(reporter, 0.1, "お出かけの話を書いています", key="outingWriting")
     if not await _outing_is_due(db, character_id):
         return {"status": "skipped", "reason": "not due"}
 
@@ -2030,7 +2041,7 @@ async def run_generate_outing_job(
     if picked:
         occasion = picked[:16]
         hint = next((h for n, h in choices if n == picked), "")
-    _report(reporter, 0.5, "お出かけの話を書いています")
+    _report(reporter, 0.5, "お出かけの話を書いています", key="outingWriting")
     try:
         raw = await chain._call(
             ollama,
@@ -2097,7 +2108,7 @@ async def run_generate_outing_job(
             logger.warning("[muse] the outing snapshot could not be queued",
                            exc_info=True)
 
-    _report(reporter, 1.0, "お出かけの話を書きました")
+    _report(reporter, 1.0, "お出かけの話を書きました", key="outingDone")
     return {"status": "ok", "thread_id": thread["id"]}
 async def _spool_outing_snapshot(
     db, spooler, comfy, thread: dict[str, Any], cast: list[dict[str, Any]],
@@ -2159,7 +2170,7 @@ async def run_generate_lounge_reactions_job(
     model: str = "", num_ctx: int | None = None,
 ):
     """Close friends like + 1–2 short comments; seeds trend/feedback memories."""
-    _report(reporter, 0.1, "楽屋の反応を集めています")
+    _report(reporter, 0.1, "楽屋の反応を集めています", key="reactionsGathering")
     thread = await lounge_db.get_thread(db, thread_id)
     if not thread:
         return {"status": "skipped", "reason": "thread not found"}
@@ -2283,7 +2294,7 @@ async def run_generate_lounge_reactions_job(
         events.publish(sid, {
             "type": "lounge_status", "status": "reacted", "thread_id": thread_id,
         })
-    _report(reporter, 1.0, "楽屋の反応が付きました")
+    _report(reporter, 1.0, "楽屋の反応が付きました", key="reactionsDone")
     return {"status": "ok", "thread_id": thread_id, "reactions": len(reactions)}
 async def run_generate_lounge_pitch_job(
     reporter, cancel, *, db, ollama, session: dict[str, Any], character_id: str,
@@ -2291,7 +2302,7 @@ async def run_generate_lounge_pitch_job(
 ):
     """Occasional 'how about this?' pitch visible to the showrunner in the lounge."""
     sid = str(session.get("session_id") or "")
-    _report(reporter, 0.1, "提案を楽屋に書いています")
+    _report(reporter, 0.1, "提案を楽屋に書いています", key="pitchWriting")
     preset = await presets_db.get_preset(db, character_id)
     if not preset:
         return {"status": "skipped", "reason": "character not found"}
@@ -2344,14 +2355,14 @@ async def run_generate_lounge_pitch_job(
     await lounge_db.save_thread(db, thread)
     if sid:
         events.publish(sid, {"type": "lounge_status", "status": "pitch", "thread_id": thread["id"]})
-    _report(reporter, 1.0, "提案を楽屋に出しました")
+    _report(reporter, 1.0, "提案を楽屋に出しました", key="pitchPosted")
     return {"status": "ok", "thread_id": thread["id"]}
 async def run_generate_handpost_habit_job(
     reporter, cancel, *, db, ollama, session: dict[str, Any], character_id: str,
     model: str = "", num_ctx: int | None = None,
 ):
     """Rare handpost line about the showrunner's taste (not a how-to wiki)."""
-    _report(reporter, 0.1, "手帖に癖を書き留めています")
+    _report(reporter, 0.1, "手帖に癖を書き留めています", key="habitWriting")
     preset = await presets_db.get_preset(db, character_id) or {}
     notes = _director_highlights(session)
     if not notes.strip():
@@ -2393,7 +2404,7 @@ async def run_generate_handpost_habit_job(
     sid = str(session.get("session_id") or "")
     if sid:
         events.publish(sid, {"type": "lounge_status", "status": "habit", "page_id": page["id"]})
-    _report(reporter, 1.0, "手帖に書き留めました")
+    _report(reporter, 1.0, "手帖に書き留めました", key="habitDone")
     return {"status": "ok", "page_id": page["id"]}
 
 # ── The memory blocks and the shoot's continuity (added 2026-09-12) ─────────

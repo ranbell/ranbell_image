@@ -29,3 +29,22 @@ export function jobLabel(title, { t, te }) {
   }
   return raw
 }
+
+/**
+ * The progress note of a job, in the reader's language.
+ *
+ * The backend writes the note in whatever language its file was written in —
+ * the Muse jobs in Japanese (「日記を書いてもらっています」), the rest in English
+ * ("Waiting in the ComfyUI queue…") — so half the console was always foreign.
+ * A job now reports `progress_key` plus its placeholders (`jobProgress.*` in both
+ * locales) and `progress_text` stays as the fallback for anything that names no
+ * key.
+ */
+export function jobProgress(job, { t, te }) {
+  const key = String(job?.progress_key || '')
+  if (key) {
+    const path = `jobProgress.${key}`
+    if (te(path)) return t(path, job.progress_params || {})
+  }
+  return job?.progress_text || ''
+}

@@ -111,7 +111,7 @@ async def run_render(
     prompt_id = await comfy.queue_prompt(
         patched, preview=preview is not None, client_id=client_id,
     )
-    reporter.update(0.0, "Waiting in ComfyUI queue...")
+    reporter.update(0.0, "Waiting in ComfyUI queue...", key="comfyQueue")
 
     queued = True
 
@@ -173,7 +173,7 @@ async def run_render(
         if event["type"] == "comfy_progress":
             v = event.get("value", 0)
             m = max(event.get("max", 1), 1)
-            reporter.update(v / m, f"Step {v}/{m}")
+            reporter.update(v / m, f"Step {v}/{m}", key="step", v=v, m=m)
         elif event["type"] == "comfy_preview" and preview is not None:
             now = time.monotonic()
             if now - last_preview >= PREVIEW_MIN_INTERVAL:
@@ -206,7 +206,7 @@ async def run_render(
         except Exception as exc:
             logger.error("[render] history image save error: %s", exc)
 
-    reporter.update(1.0, f"{len(saved)} image(s)")
+    reporter.update(1.0, f"{len(saved)} image(s)", key="imagesSaved", n=len(saved))
     return {
         "sha256s": saved,
         "seed": seed,

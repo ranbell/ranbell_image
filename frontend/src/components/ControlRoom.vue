@@ -316,7 +316,7 @@
                 <ProgressBar
                   class="cr-job-progress"
                   :progress="job.progress || 0"
-                  :progress-text="job.progress_indeterminate ? '…' : (job.progress_text || null)"
+                  :progress-text="job.progress_indeterminate ? '…' : (taskProgress(job) || null)"
                   :indeterminate="job.progress_indeterminate"
                   :eta="job.progress_indeterminate ? null : (job.eta_seconds ?? null)"
                 />
@@ -469,7 +469,7 @@
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useControlRoom } from '../composables/useControlRoom.js'
-import { jobLabel } from '../jobLabel.js'
+import { jobLabel, jobProgress } from '../jobLabel.js'
 import ProgressBar from './ProgressBar.vue'
 
 const { t, te } = useI18n()
@@ -477,6 +477,7 @@ const { t, te } = useI18n()
 // The task's name is an identifier (`generate_actress_diary`); the console shows
 // what it means. Unknown names print as they stand — see `jobLabel`.
 const taskLabel = (title) => jobLabel(title, { t, te })
+const taskProgress = (job) => jobProgress(job, { t, te })
 
 const props = defineProps({
   jobsMap:      { type: Object,  required: true },

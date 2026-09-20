@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { jobLabel } from './jobLabel.js'
+import { jobLabel, jobProgress } from './jobLabel.js'
 import { saveAndSyncToken, getToken } from './apiToken.js'
 import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide } from 'd3-force'
 import AnalyzerModal from './components/AnalyzerModal.vue'
@@ -2999,7 +2999,7 @@ onUnmounted(() => {
           <span class="w-1.5 h-1.5 rounded-full inline-block flex-shrink-0"
             :class="headerActiveJobs[0].state === 'running' ? 'bg-blue-400 animate-pulse' : headerActiveJobs[0].state === 'cancelling' ? 'bg-orange-400 animate-pulse' : 'bg-yellow-400'"></span>
           <span class="truncate" :title="headerActiveJobs[0].title">{{ jobLabel(headerActiveJobs[0].title, { t, te }) }}</span>
-          <span v-if="headerActiveJobs[0].state === 'running' && headerActiveJobs[0].progress_text" class="text-gray-500 truncate">{{ headerActiveJobs[0].progress_text }}</span>
+          <span v-if="headerActiveJobs[0].state === 'running' && jobProgress(headerActiveJobs[0], { t, te })" class="text-gray-500 truncate">{{ jobProgress(headerActiveJobs[0], { t, te }) }}</span>
           <span v-else-if="headerActiveJobs[0].state === 'running' && headerActiveJobs[0].progress > 0" class="text-gray-500">{{ Math.round(headerActiveJobs[0].progress * 100) }}%</span>
           <span v-else-if="headerActiveJobs[0].state === 'queued'" class="text-yellow-400/70">{{ $t('header.jobQueued') }}</span>
           <span v-else-if="headerActiveJobs[0].state === 'cancelling'" class="text-orange-400/70">{{ $t('header.jobCancelling') }}</span>
@@ -4472,8 +4472,8 @@ onUnmounted(() => {
                         class="text-[9px] text-cyan-400 bg-cyan-900/40 border border-cyan-800/40 px-1.5 py-0.5 rounded font-mono normal-case font-normal">
                         {{ $t('refine.promptSourceBypass') }}
                       </span>
-                      <span v-if="refineGenJob?.progress_text" class="text-gray-500 font-normal font-mono normal-case">
-                        ({{ refineGenJob.progress_text }})
+                      <span v-if="refineGenJob && jobProgress(refineGenJob, { t, te })" class="text-gray-500 font-normal font-mono normal-case">
+                        ({{ jobProgress(refineGenJob, { t, te }) }})
                       </span>
                     </p>
                     <ProgressBar

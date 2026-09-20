@@ -68,6 +68,7 @@ async def run_scan_heal(
             reporter.update(
                 scan_state.processed / scan_state.total,
                 f"{scan_state.processed}/{scan_state.total} files",
+                key="files", done=scan_state.processed, total=scan_state.total,
             )
         await asyncio.sleep(0.5)
 
@@ -112,6 +113,7 @@ async def run_scan_full(
             reporter.update(
                 scan_state.processed / scan_state.total,
                 f"{scan_state.processed}/{scan_state.total} files",
+                key="files", done=scan_state.processed, total=scan_state.total,
             )
         await asyncio.sleep(0.5)
 
@@ -150,6 +152,7 @@ async def run_scan_refresh_metadata(
             reporter.update(
                 scan_state.processed / scan_state.total,
                 f"{scan_state.processed}/{scan_state.total} files",
+                key="files", done=scan_state.processed, total=scan_state.total,
             )
         await asyncio.sleep(0.5)
 
@@ -289,7 +292,8 @@ async def run_color_backfill(
                 )
 
             if total > 0:
-                reporter.update(done / max(total, 1), f"{done}/{total} items")
+                reporter.update(done / max(total, 1), f"{done}/{total} items",
+                                key="items", done=done, total=total)
 
             if next_offset is None:
                 break
@@ -326,6 +330,7 @@ async def run_analyze_umap(
             reporter.update(
                 st["done"] / st["total"],
                 f"{st.get('phase', '')} {st['done']}/{st['total']}",
+                key="phaseItems", phase=st.get("phase", ""), done=st["done"], total=st["total"],
             )
         else:
             reporter.indeterminate()
@@ -368,7 +373,8 @@ async def run_pipeline_tagging(
         total = tagging_state.total
         processed = tagging_state.processed
         if total > 0:
-            reporter.update(processed / total, f"{processed}/{total} tagged")
+            reporter.update(processed / total, f"{processed}/{total} tagged",
+                            key="tagged", done=processed, total=total)
         else:
             reporter.indeterminate()
         await asyncio.sleep(0.5)
@@ -432,7 +438,8 @@ async def run_pipeline(
         total = pipeline_state.total
         processed = pipeline_state.processed
         if total > 0:
-            reporter.update(processed / total, f"{processed}/{total} processed")
+            reporter.update(processed / total, f"{processed}/{total} processed",
+                            key="processed", done=processed, total=total)
         else:
             reporter.indeterminate()
         await asyncio.sleep(0.5)
@@ -512,17 +519,17 @@ async def run_backup(
     cfg = await get_runtime_config(db)
     root = str(cfg.get("backup_dir") or "/mnt/backup")
 
-    reporter.update(0.1, "lineage ledger")
+    reporter.update(0.1, "lineage ledger", key="lineageLedger")
     ledger = await run_lineage_backup(db, root)
     cancel.raise_if_set()
     if lineage_only:
-        reporter.update(1.0, "done")
+        reporter.update(1.0, "done", key="done")
         return {"ledger": ledger}
 
-    reporter.update(0.5, "qdrant snapshots")
+    reporter.update(0.5, "qdrant snapshots", key="qdrantSnapshots")
     keep = int(cfg.get("backup_retain_days", 7) or 7)
     snaps = await run_snapshots(db, keep=keep)
-    reporter.update(1.0, "done")
+    reporter.update(1.0, "done", key="done")
     return {"ledger": ledger, "snapshots": snaps}
 
 
@@ -557,11 +564,12 @@ async def run_schema_apply(
     source = state.get("physical") or "images"
     same_full_width = int(embed_dim) == int(db.embed_dim)
 
-    reporter.update(0.05, "backing up lineage first")
+    reporter.update(0.05, "backing up lineage first", key="backupLineageFirst")
     await run_backup(reporter, cancel, db=db, lineage_only=True)
     cancel.raise_if_set()
 
-    reporter.update(0.1, f"building a {embed_dim}/{embed_dim_small} collection")
+    reporter.update(0.1, f"building a {embed_dim}/{embed_dim_small} collection",
+                    key="buildingCollection", dim=embed_dim, small=embed_dim_small)
     transform = db._transform_small_dim(embed_dim_small)
     target = await db._rebuild_images(
         source=source,
@@ -593,7 +601,7 @@ async def run_schema_apply(
         # Full embeddings survived; only the truncation needs redoing.
         await db.backfill_small_embeddings()
 
-    reporter.update(1.0, "done")
+    reporter.update(1.0, "done", key="done")
     return {"collection": target, "reembedding": reset}
 
 
@@ -618,7 +626,8 @@ async def run_alignment_evaluate(
 
     def _on_progress(done: int, total: int) -> None:
         if total > 0:
-            reporter.update(done / total, f"{done}/{total} images")
+            reporter.update(done / total, f"{done}/{total} images",
+                            key="images", done=done, total=total)
         else:
             reporter.indeterminate()
 
@@ -707,7 +716,8 @@ async def run_tag_taxonomy(
         except Exception as e:
             logger.warning("Tag taxonomy chunk failed: %s", e)
         done += len(chunk)
-        reporter.update(done / max(total, 1), f"{done}/{total} tags")
+        reporter.update(done / max(total, 1), f"{done}/{total} tags",
+                            key="tags", done=done, total=total)
 
     return {"taxonomy": taxonomy}
 
@@ -824,7 +834,7 @@ async def run_generation(
     # A separate clientId per render (a retake otherwise drops the previous socket)
     client_id = comfy.new_client_id()
     prompt_id = await comfy.queue_prompt(patched, client_id=client_id)
-    reporter.update(0.0, "Waiting in ComfyUI queue...")
+    reporter.update(0.0, "Waiting in ComfyUI queue...", key="comfyQueue")
 
     # cancel handler: delete from queue if not yet started, interrupt if running
     queued = True
@@ -852,7 +862,7 @@ async def run_generation(
         if event["type"] == "comfy_progress":
             v = event.get("value", 0)
             m = event.get("max", 1)
-            reporter.update(v / max(m, 1), f"Step {v}/{m}")
+            reporter.update(v / max(m, 1), f"Step {v}/{m}", key="step", v=v, m=m)
 
         elif event["type"] == "comfy_output":
             for img_ref in event.get("images", []):
@@ -893,7 +903,8 @@ async def run_generation(
         except Exception as exc:
             logger.error("ComfyUI history image save error: %s", exc)
 
-    reporter.update(1.0, f"{len(saved_sha256s)} images generated")
+    reporter.update(1.0, f"{len(saved_sha256s)} images generated",
+                    key="imagesGenerated", n=len(saved_sha256s))
     return {"sha256s": saved_sha256s, "prompt_id": prompt_id}
 
 
@@ -932,9 +943,13 @@ async def run_inversion(
                 if evt.get("type") == "stage":
                     p = STAGE_PROGRESS.get(evt.get("stage"), None)
                     if p is not None:
-                        reporter.update(p, evt.get("label", ""))
+                        # The six stages of the inversion have fixed meanings, so the console
+                        # names them in the reader's language; the label in the
+                        # event stays as it is for the Inspire panel.
+                        reporter.update(p, evt.get("label", ""),
+                                        key=f"inversionStage{evt.get('stage')}")
                 elif evt.get("type") == "done":
-                    reporter.update(1.0, "Done")
+                    reporter.update(1.0, "Done", key="done")
             except Exception:
                 pass
     except JobCancelled:
@@ -982,7 +997,7 @@ async def run_brainstorm(
         await event_queue.put(f'data: {{"type":"error","message":{str(exc)!r}}}\n\n')
         raise
     finally:
-        reporter.update(1.0, "Done")
+        reporter.update(1.0, "Done", key="done")
         await event_queue.put(None)
 
 
@@ -1038,7 +1053,7 @@ async def run_expand_theme(
         "mood":       _normalize_section(data.get("mood", "")),
         "camera":     _normalize_section(data.get("camera", "")),
     }))
-    reporter.update(1.0, "Done")
+    reporter.update(1.0, "Done", key="done")
     await event_queue.put(None)
 
 
@@ -1573,7 +1588,7 @@ async def run_refine_prompt(
                 logger.error("Refine variant submit failed: %s", exc)
                 _put({"type": "error", "message": f"Variant job error: {exc}"})
 
-    reporter.update(1.0, "Done")
+    reporter.update(1.0, "Done", key="done")
     _put(None)
 
 
@@ -1782,7 +1797,7 @@ async def run_invoke_axis_decompose(
         scene_variants = await generate_scene_variants(ollama, axes, variant_topic, n=enabled_count)
         axes['_scene_variants'] = scene_variants
 
-    reporter.update(1.0, "Axes ready")
+    reporter.update(1.0, "Axes ready", key="axesReady")
     await session_manager.on_axis_done(session_id, axes)
     return {"axes": axes}
 
@@ -1982,7 +1997,7 @@ async def run_invoke_spirit_compose(
         return {}
 
     logger.debug("[invoke] spirit_compose done: %s → nl=%r", spirit_name, str(result.get("natural_language", ""))[:60])
-    reporter.update(1.0, f"{spirit_name} composed")
+    reporter.update(1.0, f"{spirit_name} composed", key="spiritComposed", spirit=spirit_name)
 
     cancel.raise_if_set()
     await session_manager.on_spirit_composed(session_id, spirit_name, result)
@@ -2057,7 +2072,7 @@ async def run_invoke_image_generate(
         await session_manager.on_spirit_error(session_id, spirit_name, f"ComfyUI setup error: {e}")
         return {}
 
-    reporter.update(0.0, "Waiting in ComfyUI queue...")
+    reporter.update(0.0, "Waiting in ComfyUI queue...", key="comfyQueue")
 
     queued = True
 
@@ -2084,7 +2099,7 @@ async def run_invoke_image_generate(
             if event["type"] == "comfy_progress":
                 v = event.get("value", 0)
                 m = event.get("max", 1)
-                reporter.update(v / max(m, 1), f"Step {v}/{m}")
+                reporter.update(v / max(m, 1), f"Step {v}/{m}", key="step", v=v, m=m)
                 await session_manager.on_spirit_progress(session_id, spirit_name, v, m)
 
             elif event["type"] == "comfy_output":
@@ -2112,7 +2127,7 @@ async def run_invoke_image_generate(
 
     if sha256:
         logger.debug("[invoke] image_generate done: %s sha256=%s", spirit_name, sha256[:12])
-        reporter.update(1.0, f"{spirit_name} image ready")
+        reporter.update(1.0, f"{spirit_name} image ready", key="spiritImageReady", spirit=spirit_name)
         await session_manager.on_image_done(session_id, spirit_name, sha256)
     else:
         await session_manager.on_spirit_error(session_id, spirit_name, "Image generation produced no output")
@@ -2151,7 +2166,7 @@ async def run_invoke_session_finalize(
     except Exception as exc:
         logger.warning("[invoke] session_finalize pipeline failed: %s", exc)
 
-    reporter.update(0.85, "pipeline done, scoring novelty")
+    reporter.update(0.85, "pipeline done, scoring novelty", key="scoringNovelty")
 
     # Surprise score: the embedding distance to the nearest library image (session
     # siblings excluded). Pure vector arithmetic with no VLM — it makes lunatic's and
@@ -2180,7 +2195,7 @@ async def run_invoke_session_finalize(
         except Exception as exc:
             logger.debug("[invoke] novelty payload write failed for %s: %s", sha256[:12], exc)
 
-    reporter.update(0.9, "novelty done, submitting alignment")
+    reporter.update(0.9, "novelty done, submitting alignment", key="submittingAlignment")
 
     # Once the pipeline finishes, submit each spirit's alignment onto the EVALUATION
     # lane
@@ -2204,7 +2219,7 @@ async def run_invoke_session_finalize(
             if spirit:
                 spirit.job_ids.append(job_id)
 
-    reporter.update(1.0, "finalize done")
+    reporter.update(1.0, "finalize done", key="finalizeDone")
     return {"processed": len(sha256s)}
 
 
@@ -2233,7 +2248,10 @@ async def run_invoke_alignment_score(
     except Exception as e:
         logger.warning("invoke alignment failed for %s: %s", sha256, e)
 
-    reporter.update(1.0, f"score={score:.2f}" if score is not None else "scored")
+    if score is not None:
+        reporter.update(1.0, f"score={score:.2f}", key="scored", score=f"{score:.2f}")
+    else:
+        reporter.update(1.0, "scored", key="scoredPlain")
     await session_manager.on_spirit_done(session_id, spirit_name, score)
     return {"score": score}
 
@@ -2297,7 +2315,8 @@ async def run_invoke_respin(
                 for k, v in spirit_vocab.items()
             }
 
-    reporter.update(0.25, f"Hints ready — composing {spirit_name}")
+    reporter.update(0.25, f"Hints ready — composing {spirit_name}",
+                        key="hintsReady", spirit=spirit_name)
     cancel.raise_if_set()
 
     # Stepped respin temperature ramp. The previous +0.1 * len(history) was
@@ -2344,18 +2363,18 @@ async def run_invoke_enhance_prompt(
     import re as _re
     from ..invoke.vocab_bank import _is_species_tag
 
-    reporter.update(0.1, "Embedding text...")
+    reporter.update(0.1, "Embedding text...", key="embeddingText")
     cancel.raise_if_set()
 
     vec = await ollama.embed(text)
 
-    reporter.update(0.4, "Searching vocab...")
+    reporter.update(0.4, "Searching vocab...", key="searchingVocab")
     cancel.raise_if_set()
 
     hits = await db.search_wd14_vocab(vec, min_freq=0.005, max_freq=1.0, limit=tag_count * 2)
     candidate_names = [h["name"] for h in hits if not _is_species_tag(h["name"])]
 
-    reporter.update(0.6, "Refining tags...")
+    reporter.update(0.6, "Refining tags...", key="refiningTags")
     cancel.raise_if_set()
 
     system_prompt = (
@@ -2395,7 +2414,7 @@ async def run_invoke_enhance_prompt(
         "natural_language": result.get("natural_language", ""),
         "vocab_hits":       [h for h in hits[:tag_count] if not _is_species_tag(h["name"])],
     }
-    reporter.update(1.0, "Done")
+    reporter.update(1.0, "Done", key="done")
     await event_queue.put(f"data: {json.dumps(result_dict)}\n\n")
     await event_queue.put(None)
 
@@ -2469,7 +2488,7 @@ async def run_invoke_oracle_compose(
 
     cancel.raise_if_set()
     axes = await decompose_axes(ollama, user_intent=topic, context_hint=context_hint)
-    reporter.update(1.0, "Oracle axes ready")
+    reporter.update(1.0, "Oracle axes ready", key="oracleAxesReady")
     return {"axes": axes, "topic": topic}
 
 
@@ -2499,7 +2518,7 @@ async def run_invoke_daily_oracle(
     cancel.raise_if_set()
 
     if not workflow_name:
-        reporter.update(1.0, "Skipped: no oracle workflow configured")
+        reporter.update(1.0, "Skipped: no oracle workflow configured", key="oracleNoWorkflow")
         return {"skipped": True, "reason": "no workflow"}
 
     compose_job_id = spooler.submit(
@@ -2514,13 +2533,13 @@ async def run_invoke_daily_oracle(
         daily_oracle_date=daily_oracle_date,
     )
     cancel.on_cancel(lambda: asyncio.create_task(spooler.cancel(compose_job_id)))
-    reporter.update(0.05, "Composing oracle axes (PROMPT lane)...")
+    reporter.update(0.05, "Composing oracle axes (PROMPT lane)...", key="composingOracleAxes")
     compose_result = await spooler.wait(compose_job_id)
 
     axes = compose_result["axes"]
     axes["_daily_oracle_date"] = daily_oracle_date
 
-    reporter.update(0.1, "Axes ready — launching oracle spirits")
+    reporter.update(0.1, "Axes ready — launching oracle spirits", key="axesReadyLaunching")
     cancel.raise_if_set()
 
     session = session_manager.create_session(
@@ -2535,7 +2554,9 @@ async def run_invoke_daily_oracle(
     )
 
     await session_manager.on_axis_done(session.session_id, axes)
-    reporter.update(0.15, f"Oracle session {session.session_id} launched — awaiting spirits")
+    reporter.update(0.15,
+                    f"Oracle session {session.session_id} launched — awaiting spirits",
+                    key="oracleLaunched", session=session.session_id)
 
     # Wait until the session reaches a terminal state (complete / all-error / cancelled)
     waiter = asyncio.create_task(session.completion.wait())
@@ -2545,7 +2566,7 @@ async def run_invoke_daily_oracle(
     except asyncio.CancelledError:
         raise JobCancelled()
 
-    reporter.update(1.0, "Daily oracle complete")
+    reporter.update(1.0, "Daily oracle complete", key="dailyOracleComplete")
     return {"session_id": session.session_id, "axes": axes}
 
 
@@ -2646,7 +2667,7 @@ async def run_invoke_lineage(
     axes["_slogan"] = session.user_intent
     axes["_user_intent"] = session.user_intent
 
-    reporter.update(1.0, f"{mode} axes ready")
+    reporter.update(1.0, f"{mode} axes ready", key="modeAxesReady", mode=mode)
     await session_manager.on_axis_done(session_id, axes)
     return {"axes": axes, "mode": mode}
 
@@ -2720,14 +2741,15 @@ async def run_import_wd14_vocab(
             })
 
         done += len(batch)
-        reporter.update(done / total, f"埋め込み中 {done}/{total}")
+        reporter.update(done / total, f"埋め込み中 {done}/{total}",
+                            key="embedding", done=done, total=total)
 
-    reporter.update(0.95, "Qdrantに登録中...")
+    reporter.update(0.95, "Qdrantに登録中...", key="registeringQdrant")
     await db.upsert_wd14_vocab(points)
 
     invalidate_vocab_cache()
 
-    reporter.update(1.0, f"完了: {len(points)} タグを登録")
+    reporter.update(1.0, f"完了: {len(points)} タグを登録", key="tagsRegistered", n=len(points))
     logger.info("[import_wd14_vocab] done: %d tags", len(points))
     return {"imported": len(points)}
 
@@ -2818,7 +2840,8 @@ async def run_emotion_tag(
             else:
                 errors += 1
             if total > 0:
-                reporter.update(done / total, f"感情タグ付け {done}/{total}")
+                reporter.update(done / total, f"感情タグ付け {done}/{total}",
+                            key="emotionTagging", done=done, total=total)
 
     await asyncio.gather(*(process_one(doc) for doc in docs), return_exceptions=True)
     logger.info("[emotion_tag] done=%d errors=%d total=%d", done, errors, total)

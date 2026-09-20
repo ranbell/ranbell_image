@@ -201,7 +201,7 @@ async def run_character_compat_backfill(reporter, cancel, *, db, ollama) -> dict
 
     total = len(presets)
     done = 0
-    reporter.update(0.0, f"0 / {total}")
+    reporter.update(0.0, f"0 / {total}", key="pairs", done=0, total=total)
     for character_id, payload in presets:
         raise_if_cancelled = getattr(cancel, "raise_if_set", None)
         if raise_if_cancelled is not None:
@@ -215,7 +215,7 @@ async def run_character_compat_backfill(reporter, cancel, *, db, ollama) -> dict
             continue
         await upsert_character_compat(db, character_id, vectors)
         done += 1
-        reporter.update(done / total if total else 1.0, f"{done} / {total}")
+        reporter.update(done / total if total else 1.0, f"{done} / {total}", key="pairs", done=done, total=total)
     return {"done": done, "total": total}
 
 

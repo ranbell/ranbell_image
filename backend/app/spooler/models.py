@@ -49,6 +49,14 @@ class Job:
     priority: int = 0
     progress: float = 0.0
     progress_text: str | None = None
+    #: **What the note says, in the reader's language (2026-09-20).** The Showrunner
+    #: runs the console in English and read 「日記を書いてもらっています」 there, while a
+    #: Japanese reader gets "Waiting in ComfyUI queue...". `progress_text` is written
+    #: by whoever reports, in whatever language they wrote the file in, so the key is
+    #: what the screen renders (`jobProgress.*` in both locales) and the text is the
+    #: fallback for a job that names no key.
+    progress_key: str = ""
+    progress_params: dict = field(default_factory=dict)
     progress_indeterminate: bool = False
     created_at: float = field(default_factory=time.time)
     started_at: float | None = None
@@ -103,6 +111,8 @@ class Job:
             "priority": self.priority,
             "progress": self.progress,
             "progress_text": self.progress_text,
+            "progress_key": self.progress_key,
+            "progress_params": self.progress_params,
             "progress_indeterminate": self.progress_indeterminate,
             "created_at": self.created_at,
             "started_at": self.started_at,
@@ -120,9 +130,25 @@ class ProgressReporter:
         self._job = job
         self._push = push_fn
 
-    def update(self, progress: float, text: str | None = None) -> None:
+    def update(
+        self,
+        progress: float,
+        text: str | None = None,
+        *,
+        key: str = "",
+        **params: Any,
+    ) -> None:
+        """Report progress.
+
+        `key` names a line in `jobProgress.*` (both locales) and the keyword
+        arguments are its placeholders — `update(0.5, "3/9 files", key="files",
+        done=3, total=9)`. The text stays as the fallback: a client that does not
+        know the key, and the job history, still read something.
+        """
         self._job.progress = max(0.0, min(1.0, progress))
         self._job.progress_text = text
+        self._job.progress_key = key
+        self._job.progress_params = dict(params)
         self._job.progress_indeterminate = False
         self._push("job_updated", self._job)
 
