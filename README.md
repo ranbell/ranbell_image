@@ -156,6 +156,39 @@ When you know the vibe but not the destination, the Inspire panel helps you navi
 
 ---
 
+### 🎬 Muse — Shoot a Picture by Talking About It
+
+Instead of writing a prompt, **you direct**. Say "walk down the park path chatting
+with each other" and the actress answers, the crew argues it out field by field, and
+the shot ledger changes. Look at the test shot, say what to fix, and when it is right
+the final render keeps **the very same seed**.
+
+![Muse studio](docs/screenshots/muse/JA_muse_01_overview.png)
+![The ledger](docs/screenshots/muse/JA_muse_03_ledger.png)
+
+- **The ledger is the record of truth** — clothes, pose, expression, place, light,
+  background and framing are fields, rewritten as a diff on every turn. Say it again
+  and it lands on the next turn
+- **Solo, duet, or a full crew** — one actress, two (written apart, each with her own
+  lines and side of the frame), or a crew of 30 across 17 jobs in six presets, who
+  settle each field in its own corner
+- **Test shot → final** — the test shot draws a fresh seed each press; the final keeps
+  the seed you approved and only raises the steps
+- **It knows which model family a workflow belongs to** — anima and krea2 want
+  different steps, and only one of them takes a negative prompt. cfg and resolution
+  are whatever the workflow was saved with
+- **After the shoot** — she writes a secret diary nobody sees, posts something short
+  in the green room, and now and then goes out with friends. Next time, those memories
+  are in her preamble
+- **Three layers of safety** — a clerk that reads one line at a time, a second reader
+  before anything stops, and a floor that protects minors. Dark material still gets
+  shot; only what must stop, stops
+
+> 📖 The guide and the reference are in Japanese:
+> [Creator's Guide →](docs/guide/muse.ja.md) · [Technical Reference →](docs/tech/muse.ja.md)
+
+---
+
 ### 📊 Analyze — See Your Collection as a Whole
 
 ![Analyzer-1](docs/screenshots/06_02_analyzer.png)
@@ -180,6 +213,7 @@ Two entry points for each major feature — pick whichever matches your goal:
 
 | Feature | I want to use it | I want to understand how it works |
 |---|---|---|
+| **Muse** (shoot by talking) | [Creator's Guide (JP) →](docs/guide/muse.ja.md) | [Technical Reference (JP) →](docs/tech/muse.ja.md) |
 | **Invoke** | [Creator's Guide →](docs/guide/invoke.md) · [JP →](docs/guide/invoke.ja.md) | Coming soon |
 | **Inspire & Brainstorm** | [Creator's Guide →](docs/guide/inspire-brainstorm.md) | [Technical Reference →](docs/tech/inspire-brainstorm.md) |
 | **Prompt Alchemy** | [Creator's Guide →](docs/guide/prompt-alchemy.md) | [Technical Reference →](docs/tech/prompt-alchemy.md) |
@@ -291,6 +325,7 @@ graph LR
         UI["Control Room"]
         IP["Inspire Panel"]
         INV["Invoke Panel"]
+        MUSE["Muse Studio"]
     end
 
     subgraph BE ["Backend · FastAPI"]
@@ -324,7 +359,7 @@ graph LR
     end
 
     User -->|"clicks"| UI
-    UI & IP & INV -- "REST /api" --> API
+    UI & IP & INV & MUSE -- "REST /api" --> API
     API -- "SSE /api/jobs/stream" --> UI
     API -- "spooler.submit()" --> Spl
     Spl --> SYNC & EMBED & GEN_L & PROMPT_L & EVAL_L

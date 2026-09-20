@@ -11,6 +11,11 @@ Muse の設計は一行で言えば **「話す人は多く、書く人は一人
 旧 B・C・D 3 段階描き直しチェーンはいずれも退役済みです。設計の経緯と実測ログは
 リポジトリ内の `private/muse/design.ja.md` に残しています。
 
+**ワークフローは系統で扱う。** anima 系と krea2 系では steps と negative の要不要が
+違い、cfg と解像度はどちらもワークフローに焼かれた値を使う
+（→ [§7.1](#71-ワークフローの系統anima--krea2)）。撮影室がグラフに書き込むのは
+**steps と seed だけ**です。
+
 **Muse から呼ばないもの。** Inspire の `backend/app/invoke/vocab_bank.py`（語彙検索）
 と `backend/app/prompt/tag_merge.py`（タグ結合）への経路は無い。Refine の
 `rebuild_craft` は WD14 自動注入を外している（2026-09-09）。戻すなら「置き換え」
@@ -115,6 +120,7 @@ W 用 `_b` 欄は `has_partner` で gate します。門（gate 席）も `mode`
 | `persona.py` | 女優の SAY / ASIDE / CARD / PROPOSE 契約、メモリ／日記読了 |
 | `brief.py` | チェーン用 brief テキスト |
 | `anima.py` | Anima 向け整形、lettering 抽出 |
+| `family.py` | ワークフローの系統（anima / krea2）。steps・cfg・canvas・negative の表と判定 |
 | `runtime.py` | `style_for` / `negative_for` / `render_settings`（runner が service を import しないため分離） |
 | `ctx.py` | `refine_num_ctx` — 全 LLM 呼び出しで Ollama 再ロードを避ける |
 | `defaults.py` | 検証済み既定（解像度、steps、unload_vlm、crew_preset 空） |
@@ -233,7 +239,7 @@ W 用 `_b` 欄は `has_partner` で gate します。門（gate 席）も `mode`
 開幕は撮影版で入口が分かれる。
 
 - 主演／W: `POST .../open` → `open_session`（彼女が先に話す。空の `wearing` には signature 衣装）
-- スタジオ: `POST .../table` → `open_table`。`crew_preset` が空なら拒否（黙って `standard` にしない）。開幕は衣装 → 撮影 → 主演の 3 席（`OPENING_SEQUENCE`）
+- スタジオ: `POST .../table` → `open_table`。`crew_preset` が空なら拒否（黙って `standard` にしない）。**開幕の 3 席より前に `talk.dress_from_signature`**（空の `wearing` にだけ入る）—— 衣装の席は入っている値に質感を足す仕事なので、空欄を見せると一から作り始める。席は衣装 → 撮影 → 主演（`OPENING_SEQUENCE`）
 
 画面の「開始」はスタジオのとき `/table`、それ以外は `/open`（`MusePanel.vue` の `door`）。
 
@@ -464,14 +470,92 @@ flowchart LR
     R2 ==>|"同じ構図・高画質"| R3
 ```
 
-canvas（幅・高さ）は試し撮りと本番で同じ。**撮影室から変えるのは steps だけ**です。
-cfg は既定のまま（試し撮り 4.0、本番 4.5）。`InputsPatch` にも cfg の欄は無く、
-種を揃えると「OK を出したのと同じ絵の仕上げ版」になります。0 を渡すと `runner` が
-`None` に畳んで引き直すので、`start_shoot` が種を空振りすると黙って別の絵が出る。
+**撮影室がグラフに書き込むのは steps と seed だけ**です（2026-09-20）。cfg と
+解像度はワークフローに焼かれた値をそのまま使い、negative は系統が決めます
+（→ [§7.1 ワークフローの系統](#71-ワークフローの系統anima--krea2)）。
+試し撮りと本番で変わるのは steps だけなので、種を揃えると「OK を出したのと
+同じ絵の仕上げ版」になります。0 を渡すと `runner` が `None` に畳んで引き直すので、
+`start_shoot` が種を空振りすると黙って別の絵が出る。
 
 台帳が動いていなければ、承認時のプロンプトもそのまま本番へ渡る
 （`board.ledger_fp` と現在の ledger を `|` 連結で比較）。動いていれば
 `rebuild_craft` し直すが、種はそのまま。
+
+### 7.1 ワークフローの系統（anima / krea2）
+
+同じ台本でも、画像モデルによって欲しい数値が違う。総監督（2026-09-20）「krea2 も
+ワークフローで扱いたいんだけど、negative prompt は要らないとか step は 8 でいいとかの
+違いがあります」。そこで**ワークフローがどの系統かを Muse が見分ける**
+（`backend/app/muse/family.py`）。
+
+| | steps（試し撮り / 本番） | cfg | 解像度 | negative |
+|---|---|---|---|---|
+| **anima** | 20 / 30 | **ワークフロー** | **ワークフロー** | 送る |
+| **krea2** | 4 / 8 | **ワークフロー** | **ワークフロー** | **送らない** |
+| 参照画像（キャラのボード） | ワークフロー | ワークフロー | **Muse**（`board.SLOT_SIZE`） | 送る |
+
+- **anima の 20/30 は `defaults.py` から引いている**（写していない）。30 本パックで
+  validated した数字なので、出典を一つにしてある
+- **cfg と解像度はワークフローのもの。** 総監督「cfg は画像モデルで大きく異なるから
+  workflow に焼き込まれた内容をそのまま使いたい」「解像度は Muse の一覧で表示する
+  画像だけに適用して、通常のセッションではワークフローに基本任せる」。
+  `render_settings` はその欄を**返さない**ので、`patch_workflow` はグラフに触れない
+- **総監督が入れた数値は常に勝つ。** 出荷時の既定（`ALL_DEFAULTS`）から動いている欄は
+  「選んだ」と読み、系統より優先する（`runtime._untouched`）
+
+#### 判定
+
+**json の印 → ファイル名 → 既定（anima）** の順。
+
+```
+印        どれかのノードのタイトル（_meta.title）に muse:family=krea2
+ファイル名  NAME_PATTERNS（krea を含めば krea2 / anima を含めば anima）
+既定       anima —— いま存在するワークフローは全部これ
+```
+
+印を `_meta.title` に置くのは、ComfyUI の API 書き出しで残る唯一の場所だから。
+`Note` ノードは出力を持たないので API 形式から落ちる。トップレベルに独自キーを
+足すのも不可（`queue_prompt` がその dict をそのまま ComfyUI に渡す）。
+
+**系統を足すときは `FAMILIES` と `NAME_PATTERNS` に一行ずつ。** 他のどこも
+系統名で分岐していない。
+
+#### negative を送らない系統
+
+`runtime.negative_for` が空文字を返し、`patch_workflow` は空なら negative の
+ノードに触れない。つまり**ワークフロー自身が焼き込んだ negative はそのまま生きる**
+（それは作者の選択）。落としたことは `[muse.family] krea2 sends no negative —
+N chars dropped: …` として INFO に残す。
+
+**negative を消す形のグラフに注意**（実機で踏んだ）。krea2 のサンプルは
+`CLIPTextEncode` が一つしか無く、`KSampler.negative` は `ConditioningZeroOut`
+経由でその同じノードに戻っている。負の線を辿ると positive を書いたノードに着くので、
+negative を送ると **positive に焼き込まれる**（実測: `1girl, park, smile, bad quality,
+border`）。`patch_workflow` は宛先が positive と同じなら書かない。
+
+#### 実機の確認（2026-09-20・同じ台本を両系統で）
+
+最新の撮影記録（`0d5ac337`）から台本を起こし、anima と krea2 で一度ずつ流した
+（`private/muse/crew_lab/replay_record.py --workflow …`）。値は**撮れた PNG に
+焼かれたグラフ**を読んだもの。
+
+```
+anima  試し撮り steps 20 / cfg 4.0 / latent 896x1152  / negative あり
+anima  本番     steps 30 / cfg 4.5 / latent 896x1152
+krea2  試し撮り steps  4 / cfg リンクのまま / latent 1284x1824 / negative 空
+krea2  本番     steps  8 / 同上
+       種の引き継ぎ 試し撮り = 本番（両方）、本番 45.7s（anima は 107.5s）
+```
+
+**anima の cfg と解像度は、この測定のあとに系統の表から外した**（総監督の指示）。
+いまの anima は krea2 と同じく、両方ともワークフローの値で撮る。グラフに対しては
+`tests/ai/test_zeroed_negative_workflow.py` が「cfg にも latent にも触れないこと」を
+実物のグラフで固定している。
+
+`GET /catalog` は `comfyui.workflow_caps[].family` と、そのグラフ自身の解像度
+`workflow_caps[].canvas`、系統の表 `image_families` を返す。画面はそれを札として出す。
+
+---
 
 ### board（`service.start_board` → `runner.run_board_job`）
 
@@ -561,6 +645,37 @@ PROMPT レーンへ積むジョブ:
 | `generate_lounge_pitch` | 主演のみ | 次の撮影の提案。確率は `lounge.should_pitch` |
 | `generate_handpost_habit` | 主演のみ | 監督の癖メモ。その撮影の `notes` が空なら出ない |
 | chemistry | 二人の日記が揃ったとき | 相性カード |
+
+### 日記が日本語であること（2026-09-20）
+
+総監督「gemma26 で最新撮影したんだけど、日記がひらがなのみかつ、変な日本語です」。
+実機の一本が 646 字で漢字 1 字、分かち書きまで付いていた。
+
+原因は**条文の第5項の文言**だった。「ひらがな・カタカナ・常用漢字だけで書くこと」は
+「日本語の文字だけを使え」の意図だったが、「かなで書け」とも読める。前置きに VLM の
+英語の散文（写真読み）が入っていると倒れる —— 実測 93 本:
+
+```
+写真読み無し（タグ列）× 2モデル × 2条文   要約かな一色 0/40
+写真読み有り・現行の文言                  7/20（35%）
+写真読み有り・「漢字かな交じりの、ふつうの日本語で書くこと」  0/20
+```
+
+枠（`num_ctx`）は無関係だった —— 入力 1,455 tok ＋ 出力 851 tok＝ 32,768 の 7%、
+`done_reason` は毎回 `stop`。7% の状態で崩れている。
+
+直したのは三つ:
+
+1. 第5項を「**漢字かな交じりの、ふつうの日本語で書くこと（漢字を減らさない）**。
+   混ぜてはいけないのはハングル・キリル・中国語だけの漢字」に
+2. `diary.kana_only()` の検査 —— 本文の漢字率 8% 未満（健全は 17〜29%）、または
+   要約が 12 字以上で漢字ゼロなら**一度だけ書き直しを頼む**。最後の一回はそのまま残す
+   （日記が無いほうが損失が大きい）
+3. 頼んだ事実を `session["diary"]["entries"][<character_id>]["asked_again"]` に残す。
+   今回はログに何も残らず、追跡に半日かかった
+
+あわせて【口調・声】が英語の `appearance.voice`（30 人全員・文が途中で切れている）を
+使っていたのを、`first_person_ja` と `talk_quirks` に替えた。
 
 永続化は [Qdrant](qdrant.ja.md) のみ。画像本体はディスクの sha。セッションは
 `image_id` 参照。
@@ -680,10 +795,10 @@ standard 18 席だった）。`public_view.inputs` も同じキーを返す。�
 
 | キー | 値 | メモ |
 |---|---|---|
-| `width` / `height` | 896 × 1152 | 試し撮りも本番もフルサイズ。サムネイルではない |
-| `draft_steps` / `draft_cfg` | 20 / 4.0 | cfg 3 未満でテーマが滑る |
-| `draft_count` | 1 | バッチ 2 以上で VRAM の余裕が薄くなる |
-| `final_steps` / `final_cfg` | 30 / 4.5 | canvas は同じ |
+| `width` / `height` | 896 × 1152 | **セッションでは使わない**（解像度はワークフロー任せ）。上書きしたときの出発点と、参照画像の既定 |
+| `draft_steps` / `draft_cfg` | 20 / 4.0 | steps は anima の系統が引く。**cfg は書き込まない**（2026-09-20）。3 未満でテーマが滑るのは当時の実測 |
+| `draft_count` | 1 | バッチ 2 以上で VRAM の余裕が薄くなる。krea2 は latent が 2.3MP あるので特に |
+| `final_steps` / `final_cfg` | 30 / 4.5 | 同上。系統ごとの値は [§7.1](#71-ワークフローの系統anima--krea2) |
 | `num_ctx` | 32768 | 全ターン同一 |
 | `vision_model` | `""` | 空なら `model` を流用 |
 | `unload_vlm` | `true` | 描画前に LLM を落とす |

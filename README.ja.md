@@ -138,6 +138,32 @@ Ranbell Image は**完全ローカル動作**のアプリケーションです�
 
 ---
 
+### 🎬 Muse — 会話しながら一枚を撮る
+
+プロンプトを書くのではなく、**撮影監督として喋る**。「公園の遊歩道をおしゃべりしながら
+歩いて」と言えば、女優（Muse）が返事をして、撮影班が欄ごとに相談し、台帳（ledger）が
+書き換わります。試し撮りを見て「これでいい？」を確かめ、OK なら**同じ種のまま**本番へ。
+
+![Muse 撮影室](docs/screenshots/muse/JA_muse_01_overview.png)
+![Muse 台帳](docs/screenshots/muse/JA_muse_03_ledger.png)
+
+- **台帳が正本** — 服・姿勢・表情・場所・光・背景・画角を欄で持ち、会話のたびに
+  差分で書き換わる。言い直しは次のターンで必ず効く
+- **一人撮り / W 撮り / スタジオ撮り** — 一人、二人（それぞれの台詞と立ち位置を書き分け）、
+  または 17 職 30 人の撮影班から 6 プリセットを選んで、欄ごとの会議で詰める
+- **試し撮り → 本番** — 試し撮りは押すたびに種を引き直し、本番は**OK を出した種のまま**
+  steps だけ上げて仕上げる
+- **ワークフローの系統を自動で見分ける** — anima 系と krea2 系で steps・negative の
+  要不要が違う。cfg と解像度はワークフローに焼かれた値をそのまま使う
+- **撮影のあと** — 彼女は誰にも見せない秘密の日記を書き、楽屋に短い投稿をし、
+  たまに友達と出かけます。次の撮影ではその記憶が前置きに入る
+- **安全弁** — 一行ずつ読む判定係・二人目の確認・未成年の保護を三段で。暗い題材は
+  撮れるまま、止めるものだけ止める
+
+> 📖 [クリエイターガイド — Muse](docs/guide/muse.ja.md) ／ [技術リファレンス](docs/tech/muse.ja.md)
+
+---
+
 ### 📊 アナライズ — コレクション全体を俯瞰する
 
 **セマンティックマップ（UMAP）**
@@ -261,6 +287,7 @@ graph LR
         UI["Control Room"]
         IP["Inspire Panel"]
         INV["Invoke Panel"]
+        MUSE["Muse Studio"]
     end
 
     subgraph BE ["Backend · FastAPI"]
@@ -294,7 +321,7 @@ graph LR
     end
 
     User -->|"clicks"| UI
-    UI & IP & INV -- "REST /api" --> API
+    UI & IP & INV & MUSE -- "REST /api" --> API
     API -- "SSE /api/jobs/stream" --> UI
     API -- "spooler.submit()" --> Spl
     Spl --> SYNC & EMBED & GEN_L & PROMPT_L & EVAL_L
