@@ -72,8 +72,14 @@ Read it again. If it names clothes, place, pose, face, light, camera,
 atmosphere (mood), or look (art style), fill those keys.
 Do NOT blank sticky atmosphere/look/lettering to "keep" them — omit the key.
 Still return {} only for pure emotion/banter with no picture/mood/look change.
+Absolute phrases in English (danbooru-friendly words ok).
 Output ONLY JSON.
 """
+# **The English rule was missing from the retry (2026-09-20).** This head
+# *replaces* `WRITER_SYSTEM` rather than being added to it, so the one line that
+# says what language the ledger is written in was gone on exactly the calls that
+# needed it most — measured, 「雨上がりの帰り道」 came back as
+# `{"scene": "雨上がりの帰り道"}` and went into the prompt as Japanese.
 
 VERIFY_SYSTEM = """You check whether the shot LEDGER matches the director's latest intent.
 

@@ -334,6 +334,108 @@ async def _load_runtime_cfg(db, session: dict[str, Any]) -> dict[str, Any]:
     return cfg
 
 
+async def _theme_into_ledger(
+    ollama,
+    session: dict[str, Any],
+    *,
+    theme: str,
+    model: str,
+    locale: str,
+) -> dict[str, str]:
+    """Write the opening theme into the ledger, through the Scripter.
+
+    **The theme reached the picture through nobody (2026-09-20).** The Showrunner:
+    "Muse cannot handle the opening theme of a session — saying 'a walk in the
+    park' is not reflected." Measured over every stored session that carried one
+    (159 of them): the ledger's `scene` / `bg` / `beat` moved on the Showrunner's
+    **first chat line**, never on the theme — in most of them that line was the
+    theme typed a second time (「じゃあ二人とも公園の遊歩道を…」), which is what hid
+    this. Say something that assumes the place is already known — 「じゃあ二人で構図を
+    考えて」 — and the writer has no place to put it: only the two expressions moved,
+    and the turn came back marked 未反映.
+
+    `open_session` handed the theme to the actress as her cue (`user_line`) and to
+    the record (the `Theme` row, the diary, the lounge) and nowhere else. The
+    ledger is written by one hand and one hand only — `writer.write_patch` — and
+    nothing called it until the first chat turn, so the board was built
+    (`assemble.rebuild_craft` reads the ledger, not the theme) from a blank sheet
+    plus the signature wardrobe.
+
+    So the theme gets the Scripter at open, and a second time when the first
+    answer is empty. It runs **before** `talk.dress_from_signature`, which fills
+    only empty slots — a theme that names an outfit therefore keeps it. If neither
+    ask lands anything, it is said in the conversation (the same 未反映 notice a
+    chat turn gets): a theme that did not land is the cue to say it again.
+    """
+    patch: dict[str, str] = {}
+    if ollama is None or not str(theme or "").strip():
+        return patch
+    char = session.get("character") or {}
+    partner_char = session.get("partner_character") or {}
+    has_partner = bool(str(partner_char.get("character_id") or "").strip())
+    before = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
+    kw = {
+        "model": model,
+        "user_line": theme,
+        "ledger": before,
+        "partner": has_partner,
+        "name_a": str(char.get("name_ja") or char.get("name") or ""),
+        "name_b": str(partner_char.get("name_ja") or partner_char.get("name") or ""),
+        "num_ctx": refine_num_ctx(session),
+    }
+    t0 = time.monotonic()
+    try:
+        patch = await writer.write_patch(ollama, **kw)
+        # **The theme always gets the second ask (measured, 2026-09-20).** A chat
+        # turn only retries on `looks_like_picture_line`, because most lines in a
+        # conversation are not picture directions. **A theme always is** — it is
+        # the subject of the shoot — and the heuristic reads three of eight real
+        # themes as ordinary talk (「雨上がりの帰り道」「図書館で調べもの」
+        # 「私たちの撮影スタジオが完成したよ！」). On those the writer answered a
+        # bare `{}` the first time and the retry contract got `scene` out of two of
+        # the three, so gating the retry would have lost exactly the ones that
+        # needed it.
+        if not ledger_mod.touched_picture(patch):
+            patch = await writer.write_patch(ollama, retry=True, **kw)
+            debug_mod.note(session, "open_theme_retry", detail=str(patch), patch=patch)
+    except Exception as exc:
+        # The opening must not fail over this: she still has to greet him.
+        logger.warning("[muse] theme did not reach the ledger: %s", exc)
+        debug_mod.note(session, "open_theme_failed", detail=str(exc)[:200])
+        return {}
+    debug_mod.stage(session, "open_theme_writer", t0)
+    patch = ledger_mod.scrub_patch(patch, before)
+    if not ledger_mod.touched_picture(patch):
+        debug_mod.note(session, "open_theme_missed", detail=theme[:240])
+        _append_chat(
+            session,
+            role="system",
+            name="Shot",
+            text=(
+                "お題が ledger に載らなかった（会話でもう一度言って）"
+                if locale.startswith("ja") else
+                "The theme did not reach the ledger — say it again in chat"
+            ),
+            meta={
+                "kind": "ledger_missed",
+                "chips": [{
+                    "key": "missed",
+                    "icon": "⚠",
+                    "label": "未反映" if locale.startswith("ja") else "Missed",
+                }],
+            },
+        )
+        return {}
+    after = ledger_mod.apply_patch(before, patch)
+    session["refine_ledger"] = after
+    debug_mod.note(session, "open_theme_patch", detail=str(patch), patch=patch)
+    debug_mod.turn_trace(session, line=theme, patch=patch, before=before, after=after)
+    _change_event(
+        session, source="theme", patch=patch, before=before, after=after, locale=locale,
+    )
+    return patch
+
+
 async def open_session(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
     """She speaks first — theme + reunion + signature dress. Idempotent-ish."""
     import time
@@ -367,6 +469,20 @@ async def open_session(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
 
     await persona.load_memory(db, session)
     persona.mark_reunion(session)
+
+    if theme:
+        _append_chat(
+            session,
+            role="system",
+            name="Theme",
+            text=theme,
+            meta={"kind": "theme"},
+        )
+    # **The theme is a picture direction, so it goes to the Scripter (2026-09-20).**
+    # Before `dress_from_signature`, which fills only what is still empty.
+    await _theme_into_ledger(
+        ollama, session, theme=theme, model=model, locale=locale,
+    )
     dress_patch = talk.dress_from_signature(session)
     if dress_patch:
         debug_mod.note(session, "opening_dress", detail=str(dress_patch), patch=dress_patch)
@@ -382,15 +498,6 @@ async def open_session(db, ollama, session: dict[str, Any]) -> dict[str, Any]:
     await assemble.rebuild_craft(db, ollama, session)
     now = str((session.get("craft") or {}).get("now") or "")
     led = {**ledger_mod.blank(), **(session.get("refine_ledger") or {})}
-
-    if theme:
-        _append_chat(
-            session,
-            role="system",
-            name="Theme",
-            text=theme,
-            meta={"kind": "theme"},
-        )
 
     # Casual opening — greet / reunion; do not invent a full shot briefing.
     session["scripter_intent"] = "casual"
