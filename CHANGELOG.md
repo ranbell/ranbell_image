@@ -6,6 +6,62 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · Versioning: 
 
 ---
 
+## [0.4.0] — 2026-09-20
+
+The Muse release. A studio where you direct a photo shoot by talking to the model,
+instead of writing a prompt.
+
+### Added
+
+- **Muse — shoot a picture by talking about it**
+  - **The shot ledger is the record of truth** — clothes, pose, expression, place, light, background, framing and atmosphere are fields, rewritten as a diff on every turn. Say it again and the restatement lands on the next turn
+  - **Three ways to shoot**: solo, duet (both written apart, each with her own lines and side of the frame), or a studio crew
+  - **A crew of 30 across 17 jobs in 6 presets** (standard / vivid / photoreal / calm / flat / bold) — each seat argues for one ledger field in its own corner, and a single writer holds the pen, so the crew cannot overwrite each other
+  - **Test shot → final**: the test shot draws a fresh seed on every press; the final keeps the seed you approved and only raises the steps, so what you approved is what gets finished
+  - **Workflow families** — a workflow is recognised as `anima` or `krea2` from its filename, or from a `muse:family=…` marker in the graph. Each family names its own steps and whether a negative prompt is sent at all; cfg and resolution are whatever the workflow was saved with
+  - **She answers as she writes** — her lines stream token by token over SSE, with ComfyUI preview frames during the render
+  - **Characters**: 30 presets with four wardrobe sets each, reference boards for the roster, and chemistry between pairs that grows from what they shot together
+  - **The green room** — after a shoot she writes a secret diary nobody sees, posts something short for the others to react to, now and then goes out with friends, and the Showrunner's habits are noted down. Those memories come back into the preamble of the next shoot
+  - **Three layers of safety**: a clerk that reads one line at a time, a second reader before anything is stopped, and a floor that protects minors regardless of settings. Dark material is still shootable — only what must stop, stops
+
+- **Control Room**
+  - Retry and dismiss for finished and failed jobs (both used to 404 — the history, not the registry, is the source of truth)
+  - A job whose resource is down now waits and runs when it comes back, instead of failing
+
+- **Characters**
+  - "Erase memory" — clears every character's accrued diary, chemistry and green-room data in one action
+
+### Changed
+
+- **One studio.** Muse Classic, Chronicle / Weave, the tag-driven Muse and the old three-stage redraw chain are retired. The URLs are folded into `/api/muse`
+- **cfg and resolution come from the workflow**, not from Muse. They differ far more between checkpoints than between stages, and the graph already carries its author's answer. Muse's own canvas is kept for the reference boards in the roster, which have to match each other
+- **Every code comment and docstring is in English** (about 6,200 lines) — the Japanese that remains is the text the product itself emits, kept in the original with an English gloss
+
+### Fixed
+
+- **Muse** — the chat input froze for good when a `muse_speaking` signal arrived mid-POST; a whole studio turn could leave it unusable
+- **Muse** — the final render drew a different seed from the test shot that was approved (all six live sessions disagreed)
+- **Muse** — `SAY:` and other field labels leaked into the bubbles; the eight-line costume block reached the screen as her dialogue
+- **Muse** — two Muses' words piled into one bubble, and a seat's name tag showed a job title nobody in the room used
+- **Muse** — the thumbnail vanished on exactly the turns she heckled
+- **Muse** — a solo or duet turn crashed with a 500 for four days (a variable bound only inside the crew branch)
+- **Muse** — her turn came back as "……" at 0.0 s whenever a new argument was added to the client but not to the facade
+- **Muse** — the secret diary came back in kana with spaces between the words; the language rule read as "write it in kana" (measured 35% → 0%), and a kana page is now asked for again and the retry recorded
+- **Muse** — the default outfit was not loaded when a studio shoot started
+- **Muse** — prose and tags were cut mid-word; long prompts now stop at a sentence or a word boundary
+- **Muse** — the chat rewound to the previous seat's words every time a new seat spoke
+- **Muse** — a garment taken off and put back on never reached the picture again
+- **ComfyUI** — every render shared one client id, so continuing a shoot with a retake broke image streaming and mixed up previews
+- **ComfyUI** — a graph that zeroes its negative out (one text encoder, `ConditioningZeroOut`) had the negative prompt burned into the **positive**
+
+---
+
+## [0.3.1] — 2026-06-26
+
+Version bump only; no user-visible change.
+
+---
+
 ## [0.3.0] — 2026-06-21
 
 ### Added
