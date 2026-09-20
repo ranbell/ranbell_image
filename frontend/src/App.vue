@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { jobLabel } from './jobLabel.js'
 import { saveAndSyncToken, getToken } from './apiToken.js'
 import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide } from 'd3-force'
 import AnalyzerModal from './components/AnalyzerModal.vue'
@@ -19,7 +20,7 @@ import { useInvokeSession } from './composables/useInvokeSession.js'
 
 const { fetchDaily: fetchDailyOracle } = useInvokeSession()
 
-const { t, locale } = useI18n()
+const { t, te, locale } = useI18n()
 function toggleLocale() {
   locale.value = locale.value === 'ja' ? 'en' : 'ja'
   localStorage.setItem('locale', locale.value)
@@ -2997,12 +2998,12 @@ onUnmounted(() => {
           class="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-200 whitespace-nowrap transition-colors min-w-0 max-w-[40vw]">
           <span class="w-1.5 h-1.5 rounded-full inline-block flex-shrink-0"
             :class="headerActiveJobs[0].state === 'running' ? 'bg-blue-400 animate-pulse' : headerActiveJobs[0].state === 'cancelling' ? 'bg-orange-400 animate-pulse' : 'bg-yellow-400'"></span>
-          <span class="truncate">{{ headerActiveJobs[0].title }}</span>
+          <span class="truncate" :title="headerActiveJobs[0].title">{{ jobLabel(headerActiveJobs[0].title, { t, te }) }}</span>
           <span v-if="headerActiveJobs[0].state === 'running' && headerActiveJobs[0].progress_text" class="text-gray-500 truncate">{{ headerActiveJobs[0].progress_text }}</span>
           <span v-else-if="headerActiveJobs[0].state === 'running' && headerActiveJobs[0].progress > 0" class="text-gray-500">{{ Math.round(headerActiveJobs[0].progress * 100) }}%</span>
           <span v-else-if="headerActiveJobs[0].state === 'queued'" class="text-yellow-400/70">{{ $t('header.jobQueued') }}</span>
           <span v-else-if="headerActiveJobs[0].state === 'cancelling'" class="text-orange-400/70">{{ $t('header.jobCancelling') }}</span>
-          <span v-if="headerActiveJobs.length > 1" class="text-gray-500 flex-shrink-0">+{{ headerActiveJobs.length - 1 }}件</span>
+          <span v-if="headerActiveJobs.length > 1" class="text-gray-500 flex-shrink-0">{{ $t('header.jobMore', { n: headerActiveJobs.length - 1 }) }}</span>
         </button>
 
         <!-- Action buttons -->
@@ -4801,7 +4802,7 @@ onUnmounted(() => {
               <div v-if="selected.positive_prompt">
                 <div class="flex items-center justify-between mb-1">
                   <div class="flex items-center gap-1.5">
-                    <p class="text-xs font-semibold text-purple-400 uppercase tracking-wide">Prompt</p>
+                    <p class="text-xs font-semibold text-purple-400 uppercase tracking-wide">{{ $t('detail.sectionPrompt') }}</p>
                     <span v-if="selected.extraction?.method"
                       :class="{
                         'bg-green-900/60 text-green-300 border-green-700/50':  selected.extraction.method === 'a1111',
@@ -4835,7 +4836,7 @@ onUnmounted(() => {
               <!-- WD14 auto-tags -->
               <div v-if="selected.wd14_tags?.length">
                 <div class="flex items-center justify-between mb-1">
-                  <p class="text-xs font-semibold text-teal-400 uppercase tracking-wide">WD14 Auto-tags</p>
+                  <p class="text-xs font-semibold text-teal-400 uppercase tracking-wide">{{ $t('detail.sectionWd14') }}</p>
                   <div class="flex items-center gap-2">
                     <button @click="copyWd14Tags"
                       class="text-xs text-gray-500 hover:text-teal-400 transition-colors">{{ wd14Copied ? '✓ Copied' : 'Copy' }}</button>
@@ -4855,7 +4856,7 @@ onUnmounted(() => {
               <!-- Prompt Alignment -->
               <div v-if="selected.positive_prompt && selected.wd14_tags?.length">
                 <div class="flex items-center justify-between mb-1">
-                  <p class="text-xs font-semibold text-orange-400 uppercase tracking-wide">Alignment</p>
+                  <p class="text-xs font-semibold text-orange-400 uppercase tracking-wide">{{ $t('detail.sectionAlignment') }}</p>
                   <button
                     @click="triggerAlignmentEvaluate(selected.sha256)"
                     :disabled="alignmentEvaluating.has(selected.sha256)"
@@ -4875,7 +4876,7 @@ onUnmounted(() => {
                              : 'text-red-400'">
                       {{ Math.round(alignmentCache.get(selected.sha256).score * 100) }}%
                     </span>
-                    <span class="text-xs text-gray-500">embedding similarity</span>
+                    <span class="text-xs text-gray-500">{{ $t('detail.embeddingSimilarity') }}</span>
                   </div>
                   <p v-if="alignmentCache.get(selected.sha256).summary_i18n?.[locale] || alignmentCache.get(selected.sha256).summary"
                     class="text-xs text-gray-300 bg-gray-800 rounded-lg p-2 leading-relaxed">
@@ -4969,7 +4970,7 @@ onUnmounted(() => {
               </details>
 
               <div v-if="selected.params && Object.keys(selected.params).length">
-                <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Parameters</p>
+                <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">{{ $t('detail.sectionParameters') }}</p>
                 <dl class="grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs bg-gray-800 rounded-lg p-2.5">
                   <template v-for="(v, k) in selected.params" :key="k">
                     <dt class="text-gray-500 truncate">{{ k }}</dt>
@@ -5004,7 +5005,7 @@ onUnmounted(() => {
           <!-- header -->
           <div class="flex items-center justify-between px-5 py-3 border-b border-gray-700 shrink-0">
             <div>
-              <p class="text-sm font-semibold text-gray-100">Raw Metadata</p>
+              <p class="text-sm font-semibold text-gray-100">{{ $t('detail.sectionRawMetadata') }}</p>
               <p class="text-xs text-gray-500 font-mono">{{ rawMetadataModal.sha256?.slice(0, 16) }}…</p>
             </div>
             <button @click="rawMetadataModal.open = false" class="text-gray-500 hover:text-gray-200 text-xl leading-none">✕</button>
@@ -5538,10 +5539,14 @@ onUnmounted(() => {
     <div v-if="showTokenPrompt"
       class="fixed inset-0 z-[var(--z-modal)] bg-black/80 flex items-center justify-center p-4">
       <div class="bg-gray-900 rounded-xl w-full max-w-sm shadow-2xl border border-gray-700 p-6 space-y-4">
-        <h2 class="text-base font-semibold text-gray-100">API トークンの入力</h2>
+        <h2 class="text-base font-semibold text-gray-100">{{ $t('header.tokenTitle') }}</h2>
         <p class="text-xs text-gray-400">
-          サーバーへのアクセスには API トークンが必要です。<br>
-          環境変数 <code class="text-purple-300">API_TOKEN</code> で設定したトークンを入力してください。
+          {{ $t('header.tokenBody') }}<br>
+          <!-- The variable's name is a parameter rather than markup: one sentence,
+               one key. `<i18n-t>` would keep the <code> styling, but nothing else
+               in this app uses that component and a cosmetic gain is not worth a
+               mechanism nobody else reads. -->
+          <span class="text-purple-300">{{ $t('header.tokenHint', { env: 'API_TOKEN' }) }}</span>
         </p>
         <input
           v-model="tokenInput"
@@ -5555,7 +5560,7 @@ onUnmounted(() => {
           <button
             @click="saveToken"
             class="px-4 py-2 bg-purple-600 hover:bg-purple-500 rounded-lg text-sm font-medium transition-colors">
-            保存して再読み込み
+            {{ $t('header.tokenSave') }}
           </button>
         </div>
       </div>

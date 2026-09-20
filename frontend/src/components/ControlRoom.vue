@@ -269,7 +269,7 @@
             >
               <div class="cr-job-row1">
                 <span class="cr-job-id-dim">{{ job.id }}</span>
-                <span class="cr-job-title">{{ job.title }}</span>
+                <span class="cr-job-title" :title="job.title">{{ taskLabel(job.title) }}</span>
                 <div class="cr-job-actions">
                   <!-- RUNNING: Pause -->
                   <button
@@ -377,7 +377,7 @@
               >
                 <span class="cr-waited-pos">{{ String(i + 1).padStart(2, ' ') }}</span>
                 <span class="cr-waited-lane" :data-lane="job.lane">{{ laneCode(job.lane) }}</span>
-                <span class="cr-waited-title" :title="job.title">{{ job.title }}</span>
+                <span class="cr-waited-title" :title="job.title">{{ taskLabel(job.title) }}</span>
                 <span v-if="job.held" class="cr-waited-tag cr-waited-tag--held" :title="t('controlRoom.heldTooltip')">HELD</span>
                 <span v-else-if="job.priority > 0" class="cr-waited-tag cr-waited-tag--pri">P{{ job.priority }}</span>
                 <div class="cr-waited-actions">
@@ -469,9 +469,14 @@
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useControlRoom } from '../composables/useControlRoom.js'
+import { jobLabel } from '../jobLabel.js'
 import ProgressBar from './ProgressBar.vue'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
+
+// The task's name is an identifier (`generate_actress_diary`); the console shows
+// what it means. Unknown names print as they stand — see `jobLabel`.
+const taskLabel = (title) => jobLabel(title, { t, te })
 
 const props = defineProps({
   jobsMap:      { type: Object,  required: true },
