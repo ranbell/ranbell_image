@@ -10,7 +10,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker)](docker-compose.yml)
 [![ghcr.io](https://img.shields.io/badge/ghcr.io-ranbell%2Franbell--image-blue?logo=github)](https://github.com/ranbell/ranbell_image/pkgs/container/ranbell-image-backend)
-[![Qdrant](https://img.shields.io/badge/Qdrant-v1.18-6B4FBB)](https://qdrant.tech/)
+[![Qdrant](https://img.shields.io/badge/Qdrant-v1.19-6B4FBB)](https://qdrant.tech/)
 [![Ollama](https://img.shields.io/badge/Ollama-local_AI-grey)](https://ollama.ai/)
 [![ComfyUI](https://img.shields.io/badge/ComfyUI-integration-orange)](https://github.com/comfyanonymous/ComfyUI)
 [![WD14](https://img.shields.io/badge/WD14-tagger-pink)](https://huggingface.co/SmilingWolf)
@@ -57,7 +57,7 @@ Ranbell Image は**完全ローカル動作**のアプリケーションです�
 
 #### 特徴とその他機能
 - **台帳で状態を管理** — 服・姿勢・表情・場所・光・背景・画角を欄で持ち、会話のたびに差分で書き換わります。言い直しは次のターンで必ず効く
-- **一人撮り / W 撮り / スタジオ撮り** — 一人、二人（それぞれの台詞と立ち位置を書き分け）、または 17 職 30 人の撮影班から 6 プリセットを選んで特徴ある撮影が可能です
+- **一人撮り / W 撮り / スタジオ撮り** — 一人、二人（それぞれの台詞と立ち位置を書き分け）、または 6 プリセットの撮影班を選んで特徴ある撮影が可能です
 - **試し撮り → 本番** — 試し撮りは押すたびに seed を引き直し、本番は**OK を出した seed のまま**　steps だけ上げて仕上げます
 - **ワークフローの系統を自動で見分ける** — anima 系と krea2 系で steps・negative の要不要が違います。cfg と解像度はワークフローに焼かれた値をそのまま使います
 - **撮影のあと** — 彼女は誰にも見せない秘密の日記を書き、楽屋に短い投稿をし、たまに友達と出かけます。次の撮影ではその記憶が前置きに入ります
@@ -244,10 +244,9 @@ Ranbell Image は**完全ローカル動作**のアプリケーションです�
 | **LLM** | **Gemma 4 26B（A4B）** —— `gemma4:26b-a4b-it-qat` | 会話も台帳も狙いどおりに届きません。**小さいモデルでは、撮影そのものが成立しません** |
 | **画像モデル** | **Anima 系列・Krea2 系列**のワークフロー | Muse が出すのは自然文まじりのプロンプトです。自然文を読めないモデルでは絵になりません |
 
-**なぜ 26B なのか（実測に基づきます）**
+**Gemma4 26B が必要な理由**
 
-- **撮影を止める判定係（安全弁）は 26B が必須**です。小型モデルでは判定が破綻します —— `e4b` は普通の演出まで止めてしまい、`e2b` は止めるべきものを通してしまいました。**ここだけ軽いモデルに替える、ということはできません**
-- `e4b` で撮影した場合、**「指示したのに画が動かない」が 16%** 出ました（26B では出ません）。会話は続くのに台帳が書き換わらないので、**壊れていることに気づきにくい**のが厄介です
+- より小型の LLM で撮影した場合、**「指示したのに画に反映されない」ことが多く発生します。** 会話は続くのに台帳が書き換わらないので、**壊れていることに気づきにくい**のが厄介です
 - 撮影班（スタジオ撮り）は 1 ターンに何度も LLM を呼びます。判定・台本・女優・確認が噛み合って初めて一枚になるため、**どれか一つが弱いと全体が崩れます**
 
 **VRAM** — 26B（Q4_0）で約 **15.6GB**。**16GB のカードでも動きますが、画像生成と同時には載りません**。Muse は描画の直前に LLM を VRAM から必ず降ろします（`unload_vlm`、既定 on）。**24GB 以上あると余裕があります。**

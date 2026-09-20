@@ -10,7 +10,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker)](docker-compose.yml)
 [![ghcr.io](https://img.shields.io/badge/ghcr.io-ranbell%2Franbell--image-blue?logo=github)](https://github.com/ranbell/ranbell_image/pkgs/container/ranbell-image-backend)
-[![Qdrant](https://img.shields.io/badge/Qdrant-v1.18-6B4FBB)](https://qdrant.tech/)
+[![Qdrant](https://img.shields.io/badge/Qdrant-v1.19-6B4FBB)](https://qdrant.tech/)
 [![Ollama](https://img.shields.io/badge/Ollama-local_AI-grey)](https://ollama.ai/)
 [![ComfyUI](https://img.shields.io/badge/ComfyUI-integration-orange)](https://github.com/comfyanonymous/ComfyUI)
 [![WD14](https://img.shields.io/badge/WD14-tagger-pink)](https://huggingface.co/SmilingWolf)
@@ -170,8 +170,7 @@ the final render keeps **the very same seed**.
   background and framing are fields, rewritten as a diff on every turn. Say it again
   and it lands on the next turn
 - **Solo, duet, or a full crew** — one actress, two (written apart, each with her own
-  lines and side of the frame), or a crew of 30 across 17 jobs in six presets, who
-  settle each field in its own corner
+  lines and side of the frame), or one of six crew presets, each with its own look
 - **Test shot → final** — the test shot draws a fresh seed each press; the final keeps
   the seed you approved and only raises the steps
 - **It knows which model family a workflow belongs to** — anima and krea2 want
@@ -265,10 +264,9 @@ The following models were used during development and are confirmed to work:
 | **LLM** | **Gemma 4 26B (A4B)** — `gemma4:26b-a4b-it-qat` | Neither the conversation nor the ledger lands where you aimed it. **With a smaller model a shoot does not come together at all** |
 | **Image model** | An **Anima-family or Krea2-family** workflow | Muse writes prompts with natural-language prose in them. A checkpoint that cannot read prose will not draw what it says |
 
-**Why 26B — measured, not assumed**
+**Why Gemma 4 26B is needed**
 
-- **The clerk that stops a shoot (the safety layer) needs 26B.** Smaller models break the judgement in both directions: `e4b` stopped ordinary direction, and `e2b` let through what had to be stopped. **This is not a place where a lighter model can be substituted.**
-- Shooting on `e4b`, **16% of turns did not move the picture at all** despite an explicit instruction (0% on 26B). The conversation carries on while the ledger stays still, which makes the failure **hard to notice**.
+- With a smaller LLM, **an instruction often fails to reach the picture.** The conversation carries on while the ledger stays still, which makes the failure **hard to notice**.
 - A studio shoot calls the LLM several times per turn — clerk, writer, actress, verify. One weak link and the whole turn degrades.
 
 **VRAM** — 26B (Q4_0) is about **15.6 GB**. It runs on a 16 GB card, **but not at the same time as image generation**: Muse always drops the LLM out of VRAM immediately before a render (`unload_vlm`, on by default). **24 GB or more leaves real headroom.**

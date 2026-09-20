@@ -62,7 +62,7 @@ Qdrant データベースが破損・不整合・陳腐化した場合の復旧�
 
 Ranbell Image プロジェクトで使用しているすべての Qdrant 機能を説明します。コレクション設計、名前付きベクトル、ペイロードスキーマ、検索パターン、ジョブステータス管理、高度な機能をカバーします。
 
-- **Qdrant バージョン:** 1.18.0
+- **Qdrant バージョン:** 1.19.1
 - **クライアント:** Python SDK `qdrant-client` の `AsyncQdrantClient`
 - **主要実装:** `backend/app/db/qdrant_client.py`
 - **設定:** `backend/app/config.py`
@@ -187,7 +187,7 @@ HSV / L\*a\*b\* 空間での 5 クラスター KMeans で抽出されます。
 
 #### 感情スコア（Subjective Emotion）
 
-Ollama が `positive_prompt` + `wd14_tags` を解析して付与する 12 次元の主観的感情スコアです。`run_emotion_tag` ランナー（EMBEDDING レーン）が処理し、`POST /api/ai/emotion-tag` でトリガーできます。フィールド名はネスト構造ではなくフラットキー形式を採用しています（Qdrant 1.18 の `FieldCondition` との確実な互換性のため）。
+Ollama が `positive_prompt` + `wd14_tags` を解析して付与する 12 次元の主観的感情スコアです。`run_emotion_tag` ランナー（EMBEDDING レーン）が処理し、`POST /api/ai/emotion-tag` でトリガーできます。フィールド名はネスト構造ではなくフラットキー形式を採用しています（`FieldCondition` との確実な互換性のため）。
 
 | フィールド | インデックス種別 | 感情次元 |
 |---|---|---|
@@ -428,7 +428,7 @@ Qdrant サービスは `docker-compose.yml` で定義されています。
 
 ```yaml
 qdrant:
-  image: qdrant/qdrant:v1.18.0
+  image: qdrant/qdrant:v1.19.1
   environment:
     QDRANT__TELEMETRY_DISABLED: "true"
 ```

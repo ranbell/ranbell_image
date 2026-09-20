@@ -62,7 +62,7 @@ This is only possible because the true source of record â€” the images on disk â
 
 This document describes every Qdrant feature used in the ranbell_image project, covering collections, named vectors, payload schema, search patterns, job-status management, and advanced capabilities.
 
-- **Qdrant version:** 1.18.0
+- **Qdrant version:** 1.19.1
 - **Client:** `AsyncQdrantClient` from the `qdrant-client` Python SDK
 - **Primary implementation:** `backend/app/db/qdrant_client.py`
 - **Configuration:** `backend/app/config.py`
@@ -407,7 +407,7 @@ The Qdrant service is defined in `docker-compose.yml`:
 
 ```yaml
 qdrant:
-  image: qdrant/qdrant:v1.18.0
+  image: qdrant/qdrant:v1.19.1
   environment:
     QDRANT__TELEMETRY_DISABLED: "true"
 ```
