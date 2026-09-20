@@ -4,26 +4,12 @@
 
 English → [muse.md](muse.md)
 
-このドキュメントは Muse Refine（保存値 `studio: "muse_refine"`）の実装全体を
-解説します。使い方は [クリエイターガイド](../guide/muse.ja.md) を参照してください。
+このドキュメントは Muse の実装全体を解説します。
+使い方は [クリエイターガイド](../guide/muse.ja.md) を参照してください。
 
-Muse の設計は一行で言えば **「話す人は多く、書く人は一人」** です。18 役職が
-意見を出しても、台帳（ledger）に書き込むのは台本係（writer）ただ一人 —— これが、
-同じ欄を全員で奪い合って絵が壊れるのを防いでいます。
-
-現行の撮影室は Refine だけです。Classic Muse、Chronicle / Weave、タグ駆動 Muse、
-旧 B・C・D 3 段階描き直しチェーンはいずれも退役済みです。設計の経緯と実測ログは
-リポジトリ内の `private/muse/design.ja.md` に残しています。
-
-**ワークフローは系統で扱う。** anima 系と krea2 系では steps と negative の要不要が
-違い、cfg と解像度はどちらもワークフローに焼かれた値を使う
-（→ [§7.1](#71-ワークフローの系統anima--krea2)）。撮影室がグラフに書き込むのは
-**steps と seed だけ**です。
-
-**Muse から呼ばないもの。** Inspire の `backend/app/invoke/vocab_bank.py`（語彙検索）
-と `backend/app/prompt/tag_merge.py`（タグ結合）への経路は無い。Refine の
-`rebuild_craft` は WD14 自動注入を外している（2026-09-09）。戻すなら「置き換え」
-ではなく、彼女が落とす **recommendation** として渡す形にする。どちらも再発明しない。
+Muse の設計は一行で言えば **「話す人は多く、書く人は一人」** です。
+18 役職が意見を出しても、台帳（ledger）に書き込むのは台本係（writer）ただ一人
+ —— これが、同じ欄を全員で奪い合って絵が壊れるのを防いでいます。
 
 ---
 

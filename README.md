@@ -215,8 +215,8 @@ Each feature has two kinds of docs. Pick the door that matches what you need.
 
 | Feature                     | I want to use it                                                            | I want to understand how it works                        |
 | --------------------------- | --------------------------------------------------------------------------- | -------------------------------------------------------- |
-| **Muse** (shoot by talking) | [Creator's Guide (JP) →](docs/guide/muse.ja.md)                             | [Technical Reference (JP) →](docs/tech/muse.ja.md)       |
-| **Invoke**                  | [Creator's Guide →](docs/guide/invoke.md) · [JP →](docs/guide/invoke.ja.md) | Coming soon                                              |
+| **Muse** (shoot by talking) | [Creator's Guide →](docs/guide/muse.md)                             | [Technical Reference →](docs/tech/muse.md)       |
+| **Invoke**                  | [Creator's Guide →](docs/guide/invoke.md) | Coming soon                                              |
 | **Inspire & Brainstorm**    | [Creator's Guide →](docs/guide/inspire-brainstorm.md)                       | [Technical Reference →](docs/tech/inspire-brainstorm.md) |
 | **Prompt Alchemy**          | [Creator's Guide →](docs/guide/prompt-alchemy.md)                           | [Technical Reference →](docs/tech/prompt-alchemy.md)     |
 

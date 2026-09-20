@@ -12,21 +12,6 @@ Muse in one line: **many people talk, one person writes.** Eighteen roles can
 have an opinion; only the writer writes the ledger. That is what stops everyone
 fighting over the same field and breaking the picture.
 
-The current studio is Refine only. Classic Muse, Chronicle / Weave, tag-driven
-Muse, and the old B·C·D three-stage rewrite chain are all retired. Design notes
-and measured logs live in-repo at `private/muse/design.ja.md`.
-
-**Workflows are handled by family.** Anima-family and krea2-family differ on
-steps and whether a negative is wanted; cfg and size both come from the values
-baked into the workflow (→ [§7.1](#71-workflow-families-anima--krea2)). The
-studio writes **steps and seed only** into the graph.
-
-**What Muse does not call.** There is no path to Inspire's
-`backend/app/invoke/vocab_bank.py` (vocab search) or
-`backend/app/prompt/tag_merge.py` (tag merge). Refine's `rebuild_craft` has
-WD14 auto-inject turned off (2026-09-09). If it comes back, it is a
-**recommendation** she can drop — not a replacement. Do not reinvent either.
-
 ---
 
 ## 1. One turn around the room

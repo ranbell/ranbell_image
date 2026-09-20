@@ -15,9 +15,9 @@ The internals live in the [technical reference](../tech/muse.md).
 
 **Setup.** Get Ranbell Image running first: [INSTALLATION.md](../../INSTALLATION.md). This page is how to shoot once the studio is up.
 
-![Muse roster](../screenshots/muse/JA_muse_00_muse.png)
+![Muse roster](../screenshots/muse/muse_00_muse.png)
 
-![The studio](../screenshots/muse/JA_muse_01_overview.png)
+![The studio](../screenshots/muse/muse_01_overview.png)
 
 ---
 
@@ -58,7 +58,7 @@ Whatever is missing is listed under the button.
 3. **Crew** — Studio only. Pick one of the crew cards
 4. **LLM** and **image model (workflow)** — pick **Gemma 4 26B** and an **Anima-family** workflow, as above
 
-![Settings before you open](../screenshots/muse/JA_muse_02_start.png)
+![Settings before you open](../screenshots/muse/muse_02_start.png)
 
 
 
@@ -76,7 +76,7 @@ Leave them empty and pick for that day's work.
 
 Enter in the chat box is a **newline**. Send is the send button, so confirming kanji will not fire the line.
 
-![Muse settings and admin defaults](../screenshots/muse/JA_muse_10_settings.png)
+![Muse settings and admin defaults](../screenshots/muse/muse_10_settings.png)
 
 
 
@@ -108,7 +108,7 @@ On a two-person shoot, 👗 `wearing_b` / 🤝 `beat_b` / 🙂 `expression_b` ar
 
 Fields do not mix. "Subaru sits, Asahi stays standing" writes two separate fields.
 
-![Ledger chips](../screenshots/muse/JA_muse_03_ledger.png)
+![Ledger chips](../screenshots/muse/muse_03_ledger.png)
 
 
 
@@ -171,9 +171,9 @@ A filename with `krea` in it is detected automatically.
 Test and final queue on the Control Room generation lane. If the card is busy, you wait.
 You cannot press the next still until this one is done.
 
-![Test shot](../screenshots/muse/JA_muse_04_board.png)
+![Test shot](../screenshots/muse/muse_04_board.png)
 
-![Test shot vs final](../screenshots/muse/JA_muse_05_shoot.png)
+![Test shot vs final](../screenshots/muse/muse_05_shoot.png)
 
 
 
@@ -224,7 +224,7 @@ Fewer people is a little faster. The crew also sets the look's floor
 **Heckling** (off / light / full) is how much the seats react to each other.
 `off` is quietest and fastest. Change it in Muse settings. Default is Light.
 
-![Studio crews](../screenshots/muse/JA_muse_06_studio.png)
+![Studio crews](../screenshots/muse/muse_06_studio.png)
 
 
 
@@ -266,9 +266,9 @@ Left alone, the book fills with you, and her world becomes only the shoot.
 An actress keeps her own memory, quietly rewritten after a wrap. The studio handpost is readable by everyone, but **only pinned notes (up to 3)** reach the next shoot.
 A same-day thing like "no hat today" is gone when the shoot ends.
 
-![Lounge timeline](../screenshots/muse/JA_muse_08_lounge.png)
+![Lounge timeline](../screenshots/muse/muse_08_lounge.png)
 
-![Studio handpost](../screenshots/muse/JA_muse_09_handpost.png)
+![Studio handpost](../screenshots/muse/muse_09_handpost.png)
 
 
 
