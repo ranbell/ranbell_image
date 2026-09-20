@@ -797,6 +797,30 @@ function openStream(id) {
       return
     }
     if (data.type === 'chat' || data.type === 'chat_message') {
+      // **The director's own line goes up at once (2026-09-20).** The Showrunner:
+      // "if the director's instruction is not reflected in the chat right away it
+      // is a little hard to follow". `scheduleRefresh` refuses to run while the
+      // POST owns the session, so the row is appended here instead of fetched —
+      // the backend sends it once the safe filter has passed it. When the POST
+      // returns, `session.value` is replaced by the server's copy, which holds
+      // this same row, so nothing is shown twice.
+      if (data.role === 'user' && data.text && session.value) {
+        const chat = session.value.chat || []
+        const last = chat[chat.length - 1]
+        if (!(last && last.role === 'user' && last.text === data.text)) {
+          session.value = {
+            ...session.value,
+            chat: [...chat, {
+              role: 'user',
+              name: data.name || 'Director',
+              text: data.text,
+              at: data.at || Date.now() / 1000,
+            }],
+          }
+        }
+        scrollChat()
+        return
+      }
       // Once the settled rows arrive, the streaming draft has done its job.
       liveSay.value = ''
       liveName.value = ''

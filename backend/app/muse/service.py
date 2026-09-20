@@ -890,8 +890,7 @@ async def chat(
     # is noted here; `_mark_turn_shot` stamps it at the end of the turn.
     turn_mark = len(session.get("chat") or [])
 
-    _append_chat(session, role="user", name="Director", text=text)
-    events.publish(session["session_id"], {"type": "chat", "role": "user", "text": text})
+    row = _append_chat(session, role="user", name="Director", text=text)
     debug_mod.note(session, "director_line", detail=text[:240])
 
     # Contract clerk — block crime/violence (and nsfw when configured) before her.
@@ -923,6 +922,26 @@ async def chat(
         session["status"] = "chat"
         await session_db.save(db, session)
         return session
+
+    # **His line goes up the moment it clears the clerk (2026-09-20).** The
+    # Showrunner: "if the director's instruction is not reflected in the chat right
+    # away it is a little hard to follow".
+    #
+    # The line was published **before** the clerk and the panel answered it with
+    # `scheduleRefresh`, which refuses to run while the POST is in flight (a GET
+    # before the turn's final save would overwrite the answer) — so nothing
+    # appeared until the whole turn came back, seats and all. The row itself is
+    # sent now, and the panel appends it without a fetch. **After** the clerk, so a
+    # refused line never appears and then vanishes: what it gets instead is the
+    # refusal, which is the road the blocked branch above already takes.
+    await session_db.save(db, session)
+    events.publish(session["session_id"], {
+        "type": "chat",
+        "role": "user",
+        "name": "Director",
+        "text": text,
+        "at": row.get("at"),
+    })
 
     led = dict(before)
     director_recent = _director_tail(session)
