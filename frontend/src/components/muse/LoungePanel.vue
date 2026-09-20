@@ -60,6 +60,37 @@ function textOf(row, key = 'text') {
   const en = row[`${key}_en`] || ''
   return isJa.value ? (ja || en) : (en || ja)
 }
+const LOOKS_JA = /[\u3040-\u30ff\u3400-\u9fff]/
+function looksJa(s) {
+  return LOOKS_JA.test(String(s || ''))
+}
+function trendTitle(tr) {
+  if (!tr) return ''
+  if (isJa.value) return tr.summary_ja || tr.summary_en || ''
+  const en = tr.summary_en || ''
+  if (en && !looksJa(en)) return en
+  const fromTwist = (tr.twists || []).map((tw) => tw.text_en).find(Boolean)
+  if (fromTwist) return fromTwist
+  return en || tr.summary_ja || ''
+}
+function trendTags(tr) {
+  const ja = tr?.tags || {}
+  const en = tr?.tags_en || {}
+  if (isJa.value) return ja
+  const out = {}
+  const keys = [...new Set([...Object.keys(en), ...Object.keys(ja)])]
+  for (const k of keys) {
+    const v = en[k] || (!looksJa(ja[k]) ? ja[k] : '')
+    if (v) out[k] = v
+  }
+  return out
+}
+function twistBody(tw) {
+  if (isJa.value) return tw.twist || tw.text_ja || tw.text_en || ''
+  if (tw.text_en) return tw.text_en
+  if (tw.twist && !looksJa(tw.twist)) return tw.twist
+  return tw.text_ja || tw.twist || ''
+}
 function nameOf(row) {
   if (!row) return ''
   return isJa.value
@@ -282,7 +313,7 @@ watch(tab, () => ensureSelected())
                     <div v-if="selected.kind === 'outing'" class="text-[11px] text-rose-500/90 mt-0.5">
                       {{ [selected.when_ja, selected.occasion].filter(Boolean).join(' · ') }}
                       <span v-if="(selected.cast || []).length" class="text-rose-400/80">
-                        — {{ (selected.cast || []).map(c => (isJa ? (c.name_ja || c.name) : (c.name || c.name_ja))).filter(Boolean).join('、') }}
+                        — {{ (selected.cast || []).map(c => (isJa ? (c.name_ja || c.name) : (c.name || c.name_ja))).filter(Boolean).join(isJa ? '、' : ', ') }}
                       </span>
                     </div>
                     <p class="mt-2 text-sm leading-relaxed whitespace-pre-wrap">{{ textOf(selected) }}</p>
@@ -321,7 +352,7 @@ watch(tab, () => ensureSelected())
                     >{{ stanceLabel(m.stance) }}</span>
                   </div>
                   <p class="text-sm mt-1 whitespace-pre-wrap">{{ textOf(m) }}</p>
-                  <p v-if="m.twist" class="text-[11px] mt-1 text-rose-500/90">
+                  <p v-if="isJa ? m.twist : (m.twist && !looksJa(m.twist))" class="text-[11px] mt-1 text-rose-500/90">
                     {{ t('muse.lounge.myTwist') }}: {{ m.twist }}
                   </p>
                 </div>
@@ -343,15 +374,15 @@ watch(tab, () => ensureSelected())
           >
             <div class="text-[10px] text-rose-400">{{ when(tr.at) }}</div>
             <h3 class="text-sm font-semibold text-rose-600 mt-0.5">
-              {{ isJa ? (tr.summary_ja || tr.summary_en) : (tr.summary_en || tr.summary_ja) }}
+              {{ trendTitle(tr) }}
             </h3>
             <div v-if="tr.from_name_ja || tr.from_name" class="text-[11px] text-rose-400 mt-1">
               {{ t('muse.lounge.fromMuse') }}:
               {{ isJa ? (tr.from_name_ja || tr.from_name) : (tr.from_name || tr.from_name_ja) }}
             </div>
-            <div v-if="tr.tags && Object.keys(tr.tags).length" class="flex flex-wrap gap-1 mt-2">
+            <div v-if="Object.keys(trendTags(tr)).length" class="flex flex-wrap gap-1 mt-2">
               <span
-                v-for="(v, k) in tr.tags"
+                v-for="(v, k) in trendTags(tr)"
                 :key="k"
                 class="text-[10px] px-2 py-0.5 rounded-full bg-pink-100 text-pink-700"
               >{{ k }}: {{ v }}</span>
@@ -370,7 +401,7 @@ watch(tab, () => ensureSelected())
                   {{ stanceLabel(tw.stance) }}
                 </span>
                 <p class="mt-0.5 text-slate-700">
-                  {{ tw.twist || (isJa ? tw.text_ja : tw.text_en) || tw.text_ja }}
+                  {{ twistBody(tw) }}
                 </p>
               </div>
             </div>

@@ -99,6 +99,7 @@ function foldLive() {
       name: liveName.value,
       text: liveText.value,
       lead: liveIsLead.value,
+      id: liveId.value,
       // **The face stays after folding (2026-09-18).** With the thumbnail gone
       // from folded bubbles alone, the same person speaking on and on made the face
       // appear and disappear.
@@ -121,6 +122,49 @@ let startedAt = 0
 const elapsed = ref(0)
 
 const isJa = computed(() => String(locale.value).startsWith('ja'))
+function personLabel(who) {
+  if (!who) return ''
+  return isJa.value
+    ? (who.name_ja || who.name || '')
+    : (who.name || who.name_ja || '')
+}
+function crewLabel(mid) {
+  const muses = catalog.value?.crew?.muses || []
+  const m = muses.find((row) => row.id === mid)
+  if (!m) return ''
+  const nick = isJa.value ? (m.nick_ja || m.nick) : (m.nick || m.nick_ja)
+  const role = isJa.value ? (m.name_ja || m.name) : (m.name || m.name_ja)
+  if (nick && role && nick !== role) {
+    return isJa.value ? `${nick}（${role}）` : `${nick} (${role})`
+  }
+  return nick || role || ''
+}
+function chatName(row) {
+  const sid = String(row?.meta?.speaker_id || '')
+  const mid = String(row?.meta?.muse_id || '')
+  const lead = leadCharacter.value
+  const part = partner.value
+  if (sid && sid === String(lead?.character_id || '')) return personLabel(lead) || row?.name || ''
+  if (sid && sid === String(part?.character_id || '')) return personLabel(part) || row?.name || ''
+  if (row?.meta?.speaker === 'A') return personLabel(lead) || row?.name || ''
+  if (row?.meta?.speaker === 'B') return personLabel(part) || row?.name || ''
+  if (mid && mid === String(lead?.character_id || '')) return personLabel(lead) || row?.name || ''
+  if (mid) {
+    const crew = crewLabel(mid)
+    if (crew) return crew
+  }
+  const raw = String(row?.name || '')
+  if (raw && (raw === lead?.name || raw === lead?.name_ja)) return personLabel(lead) || raw
+  if (raw && (raw === part?.name || raw === part?.name_ja)) return personLabel(part) || raw
+  const muses = catalog.value?.crew?.muses || []
+  const hit = muses.find((m) => {
+    if (m.nick_ja && m.name_ja && raw.includes(m.nick_ja) && raw.includes(m.name_ja)) return true
+    if (m.nick && m.name && raw.includes(m.nick) && raw.includes(m.name)) return true
+    return raw === m.nick_ja || raw === m.nick || raw === m.name_ja || raw === m.name
+  })
+  if (hit) return crewLabel(hit.id) || raw
+  return raw
+}
 const inputs = computed(() => session.value?.inputs || {})
 const ledger = computed(() => session.value?.refine_ledger || {})
 const craft = computed(() => session.value?.craft || {})
@@ -296,9 +340,17 @@ const partnerFaceSha = computed(() =>
 )
 const leadFace = computed(() => thumb(leadFaceSha.value))
 const partnerFace = computed(() => thumb(partnerFaceSha.value))
-const waitName = computed(() =>
-  leadCharacter.value?.name_ja || leadCharacter.value?.name || 'Muse',
-)
+const waitName = computed(() => personLabel(leadCharacter.value) || 'Muse')
+const liveDisplayName = computed(() => {
+  if (liveIsLead.value) return personLabel(leadCharacter.value) || waitName.value
+  return chatName({ name: liveName.value, meta: { muse_id: liveId.value } })
+    || liveName.value
+    || waitName.value
+})
+function foldedName(done) {
+  if (done?.lead) return personLabel(leadCharacter.value) || done.name || waitName.value
+  return chatName({ name: done?.name, meta: { muse_id: done?.id } }) || done?.name || waitName.value
+}
 const boardPending = computed(() => !!session.value?.board?.pending)
 const shootPending = computed(() => !!session.value?.shoot?.pending)
 const renderLocked = computed(() => boardPending.value || shootPending.value)
@@ -905,7 +957,7 @@ function publishSessionState() {
   const s = session.value
   emit('session-state', {
     available: Boolean(s?.session_id && s.status !== 'finished'),
-    name: String(s?.character?.name || ''),
+    name: personLabel(s?.character) || '',
     sessionId: String(s?.session_id || ''),
   })
 }
@@ -965,7 +1017,7 @@ function rowKindLabel(row, t) {
   if (kind === 'contract') return t('muse.contract')
   if (kind === 'theme') return t('muse.theme')
   if (kind === 'table_open') return t('muse.tableOpened')
-  return row.name || row.role
+  return chatName(row) || row.role
 }
 function isStruckRow(row) {
   return !!(row?.meta?.struck)
@@ -1074,7 +1126,7 @@ function isStruckRow(row) {
                   <span v-else class="h-9 w-7 shrink-0 rounded bg-black/40"></span>
                   <span class="min-w-0">
                     <span class="block truncate text-xs text-pink-100">
-                      {{ (isJa ? (leadCharacter.name_ja || leadCharacter.name) : (leadCharacter.name || leadCharacter.name_ja)) || t('muse.pickCharacter') }}
+                      {{ personLabel(leadCharacter) || t('muse.pickCharacter') }}
                     </span>
                     <span class="block text-[9px] text-pink-300/60">{{ t('muse.pickCharacter') }}</span>
                   </span>
@@ -1094,7 +1146,7 @@ function isStruckRow(row) {
                   <span v-else class="h-9 w-7 shrink-0 rounded bg-black/40"></span>
                   <span class="min-w-0">
                     <span class="block truncate text-xs text-fuchsia-100">
-                      {{ (isJa ? (partner.name_ja || partner.name) : (partner.name || partner.name_ja)) || t('muse.noPartner') }}
+                      {{ personLabel(partner) || t('muse.noPartner') }}
                     </span>
                     <span class="block text-[9px] text-fuchsia-300/60">{{ t('muse.partnerCharacter') }}</span>
                   </span>
@@ -1247,7 +1299,7 @@ function isStruckRow(row) {
                     class="h-7 w-7 shrink-0 rounded-full object-cover border border-pink-100 shadow-md ring-2 ring-pink-400/80"
                   />
                   <template v-if="isSeatRow(row)">
-                    🎬 {{ row.name }}
+                    🎬 {{ chatName(row) }}
                     <span
                       v-for="chip in rowChips(row)"
                       :key="chip.key"
@@ -1255,17 +1307,17 @@ function isStruckRow(row) {
                       :title="chip.key"
                     ><span aria-hidden="true">{{ chip.icon }}</span><span>{{ chip.label }}</span></span>
                   </template>
-                  <template v-else-if="isHeckleRow(row)">〃 {{ row.name }}</template>
-                  <template v-else-if="isBanterRow(row)">💭 {{ t('muse.asideTitle') }} · {{ row.name }}</template>
+                  <template v-else-if="isHeckleRow(row)">〃 {{ chatName(row) }}</template>
+                  <template v-else-if="isBanterRow(row)">💭 {{ t('muse.asideTitle') }} · {{ chatName(row) }}</template>
                   <template v-else-if="isSayRow(row)">
-                    🌸 {{ row.name || waitName }}
+                    🌸 {{ chatName(row) || waitName }}
                     <span
                       v-if="turnIcon(row)"
                       class="opacity-70"
                       :title="turnIconTitle(row, t)"
                     >{{ turnIcon(row) }}</span>
                   </template>
-                  <template v-else-if="row.meta?.speaker">🌸 {{ row.name }} · {{ row.meta.speaker }}</template>
+                  <template v-else-if="row.meta?.speaker">🌸 {{ chatName(row) }} · {{ row.meta.speaker }}</template>
                   <template v-else-if="row.meta?.kind === 'pitch'">
                     💡 {{ t('muse.pitchTitle') }}
                   </template>
@@ -1394,7 +1446,7 @@ function isStruckRow(row) {
                     alt=""
                     class="h-7 w-7 shrink-0 rounded-full object-cover border border-pink-100 shadow-md ring-2 ring-pink-400/80"
                   />
-                  {{ done.lead ? '🌸' : '🎬' }} {{ done.name }}</span>
+                  {{ done.lead ? '🌸' : '🎬' }} {{ foldedName(done) }}</span>
                 <div
                   class="max-w-[90%] whitespace-pre-wrap shadow-sm"
                   :class="done.lead
@@ -1413,7 +1465,7 @@ function isStruckRow(row) {
                     alt=""
                     class="h-7 w-7 shrink-0 rounded-full object-cover border border-pink-100 shadow-md ring-2 ring-pink-400/80"
                   />
-                  {{ liveIsLead ? '🌸' : '🎬' }} {{ liveName || waitName }}
+                  {{ liveIsLead ? '🌸' : '🎬' }} {{ liveDisplayName }}
                 </span>
                 <div
                   class="max-w-[90%] whitespace-pre-wrap shadow-sm"

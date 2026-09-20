@@ -29,6 +29,26 @@ VIBE: windy dusk
     assert "屋上" in fields["text_ja"]
     assert fields["tags"]["pose"] == "looking back"
     assert fields["tags"]["place"] == "rooftop"
+    assert fields["tags_en"]["pose"] == "looking back"
+    assert fields["tags_en"]["place"] == "rooftop"
+
+
+def test_normalize_share_keeps_english_tags_apart():
+    parsed = lounge.parse_labelled("""
+TEXT_JA: 今日は屋上で撮ったよ
+TEXT_EN: Shot on the rooftop today
+POSE: 振り返り
+POSE_EN: looking back
+OUTFIT: セーラー服
+OUTFIT_EN: sailor uniform
+PLACE: 屋上
+PLACE_EN: rooftop
+""")
+    fields = lounge.normalize_share(parsed)
+    assert fields["tags"]["pose"] == "振り返り"
+    assert fields["tags_en"]["pose"] == "looking back"
+    assert fields["tags"]["outfit"] == "セーラー服"
+    assert fields["tags_en"]["outfit"] == "sailor uniform"
 
 
 def test_normalize_reactions_maps_friends():

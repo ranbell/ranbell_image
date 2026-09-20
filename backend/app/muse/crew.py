@@ -2724,11 +2724,16 @@ def lounge_share_prompt(
         "4. 出力は下の見出しだけ。JSON やコードフェンスは禁止:",
         "TEXT_JA: 日本語の投稿本文\n"
         "TEXT_EN: English version of the same post\n"
-        "POSE: 触れたポーズ（なければ空）\n"
-        "OUTFIT: 触れた服装（なければ空）\n"
-        "EXPRESSION: 触れた表情（なければ空）\n"
-        "PLACE: 場所（なければ空）\n"
-        "VIBE: 空気感一言（なければ空）",
+        "POSE: 触れたポーズ（日本語）\n"
+        "POSE_EN: the same pose in English (empty if none)\n"
+        "OUTFIT: 触れた服装（日本語）\n"
+        "OUTFIT_EN: the same outfit in English (empty if none)\n"
+        "EXPRESSION: 触れた表情（日本語）\n"
+        "EXPRESSION_EN: the same expression in English (empty if none)\n"
+        "PLACE: 場所（日本語）\n"
+        "PLACE_EN: the same place in English (empty if none)\n"
+        "VIBE: 空気感一言（日本語）\n"
+        "VIBE_EN: the same vibe in English (empty if none)",
     ] if x)
 
 

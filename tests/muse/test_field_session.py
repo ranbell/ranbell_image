@@ -514,6 +514,18 @@ def test_the_seat_wears_its_nickname_on_the_name_tag():
     assert C.seat_name(s, cast) == "各務 みお"
 
 
+def test_the_seat_name_tag_follows_the_session_locale():
+    s = _session(
+        character={"name_ja": "各務 みお", "name": "Mio Kagami"},
+        inputs={"locale": "en"},
+    )
+    assert C.seat_name(s, "palette:itten") == "Palette (Colour Designer)"
+    assert C.seat_name(s, "beat:ichibyou") == "Beat (Director)"
+    cast = [m for m in crew.resolve_crew(preset="standard")
+            if crew.role_of(m) == "actress"][0]
+    assert C.seat_name(s, cast) == "Mio Kagami"
+
+
 def test_the_lead_keeps_her_seat_at_the_opening():
     """Out of the walk, but **still in the opening rough-in** (wardrobe → camera →
     lead)."""

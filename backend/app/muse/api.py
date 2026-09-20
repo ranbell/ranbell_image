@@ -103,10 +103,21 @@ async def catalog(request: Request):
         "roles": [
             {
                 "id": rid,
+                "name": str(crew.ROLES[rid].get("name") or ""),
                 "name_ja": str(crew.ROLES[rid].get("name_ja") or ""),
                 "slot": (getattr(crew, "CRAFT_SLOTS", None) or {}).get(rid, ""),
             }
             for rid in crew.ROLE_ORDER
+        ],
+        "muses": [
+            {
+                "id": mid,
+                "nick": str(m.get("nick") or ""),
+                "nick_ja": str(m.get("nick_ja") or ""),
+                "name": str(crew.ROLES.get(str(m.get("role_id") or ""), {}).get("name") or m.get("name") or ""),
+                "name_ja": str(m.get("name_ja") or ""),
+            }
+            for mid, m in crew.MUSES.items()
         ],
     }
     return out

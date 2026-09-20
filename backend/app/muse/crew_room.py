@@ -370,16 +370,29 @@ def seat_name(session: dict[str, Any], muse_id: str) -> str:
     Seats, banter, `muse_speaking` and the stored rows all come through here, so
     this is the only place to fix.
     """
+    ja = str((session.get("inputs") or {}).get("locale") or "ja").startswith("ja")
     if crew.role_of(muse_id) == "actress":
         char = session.get("character") or {}
-        name = str(char.get("name_ja") or char.get("name") or "").strip()
+        name = str(
+            (char.get("name_ja") if ja else char.get("name"))
+            or char.get("name_ja") or char.get("name") or ""
+        ).strip()
         if name:
             return name
-    m = (getattr(crew, "MUSES", None) or {}).get(crew.resolve_member(muse_id)) or {}
-    role = str(m.get("name_ja") or m.get("name") or muse_id).strip()
-    nick = str(m.get("nick_ja") or m.get("nick") or "").strip()
+    mid = crew.resolve_member(muse_id)
+    m = (getattr(crew, "MUSES", None) or {}).get(mid) or {}
+    rid = crew.role_of(mid or muse_id)
+    role_meta = (getattr(crew, "ROLES", None) or {}).get(rid) or {}
+    role = str(
+        (role_meta.get("name_ja") if ja else role_meta.get("name"))
+        or m.get("name_ja") or m.get("name") or muse_id
+    ).strip()
+    nick = str(
+        (m.get("nick_ja") if ja else m.get("nick"))
+        or m.get("nick_ja") or m.get("nick") or ""
+    ).strip()
     if nick and nick != role:
-        return f"{nick}（{role}）"
+        return f"{nick}（{role}）" if ja else f"{nick} ({role})"
     return role
 
 

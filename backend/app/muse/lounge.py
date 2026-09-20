@@ -9,6 +9,11 @@ from typing import Any
 _LABEL_RE = re.compile(
     r"^[ \t]*[#*\-]*[ \t]*([A-Z][A-Z0-9_]*)[ \t]*[:：][ \t]*(.*)$",
 )
+_LOOKS_JA_RE = re.compile(r"[\u3040-\u30ff\u3400-\u9fff]")
+
+
+def looks_ja(text: str) -> bool:
+    return bool(_LOOKS_JA_RE.search(str(text or "")))
 
 _SHARE_TEMPLATES = (
     "report",      # where they shot and what it was like
@@ -444,22 +449,38 @@ def parse_labelled(raw: str) -> dict[str, str]:
     return {k: "\n".join(v).strip() for k, v in bodies.items() if "\n".join(v).strip()}
 
 
+def _tag_pair(parsed: dict[str, str], key: str) -> tuple[str, str]:
+    ja = (parsed.get(f"{key}_JA") or parsed.get(key) or "").strip()
+    en = (parsed.get(f"{key}_EN") or "").strip()
+    if not en and ja and not looks_ja(ja):
+        en = ja
+    return ja, en
+
+
 def normalize_share(parsed: dict[str, str], *, fallback_ja: str = "") -> dict[str, Any]:
     text_ja = (parsed.get("TEXT_JA") or parsed.get("JA") or fallback_ja or "").strip()
     text_en = (parsed.get("TEXT_EN") or parsed.get("EN") or "").strip()
     if not text_en and text_ja:
         text_en = text_ja
-    tags = {
-        "pose": (parsed.get("POSE") or "").strip(),
-        "outfit": (parsed.get("OUTFIT") or "").strip(),
-        "expression": (parsed.get("EXPRESSION") or "").strip(),
-        "place": (parsed.get("PLACE") or "").strip(),
-        "vibe": (parsed.get("VIBE") or "").strip(),
-    }
+    tags: dict[str, str] = {}
+    tags_en: dict[str, str] = {}
+    for field, key in (
+        ("pose", "POSE"),
+        ("outfit", "OUTFIT"),
+        ("expression", "EXPRESSION"),
+        ("place", "PLACE"),
+        ("vibe", "VIBE"),
+    ):
+        ja, en = _tag_pair(parsed, key)
+        if ja:
+            tags[field] = ja
+        if en:
+            tags_en[field] = en
     return {
         "text_ja": text_ja,
         "text_en": text_en,
-        "tags": {k: v for k, v in tags.items() if v},
+        "tags": tags,
+        "tags_en": tags_en,
     }
 
 

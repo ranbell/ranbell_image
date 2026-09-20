@@ -90,6 +90,7 @@ async def push_trend(db, item: dict[str, Any]) -> list[dict[str, Any]]:
             "at": time.time(),
             "twists": list(item.get("twists") or []),
             "tags": dict(item.get("tags") or {}),
+            "tags_en": dict(item.get("tags_en") or {}),
         }
         items.insert(0, entry)
         items = items[:MAX_TRENDS]

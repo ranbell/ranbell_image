@@ -1823,7 +1823,9 @@ async def run_generate_lounge_share_job(
         director_highlights=_director_highlights(session),
     )
     ask = (
-        "楽屋への投稿を書いて。TEXT_JA / TEXT_EN と任意の POSE/OUTFIT/EXPRESSION/PLACE/VIBE。"
+        "楽屋への投稿を書いて。TEXT_JA / TEXT_EN と任意の "
+        "POSE/POSE_EN / OUTFIT/OUTFIT_EN / EXPRESSION/EXPRESSION_EN / "
+        "PLACE/PLACE_EN / VIBE/VIBE_EN。"
         "秘密の日記の本音は書かない。"
     )
     try:
@@ -1854,6 +1856,7 @@ async def run_generate_lounge_share_job(
         "text_ja": fields["text_ja"],
         "text_en": fields["text_en"],
         "tags": fields.get("tags") or {},
+        "tags_en": fields.get("tags_en") or {},
         "messages": [{
             "id": str(uuid.uuid4()),
             "turn": 0,
@@ -2237,7 +2240,17 @@ async def run_generate_lounge_reactions_job(
     await lounge_db.save_thread(db, thread)
 
     tags = thread.get("tags") or {}
+    tags_en = thread.get("tags_en") or {}
     trend_bits = [v for k, v in tags.items() if v and k in ("pose", "outfit", "expression", "vibe")]
+    trend_bits_en = [
+        v for k, v in tags_en.items() if v and k in ("pose", "outfit", "expression", "vibe")
+    ]
+    if not trend_bits_en:
+        trend_bits_en = [
+            v for k, v in tags.items()
+            if v and k in ("pose", "outfit", "expression", "vibe")
+            and not lounge_mod.looks_ja(str(v))
+        ]
     twists = [
         {
             "character_id": r["character_id"],
@@ -2251,15 +2264,17 @@ async def run_generate_lounge_reactions_job(
         for r in reactions
         if r.get("stance") in ("twist", "try")
     ]
-    if trend_bits or twists:
+    if trend_bits or trend_bits_en or twists:
+        en_fallback = (reactions[0].get("text_en") or reactions[0].get("text_ja") or "")[:80]
         await lounge_db.push_trend(db, {
             "from_character_id": author_id,
             "from_name_ja": author.get("name_ja") or "",
             "from_name": author.get("name") or "",
             "thread_id": thread_id,
             "summary_ja": (" / ".join(trend_bits) if trend_bits else (reactions[0]["text_ja"][:80]))[:120],
-            "summary_en": (" / ".join(trend_bits) if trend_bits else (reactions[0]["text_en"][:80]))[:120],
+            "summary_en": (" / ".join(trend_bits_en) if trend_bits_en else en_fallback)[:120],
             "tags": tags,
+            "tags_en": tags_en,
             "twists": twists,
         })
 

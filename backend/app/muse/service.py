@@ -78,12 +78,16 @@ def public_view(session: dict[str, Any]) -> dict[str, Any]:
         },
         "character": {
             "character_id": char.get("character_id", ""),
-            "name": char.get("name_ja") or char.get("name") or "",
+            # Keep both. Collapsing to name_ja made the English panel show
+            # 「二宮 かなで」 even though the picker already switches on locale.
+            "name": char.get("name") or char.get("name_ja") or "",
+            "name_ja": char.get("name_ja") or char.get("name") or "",
             "board": char.get("board") or {},
         },
         "partner_character": {
             "character_id": partner.get("character_id", ""),
-            "name": partner.get("name_ja") or partner.get("name") or "",
+            "name": partner.get("name") or partner.get("name_ja") or "",
+            "name_ja": partner.get("name_ja") or partner.get("name") or "",
             "board": partner.get("board") or {},
         } if partner else {},
         "refine_ledger": session.get("refine_ledger") or ledger_mod.blank(),

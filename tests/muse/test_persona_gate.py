@@ -79,3 +79,26 @@ def test_public_view_exposes_partner_and_standing():
     assert view["standing"] == ["keep soft light"]
     assert view["last_pitch"] == ["寄る", "引く"]
     assert "屋上" in view["bond"]["last"]
+
+
+def test_public_view_keeps_english_character_names():
+    """The English panel switches on `name` vs `name_ja`. Collapsing both to
+    Japanese made Kanade Ninomiya show up as 二宮 かなで."""
+    session = service.new_session()
+    session["character"] = {
+        "character_id": "c1",
+        "name": "Kanade Ninomiya",
+        "name_ja": "二宮 かなで",
+        "board": {},
+    }
+    session["partner_character"] = {
+        "character_id": "c2",
+        "name": "Mio Kagami",
+        "name_ja": "各務 みお",
+        "board": {},
+    }
+    view = service.public_view(session)
+    assert view["character"]["name"] == "Kanade Ninomiya"
+    assert view["character"]["name_ja"] == "二宮 かなで"
+    assert view["partner_character"]["name"] == "Mio Kagami"
+    assert view["partner_character"]["name_ja"] == "各務 みお"
