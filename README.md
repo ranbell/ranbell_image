@@ -1,29 +1,30 @@
-<div align="center">
 
-<img src="assets/ranbell_image_logo.png" alt="Ranbell Image" width="120" />
+
+![Ranbell Image](assets/ranbell_image_logo.png)
 
 # Ranbell Image
 
 **Local AI image studio — discover by meaning, synthesize by instinct.**
 
-[![Version](https://img.shields.io/badge/version-0.4.0-blue)](https://github.com/ranbell/ranbell_image/releases)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker)](docker-compose.yml)
-[![ghcr.io](https://img.shields.io/badge/ghcr.io-ranbell%2Franbell--image-blue?logo=github)](https://github.com/ranbell/ranbell_image/pkgs/container/ranbell-image-backend)
-[![Qdrant](https://img.shields.io/badge/Qdrant-v1.19-6B4FBB)](https://qdrant.tech/)
-[![Ollama](https://img.shields.io/badge/Ollama-local_AI-grey)](https://ollama.ai/)
-[![ComfyUI](https://img.shields.io/badge/ComfyUI-integration-orange)](https://github.com/comfyanonymous/ComfyUI)
-[![WD14](https://img.shields.io/badge/WD14-tagger-pink)](https://huggingface.co/SmilingWolf)
+![Version](https://img.shields.io/badge/version-0.4.0-blue)
+![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
+![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker)
+![ghcr.io](https://img.shields.io/badge/ghcr.io-ranbell%2Franbell--image-blue?logo=github)
+![Qdrant](https://img.shields.io/badge/Qdrant-v1.19-6B4FBB)
+![Ollama](https://img.shields.io/badge/Ollama-local_AI-grey)
+![ComfyUI](https://img.shields.io/badge/ComfyUI-integration-orange)
+![WD14](https://img.shields.io/badge/WD14-tagger-pink)
 
 **日本語版はこちら → [README.ja.md](README.ja.md)**
 
-</div>
+
 
 ---
 
-![Main Gallery](docs/screenshots/01_01_gallery.png)
+## ![Main Gallery](docs/screenshots/01_01_gallery.png)
 ![Detail Info](docs/screenshots/01_02_gallery.png)
----
+
+
 
 ## What is Ranbell Image?
 
@@ -37,7 +38,11 @@ Ranbell Image is a **fully local** application. Your images never leave the mach
 
 ---
 
+
+
 ## Features
+
+
 
 ### 🎬 Muse — Shoot a picture by talking
 
@@ -69,6 +74,8 @@ The Muse guide and technical reference are in Japanese:
 
 ---
 
+
+
 ### 🔍 Discover — Search by mood
 
 Every image is stored in Qdrant as an [Ollama](https://ollama.ai/) embedding. Search works at the level of meaning.
@@ -76,11 +83,10 @@ Every image is stored in Qdrant as an [Ollama](https://ollama.ai/) embedding. Se
 - **Semantic search** — type `"a melancholy girl standing still"` and it finds images that *feel* like that
 - **Keyword search** — full-text search across prompts, descriptions, and model names
 - **Tag search** — [WD14](https://huggingface.co/SmilingWolf) tags every image with 1,000+ Danbooru categories; AND/OR filters and autocomplete
-- **Color search** — pick a hex color; matching is perceptually accurate in CIE L\*a\*b\* space, with an option to exclude opposite hues
+- **Color search** — pick a hex color; matching is perceptually accurate in CIE Lab space, with an option to exclude opposite hues
 - **Filters compose** — semantic + tags + color + rating + alignment score at the same time
 
-![Semantic search](docs/screenshots/JA_02_search_semantic.png)
----
+## ![Semantic search](docs/screenshots/JA_02_search_semantic.png)
 
 
 
@@ -92,11 +98,13 @@ Pick 1–6 reference images, set influence weights, write a short instruction, a
 
 Choose an output style to match your model:
 
-| Style | Best for | Shape of the output |
-|---|---|---|
-| **natural** | Newer models (FLUX, Anima) | Tags + a prose block |
+
+| Style        | Best for                     | Shape of the output       |
+| ------------ | ---------------------------- | ------------------------- |
+| **natural**  | Newer models (FLUX, Anima)   | Tags + a prose block      |
 | **danbooru** | Tag-trained SD-family models | Comma-separated tags only |
-| **detailed** | Structured prompts | An 8-section write-up |
+| **detailed** | Structured prompts           | An 8-section write-up     |
+
 
 - **Weight-aware WD14 injection** — tag budget and conflict resolution respect the weights in every style
 - One-click ComfyUI submit (the prompt is injected into the workflow)
@@ -110,20 +118,25 @@ Choose an output style to match your model:
 
 ---
 
+
+
 ### Invoke — Summon seeds from nothing
 
 Five spirits take your mood, colors, and rough intent, and each grows a seed (prompt + image) **in parallel**, from its own philosophy. Adopt one into a full generation, or respin.
 
-<!-- screenshot: Invoke panel with spirit cards -->
+
+
 ![Invoke panel](docs/screenshots/invoke_panel.png)
 
-| Kanji | Name | Role |
-|:-----:|------|------|
-| **映** | Mirror — Faithful | Realizes the intent on the centerline. Does not drift |
-| **逆** | Counter — Rebel | Shows the shadow of the desire. Inverts exactly one axis |
+
+| Kanji | Name              | Role                                                          |
+| ----- | ----------------- | ------------------------------------------------------------- |
+| **映** | Mirror — Faithful | Realizes the intent on the centerline. Does not drift         |
+| **逆** | Counter — Rebel   | Shows the shadow of the desire. Inverts exactly one axis      |
 | **漂** | Wander — Stranger | Weaves in a rare guest element as if it had always been there |
-| **奔** | Surge — Lunatic | Accepts the impossible. Commits to low-co-occurrence tags |
-| **瞰** | Vantage — Oracle | Full creative freedom. Striking results first |
+| **奔** | Surge — Lunatic   | Accepts the impossible. Commits to low-co-occurrence tags     |
+| **瞰** | Vantage — Oracle  | Full creative freedom. Striking results first                 |
+
 
 - **Light mode**: 39 emojis, 4-axis mood sliders (warm/cool · still/moving · dense/sparse · concrete/abstract), color palette, person spec
 - **Pro mode**: Direct prompt editing, topic-to-tags, per-spirit seeds
@@ -134,24 +147,28 @@ Five spirits take your mood, colors, and rough intent, and each grows a seed (pr
 
 ---
 
+
+
 ### ✨ Inspire — 9 exploration modes
 
-| Mode | What it uses | Best for |
-|---|---|---|
-| **Serendipity** | Qdrant vector search | Finding "similar, but not the same" |
-| **Alchemy** | Qdrant vector math (A + B − C) | "This composition + that palette − the city" |
-| **Morph** | Qdrant LERP (5 steps) | The taste that sits between A and B |
-| **Anomaly** | WD14 tag co-occurrence | Rare combinations, intellectual finds |
-| **Inversion** | Qdrant + VLM (Ollama) | Opposites: day↔night, light↔dark |
-| **Discovery** | Qdrant DiscoverQuery | "What is the anti-image of this?" |
-| **Blend** | Qdrant weighted centroid | Mixing moods by ratio |
-| **Outlier** | Qdrant + UMAP density | The most isolated image in the collection |
-| **Group Search** | Qdrant GroupBy | Results grouped by model or category |
+
+| Mode             | What it uses                   | Best for                                     |
+| ---------------- | ------------------------------ | -------------------------------------------- |
+| **Serendipity**  | Qdrant vector search           | Finding "similar, but not the same"          |
+| **Alchemy**      | Qdrant vector math (A + B − C) | "This composition + that palette − the city" |
+| **Morph**        | Qdrant LERP (5 steps)          | The taste that sits between A and B          |
+| **Anomaly**      | WD14 tag co-occurrence         | Rare combinations, intellectual finds        |
+| **Inversion**    | Qdrant + VLM (Ollama)          | Opposites: day↔night, light↔dark             |
+| **Discovery**    | Qdrant DiscoverQuery           | "What is the anti-image of this?"            |
+| **Blend**        | Qdrant weighted centroid       | Mixing moods by ratio                        |
+| **Outlier**      | Qdrant + UMAP density          | The most isolated image in the collection    |
+| **Group Search** | Qdrant GroupBy                 | Results grouped by model or category         |
+
 
 > 📖 [Creator's Guide — Inspire & Brainstorm](docs/guide/inspire-brainstorm.md) · [Technical Reference](docs/tech/inspire-brainstorm.md)
 
 ![Inspire-1](docs/screenshots/05_01_inspire.png)
-![Inspire-2](docs/screenshots/JA_05_02_inspire.png)
+![Inspire-2](docs/screenshots/05_02_inspire.png)
 
 ---
 
@@ -163,15 +180,16 @@ Five spirits take your mood, colors, and rough intent, and each grows a seed (pr
 768-d embeddings compressed to a 2D scatter. Neighbors sit together. K-means finds clusters. Hover for a thumbnail. Click to search.
 
 **Color 3D**
-Each image's dominant color plotted in CIE L\*a\*b\*. Rotate it and the bias in your palette is obvious.
+Each image's dominant color plotted in CIE Lab. Rotate it and the bias in your palette is obvious.
 
 **Tag network**
 Tags as nodes, co-occurrence as edges, force-directed. Dense clusters are your visual vocabulary. Click a node to search.
 
-![Analyzer-1](docs/screenshots/JA_06_01_analyzer.png)
+## ![Analyzer-1](docs/screenshots/JA_06_01_analyzer.png)
 ![Analyzer-2](docs/screenshots/06_02_analyzer.png)
 ![Analyzer-3](docs/screenshots/06_03_analyzer.png)
----
+
+
 
 ### 🎛️ Control Room — command center for every job
 
@@ -188,38 +206,49 @@ Scanning, embeddings, prompt alchemy, and image generation all run as jobs.
 
 ---
 
+
+
 ## Documentation
 
 Each feature has two kinds of docs. Pick the door that matches what you need.
 
-| Feature | I want to use it | I want to understand how it works |
-|---|---|---|
-| **Muse** (shoot by talking) | [Creator's Guide (JP) →](docs/guide/muse.ja.md) | [Technical Reference (JP) →](docs/tech/muse.ja.md) |
-| **Invoke** | [Creator's Guide →](docs/guide/invoke.md) · [JP →](docs/guide/invoke.ja.md) | Coming soon |
-| **Inspire & Brainstorm** | [Creator's Guide →](docs/guide/inspire-brainstorm.md) | [Technical Reference →](docs/tech/inspire-brainstorm.md) |
-| **Prompt Alchemy** | [Creator's Guide →](docs/guide/prompt-alchemy.md) | [Technical Reference →](docs/tech/prompt-alchemy.md) |
+
+| Feature                     | I want to use it                                                            | I want to understand how it works                        |
+| --------------------------- | --------------------------------------------------------------------------- | -------------------------------------------------------- |
+| **Muse** (shoot by talking) | [Creator's Guide (JP) →](docs/guide/muse.ja.md)                             | [Technical Reference (JP) →](docs/tech/muse.ja.md)       |
+| **Invoke**                  | [Creator's Guide →](docs/guide/invoke.md) · [JP →](docs/guide/invoke.ja.md) | Coming soon                                              |
+| **Inspire & Brainstorm**    | [Creator's Guide →](docs/guide/inspire-brainstorm.md)                       | [Technical Reference →](docs/tech/inspire-brainstorm.md) |
+| **Prompt Alchemy**          | [Creator's Guide →](docs/guide/prompt-alchemy.md)                           | [Technical Reference →](docs/tech/prompt-alchemy.md)     |
+
 
 The **Creator's Guides** cover how to use each mode, when to pick it, and how inputs map to outputs — with diagrams, no implementation details.
 
 The **Technical References** cover algorithm specs, the math (L2 normalization, iterative normalization, LERP, sign inversion), Qdrant query patterns (DiscoverQuery, GroupBy, MRL two-phase), and the VLM 3-stage pipeline.
 
 Also:
+
 - [Qdrant collection design →](docs/tech/qdrant.md)
 - [Job Spooler & Task Scheduling →](docs/tech/spooler.md)
 
 ---
 
+
+
 ## System Requirements
 
 > ⚠️ **Install and start the three services below on your machine before launching Ranbell Image.**
 
+
+
 ### Required services
 
-| Service | Role | Default endpoint |
-|---|---|---|
-| **Docker + Docker Compose v2** | App and Qdrant | — |
-| **[Ollama](https://ollama.ai/)** | Local LLM / VLM — prompt alchemy, image analysis, embeddings | `http://localhost:11434` |
-| **[ComfyUI](https://github.com/comfyanonymous/ComfyUI)** | Image generation backend | `http://localhost:8188` |
+
+| Service                                                  | Role                                                         | Default endpoint         |
+| -------------------------------------------------------- | ------------------------------------------------------------ | ------------------------ |
+| **Docker + Docker Compose v2**                           | App and Qdrant                                               | —                        |
+| **[Ollama](https://ollama.ai/)**                         | Local LLM / VLM — prompt alchemy, image analysis, embeddings | `http://localhost:11434` |
+| **[ComfyUI](https://github.com/comfyanonymous/ComfyUI)** | Image generation backend                                     | `http://localhost:8188`  |
+
 
 An **NVIDIA GPU with 16 GB VRAM or more** is effectively required (comfortable VLM inference and generation).
 
@@ -227,24 +256,30 @@ An **NVIDIA GPU with 16 GB VRAM or more** is effectively required (comfortable V
 
 These are the models used in development and confirmed to work:
 
-| Role | Model | Install |
-|---|---|---|
-| VLM — image analysis & prompt synthesis | `gemma4:e2b` | `ollama pull gemma4:e2b` |
-| Embedding — semantic search | `embeddinggemma:300m` ⚠️ required | `ollama pull embeddinggemma:300m` |
-| **Muse — conversation, ledger, safety** | **`gemma4:26b-a4b-it-qat`** ⚠️ effectively required | `ollama pull gemma4:26b-a4b-it-qat` |
 
-> ⚠️ **The embedding model must be `embeddinggemma:300m`.** The system uses Matryoshka embeddings for multi-resolution semantic search. Ordinary embedding models do not support this and cannot be substituted.
+| Role                                    | Model                                           | Install                             |
+| --------------------------------------- | ----------------------------------------------- | ----------------------------------- |
+| VLM — image analysis & prompt synthesis | `gemma4:e2b`                                    | `ollama pull gemma4:e2b`            |
+| Embedding — semantic search             | `embeddinggemma:300m` ⚠️ required               | `ollama pull embeddinggemma:300m`   |
+| **Muse — conversation, ledger, safety** | `gemma4:26b-a4b-it-qat` ⚠️ effectively required | `ollama pull gemma4:26b-a4b-it-qat` |
+
+
+> ⚠️ **The embedding model must be** `embeddinggemma:300m`**.** The system uses Matryoshka embeddings for multi-resolution semantic search. Ordinary embedding models do not support this and cannot be substituted.
 >
 > Other Ollama-compatible models may work as a VLM, but they have not been tested.
+
+
 
 ### 🎬 Requirements for Muse
 
 > ⚠️ **Muse is where the gap between "it runs" and "it works" is widest.** Nothing errors out with a smaller LLM or a different checkpoint — **but a shoot is only worth keeping with the combination below.**
 
-| | What you need | What happens without it |
-|---|---|---|
-| **LLM** | **Gemma 4 26B (A4B)** — `gemma4:26b-a4b-it-qat` | Neither the conversation nor the ledger lands where you aimed it. **With a smaller model a shoot does not come together at all** |
-| **Image model** | An **Anima-family or Krea2-family** workflow | Muse writes prompts with natural-language prose in them. A checkpoint that cannot read prose will not draw what it says |
+
+|                 | What you need                                   | What happens without it                                                                                                          |
+| --------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| **LLM**         | **Gemma 4 26B (A4B)** — `gemma4:26b-a4b-it-qat` | Neither the conversation nor the ledger lands where you aimed it. **With a smaller model a shoot does not come together at all** |
+| **Image model** | An **Anima-family or Krea2-family** workflow    | Muse writes prompts with natural-language prose in them. A checkpoint that cannot read prose will not draw what it says          |
+
 
 **Why Gemma 4 26B is needed**
 
@@ -256,6 +291,8 @@ These are the models used in development and confirmed to work:
 **Workflows** — put the ComfyUI API-format json in `/mnt/comfy/workflows` (`COMFYUI_WORKFLOWS_DIR`). A filename containing `krea` is recognised as the Krea2 family, which **switches the step count and whether a negative prompt is sent** (Anima 20/30 steps with a negative; Krea2 4/8 steps without). cfg and resolution are taken from the workflow itself in both families.
 
 ---
+
+
 
 ## Quick Start
 
@@ -269,7 +306,7 @@ cp docker-compose.override.yml.example docker-compose.override.yml
 # Edit docker-compose.override.yml — see the note below
 ```
 
-> ⚠️ **Edit `docker-compose.override.yml` before you start:**
+> ⚠️ **Edit** `docker-compose.override.yml` **before you start:**
 >
 > - Source image folders: mount each as `/mnt/image/source/<label>` with `:ro` (read-only). The `<label>` becomes the folder name in the app.
 > - Generated-image folder: mount as `/mnt/image/generated` **without** `:ro` (writable). Keep this separate from your source directories.
@@ -282,11 +319,13 @@ docker compose pull && docker compose up -d
 docker compose up -d --build
 ```
 
-Open **http://localhost:3100** in your browser.
+Open **[http://localhost:3100](http://localhost:3100)** in your browser.
 
 **First run:** the app checks setup and opens **Admin → Diagnostics** if anything is missing (WD14 models, Ollama, INVOKE Vocab, ComfyUI workflows). Follow that, then click **SCAN** and run AI backfill from Admin. Full walkthrough: [INSTALLATION.md](INSTALLATION.md).
 
 ---
+
+
 
 ## Thanks
 
@@ -302,7 +341,11 @@ Open **http://localhost:3100** in your browser.
 
 ---
 
+
+
 ## Architecture
+
+
 
 ### System overview
 
@@ -378,6 +421,10 @@ graph LR
     class QC,IMG,ALN,CFG db
 ```
 
+
+
+
+
 ### Job orchestration
 
 ```mermaid
@@ -411,7 +458,11 @@ graph TD
     class GPU gpu
 ```
 
+
+
 ---
+
+
 
 ## License
 
