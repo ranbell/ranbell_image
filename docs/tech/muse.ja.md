@@ -2,6 +2,8 @@
 
 **Ranbell Image v0.4.0**
 
+English → [muse.md](muse.md)
+
 このドキュメントは Muse Refine（保存値 `studio: "muse_refine"`）の実装全体を
 解説します。使い方は [クリエイターガイド](../guide/muse.ja.md) を参照してください。
 
