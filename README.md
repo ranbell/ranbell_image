@@ -250,10 +250,30 @@ The following models were used during development and are confirmed to work:
 |---|---|---|
 | VLM — image analysis & prompt synthesis | `gemma4:e2b` | `ollama pull gemma4:e2b` |
 | Embedding — semantic search | `embeddinggemma:300m` ⚠️ required | `ollama pull embeddinggemma:300m` |
+| **Muse — conversation, ledger, safety** | **`gemma4:26b-a4b-it-qat`** ⚠️ effectively required | `ollama pull gemma4:26b-a4b-it-qat` |
 
 > ⚠️ **`embeddinggemma:300m` is required for the embedding model.** The system relies on Matryoshka embeddings for multi-resolution semantic search; standard embedding models do not support this and cannot be used as a substitute.
 >
 > Other Ollama-compatible models may work for VLM but have not been tested.
+
+### 🎬 Requirements for Muse
+
+> ⚠️ **Muse is where the gap between "it runs" and "it works" is widest.** Nothing errors out with a smaller model or a different checkpoint — **but a shoot is only worth keeping with the combination below.**
+
+| | What you need | What happens without it |
+|---|---|---|
+| **LLM** | **Gemma 4 26B (A4B)** — `gemma4:26b-a4b-it-qat` | Neither the conversation nor the ledger lands where you aimed it. **With a smaller model a shoot does not come together at all** |
+| **Image model** | An **Anima-family or Krea2-family** workflow | Muse writes prompts with natural-language prose in them. A checkpoint that cannot read prose will not draw what it says |
+
+**Why 26B — measured, not assumed**
+
+- **The clerk that stops a shoot (the safety layer) needs 26B.** Smaller models break the judgement in both directions: `e4b` stopped ordinary direction, and `e2b` let through what had to be stopped. **This is not a place where a lighter model can be substituted.**
+- Shooting on `e4b`, **16% of turns did not move the picture at all** despite an explicit instruction (0% on 26B). The conversation carries on while the ledger stays still, which makes the failure **hard to notice**.
+- A studio shoot calls the LLM several times per turn — clerk, writer, actress, verify. One weak link and the whole turn degrades.
+
+**VRAM** — 26B (Q4_0) is about **15.6 GB**. It runs on a 16 GB card, **but not at the same time as image generation**: Muse always drops the LLM out of VRAM immediately before a render (`unload_vlm`, on by default). **24 GB or more leaves real headroom.**
+
+**Workflows** — put the ComfyUI API-format json in `/mnt/comfy/workflows` (`COMFYUI_WORKFLOWS_DIR`). A filename containing `krea` is recognised as the Krea2 family, which **switches the step count and whether a negative prompt is sent** (Anima 20/30 steps with a negative; Krea2 4/8 steps without). cfg and resolution are taken from the workflow itself in both families.
 
 ---
 
