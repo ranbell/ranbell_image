@@ -18,6 +18,10 @@
   --z-gallery-zoom:    550;  /* focus/lightbox zoom (above the detail it launched from) */
   --z-panel:           600;  /* major panels: Invoke / Refine / Analyzer / Inspire / About */
   --z-panel-child:     610;  /* panel-owned sub-detail (Analyzer detail, etc.) */
+  --z-panel-over:      620;  /* a panel opened FROM another panel (Refine launched
+                                from Inspire / Invoke). Same tier meant the one
+                                teleported to <body> last won, and Refine opened
+                                BEHIND the panel that asked for it. */
   --z-panel-muse:      640;  /* Muse shell (top-most panel) */
   --z-panel-muse-child: 650; /* Muse-owned dialogs */
   --z-panel-media:     700;  /* panel-owned media zoom / lightbox */

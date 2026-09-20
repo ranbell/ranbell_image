@@ -2647,6 +2647,10 @@ const {
   hasSession: inspireHasSession,
   isRunning: inspireIsRunning,
   resetSession: inspireReset,
+  // The Refine panel's 「ブレストに戻る」 reads this. The template referred to a
+  // bare `brainstormText`, which lives in `InspirePanel`'s setup and is not in
+  // scope here — so the button's `v-if` was always false and it never appeared.
+  brainstormText,
 } = useInspireSession()
 
 const refineHasSession = computed(() =>
@@ -3626,7 +3630,11 @@ onUnmounted(() => {
 
     <!-- ── Prompt Refine Panel (2-pane) ── -->
     <Teleport to="body">
-      <div v-if="showRefine" class="fixed inset-0 z-[var(--z-panel)] bg-black/90 flex items-center justify-center p-3"
+      <!-- **Refine sits one tier above the panels (2026-09-20).** It is opened
+           from Inspire ("Refine with this") and from Invoke, and every panel
+           teleports to <body> at --z-panel — so the one mounted last, which is
+           Inspire, painted over it and the button looked dead. -->
+      <div v-if="showRefine" class="fixed inset-0 z-[var(--z-panel-over)] bg-black/90 flex items-center justify-center p-3"
         @mousedown.self="refineOverlayMousedownOnBg = true"
         @mouseup.self="if (refineOverlayMousedownOnBg) showRefine = false; refineOverlayMousedownOnBg = false"
         @mouseleave="refineOverlayMousedownOnBg = false">
