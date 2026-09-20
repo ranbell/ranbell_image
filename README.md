@@ -4,7 +4,7 @@
 
 # Ranbell Image
 
-**Local AI image Studio — discover by meaning, synthesize by instinct.**
+**Local AI image studio — discover by meaning, synthesize by instinct.**
 
 [![Version](https://img.shields.io/badge/version-0.4.0-blue)](https://github.com/ranbell/ranbell_image/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -27,188 +27,170 @@
 
 ## What is Ranbell Image?
 
-It started with a single question: *"What if I could search my image collection by meaning instead of filename?"*
+It started with a single question: *"What if I could search my images by mood, not by filename?"*
 
-After discovering [Qdrant](https://qdrant.tech/) — a vector database that makes semantic similarity feel effortless — I had to build something with it. What began as a search experiment grew, feature by feature, into a full creative pipeline for artists and AI image creators.
+After discovering [Qdrant](https://qdrant.tech/) and what semantic search could do, it felt like there was more here than search. What began as an experiment grew, feature by feature, into a studio for AI image creators.
 
-Ranbell Image is a **self-hosted, local-first** application that turns your image collection into a living, searchable, navigable space. It runs entirely on your machine. Your images never leave your system.
+Ranbell Image is a **fully local** application. Your images never leave the machine.
 
 > *This application was designed and built in close collaboration with [Claude](https://claude.ai) (Anthropic). Architecture decisions, feature design, and every line of code emerged from that collaboration — a real example of what becomes possible when domain knowledge meets AI that can build.*
-
 
 ---
 
 ## Features
 
-### 🔍 Discover — Search Beyond Filenames
+### 🎬 Muse — Shoot a picture by talking
 
-![Tag Search](docs/screenshots/02_search_tags.png)
+You don't write a prompt. **You direct**, as the showrunner.
 
-Your images are indexed as **semantic vectors** (via [Ollama](https://ollama.ai/) embeddings stored in Qdrant). Search works at the level of meaning, not metadata.
+Start by picking one or two of 30 Muses (actresses).
 
-Under the hood, Ranbell Image uses **Matryoshka Representation Learning (MRL)** — a technique where a single 768-dimensional embedding also encodes valid lower-dimensional representations nested inside it. A compact 256-dim prefix is used for fast approximate prefetch across the entire collection, and the full 768-dim vector is used to rerank the candidates precisely. Like the nested dolls it's named after, more detail lives within the same structure.
+![Muse studio](docs/screenshots/X1_muse_overview.png)
 
-- **Semantic search** — type `"a melancholy girl looking out at the rain"` and find images that *feel* like that, regardless of what their files are named or tagged
+Say "walk down the park path chatting with each other" and the actress (and, if you called a crew, the crew) writes that state into a ledger, then turns it into an image prompt.
+
+![Muse ledger](docs/screenshots/JA_X2_muse_ledger.png)
+
+Look at the test shot — *is this okay?* If it is, go to the final with **the same seed**.
+
+![Muse take](docs/screenshots/JA_X3_muse_take.png)
+
+#### What else it does
+
+- **The ledger holds the shot** — clothes, pose, expression, place, light, background, and framing are fields, rewritten as a diff on every turn. Say it again and it lands on the next turn
+- **Solo, duet, or a full crew** — one actress, two (each with her own lines and side of the frame), or one of six crew presets
+- **Test shot → final** — each test press draws a fresh seed; the final keeps **the seed you approved** and only raises the steps
+- **It knows which model family a workflow belongs to** — Anima and Krea2 want different steps, and only one of them takes a negative prompt. cfg and resolution are whatever the workflow was saved with
+- **After the shoot** — she writes a secret diary nobody sees, posts something short in the green room, and now and then goes out with friends. Next time, those memories are in her preamble
+
+The Muse guide and technical reference are in Japanese:
+
+> 📖 [Creator's Guide — Muse](docs/guide/muse.ja.md) · [Technical Reference](docs/tech/muse.ja.md)
+
+---
+
+### 🔍 Discover — Search by mood
+
+Every image is stored in Qdrant as an [Ollama](https://ollama.ai/) embedding. Search works at the level of meaning.
+
+- **Semantic search** — type `"a melancholy girl standing still"` and it finds images that *feel* like that
 - **Keyword search** — full-text search across prompts, descriptions, and model names
-- **Tag search** — [WD14](https://huggingface.co/SmilingWolf) automatically tags every image with 1000+ Danbooru categories; filter with AND/OR logic, autocomplete supported
-- **Color search** — pick any hex color; images are indexed in CIE L\*a\*b\* space for perceptually accurate matching; optionally exclude opposite hues
-- **All filters compose** — combine semantic + tags + color + rating + alignment score simultaneously
+- **Tag search** — [WD14](https://huggingface.co/SmilingWolf) tags every image with 1,000+ Danbooru categories; AND/OR filters and autocomplete
+- **Color search** — pick a hex color; matching is perceptually accurate in CIE L\*a\*b\* space, with an option to exclude opposite hues
+- **Filters compose** — semantic + tags + color + rating + alignment score at the same time
 
+![Semantic search](docs/screenshots/JA_02_search_semantic.png)
 ---
 
-### 🎛️ Control Room — Command Center for All Jobs
 
-
-![Control Room](docs/screenshots/03_control_room.png)
-
-Press `/` or click the top-bar button to open the Control Room.
-
-Every background operation in Ranbell Image — scanning, embedding generation, prompt synthesis, image generation — runs as a **job** with live status. The Control Room gives you full command:
-
-- **Cancel, pause, resume, or reorder** any individual job
-- **Pause entire lanes**: SYNC (scanning), EMBED (embedding), EVAL (alignment), GEN (generation)
-  — useful for prioritizing GPU time when generating images
-- **ISA-101 style status lamps** showing real-time health of Qdrant, Ollama, ComfyUI, and GPU
-- All job history in one place — no hunting through logs
-
----
 
 ### ⚗️ Synthesis — Prompt Alchemy Studio
 
-![Synthesis](docs/screenshots/05_synthesis.png)
+Pick 1–6 reference images, set influence weights, write a short instruction, and the VLM builds a prompt that follows your intent.
 
-Select 1–6 reference images, set influence weights, write a short instruction, and let the VLM synthesize a prompt that blends your references exactly as intended.
+**Example:** pin two character images at 70% / 30% and write *"add bunny ears and a summer dress."* WD14 pulls visual vocabulary from each image in proportion to its weight, resolves contradictions (hair color, say) in favor of the heavier image, and Ollama synthesizes the prompt.
 
-**Example:** pin two character images at 70% / 30% and write *"add bunny ears and a summer dress"* — WD14 extracts visual vocabulary from each image proportionally to its weight, resolves contradictions (e.g., hair color) in favor of the dominant image, and Ollama generates a precise, ready-to-use prompt.
+Choose an output style to match your model:
 
-Choose your output style to match your model:
-
-| Style | Example output | Best for |
+| Style | Best for | Shape of the output |
 |---|---|---|
-| **natural** | Tags + prose paragraph | NL-first models (FLUX, Anima) |
-| **danbooru** | `rabbit_ears, 1girl, summer_dress, outdoors, smile` | Tag-trained models (SD 1.5, SDXL, Pony) |
-| **detailed** | 8-section structured description | Fine-grained control |
+| **natural** | Newer models (FLUX, Anima) | Tags + a prose block |
+| **danbooru** | Tag-trained SD-family models | Comma-separated tags only |
+| **detailed** | Structured prompts | An 8-section write-up |
 
-- **Weight-aware WD14 injection** — per-image tag budget and conflict resolution respect influence weights across all prompt styles
-- **One-click ComfyUI submit** — the synthesized prompt is auto-injected into your workflow and queued for generation
-- **Streaming output** — watch the prompt form in real time, including the model's chain-of-thought
-- **Alignment scoring** — after generation, the VLM grades how well the produced image matches the prompt (0–100%)
+- **Weight-aware WD14 injection** — tag budget and conflict resolution respect the weights in every style
+- One-click ComfyUI submit (the prompt is injected into the workflow)
+- Streaming output (tokens as they land)
+- Alignment scoring (the VLM grades image vs. prompt, 0–100%)
 
 > 📖 [Creator's Guide — Prompt Alchemy](docs/guide/prompt-alchemy.md) · [Technical Reference](docs/tech/prompt-alchemy.md)
+
+![Prompt Studio-1](docs/screenshots/JA_04_01_prompting.png)
+![Prompt Studio-3](docs/screenshots/JA_04_03_prompting.png)
 
 ---
 
 ### Invoke — Summon seeds from nothing
 
-Five spirits each receive your mood, colors, and rough intent, then generate five interpretations — in parallel, each driven by its own creative philosophy. Pick a seed, send it to the generation pipeline, or respin just that one spirit and try again.
+Five spirits take your mood, colors, and rough intent, and each grows a seed (prompt + image) **in parallel**, from its own philosophy. Adopt one into a full generation, or respin.
 
 <!-- screenshot: Invoke panel with spirit cards -->
-![Invoke Panel](docs/screenshots/invoke_panel.png)
+![Invoke panel](docs/screenshots/invoke_panel.png)
 
 | Kanji | Name | Role |
 |:-----:|------|------|
-| **映** | Mirror — Faithful | Realizes your intent without deviation; stays exactly on the axis centerline |
-| **逆** | Counter — Rebel | Shows the shadow of your desire; inverts exactly one axis to create contrast |
-| **漂** | Wander — Stranger | Weaves in rare "guest" elements that feel like they always belonged |
-| **奔** | Surge — Lunatic | Embraces the impossible; commits fully to low-co-occurrence tags |
-| **瞰** | Vantage — Oracle | Complete creative freedom; reads your intent deeply and prioritizes striking results |
+| **映** | Mirror — Faithful | Realizes the intent on the centerline. Does not drift |
+| **逆** | Counter — Rebel | Shows the shadow of the desire. Inverts exactly one axis |
+| **漂** | Wander — Stranger | Weaves in a rare guest element as if it had always been there |
+| **奔** | Surge — Lunatic | Accepts the impossible. Commits to low-co-occurrence tags |
+| **瞰** | Vantage — Oracle | Full creative freedom. Striking results first |
 
-- **Light mode**: 39-emoji mood palette, 4-axis mood sliders (warm/cool · calm/dynamic · dense/sparse · concrete/abstract), color palette, person spec
-- **Pro mode**: Direct prompt editing, topic-to-tags conversion via Ollama, per-spirit seed control
-- **Live streaming**: SSE events surface each stage in real time — prompt composition → image generation → alignment scoring
-- **Adopt / Respin / Send to Refine**: Take the seed into your collection, regenerate just that spirit, or hand the prompt off to a full-parameter generation run
+- **Light mode**: 39 emojis, 4-axis mood sliders (warm/cool · still/moving · dense/sparse · concrete/abstract), color palette, person spec
+- **Pro mode**: Direct prompt editing, topic-to-tags, per-spirit seeds
+- **Live progress**: SSE streaming for prompt → image → score
+- **Adopt / Respin / Send to generation**: keep it, roll that spirit again, or hand it off
 
 > 📖 [Creator's Guide — Invoke](docs/guide/invoke.md) · [日本語版](docs/guide/invoke.ja.md)
 
 ---
 
-### ✨ Inspire — 9 Creative Exploration Modes
+### ✨ Inspire — 9 exploration modes
 
-![Inspire](docs/screenshots/04_inspire.png)
-
-When you know the vibe but not the destination, the Inspire panel helps you navigate your collection in ways that go far beyond search.
+| Mode | What it uses | Best for |
+|---|---|---|
+| **Serendipity** | Qdrant vector search | Finding "similar, but not the same" |
+| **Alchemy** | Qdrant vector math (A + B − C) | "This composition + that palette − the city" |
+| **Morph** | Qdrant LERP (5 steps) | The taste that sits between A and B |
+| **Anomaly** | WD14 tag co-occurrence | Rare combinations, intellectual finds |
+| **Inversion** | Qdrant + VLM (Ollama) | Opposites: day↔night, light↔dark |
+| **Discovery** | Qdrant DiscoverQuery | "What is the anti-image of this?" |
+| **Blend** | Qdrant weighted centroid | Mixing moods by ratio |
+| **Outlier** | Qdrant + UMAP density | The most isolated image in the collection |
+| **Group Search** | Qdrant GroupBy | Results grouped by model or category |
 
 > 📖 [Creator's Guide — Inspire & Brainstorm](docs/guide/inspire-brainstorm.md) · [Technical Reference](docs/tech/inspire-brainstorm.md)
 
-| Mode | You provide | Engine | Best for |
-|---|---|---|---|
-| **Serendipity** | 1 reference image | Qdrant (vector search) | Discovering what's nearby — similar but not identical |
-| **Alchemy** | Add images + subtract images | Qdrant (A + B − C vector arithmetic) | "The composition of this, the color palette of that, minus the noise" |
-| **Morph** | 2 images | Qdrant (LERP, 5 steps) | Visualizing the spectrum between two aesthetics |
-| **Anomaly** | 1–3 images | WD14 tag co-occurrence analysis | Finding images with unusual, rare tag combinations |
-| **Inversion** | 1 image + axis | Qdrant + VLM (Ollama) | Generating the semantic opposite (day↔night, happy↔melancholy, etc.) |
-| **Discovery** | 1 image | Qdrant (DiscoverQuery contrast) | "What is the anti-image of this?" |
-| **Blend** | 2–4 images + weights | Qdrant (weighted centroid) | Mixing moods with precise control |
-| **Outlier** | (none) | Qdrant + UMAP density | Surfacing the truly unique images in your collection |
-| **Group Search** | text query | Qdrant (GroupBy) | Comparing how different models or categories interpret the same query |
-
-**Serendipity** finds images in the sweet spot between "too similar" and "too different" — useful for breaking creative ruts.
-
-**Alchemy** performs actual vector arithmetic on your image embeddings. Add the soft lighting of one image, subtract the urban setting of another, and find images in your collection that match that combination.
-
-**Morph** shows you the five images that form a gradient from image A to image B in embedding space — great for discovering transition aesthetics.
-
-**Anomaly** uses WD14 tag co-occurrence to find images with rare or unusual element combinations — the images your intuition wouldn't have reached.
-
-**Inversion** uses the VLM to understand which semantic axis to negate (visual brightness, time of day, emotional tone, clothing, location, and more), then finds images at the opposite end of that axis in your collection.
-
-**Outlier** identifies the most isolated points in your semantic map — the images furthest from everything else. Often the most unique or experimental work you've made.
+![Inspire-1](docs/screenshots/JA_05_01_inspire.png)
+![Inspire-2](docs/screenshots/JA_05_02_inspire.png)
 
 ---
 
-### 🎬 Muse — Shoot a Picture by Talking About It
 
-Instead of writing a prompt, **you direct**. Say "walk down the park path chatting
-with each other" and the actress answers, the crew argues it out field by field, and
-the shot ledger changes. Look at the test shot, say what to fix, and when it is right
-the final render keeps **the very same seed**.
 
-![Muse studio](docs/screenshots/muse/JA_muse_01_overview.png)
-![The ledger](docs/screenshots/muse/JA_muse_03_ledger.png)
+### 📊 Analyze — See the collection as a whole
 
-- **The ledger is the record of truth** — clothes, pose, expression, place, light,
-  background and framing are fields, rewritten as a diff on every turn. Say it again
-  and it lands on the next turn
-- **Solo, duet, or a full crew** — one actress, two (written apart, each with her own
-  lines and side of the frame), or one of six crew presets, each with its own look
-- **Test shot → final** — the test shot draws a fresh seed each press; the final keeps
-  the seed you approved and only raises the steps
-- **It knows which model family a workflow belongs to** — anima and krea2 want
-  different steps, and only one of them takes a negative prompt. cfg and resolution
-  are whatever the workflow was saved with
-- **After the shoot** — she writes a secret diary nobody sees, posts something short
-  in the green room, and now and then goes out with friends. Next time, those memories
-  are in her preamble
-- **Three layers of safety** — a clerk that reads one line at a time, a second reader
-  before anything stops, and a floor that protects minors. Dark material still gets
-  shot; only what must stop, stops
-
-> 📖 The guide and the reference are in Japanese:
-> [Creator's Guide →](docs/guide/muse.ja.md) · [Technical Reference →](docs/tech/muse.ja.md)
-
----
-
-### 📊 Analyze — See Your Collection as a Whole
-
-![Analyzer-1](docs/screenshots/06_02_analyzer.png)
-![Analyzer-3](docs/screenshots/06_03_analyzer.png)
-
-Three visualizations that show your collection from angles you've never seen before:
-
-**Semantic Map (UMAP)**
-All images projected from 768 dimensions to a 2D scatter plot. Similar images cluster together. K-means clustering auto-labels groups and identifies their dominant tags. Hover any point to see the thumbnail. Click to search.
+**Semantic map (UMAP)**
+768-d embeddings compressed to a 2D scatter. Neighbors sit together. K-means finds clusters. Hover for a thumbnail. Click to search.
 
 **Color 3D**
-Every image plotted in three-dimensional L\*a\*b\* color space by its dominant color. Rotate the plot to see the palette distribution of your entire collection — which hues you gravitate toward, which are missing.
+Each image's dominant color plotted in CIE L\*a\*b\*. Rotate it and the bias in your palette is obvious.
 
-**Tag Network**
-A force-directed graph where nodes are tags and edges represent co-occurrence. Dense clusters reveal the visual vocabulary at the heart of your collection. Sparse nodes are outliers. Click any tag to search.
+**Tag network**
+Tags as nodes, co-occurrence as edges, force-directed. Dense clusters are your visual vocabulary. Click a node to search.
+
+![Analyzer-1](docs/screenshots/JA_06_01_analyzer.png)
+![Analyzer-2](docs/screenshots/06_02_analyzer.png)
+![Analyzer-3](docs/screenshots/06_03_analyzer.png)
+---
+
+### 🎛️ Control Room — command center for every job
+
+Press `/` or the top-bar button to open the Control Room.
+
+Scanning, embeddings, prompt alchemy, and image generation all run as jobs.
+
+- Cancel, pause, resume, or reorder any job
+- Pause a whole lane (SYNC / EMBED / EVAL / GEN)
+- ISA-101 style status lamps (Qdrant, Ollama, ComfyUI, GPU)
+- All job history in one place
+
+![Control Room](docs/screenshots/03_control_room.png)
 
 ---
 
 ## Documentation
 
-Two entry points for each major feature — pick whichever matches your goal:
+Each feature has two kinds of docs. Pick the door that matches what you need.
 
 | Feature | I want to use it | I want to understand how it works |
 |---|---|---|
@@ -217,33 +199,33 @@ Two entry points for each major feature — pick whichever matches your goal:
 | **Inspire & Brainstorm** | [Creator's Guide →](docs/guide/inspire-brainstorm.md) | [Technical Reference →](docs/tech/inspire-brainstorm.md) |
 | **Prompt Alchemy** | [Creator's Guide →](docs/guide/prompt-alchemy.md) | [Technical Reference →](docs/tech/prompt-alchemy.md) |
 
-The **Creator's Guides** explain what each mode does, when to use it, and how inputs map to outputs — with diagrams, no implementation details.
+The **Creator's Guides** cover how to use each mode, when to pick it, and how inputs map to outputs — with diagrams, no implementation details.
 
-The **Technical References** cover the full algorithm specifications: pseudocode, mathematical foundations (L2 normalization, iterative normalization, LERP, sign inversion), Qdrant query patterns (DiscoverQuery, GroupBy, MRL two-phase), and the VLM 3-stage pipeline.
+The **Technical References** cover algorithm specs, the math (L2 normalization, iterative normalization, LERP, sign inversion), Qdrant query patterns (DiscoverQuery, GroupBy, MRL two-phase), and the VLM 3-stage pipeline.
 
-Additional reference: 
-- [Qdrant collection design →](docs/tech/qdrant.md) 
+Also:
+- [Qdrant collection design →](docs/tech/qdrant.md)
 - [Job Spooler & Task Scheduling →](docs/tech/spooler.md)
 
 ---
 
 ## System Requirements
 
-> ⚠️ **These three external services must be installed and running on your machine before starting Ranbell Image.**
+> ⚠️ **Install and start the three services below on your machine before launching Ranbell Image.**
 
-### Required Services
+### Required services
 
 | Service | Role | Default endpoint |
 |---|---|---|
-| **Docker + Docker Compose v2** | Runs the app backend and Qdrant | — |
-| **[Ollama](https://ollama.ai/)** | Local LLM / VLM inference — prompt synthesis, image analysis, embeddings | `http://localhost:11434` |
+| **Docker + Docker Compose v2** | App and Qdrant | — |
+| **[Ollama](https://ollama.ai/)** | Local LLM / VLM — prompt alchemy, image analysis, embeddings | `http://localhost:11434` |
 | **[ComfyUI](https://github.com/comfyanonymous/ComfyUI)** | Image generation backend | `http://localhost:8188` |
 
-A **NVIDIA GPU with 16 GB VRAM** is strongly recommended (required for comfortable VLM and generation performance).
+An **NVIDIA GPU with 16 GB VRAM or more** is effectively required (comfortable VLM inference and generation).
 
-### Verified Models (Ollama)
+### Verified models (Ollama)
 
-The following models were used during development and are confirmed to work:
+These are the models used in development and confirmed to work:
 
 | Role | Model | Install |
 |---|---|---|
@@ -251,13 +233,13 @@ The following models were used during development and are confirmed to work:
 | Embedding — semantic search | `embeddinggemma:300m` ⚠️ required | `ollama pull embeddinggemma:300m` |
 | **Muse — conversation, ledger, safety** | **`gemma4:26b-a4b-it-qat`** ⚠️ effectively required | `ollama pull gemma4:26b-a4b-it-qat` |
 
-> ⚠️ **`embeddinggemma:300m` is required for the embedding model.** The system relies on Matryoshka embeddings for multi-resolution semantic search; standard embedding models do not support this and cannot be used as a substitute.
+> ⚠️ **The embedding model must be `embeddinggemma:300m`.** The system uses Matryoshka embeddings for multi-resolution semantic search. Ordinary embedding models do not support this and cannot be substituted.
 >
-> Other Ollama-compatible models may work for VLM but have not been tested.
+> Other Ollama-compatible models may work as a VLM, but they have not been tested.
 
 ### 🎬 Requirements for Muse
 
-> ⚠️ **Muse is where the gap between "it runs" and "it works" is widest.** Nothing errors out with a smaller model or a different checkpoint — **but a shoot is only worth keeping with the combination below.**
+> ⚠️ **Muse is where the gap between "it runs" and "it works" is widest.** Nothing errors out with a smaller LLM or a different checkpoint — **but a shoot is only worth keeping with the combination below.**
 
 | | What you need | What happens without it |
 |---|---|---|
@@ -266,8 +248,8 @@ The following models were used during development and are confirmed to work:
 
 **Why Gemma 4 26B is needed**
 
-- With a smaller LLM, **an instruction often fails to reach the picture.** The conversation carries on while the ledger stays still, which makes the failure **hard to notice**.
-- A studio shoot calls the LLM several times per turn — clerk, writer, actress, verify. One weak link and the whole turn degrades.
+- With a smaller LLM, **an instruction often fails to reach the picture.** The conversation carries on while the ledger stays still, which makes the failure **hard to notice**
+- A studio shoot calls the LLM several times per turn — clerk, writer, actress, verify. One weak link and the whole turn degrades
 
 **VRAM** — 26B (Q4_0) is about **15.6 GB**. It runs on a 16 GB card, **but not at the same time as image generation**: Muse always drops the LLM out of VRAM immediately before a render (`unload_vlm`, on by default). **24 GB or more leaves real headroom.**
 
@@ -283,20 +265,17 @@ The following models were used during development and are confirmed to work:
 git clone https://github.com/ranbell/ranbell_image.git
 cd ranbell_image
 
-# Configure your environment
 cp docker-compose.override.yml.example docker-compose.override.yml
 # Edit docker-compose.override.yml — see the note below
 ```
 
-> ⚠️ **Important — edit `docker-compose.override.yml` before starting:**
+> ⚠️ **Edit `docker-compose.override.yml` before you start:**
 >
-> - Source image folders: mount each as `/mnt/image/source/<label>` with `:ro` (read-only).
->   The `<label>` name becomes the folder label shown in the app.
-> - Output folder (for generated images): mount as `/mnt/image/generated` — **without** `:ro`, writable.
->   Keep this separate from your source image directories.
+> - Source image folders: mount each as `/mnt/image/source/<label>` with `:ro` (read-only). The `<label>` becomes the folder name in the app.
+> - Generated-image folder: mount as `/mnt/image/generated` **without** `:ro` (writable). Keep this separate from your source directories.
 
 ```bash
-# Start using pre-built images from ghcr.io
+# Pre-built images from ghcr.io (recommended)
 docker compose pull && docker compose up -d
 
 # — or build locally —
@@ -305,35 +284,27 @@ docker compose up -d --build
 
 Open **http://localhost:3100** in your browser.
 
-**First run:** On first launch, the app automatically checks for required components and opens the **Admin → Diagnostics** tab if anything needs attention — WD14 model files, Ollama connection, INVOKE Vocab import, and ComfyUI workflows. Follow the guidance there, then click **SCAN** and run AI backfill from the Admin panel. See [INSTALLATION.md](INSTALLATION.md) for the full setup guide.
+**First run:** the app checks setup and opens **Admin → Diagnostics** if anything is missing (WD14 models, Ollama, INVOKE Vocab, ComfyUI workflows). Follow that, then click **SCAN** and run AI backfill from Admin. Full walkthrough: [INSTALLATION.md](INSTALLATION.md).
 
 ---
 
-## Detailed Installation
+## Thanks
 
-For complete setup instructions including Ollama, WD14 tagger, and ComfyUI workflow configuration, see **[INSTALLATION.md](INSTALLATION.md)**.
+**[Qdrant](https://qdrant.tech/)** — this whole project exists because of Qdrant. The first time semantic vector search felt this graceful, I knew I had to build something with it. "Search images by meaning" became everything you see here. Thank you, Qdrant team.
 
----
+**[Ollama](https://ollama.ai/)** — the local LLM/VLM that actually works. Every embedding, image analysis, prompt, and alignment score in Ranbell Image flows through it.
 
-## Built on the Shoulders of Giants
+**[WD14 Tagger — SmilingWolf](https://huggingface.co/SmilingWolf)** — the EVA02-large model does large-scale Danbooru tagging with surprising accuracy. It underpins tag search, anomaly detection, and the danbooru vocabulary in prompt alchemy.
 
-**[Qdrant](https://qdrant.tech/)** — This entire project exists because of Qdrant.
-The moment I discovered how elegantly it handles semantic vector search at scale, I knew I had to build something with it. What started as "can I search my images by meaning?" became everything you see here. Thank you, Qdrant team, for building something so powerful and so approachable.
+**[ComfyUI](https://github.com/comfyanonymous/ComfyUI)** — the most flexible generation environment. Ranbell Image closes the loop through its HTTP API: inspire → alchemy → generate → back into the collection.
 
-**[Ollama](https://ollama.ai/)** — Local LLM and VLM inference that simply works.
-Every embedding, every image analysis, every synthesized prompt, and every alignment score in Ranbell Image flows through Ollama. Running it locally means zero data leaves your machine.
-
-**[WD14 Tagger — SmilingWolf](https://huggingface.co/SmilingWolf)** — The EVA02-large model delivers surprisingly accurate Danbooru tag prediction at scale. It forms the backbone of tag-based search, anomaly detection, and the danbooru vocabulary in prompt synthesis.
-
-**[ComfyUI](https://github.com/comfyanonymous/ComfyUI)** — The most flexible image generation environment available. Ranbell Image integrates via ComfyUI's HTTP API to close the creative loop: inspiration → synthesis → generation → back into the collection.
-
-**[UMAP](https://umap-learn.readthedocs.io/)** — Turning 768-dimensional embeddings into a navigable 2D map of an entire image collection is genuinely remarkable. Thank you.
+**[UMAP](https://umap-learn.readthedocs.io/)** — turning 768-d embeddings into a map you can actually move around is still remarkable.
 
 ---
 
 ## Architecture
 
-### System Overview
+### System overview
 
 ```mermaid
 graph LR
@@ -398,7 +369,7 @@ graph LR
     classDef gen fill:#ffedd5,stroke:#c2410c,color:#7c2d12
     classDef db fill:#f0fdf4,stroke:#15803d,color:#14532d
 
-    class UI,IP,INV fe
+    class UI,IP,INV,MUSE fe
     class API api
     class Spl spooler
     class SYNC,EMBED,GEN_L,PROMPT_L,EVAL_L lane
@@ -407,7 +378,7 @@ graph LR
     class QC,IMG,ALN,CFG db
 ```
 
-### Job Orchestration
+### Job orchestration
 
 ```mermaid
 graph TD
@@ -439,18 +410,6 @@ graph TD
     class PQ,AP spooler
     class GPU gpu
 ```
-
----
-
-## Japanese Documentation
-
-詳しい日本語の説明は **[README.ja.md](README.ja.md)** をご覧ください。
-
----
-
-## Disclaimer
-
-This project was built for personal use. No guarantees of correctness, stability, or security are made. Issues and pull requests are welcome, though response time depends on availability.
 
 ---
 
