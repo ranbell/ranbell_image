@@ -6,6 +6,34 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · Versioning: 
 
 ---
 
+## [0.4.1] — 2026-10-10
+
+Scanning that touches only what changed, and prompt extraction for more ComfyUI workflows.
+
+### Changed
+
+- **A heal lists only folders whose mtime moved.** The scanner keeps a per-folder snapshot (`scan_dirs`); an unchanged folder is not opened, so a heal over an unchanged library is a stat per folder (~1 s over 16k images, where it used to stat and re-check every file)
+- **A file is read only when it has to be** — `(size, mtime_ns)` matching what was recorded means unchanged; a file that vanished in one place and appeared in another with the same size and mtime is a rename or move, and its point is re-pathed without reading. New files are read once, the same bytes feed the hash, the metadata and the thumbnail, and they are processed in parallel
+- **Copies of the same image are all remembered** (`dup_paths`). Before, two paths with the same bytes swapped places on every heal and one of them was re-hashed each time
+- **The file watcher syncs only the folders that changed** (`scan_sync`), instead of running a whole-library heal for every saved file. Folders moved in or out, deleted or renamed are now picked up; changes arriving during a scan are queued, not dropped
+- **A heal runs at startup**, so a newly mounted folder is picked up without pressing SCAN
+- **Qdrant writes are batched**: identical updates share one operation, writes are sent without waiting and closed with a single wait, and the scanner's bulk calls use a long timeout. The first heal after an upgrade no longer times out
+- Missing thumbnails are made when they are first requested, so scans no longer check every thumbnail
+- The admin screen's mount counts and duplicate report come from the snapshot instead of walking and re-hashing the library
+
+### Added
+
+- **Strict check** in the admin screen — lists every folder, for files overwritten under the same name while the app was stopped. It is also the only scan that drops the images of a mount that was removed
+- Metadata refresh can be limited to extraction methods (`POST /api/scan/refresh-metadata?methods=longest_text,direct_search`)
+
+### Fixed
+
+- **A mount that is missing or empty no longer loses its images.** A NAS late at boot, or a bind mount docker re-created empty, used to look like "everything in it was deleted"
+- **Prompt extraction for more ComfyUI workflows** — text wired from `String Literal (Image Saver)` and `PrimitiveString`, through ControlNet / Inpaint / FluxGuidance conditioning, `SamplerCustomAdvanced` guiders, `StringConcatenate` (its delimiter is a separator, not a prefix), `KSamplerAdvanced //Inspire`, `ClownsharKSampler_Beta`, and `WD14Tagger` tags. Anima workflows built on Image Saver were falling back to the longest text and picking an unconnected prompt
+- A negative wired through `ConditioningZeroOut` is no negative text (it used to report the positive), and Efficient Loader's negative is its own text instead of a copy of the positive
+
+---
+
 ## [0.4.0] — 2026-09-20
 
 The Muse release. A studio where you direct a photo shoot by talking to the model,

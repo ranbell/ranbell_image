@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Annotated, Literal
@@ -334,6 +335,28 @@ async def backup_import_lineage(request: Request):
 
 # ── Stats ─────────────────────────────────────────────────────────────────────
 
+def _thumbnail_usage(thumb_dir: Path) -> tuple[int, int]:
+    """(count, bytes) of thumbnails. Blocking — a walk of the whole volume, kept
+    off the event loop so opening the admin screen does not stall every request."""
+    count = size = 0
+    stack = [str(thumb_dir)] if thumb_dir.exists() else []
+    while stack:
+        try:
+            with os.scandir(stack.pop()) as it:
+                for e in it:
+                    try:
+                        if e.is_dir(follow_symlinks=False):
+                            stack.append(e.path)
+                        elif e.name.endswith(".webp"):
+                            count += 1
+                            size += e.stat().st_size
+                    except OSError:
+                        pass
+        except OSError:
+            pass
+    return count, size
+
+
 @router.get("/stats")
 async def admin_stats(request: Request):
     db = request.app.state.db
@@ -347,15 +370,9 @@ async def admin_stats(request: Request):
     ai_done = vector_count
     ai_pending = total - ai_done
 
-    thumb_dir = Path(settings.thumbnails_dir)
-    thumb_count = thumb_size = 0
-    if thumb_dir.exists():
-        for f in thumb_dir.rglob("*.webp"):
-            try:
-                thumb_count += 1
-                thumb_size += f.stat().st_size
-            except OSError:
-                pass
+    thumb_count, thumb_size = await asyncio.get_running_loop().run_in_executor(
+        None, _thumbnail_usage, Path(settings.thumbnails_dir),
+    )
 
     wd14_dir = Path(cfg.get("wd14_model_dir") or settings.wd14_model_dir)
     wd14_model_ok = (wd14_dir / "model.onnx").exists()
@@ -597,47 +614,31 @@ async def start_model_name_backfill(request: Request):
 
 @router.get("/duplicates")
 async def find_duplicates(request: Request):
-    from ..scanner.scanner import _collect_all_files, _sha256_file
+    """Files with identical bytes at more than one path.
+
+    The scanner records every copy on the image's point (`dup_paths`), so this
+    reads Qdrant instead of hashing the whole library again.
+    """
     db = request.app.state.db
-    loop = asyncio.get_event_loop()
-    files = await loop.run_in_executor(None, _collect_all_files)
-
-    sem = asyncio.Semaphore(8)
-    sha256_to_paths: dict[str, list[Path]] = {}
-
-    async def _hash(path: Path) -> None:
-        async with sem:
-            h = await loop.run_in_executor(None, _sha256_file, path)
-            sha256_to_paths.setdefault(h, []).append(path)
-
-    await asyncio.gather(*[_hash(f) for f in files])
-
-    path_index = await db.find_path_mtime_index()
-    sha256_to_registered = {v["sha256"]: k for k, v in path_index.items()}
-
     groups = []
-    for sha256, paths in sha256_to_paths.items():
-        if len(paths) < 2:
-            continue
-        registered_path = sha256_to_registered.get(sha256)
-        str_paths = [str(p) for p in paths]
-        primary = registered_path if registered_path in str_paths else str_paths[0]
-        copies = [p for p in str_paths if p != primary]
+    for doc in await db.scroll_dup_groups():
+        primary = doc.get("path") or ""
         groups.append({
-            "sha256": sha256,
+            "sha256": doc.get("sha256", ""),
             "registered_path": primary,
             "registered_name": Path(primary).name,
             "copies": [
-                {"path": p, "name": Path(p).name, "size": Path(p).stat().st_size}
-                for p in copies
+                {"path": d["path"], "name": Path(d["path"]).name, "size": d.get("size") or 0}
+                for d in doc.get("dup_paths") or [] if d.get("path")
             ],
         })
-
     groups.sort(key=lambda g: g["registered_name"])
 
+    dirs, _ = await db.load_scan_dirs()
+    total_registered = await db.total_count()
     return {
-        "total_files_on_disk": len(files),
-        "total_registered": len(sha256_to_paths),
+        "total_files_on_disk": sum(int(e.get("n_images") or 0) for e in dirs.values()),
+        "total_registered": total_registered,
         "duplicate_groups": len(groups),
         "duplicate_extra_files": sum(len(g["copies"]) for g in groups),
         "groups": groups,

@@ -16,7 +16,7 @@ from typing import Optional
 from ..ai.color_extractor import rgb_to_lab
 from ..config import settings
 from ..db.qdrant_client import QdrantDBClient
-from ..thumbnails.generator import get_thumbnail_path
+from ..thumbnails.generator import ensure_thumbnail, get_thumbnail_path
 from .cache import Cached
 from .sort_utils import sort_docs
 from .tag_categories import guess_category
@@ -521,10 +521,39 @@ async def suggest_tags(q: str = "", limit: int = 10):
     return (starts + contains)[:limit]
 
 
+_thumb_locks: dict[str, asyncio.Lock] = {}
+
+
+async def _make_missing_thumbnail(request: Request, sha256: str) -> bool:
+    """Build a thumbnail the moment it is asked for and is not there.
+
+    Scans no longer check every image's thumbnail (a stat per image on every
+    pass); one lost with the thumbnails volume comes back here instead.
+    """
+    lock = _thumb_locks.setdefault(sha256, asyncio.Lock())
+    try:
+        async with lock:
+            if get_thumbnail_path(sha256).exists():
+                return True
+            doc = await _db(request).get(sha256)
+            src = Path(doc["path"]) if doc and doc.get("path") else None
+            if src is None or not src.exists():
+                return False
+            try:
+                await ensure_thumbnail(src, sha256)
+            except Exception as exc:
+                logger.warning("thumbnail rebuild failed for %s: %s", src, exc)
+                return False
+            return True
+    finally:
+        if not lock.locked():
+            _thumb_locks.pop(sha256, None)
+
+
 @router.get("/thumbnails/{sha256}.webp")
-async def serve_thumbnail(sha256: str, response: Response):
+async def serve_thumbnail(sha256: str, request: Request, response: Response):
     thumb = get_thumbnail_path(sha256)
-    if not thumb.exists():
+    if not thumb.exists() and not await _make_missing_thumbnail(request, sha256):
         raise HTTPException(status_code=404, detail="Thumbnail not found")
     response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
     response.headers["ETag"] = f'"{sha256}"'

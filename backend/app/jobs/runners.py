@@ -50,21 +50,31 @@ def _strip_quality_metatags(tags: str) -> str:
 
 # ── SYNC lane: scan jobs ───────────────────────────────────────────────────────
 
-async def run_scan_heal(
-    reporter: ProgressReporter,
-    cancel: CancelToken,
-    *,
-    db,
-    ollama=None,
-    spooler=None,
-) -> None:
-    from ..scanner.scanner import run_heal, scan_state
+async def _drive_scan(reporter: ProgressReporter, cancel: CancelToken, *, db, ollama,
+                      spooler, start, label: str) -> None:
+    """Run one scanner pass as a job: report its progress, honour cancel, and
+    start tagging when it registered anything new.
+
+    `start(concurrency)` returns the scanner coroutine.
+    """
+    from ..runtime_config import get_runtime_config
+    from ..scanner.scanner import scan_state
+    cfg = await get_runtime_config(db)
     reporter.indeterminate()
-    task = asyncio.create_task(run_heal(db))
+    task = asyncio.create_task(start(int(cfg.get("scan_concurrency", 8))))
     cancel.on_cancel(task.cancel)
 
     while not task.done():
-        if scan_state.total > 0:
+        # Checking folders first, then reading what changed. Files left alone
+        # are not on this bar — the old one counted only files that were
+        # re-read, and sat at 0% through a whole library of unchanged ones.
+        if scan_state.phase == "dirs" and scan_state.dirs_total > 0:
+            reporter.update(
+                scan_state.dirs_done / scan_state.dirs_total,
+                f"{scan_state.dirs_done}/{scan_state.dirs_total} folders",
+                key="folders", done=scan_state.dirs_done, total=scan_state.dirs_total,
+            )
+        elif scan_state.phase == "files" and scan_state.total > 0:
             reporter.update(
                 scan_state.processed / scan_state.total,
                 f"{scan_state.processed}/{scan_state.total} files",
@@ -90,7 +100,39 @@ async def run_scan_heal(
                 ollama=ollama,
                 spooler=spooler,
             )
-            logger.info("Auto-triggered pipeline after heal: %d new files", scan_state.added)
+            logger.info("Auto-triggered pipeline after %s: %d new files", label, scan_state.added)
+
+
+async def run_scan_heal(
+    reporter: ProgressReporter,
+    cancel: CancelToken,
+    *,
+    db,
+    ollama=None,
+    spooler=None,
+    strict: bool = False,
+) -> None:
+    from ..scanner.scanner import run_heal
+    await _drive_scan(
+        reporter, cancel, db=db, ollama=ollama, spooler=spooler, label="heal",
+        start=lambda n: run_heal(db, strict=strict, concurrency=n),
+    )
+
+
+async def run_scan_sync(
+    reporter: ProgressReporter,
+    cancel: CancelToken,
+    *,
+    db,
+    ollama=None,
+    spooler=None,
+) -> None:
+    """The directories the file watcher saw change — nothing else."""
+    from ..scanner.scanner import run_sync
+    await _drive_scan(
+        reporter, cancel, db=db, ollama=ollama, spooler=spooler, label="sync",
+        start=lambda n: run_sync(db, concurrency=n),
+    )
 
 
 async def run_scan_full(
@@ -101,39 +143,11 @@ async def run_scan_full(
     ollama=None,
     spooler=None,
 ) -> None:
-    from ..scanner.scanner import run_scan, scan_state
-    from ..runtime_config import get_runtime_config
-    cfg = await get_runtime_config(db)
-    reporter.indeterminate()
-    task = asyncio.create_task(run_scan(db, concurrency=int(cfg.get("scan_concurrency", 8))))
-    cancel.on_cancel(task.cancel)
-
-    while not task.done():
-        if scan_state.total > 0:
-            reporter.update(
-                scan_state.processed / scan_state.total,
-                f"{scan_state.processed}/{scan_state.total} files",
-                key="files", done=scan_state.processed, total=scan_state.total,
-            )
-        await asyncio.sleep(0.5)
-
-    try:
-        await task
-    except asyncio.CancelledError:
-        raise JobCancelled()
-
-    if spooler is not None and ollama is not None and scan_state.added > 0:
-        from ..spooler.models import JobLane
-        if spooler.is_lane_active(JobLane.TAGGING):
-            spooler.submit(
-                JobLane.TAGGING,
-                "ai_tagging_post_scan",
-                run_pipeline_tagging,
-                db=db,
-                ollama=ollama,
-                spooler=spooler,
-            )
-            logger.info("Auto-triggered pipeline after full scan: %d new files", scan_state.added)
+    from ..scanner.scanner import run_scan
+    await _drive_scan(
+        reporter, cancel, db=db, ollama=ollama, spooler=spooler, label="full scan",
+        start=lambda n: run_scan(db, concurrency=n),
+    )
 
 
 async def run_scan_refresh_metadata(
@@ -141,10 +155,11 @@ async def run_scan_refresh_metadata(
     cancel: CancelToken,
     *,
     db,
+    methods: list[str] | None = None,
 ) -> None:
     from ..scanner.scanner import run_refresh_metadata, scan_state
     reporter.indeterminate()
-    task = asyncio.create_task(run_refresh_metadata(db))
+    task = asyncio.create_task(run_refresh_metadata(db, methods))
     cancel.on_cancel(task.cancel)
 
     while not task.done():

@@ -4,6 +4,7 @@ from __future__ import annotations
 from .known_nodes import (
     CLIP_TEXT_ENCODE_CLASSES,
     CONCAT_NODE_CLASSES,
+    GUIDER_POSITIVE_INPUTS,
     NEGATIVE_KEYWORDS,
     NEGATIVE_TITLE_KEYWORDS,
     POSITIVE_TITLE_KEYWORDS,
@@ -42,9 +43,17 @@ def trace_prompts(
     inputs = sampler_node.get("inputs") or {}
     positive_link = inputs.get("positive")
     negative_link = inputs.get("negative")
+    guider_link = inputs.get("guider")
+    if positive_link is None and isinstance(guider_link, list):
+        guider = workflow.get(str(guider_link[0])) or {}
+        g_inputs = guider.get("inputs") or {}
+        positive_link = next(
+            (g_inputs[k] for k in GUIDER_POSITIVE_INPUTS if isinstance(g_inputs.get(k), list)), None,
+        )
+        negative_link = g_inputs.get("negative") if isinstance(g_inputs.get("negative"), list) else None
 
     positive_text = _resolve_text(workflow, positive_link, set(), warnings, visual_nodes, out_map) if positive_link else None
-    negative_text = _resolve_text(workflow, negative_link, set(), warnings, visual_nodes, out_map) if negative_link else None
+    negative_text = _resolve_text(workflow, negative_link, set(), warnings, visual_nodes, out_map, negative=True) if negative_link else None
 
     if positive_text is None and negative_text is None:
         warnings.append("Could not resolve text from KSampler positive/negative links")
@@ -176,12 +185,18 @@ def _extract_wv_texts(wv_list: list, min_len: int = 0) -> list[str]:
 
 
 def _find_sampler(workflow: dict) -> dict | None:
+    """The sampler that actually receives conditioning. KSamplerSelect is in
+    SAMPLER_CLASSES but only picks a sampler for SamplerCustomAdvanced; taking
+    it first left those workflows with no prompt at all."""
+    fallback = None
     for node in workflow.values():
-        if not isinstance(node, dict):
+        if not isinstance(node, dict) or node.get("class_type") not in SAMPLER_CLASSES:
             continue
-        if node.get("class_type") in SAMPLER_CLASSES:
+        inputs = node.get("inputs") or {}
+        if isinstance(inputs.get("positive"), list) or isinstance(inputs.get("guider"), list):
             return node
-    return None
+        fallback = fallback or node
+    return fallback
 
 
 def _resolve_text(
@@ -191,6 +206,7 @@ def _resolve_text(
     warnings: list[str],
     visual_nodes: dict[str, list] | None = None,
     out_map: dict[tuple[str, int], list[str]] | None = None,
+    negative: bool = False,
 ) -> str | None:
     """
     Recursively follow workflow links to resolve text.
@@ -233,6 +249,15 @@ def _resolve_text(
                     return result
         return None
 
+    # Loaders that take both prompts as text and hand out both conditionings
+    # (Efficient Loader: CONDITIONING+ / CONDITIONING-). `positive` is also a
+    # generic text field below, which used to make the negative a copy of the
+    # positive — read the side this link is resolving.
+    pos_str, neg_str = inputs.get("positive"), inputs.get("negative")
+    if isinstance(pos_str, str) and isinstance(neg_str, str):
+        chosen = neg_str if negative else pos_str
+        return chosen if chosen.strip() else None
+
     # Nodes that hold a text field directly
     text = get_text_from_node(node)
     if text:
@@ -250,17 +275,24 @@ def _resolve_text(
         texts = _extract_wv_texts(vn.get(node_id, []))
         return "\n".join(texts) if texts else None
 
-    # Concatenation nodes (joined with empty string so the user controls the separator)
+    # Concatenation nodes. A `delimiter` input is the separator, not a part —
+    # it used to be glued on the front, since "delimiter" sorts before
+    # "string_a". Without one, parts are joined with nothing so the user's own
+    # separators are kept.
     if cls in CONCAT_NODE_CLASSES:
+        delimiter = inputs.get("delimiter")
+        delimiter = delimiter if isinstance(delimiter, str) else ""
         parts: list[str] = []
         for key, val in sorted(inputs.items()):  # Process in key-name order (string_a → string_b)
+            if key == "delimiter":
+                continue
             if isinstance(val, list):
                 part = _resolve_text(workflow, val, visited, warnings, vn, om)
                 if part is not None:
                     parts.append(part)
             elif isinstance(val, str):
                 parts.append(val)
-        return "".join(parts) if parts else None
+        return delimiter.join(parts) if parts else None
 
     # ShowText family: text_0 holds the output cache (API workflow) / widgets_values (visual)
     if cls in TEXT_SHOW_NODE_CLASSES:
@@ -270,6 +302,28 @@ def _resolve_text(
                 return val.strip()
         texts = _extract_wv_texts(vn.get(node_id, []))
         return "\n".join(texts) if texts else None
+
+    # WD14Tagger|pysssss feeding a prompt: the tags it produced are kept in its
+    # own `tags` widget, so the prompt that was used is still in the file.
+    if cls.startswith("WD14Tagger"):
+        tags = inputs.get("tags")
+        return tags.strip() if isinstance(tags, str) and tags.strip() else None
+
+    # Conditioning that only passes through: ControlNetApply / FluxGuidance /
+    # ConditioningSetArea… take one `conditioning`; ControlNetApplyAdvanced /
+    # InpaintModelConditioning take `positive` and `negative` and give them
+    # back on output slots 0 and 1. Follow the one this link came out of.
+    # ConditioningZeroOut is the exception: it blanks what it is given (the
+    # usual "no negative" for Flux/Anima), so there is no text behind it —
+    # following it reported the positive prompt as the negative.
+    if cls == "ConditioningZeroOut":
+        return None
+    cond = inputs.get("conditioning")
+    if isinstance(cond, list):
+        return _resolve_text(workflow, cond, visited, warnings, vn, om, negative=negative)
+    if isinstance(inputs.get("positive"), list) and isinstance(inputs.get("negative"), list):
+        side = inputs["negative"] if slot == 1 else inputs["positive"]
+        return _resolve_text(workflow, side, visited, warnings, vn, om, negative=slot == 1)
 
     # Unknown nodes (LLM encode, etc.): look for monitoring nodes on the same output slot in the visual workflow
     # Do not follow input links — doing so risks accidentally picking up LLM instruction text

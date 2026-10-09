@@ -20,17 +20,26 @@ CONCAT_NODE_CLASSES: list[str] = [
     "String Concatenate",
     "CR Text Concatenate",
     "easy promptConcat",
+    "StringConcatenate",   # core: string_a + delimiter + string_b
 ]
 
 SAMPLER_CLASSES: list[str] = [
     "KSampler",
     "KSamplerAdvanced",
     "SamplerCustom",
+    # Takes its conditioning through a `guider` (BasicGuider / CFGGuider).
+    "SamplerCustomAdvanced",
     "KSamplerSelect",
     "BNK_TiledKSampler",
     "KSamplerWithRefiner",
     "UltimateSDUpscale",
+    "KSamplerAdvanced //Inspire",
+    "ClownsharKSampler_Beta",
 ]
+
+# Guiders feeding SamplerCustomAdvanced: BasicGuider has one `conditioning`,
+# CFGGuider `positive` / `negative`, DualCFGGuider `cond1` / `cond2` / `negative`.
+GUIDER_POSITIVE_INPUTS: list[str] = ["positive", "conditioning", "cond1"]
 
 # Input field names that may hold text content (in priority order)
 TEXT_INPUT_FIELDS: list[str] = [
@@ -39,6 +48,13 @@ TEXT_INPUT_FIELDS: list[str] = [
     "prompt",
     "positive",
     "wildcard_text",
+    # Literal/primitive nodes a CLIPTextEncode's text is wired from:
+    # "String Literal (Image Saver)" keeps it in `string`, the core
+    # PrimitiveString / PrimitiveStringMultiline in `value`. Missing these sent
+    # every Anima workflow built on Image Saver to the longest-text fallback,
+    # which picked an unconnected prompt node.
+    "string",
+    "value",
 ]
 
 # Nodes that store runtime text in widgets_values

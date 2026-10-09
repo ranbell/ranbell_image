@@ -2009,6 +2009,23 @@ watch(() => props.jobs?.find(j => j.title === 'backup')?.state, (state) => {
               </div>
             </div>
 
+            <div class="bg-gray-800 rounded-xl p-4">
+              <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">{{ $t('admin.system.scanTitle') }}</p>
+              <div class="flex items-center justify-between">
+                <div>
+                  <p class="text-sm text-gray-300">{{ $t('admin.system.strictScan') }}</p>
+                  <p class="text-xs text-gray-600">{{ $t('admin.system.strictScanDesc') }}</p>
+                </div>
+                <button
+                  @click="adminAction('strictScan', '/api/scan/strict',
+                    { successMsg: () => $t('admin.system.strictScanQueued') })"
+                  :disabled="!!adminLoading || scanState?.running"
+                  class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 border border-gray-600 rounded-lg text-xs text-gray-300 disabled:opacity-40 transition-colors whitespace-nowrap ml-4">
+                  {{ $t('admin.system.strictScanBtn') }}
+                </button>
+              </div>
+            </div>
+
             <div class="bg-red-950/30 border border-red-800/30 rounded-xl p-4">
               <p class="text-xs font-semibold text-red-400 uppercase tracking-wide mb-3">{{ $t('admin.system.dangerZone') }}</p>
               <div class="flex items-center justify-between">

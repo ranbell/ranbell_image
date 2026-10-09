@@ -228,6 +228,14 @@ async def lifespan(app: FastAPI):
     watcher.start(_settings.source_images_dir, _settings.generated_images_dir)
     app.state.watcher = watcher
 
+    # Catch up on whatever changed while the app was down — a folder mounted
+    # since the last start, files copied in meanwhile. Only folders whose mtime
+    # moved are listed, so on an unchanged library this is a stat per folder.
+    from .jobs.runners import run_scan_heal
+    from .spooler.models import JobLane
+    spooler.submit(JobLane.SYNC, "scan_heal", run_scan_heal,
+                   db=db, ollama=ollama, spooler=spooler)
+
     yield
 
     watcher.stop()
@@ -244,7 +252,7 @@ async def lifespan(app: FastAPI):
     await ollama.close()
 
 
-app = FastAPI(title="Ranbell Image", version="0.4.0", lifespan=lifespan)
+app = FastAPI(title="Ranbell Image", version="0.4.1", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

@@ -1,3 +1,6 @@
+import asyncio
+import os
+
 from fastapi import APIRouter, Request
 from ..config import settings
 from ..scanner.scanner import SCAN_EXTENSIONS
@@ -5,36 +8,56 @@ from ..scanner.scanner import SCAN_EXTENSIONS
 router = APIRouter(prefix="/api")
 
 
+def _source_subdirs() -> list[str]:
+    src = settings.source_images_dir
+    if not src.exists():
+        return []
+    with os.scandir(src) as it:
+        return sorted(e.path for e in it if e.is_dir(follow_symlinks=False))
+
+
+def _count_under(dirs: dict[str, dict], root: str) -> int:
+    prefix = root.rstrip("/") + "/"
+    return sum(int(e.get("n_images") or 0) for p, e in dirs.items() if p == root or p.startswith(prefix))
+
+
 @router.get("/info")
 async def get_info(request: Request):
+    """Mounts and file counts — from what the last scan recorded, not by walking
+    the trees again (that took the whole server with it on a large library)."""
     db = request.app.state.db
     thumbnails_dir = settings.thumbnails_dir
-
-    file_count = 0
-    sample_files: list[str] = []
-    for root in [settings.source_images_dir, settings.generated_images_dir]:
-        if root.exists():
-            for p in root.rglob("*"):
-                if p.is_file() and p.suffix.lower() in SCAN_EXTENSIONS:
-                    file_count += 1
-                    if len(sample_files) < 5:
-                        sample_files.append(str(p.relative_to(root)))
+    roots = [str(settings.source_images_dir), str(settings.generated_images_dir)]
 
     try:
         db_count = await db.total_count()
+        dirs, _ = await db.load_scan_dirs()
         db_ok = True
     except Exception:
         db_count = 0
+        dirs = {}
         db_ok = False
+
+    file_count = sum(_count_under(dirs, r) for r in roots)
+    sample_files: list[str] = []
+    if db_ok:
+        try:
+            docs, _ = await db.scroll_images(limit=5, exclude_drafts=False)
+            for d in docs:
+                p = d.get("path") or ""
+                root = next((r for r in roots if p.startswith(r.rstrip("/") + "/")), None)
+                if root:
+                    sample_files.append(os.path.relpath(p, root))
+        except Exception:
+            pass
 
     src = settings.source_images_dir
     src_exists = src.exists()
-    source_mounts = []
-    if src_exists:
-        for d in sorted(src.iterdir()):
-            if d.is_dir():
-                count = sum(1 for p in d.rglob("*") if p.is_file() and p.suffix.lower() in SCAN_EXTENSIONS)
-                source_mounts.append({"name": d.name, "path": str(d), "file_count": count})
+    subdirs = await asyncio.get_running_loop().run_in_executor(None, _source_subdirs)
+    source_mounts = [
+        {"name": os.path.basename(d), "path": d, "file_count": _count_under(dirs, d)}
+        for d in subdirs
+    ]
 
     return {
         "source_images_dir": str(src),

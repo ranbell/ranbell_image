@@ -43,12 +43,13 @@ def test_no_index_is_created_with_a_wait():
 
 
 def test_the_table_is_the_one_source_for_the_images_indexes():
-    """32 fields, each named once — the live collection carries exactly these."""
+    """34 fields, each named once — the live collection carries exactly these."""
     fields = [field for field, _ in qc.IMAGE_PAYLOAD_INDEXES]
     assert len(fields) == len(set(fields)), "同じ欄が二度入っている"
-    assert len(fields) == 32
+    assert len(fields) == 34
     for expected in ("is_draft", "muse_session_id", "character_id",
-                     "creation_record.method", "emotion_loneliness"):
+                     "creation_record.method", "emotion_loneliness",
+                     "dir", "dup_dirs"):
         assert expected in fields
     # umap_x / umap_y must stay out: an index on them rebuilds on every UMAP save.
     assert "umap_x" not in fields and "umap_y" not in fields
@@ -86,7 +87,7 @@ def test_progress_counts_what_is_still_missing():
     out = asyncio.run(_progress(all_fields[:20]))
 
     assert out["ok"] is True
-    assert out["total"] == 32
+    assert out["total"] == 34
     assert out["ready"] == 20
     assert out["building"], "何を作っているかが出ていない"
     assert all(name in all_fields for name in out["building"])

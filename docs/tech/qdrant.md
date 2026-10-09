@@ -78,6 +78,7 @@ Three collections are maintained:
 | `images` | Primary store: all image points with embeddings, color vectors, and rich payload |
 | `alignment` | VLM prompt-alignment evaluation records (one point per evaluated image) |
 | `app_config` | Single-document store for persistent runtime configuration |
+| `scan_dirs` | What the scanner saw last time: one point per directory (`path`, `parent`, `mtime_ns`, `n_images`) plus one meta point (image count at the end of the last pass). Payload-only and rebuildable — losing it costs one full listing |
 
 All collections are created idempotently on startup; missing collections are created automatically.
 
@@ -140,7 +141,11 @@ Each image point carries a rich payload covering file identity, AI processing st
 |---|---|---|
 | `sha256` | KEYWORD | Unique image identifier (SHA-256 hash of file contents) |
 | `name` | KEYWORD | Image filename |
-| `path` | — | Full filesystem path |
+| `path` | — | Full filesystem path (the primary copy) |
+| `dir` | KEYWORD | Parent directory of `path`. The scanner reconciles one directory at a time and asks for exactly the points that live there |
+| `dup_paths` | — | Other paths holding the same bytes: `[{path, size, mtime_ns}]`. Every copy is known, so none is re-read |
+| `dup_dirs` | KEYWORD | Parent directories of `dup_paths` (so a directory query also finds copies) |
+| `mtime_ns` | — | File mtime in nanoseconds, compared with `size` to skip unchanged files. Older points without it match on `mtime` |
 | `mtime` | DATETIME | File modification timestamp |
 | `size` | INTEGER | File size in bytes |
 | `raw_metadata` | — | Full EXIF / PNG metadata dict |
@@ -263,7 +268,10 @@ All search functions are implemented in `backend/app/db/qdrant_client.py` using 
 
 | Method | Qdrant Operation | Description |
 |---|---|---|
-| `upsert_new()` | `upsert()` | Insert placeholder point (no vectors) during file scanning |
+| `upsert_new()` | `upsert()` | Insert placeholder point (no vectors) |
+| `upsert_new_batch()` | `upsert()`, `wait=False` | Insert new image points from a scan, 64 per request |
+| `set_payload_batch()` | `batch_update_points()`, `wait=False` | Payload updates for many points. Identical updates share one operation; at most 32 operations per request |
+| `images_barrier()` | `delete()` of an id no image has, `wait=True` | Returns once every earlier write is applied — closes a batch of `wait=False` writes |
 | `set_payload()` | `set_payload()` | Partial payload update; existing vectors untouched |
 | `set_embedding()` | `update_vectors()` | Store `embedding` + `embedding_small` (truncated from full vector) |
 | `set_color_vector()` | `update_vectors()` | Store single `color_vector` |
@@ -279,7 +287,8 @@ All search functions are implemented in `backend/app/db/qdrant_client.py` using 
 | `delete_payload_keys()` | `delete_payload()` | Remove specific payload fields from a single point |
 | `delete_payload_keys_batch()` | `delete_payload()` with `PointIdsList` | Remove specific payload fields from multiple points |
 | `reset_scope()` | `delete_vectors()` with `FilterSelector` | Bulk vector reset filtered by `embedding_status` value (`all` / `done` / `pending`) |
-| `delete_all_images()` | `delete()` with empty `Filter` | Wipe the entire `images` collection |
+| `delete_batch()` | `delete()` with `PointIdsList`, `wait=False` | Remove many points, 512 per request |
+| `delete_all_images()` | `delete()` with empty `Filter` | Wipe the entire `images` collection (and `scan_dirs`, so the next heal lists everything) |
 
 ---
 
@@ -300,8 +309,14 @@ Scroll operations drive the application's read path — from pagination to analy
 | `get_all_embeddings()` | Collect all `embedding` vectors for UMAP dimensionality reduction |
 | `scroll_color_lab_points()` | Collect images that need color vector backfill |
 | `scroll_tags()` | Collect `positive_prompt` + `wd14_tags` for tag counting |
-| `find_path_mtime_index()` | Collect `sha256 / path / mtime` triples for incremental heal scan |
-| `find_duplicate_path_sha256s()` | Detect multiple Qdrant records for the same file path |
+| `find_by_dirs()` | Every image whose file or copy is in the given directories (`dir` / `dup_dirs`, 64 directories per query) — the scanner's only read of `images` |
+| `get_locations()` | Location fields of known sha256s, batched — is a freshly read file new or a copy? |
+| `load_scan_dirs()` | The directory snapshot and meta point |
+| `distinct_image_dirs()` | Every directory any image is recorded in (strict heal only) |
+| `scroll_dup_groups()` | Images with extra copies (`/admin/duplicates`) |
+| `scroll_by_extraction_method()` | Images extracted a given way — targets a metadata refresh |
+
+**Write cost.** On the reference install (16k images, `on_disk_payload`, 34 payload indexes) one `set_payload` operation costs ~90 ms whether it names one point or a thousand, and a burst of writes sets off the optimizer (status yellow), during which a single request was measured at over 30 s. So the scanner writes as little as it can, groups identical updates, sends with `wait=False` and closes with one `images_barrier()`; its bulk calls use a second client with a 600 s timeout.
 
 ### Visualization & Analysis
 

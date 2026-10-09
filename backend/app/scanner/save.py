@@ -46,7 +46,8 @@ async def save_generated_image(
     await loop.run_in_executor(None, path.write_bytes, img_bytes)
 
     try:
-        await register_image(path, db)
+        # The bytes are still in hand — registering does not read the file back.
+        await register_image(path, db, data=img_bytes)
         return sha256
     except Exception as exc:
         logger.error("[save] register_image failed for %s: %s", path.name, exc)

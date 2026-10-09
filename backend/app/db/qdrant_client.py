@@ -2,6 +2,7 @@ import asyncio
 import base64
 import json
 import logging
+import os
 import random
 import uuid
 from collections import defaultdict
@@ -57,6 +58,14 @@ CHARACTER_COMPAT_COLLECTION = "character_compat"
 # Payload-only — same shape as muse_sessions.
 MUSE_LOUNGE_COLLECTION = "muse_lounge"
 MUSE_HANDPOST_COLLECTION = "muse_handpost"
+# What the scanner saw last time, one point per directory: its mtime when it
+# was last reconciled. A directory whose mtime has not moved has had nothing
+# added, removed or renamed in it, so a heal does not list it. Payload-only and
+# rebuildable — losing it costs one full listing, never data.
+SCAN_DIRS_COLLECTION = "scan_dirs"
+SCAN_META_POINT_ID = str(uuid.UUID("00000000-0000-0000-0000-00000000005c"))
+# Image payload fields the scanner reads to reconcile a directory.
+SCAN_LOCATION_FIELDS = ["sha256", "path", "size", "mtime", "mtime_ns", "dup_paths", "star_rating"]
 
 _SORT_ORDER_BY = {
     "newest":      qm.OrderBy(key="mtime", direction=qm.Direction.DESC),
@@ -193,6 +202,11 @@ IMAGE_PAYLOAD_INDEXES: tuple[tuple[str, Any], ...] = (
     ("avg_saturation", qm.PayloadSchemaType.FLOAT),
     ("avg_value", qm.PayloadSchemaType.FLOAT),
     ("model_name", qm.PayloadSchemaType.KEYWORD),
+    # Parent directory of `path`, and of every extra copy in `dup_paths`. The
+    # scanner reconciles one directory at a time and asks for exactly the
+    # points that live there, instead of scrolling the whole collection.
+    ("dir", qm.PayloadSchemaType.KEYWORD),
+    ("dup_dirs", qm.PayloadSchemaType.KEYWORD),
     # umap_x / umap_y are only used for existence checks so no index is needed
     # (an index would trigger a rebuild on every set_payload call, slowing UMAP saves)
     ("star_rating", qm.PayloadSchemaType.INTEGER),
@@ -224,6 +238,12 @@ IMAGE_PAYLOAD_INDEXES: tuple[tuple[str, Any], ...] = (
 class QdrantDBClient:
     def __init__(self) -> None:
         self._qc = AsyncQdrantClient(url=settings.qdrant_url, timeout=30)
+        # The scanner's bulk reads and writes. While Qdrant is optimizing (status
+        # yellow — which a large batch of writes itself sets off) a single
+        # request was measured taking 8 s for 10 points and over 30 s for a
+        # batch, and one timed-out request failed the whole heal. These calls
+        # are already chunked; they only need to be allowed to wait.
+        self._qc_bulk = AsyncQdrantClient(url=settings.qdrant_url, timeout=600)
         self.has_mrl = False  # True when embedding_small vector is available
         self._small_dim: int = settings.embed_dim_small  # actual dim used in collection
         self._embed_dim: int = settings.embed_dim
@@ -817,6 +837,14 @@ class QdrantDBClient:
                 wait=False,
             )
 
+        if not await self._qc.collection_exists(SCAN_DIRS_COLLECTION):
+            await self._qc.create_collection(
+                collection_name=SCAN_DIRS_COLLECTION,
+                vectors_config={},
+                on_disk_payload=True,
+            )
+            logger.info("Created collection: %s", SCAN_DIRS_COLLECTION)
+
         # Muse long-term shoot memories (embedded summaries)
         try:
             from ..muse import memories_db as muse_memories_db
@@ -925,6 +953,7 @@ class QdrantDBClient:
 
     async def close(self) -> None:
         await self._qc.close()
+        await self._qc_bulk.close()
 
     # ── Image CRUD ───────────────────────────────────────────────────────────────
 
@@ -1694,51 +1723,271 @@ class QdrantDBClient:
             points=qm.PointIdsList(points=point_ids),
         )
 
-    async def find_path_mtime_index(self) -> dict[str, dict]:
-        """Return {path: {sha256, mtime}} index for incremental heal scan."""
-        index: dict[str, dict] = {}
+    # ── Scanner support ──────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _scan_dir_point_id(path: str) -> str:
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, "scan-dir:" + path))
+
+    async def load_scan_dirs(self) -> tuple[dict[str, dict], dict]:
+        """Return ({dir path: snapshot entry}, meta) — one point per directory."""
+        dirs: dict[str, dict] = {}
+        meta: dict = {}
         offset = None
         while True:
-            points, next_offset = await self._qc.scroll(
-                collection_name=IMAGES_COLLECTION,
-                limit=1000,
+            points, next_offset = await self._qc_bulk.scroll(
+                collection_name=SCAN_DIRS_COLLECTION,
+                limit=2000,
                 offset=offset,
-                with_payload=qm.PayloadSelectorInclude(include=["sha256", "path", "mtime"]),
+                with_payload=True,
                 with_vectors=False,
             )
             for p in points:
-                path = p.payload.get("path")
-                if path:
-                    index[path] = {
-                        "sha256": p.payload.get("sha256", ""),
-                        "mtime": p.payload.get("mtime", ""),
-                    }
+                pl = p.payload or {}
+                if pl.get("meta"):
+                    meta = pl
+                elif pl.get("path"):
+                    dirs[pl["path"]] = pl
             if next_offset is None:
                 break
             offset = next_offset
-        return index
+        return dirs, meta
 
-    async def find_duplicate_path_sha256s(self) -> dict[str, list[str]]:
-        """Return {path: [sha256, ...]} for paths with more than one Qdrant entry."""
-        path_map: defaultdict[str, list[str]] = defaultdict(list)
+    async def put_scan_dirs(self, entries: list[dict]) -> None:
+        for i in range(0, len(entries), 512):
+            await self._qc_bulk.upsert(
+                collection_name=SCAN_DIRS_COLLECTION,
+                points=[
+                    qm.PointStruct(id=self._scan_dir_point_id(e["path"]), vector={}, payload=e)
+                    for e in entries[i:i + 512]
+                ],
+            )
+
+    async def delete_scan_dirs(self, paths: list[str]) -> None:
+        for i in range(0, len(paths), 512):
+            await self._qc_bulk.delete(
+                collection_name=SCAN_DIRS_COLLECTION,
+                points_selector=qm.PointIdsList(
+                    points=[self._scan_dir_point_id(p) for p in paths[i:i + 512]]
+                ),
+            )
+
+    async def put_scan_meta(self, meta: dict) -> None:
+        await self._qc_bulk.upsert(
+            collection_name=SCAN_DIRS_COLLECTION,
+            points=[qm.PointStruct(id=SCAN_META_POINT_ID, vector={}, payload={**meta, "meta": True})],
+        )
+
+    async def clear_scan_dirs(self) -> None:
+        """Forget every directory snapshot, so the next heal lists everything."""
+        await self._qc_bulk.delete(
+            collection_name=SCAN_DIRS_COLLECTION,
+            points_selector=qm.FilterSelector(filter=qm.Filter()),
+        )
+
+    async def find_by_dirs(self, dirs: list[str]) -> list[dict]:
+        """Every image with its file, or one of its extra copies, in `dirs`."""
+        docs: dict[str, dict] = {}
+        for i in range(0, len(dirs), 64):
+            chunk = dirs[i:i + 64]
+            flt = qm.Filter(should=[
+                qm.FieldCondition(key="dir", match=qm.MatchAny(any=chunk)),
+                qm.FieldCondition(key="dup_dirs", match=qm.MatchAny(any=chunk)),
+            ])
+            offset = None
+            while True:
+                points, next_offset = await self._qc_bulk.scroll(
+                    collection_name=IMAGES_COLLECTION,
+                    scroll_filter=flt,
+                    limit=1000,
+                    offset=offset,
+                    with_payload=qm.PayloadSelectorInclude(include=SCAN_LOCATION_FIELDS),
+                    with_vectors=False,
+                )
+                for p in points:
+                    pl = p.payload or {}
+                    if pl.get("sha256"):
+                        docs[pl["sha256"]] = pl
+                if next_offset is None:
+                    break
+                offset = next_offset
+        return list(docs.values())
+
+    async def get_locations(self, sha256s: list[str]) -> dict[str, dict]:
+        """{sha256: location payload} for the ones that exist."""
+        out: dict[str, dict] = {}
+        for i in range(0, len(sha256s), 256):
+            points = await self._qc_bulk.retrieve(
+                collection_name=IMAGES_COLLECTION,
+                ids=[sha256_to_point_id(s) for s in sha256s[i:i + 256]],
+                with_payload=qm.PayloadSelectorInclude(include=SCAN_LOCATION_FIELDS),
+                with_vectors=False,
+            )
+            for p in points:
+                pl = p.payload or {}
+                if pl.get("sha256"):
+                    out[pl["sha256"]] = pl
+        return out
+
+    async def images_barrier(self) -> None:
+        """Return once every earlier write to the images collection is applied.
+
+        Qdrant applies a collection's updates in the order it accepted them, so
+        a no-op that waits (deleting an id no image can have) waits for all of
+        them. The bulk writes below go in with wait=False — accepted into the
+        WAL and answered at once — and end with this one wait: measured 300
+        per-point updates in ~6 s this way against ~27 s waiting on each.
+        """
+        await self._qc_bulk.delete(
+            collection_name=IMAGES_COLLECTION,
+            points_selector=qm.PointIdsList(points=[str(uuid.UUID(int=0))]),
+            wait=True,
+        )
+
+    async def upsert_new_batch(self, items: list[tuple[str, dict]], *, wait: bool = True) -> None:
+        """Insert new image points (no vectors), 64 per request.
+
+        `wait=False` leaves the final images_barrier() to the caller.
+        """
+        for i in range(0, len(items), 64):
+            await self._qc_bulk.upsert(
+                collection_name=IMAGES_COLLECTION,
+                points=[
+                    qm.PointStruct(id=sha256_to_point_id(sha), vector={}, payload=payload)
+                    for sha, payload in items[i:i + 64]
+                ],
+                wait=False,
+            )
+        if wait and items:
+            await self.images_barrier()
+
+    async def set_payload_batch(self, items: list[tuple[str, dict]], *, wait: bool = True) -> None:
+        """Partial payload updates for many points.
+
+        What a write costs here is the number of operations, not of points: on
+        the live install one set_payload operation is ~90 ms (on-disk payload,
+        ~34 indexes), whether it names one point or a thousand. Points getting
+        an identical update share one operation, and a request carries few
+        enough operations to stay well inside the client's 30 s timeout — 256
+        per request is what timed out the first heal after this was deployed.
+        """
+        groups: dict[str, tuple[dict, list[str]]] = {}
+        for sha, updates in items:
+            key = json.dumps(updates, sort_keys=True, default=str)
+            groups.setdefault(key, (updates, []))[1].append(sha256_to_point_id(sha))
+        ops = [
+            qm.SetPayloadOperation(set_payload=qm.SetPayload(payload=updates, points=ids[j:j + 1000]))
+            for updates, ids in groups.values()
+            for j in range(0, len(ids), 1000)
+        ]
+        for i in range(0, len(ops), 32):
+            await self._qc_bulk.batch_update_points(
+                collection_name=IMAGES_COLLECTION, update_operations=ops[i:i + 32], wait=False,
+            )
+        if wait and ops:
+            await self.images_barrier()
+
+    async def delete_batch(self, sha256s: list[str], *, wait: bool = True) -> None:
+        for i in range(0, len(sha256s), 512):
+            await self._qc_bulk.delete(
+                collection_name=IMAGES_COLLECTION,
+                points_selector=qm.PointIdsList(
+                    points=[sha256_to_point_id(s) for s in sha256s[i:i + 512]]
+                ),
+                wait=False,
+            )
+        if wait and sha256s:
+            await self.images_barrier()
+
+    async def backfill_image_dirs(self) -> int:
+        """Write `dir` onto images registered before it existed. Returns how many.
+
+        One pass over the collection; every image in the same folder gets the
+        same value, so set_payload_batch writes one operation per folder.
+        """
+        items: list[tuple[str, dict]] = []
         offset = None
         while True:
-            points, next_offset = await self._qc.scroll(
+            points, next_offset = await self._qc_bulk.scroll(
                 collection_name=IMAGES_COLLECTION,
+                limit=2000,
+                offset=offset,
+                with_payload=qm.PayloadSelectorInclude(include=["sha256", "path", "dir"]),
+                with_vectors=False,
+            )
+            for p in points:
+                pl = p.payload or {}
+                if pl.get("sha256") and pl.get("path") and not pl.get("dir"):
+                    items.append((pl["sha256"], {"dir": os.path.dirname(pl["path"])}))
+            if next_offset is None:
+                break
+            offset = next_offset
+        await self.set_payload_batch(items)
+        return len(items)
+
+    async def distinct_image_dirs(self) -> set[str]:
+        """Every directory any image (or extra copy) is recorded in. Whole
+        collection — only the strict heal asks."""
+        dirs: set[str] = set()
+        offset = None
+        while True:
+            points, next_offset = await self._qc_bulk.scroll(
+                collection_name=IMAGES_COLLECTION,
+                limit=2000,
+                offset=offset,
+                with_payload=qm.PayloadSelectorInclude(include=["dir", "dup_dirs"]),
+                with_vectors=False,
+            )
+            for p in points:
+                pl = p.payload or {}
+                if pl.get("dir"):
+                    dirs.add(pl["dir"])
+                dirs.update(pl.get("dup_dirs") or ())
+            if next_offset is None:
+                break
+            offset = next_offset
+        return dirs
+
+    async def scroll_by_extraction_method(self, methods: list[str]) -> list[dict]:
+        """sha256 + path of every image whose prompt came out of one of
+        `methods` (extraction.method) — what a re-extraction is aimed at."""
+        flt = qm.Filter(must=[qm.FieldCondition(key="extraction.method", match=qm.MatchAny(any=methods))])
+        out: list[dict] = []
+        offset = None
+        while True:
+            points, next_offset = await self._qc_bulk.scroll(
+                collection_name=IMAGES_COLLECTION,
+                scroll_filter=flt,
                 limit=1000,
                 offset=offset,
                 with_payload=qm.PayloadSelectorInclude(include=["sha256", "path"]),
                 with_vectors=False,
             )
-            for p in points:
-                path = p.payload.get("path")
-                sha256 = p.payload.get("sha256")
-                if path and sha256:
-                    path_map[path].append(sha256)
+            out.extend(p.payload for p in points if p.payload)
             if next_offset is None:
                 break
             offset = next_offset
-        return {p: shas for p, shas in path_map.items() if len(shas) > 1}
+        return out
+
+    async def scroll_dup_groups(self) -> list[dict]:
+        """Images that also live at one or more other paths (same bytes)."""
+        flt = qm.Filter(must_not=[qm.IsEmptyCondition(is_empty=qm.PayloadField(key="dup_dirs"))])
+        out: list[dict] = []
+        offset = None
+        while True:
+            points, next_offset = await self._qc_bulk.scroll(
+                collection_name=IMAGES_COLLECTION,
+                scroll_filter=flt,
+                limit=1000,
+                offset=offset,
+                with_payload=qm.PayloadSelectorInclude(include=SCAN_LOCATION_FIELDS),
+                with_vectors=False,
+            )
+            out.extend(p.payload for p in points if p.payload)
+            if next_offset is None:
+                break
+            offset = next_offset
+        return out
 
     async def scroll_tags(self) -> list[dict]:
         """Fetch all points with only prompt and wd14_tags fields (for tag counting)."""
@@ -2422,10 +2671,10 @@ class QdrantDBClient:
                 IMAGES_COLLECTION,
                 limit=500,
                 offset=offset,
-                with_payload=qm.PayloadSelectorInclude(include=["sha256", "path"]),
+                with_payload=qm.PayloadSelectorInclude(include=["sha256", "path", "dup_paths"]),
                 with_vectors=False,
             )
-            to_update: list[tuple[str, str, bool]] = []
+            to_update: list[tuple[str, dict]] = []
             for p in points:
                 pl = p.payload or {}
                 sha256 = pl.get("sha256")
@@ -2433,22 +2682,32 @@ class QdrantDBClient:
                 if not sha256 or not old_path.startswith(old_prefix):
                     continue
                 new_path = new_prefix + old_path[len(old_prefix):]
-                is_ref = new_path.startswith(source_prefix)
-                to_update.append((sha256, new_path, is_ref))
+                update: dict = {
+                    "path": new_path,
+                    "dir": os.path.dirname(new_path),
+                    "is_reference": new_path.startswith(source_prefix),
+                }
+                dups = pl.get("dup_paths") or []
+                if dups:
+                    moved = [
+                        {**d, "path": new_prefix + d["path"][len(old_prefix):]}
+                        if d.get("path", "").startswith(old_prefix) else d
+                        for d in dups
+                    ]
+                    update["dup_paths"] = moved
+                    update["dup_dirs"] = sorted({os.path.dirname(d["path"]) for d in moved})
+                to_update.append((sha256, update))
             if to_update:
-                await asyncio.gather(*[
-                    self._qc.set_payload(
-                        collection_name=IMAGES_COLLECTION,
-                        payload={"path": new_path, "is_reference": is_ref},
-                        points=qm.PointIdsList(points=[sha256_to_point_id(sha256)]),
-                    )
-                    for sha256, new_path, is_ref in to_update
-                ])
+                await self.set_payload_batch(to_update)
                 count += len(to_update)
                 logger.info("migrate_path_prefix: %d docs updated so far", count)
             if next_offset is None:
                 break
             offset = next_offset
+        # The directory snapshot is keyed by path; every one under the old
+        # prefix is now wrong. Start the next heal from a clean listing.
+        if count:
+            await self.clear_scan_dirs()
         return count
 
     async def cleanup_orphan_alignments(self) -> int:
@@ -2679,6 +2938,9 @@ class QdrantDBClient:
                 collection_name=IMAGES_COLLECTION,
                 points_selector=qm.FilterSelector(filter=qm.Filter()),
             )
+        # With no points left, an "unchanged" directory would otherwise be
+        # skipped and its files never re-registered.
+        await self.clear_scan_dirs()
         return count
 
     # ── Config ───────────────────────────────────────────────────────────────────

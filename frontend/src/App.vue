@@ -155,7 +155,7 @@ const hasAnyActiveJob = computed(() =>
   [...jobsMap.value.values()].some(j => j.state === 'running' || j.state === 'cancelling')
 )
 
-const SCAN_TITLES = new Set(['scan_heal', 'scan_full', 'meta_update'])
+const SCAN_TITLES = new Set(['scan_heal', 'scan_sync', 'scan_strict', 'scan_full', 'meta_update'])
 const PIPELINE_TITLES = new Set(['ai_pipeline', 'ai_pipeline_auto', 'ai_pipeline_post_scan', 'ai_pipeline_continue'])
 
 // SYNC lane scan jobs (running / cancelling / queued)

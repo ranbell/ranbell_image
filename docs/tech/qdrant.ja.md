@@ -78,6 +78,7 @@ Ranbell Image プロジェクトで使用しているすべての Qdrant 機能�
 | `images` | 主コレクション：埋め込みベクトル・カラーベクトル・リッチなペイロードを持つ全画像ポイント |
 | `alignment` | VLM プロンプト適合度評価レコード（評価済み画像 1 枚につき 1 ポイント） |
 | `app_config` | 永続化ランタイム設定の単一ドキュメントストア |
+| `scan_dirs` | スキャナが前回見たもの。フォルダごとに1点（`path`・`parent`・`mtime_ns`・`n_images`）と、メタ点1つ（前回の終わりの画像数）。payload のみで再構築可能 —— 失っても全フォルダを一度一覧し直すだけ |
 
 すべてのコレクションは起動時にべき等に作成されます。存在しないコレクションは自動作成されます。
 
@@ -140,7 +141,11 @@ query_points(
 |---|---|---|
 | `sha256` | KEYWORD | 画像の一意識別子（ファイル内容の SHA-256 ハッシュ） |
 | `name` | KEYWORD | 画像ファイル名 |
-| `path` | — | フルファイルシステムパス |
+| `path` | — | フルファイルシステムパス（本体のコピー） |
+| `dir` | KEYWORD | `path` の親ディレクトリ。スキャナはフォルダ単位で突き合わせ、そこにある点だけを引く |
+| `dup_paths` | — | 同じバイト列を持つ別パス `[{path, size, mtime_ns}]`。全コピーを覚えているので、どれも読み直さない |
+| `dup_dirs` | KEYWORD | `dup_paths` の親ディレクトリ（フォルダで引いたときにコピーも見つかるように） |
+| `mtime_ns` | — | ナノ秒の mtime。`size` と合わせて、変わっていないファイルを読まずに済ませる。これを持たない古い点は `mtime` で照合 |
 | `mtime` | DATETIME | ファイル更新タイムスタンプ |
 | `size` | INTEGER | ファイルサイズ（バイト） |
 | `raw_metadata` | — | 完全な EXIF / PNG メタデータ辞書 |
@@ -284,7 +289,10 @@ Ollama が `positive_prompt` + `wd14_tags` を解析して付与する 12 次元
 
 | メソッド | Qdrant 操作 | 説明 |
 |---|---|---|
-| `upsert_new()` | `upsert()` | ファイルスキャン時にプレースホルダーポイント（ベクトルなし）を挿入 |
+| `upsert_new()` | `upsert()` | プレースホルダーポイント（ベクトルなし）を挿入 |
+| `upsert_new_batch()` | `upsert()`、`wait=False` | スキャンで見つけた新規画像を 64 件ずつ挿入 |
+| `set_payload_batch()` | `batch_update_points()`、`wait=False` | 多数の点の payload 更新。同じ更新は 1 操作にまとめ、1 リクエスト最大 32 操作 |
+| `images_barrier()` | 存在しない id の `delete()`、`wait=True` | それ以前の書き込みがすべて反映されたら返る —— `wait=False` の書き込みの締め |
 | `set_payload()` | `set_payload()` | 部分ペイロード更新；既存ベクトルは変更なし |
 | `set_embedding()` | `update_vectors()` | `embedding` + `embedding_small`（フルベクトルを打ち切り）を格納 |
 | `set_color_vector()` | `update_vectors()` | 単一の `color_vector` を格納 |
@@ -300,7 +308,8 @@ Ollama が `positive_prompt` + `wd14_tags` を解析して付与する 12 次元
 | `delete_payload_keys()` | `delete_payload()` | 単一ポイントから特定のペイロードフィールドを削除 |
 | `delete_payload_keys_batch()` | `delete_payload()` with `PointIdsList` | 複数ポイントから特定のペイロードフィールドを削除 |
 | `reset_scope()` | `delete_vectors()` with `FilterSelector` | `embedding_status` 値でフィルタリングしたベクトルを一括リセット（`all` / `done` / `pending`） |
-| `delete_all_images()` | `delete()` with empty `Filter` | `images` コレクション全体を消去 |
+| `delete_batch()` | `delete()` with `PointIdsList`、`wait=False` | 多数の点を 512 件ずつ削除 |
+| `delete_all_images()` | `delete()` with empty `Filter` | `images` コレクション全体を消去（`scan_dirs` も消し、次の heal で全フォルダを一覧させる） |
 
 ---
 
@@ -321,8 +330,14 @@ Ollama が `positive_prompt` + `wd14_tags` を解析して付与する 12 次元
 | `get_all_embeddings()` | UMAP 次元削減のための全 `embedding` ベクトル収集 |
 | `scroll_color_lab_points()` | カラーベクトルのバックフィルが必要な画像を収集 |
 | `scroll_tags()` | タグカウント用の `positive_prompt` + `wd14_tags` を収集 |
-| `find_path_mtime_index()` | インクリメンタル修復スキャン用の `sha256 / path / mtime` トリプルを収集 |
-| `find_duplicate_path_sha256s()` | 同一ファイルパスを持つ複数の Qdrant レコードを検出 |
+| `find_by_dirs()` | 指定フォルダにファイルかコピーを持つ画像すべて（`dir` / `dup_dirs`、1 問い合わせ 64 フォルダ）—— スキャナが `images` を読むのはこれだけ |
+| `get_locations()` | 既知の sha256 の置き場所をまとめて取得 —— 読んだファイルが新規か既存のコピーかの判定 |
+| `load_scan_dirs()` | フォルダのスナップショットとメタ点 |
+| `distinct_image_dirs()` | 画像が記録されている全フォルダ（厳密チェックのときだけ） |
+| `scroll_dup_groups()` | 別パスのコピーを持つ画像（`/admin/duplicates`） |
+| `scroll_by_extraction_method()` | 指定の抽出方法で取られた画像 —— メタデータ更新の対象を絞る |
+
+**書き込みの重さ。** 実機（16k 枚・`on_disk_payload`・payload 索引 34 本）では `set_payload` 1 操作が点 1 つでも 1000 でも約 90 ms。まとめて書くと最適化（status yellow）が走り、その間は 1 リクエストが 30 秒を超えた例もある。だからスキャナは書く量を最小にし、同じ更新はまとめ、`wait=False` で流して最後に `images_barrier()` で 1 回だけ待つ。まとめ処理は 600 秒のタイムアウトを持つ別クライアントで行う。
 
 ### 可視化・分析
 

@@ -1,6 +1,7 @@
 """Main entry point for extracting metadata from image files."""
 from __future__ import annotations
 
+import io
 import json
 import logging
 from pathlib import Path
@@ -20,10 +21,14 @@ from ._utils import basename, compute_hash, now_iso
 logger = logging.getLogger(__name__)
 
 
-def extract_from_image(path: Path) -> ExtractionResult:
-    """Build ExtractionResult from an image file (with fallback chain)."""
+def extract_from_image(path: Path, data: bytes | None = None) -> ExtractionResult:
+    """Build ExtractionResult from an image file (with fallback chain).
+
+    `data` is the file's bytes when the caller already read them (the scanner
+    reads each new file once and shares it) — the file is then not reopened.
+    """
     try:
-        png_info = _read_png_info(path)
+        png_info = _read_png_info(path, data)
     except Exception as exc:
         logger.warning("metadata read failed: %s — %s", path, exc)
         return _failed_result()
@@ -169,8 +174,8 @@ def extract_from_image(path: Path) -> ExtractionResult:
     )
 
 
-def _read_png_info(path: Path) -> dict:
-    with Image.open(path) as img:
+def _read_png_info(path: Path, data: bytes | None = None) -> dict:
+    with Image.open(io.BytesIO(data) if data is not None else path) as img:
         return img.info or {}
 
 
