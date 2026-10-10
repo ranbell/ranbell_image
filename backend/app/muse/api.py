@@ -12,9 +12,7 @@ from starlette.responses import StreamingResponse
 from . import events
 from .catalog import build_muse_catalog
 from . import service
-from . import video_expand
-from .ctx import refine_num_ctx
-from .shared import _vision_model, images_by_sha
+from . import session_db, video_expand, video_talk
 
 logger = logging.getLogger(__name__)
 
@@ -76,19 +74,26 @@ class StandingBody(BaseModel):
     standing: list[str] = Field(default_factory=list)
 
 
-class VideoIdeasBody(BaseModel):
+class VideoStartBody(BaseModel):
     sha256: str
     short: str = ""
     duration_s: int = 5
-    # The panel's last reading of this same still. Sent back on "pitch other
-    # ideas" so the picture is not read again (~45s on gemma4 26B).
-    still: str = ""
+
+
+class VideoChatBody(BaseModel):
+    message: str
+    duration_s: int | None = None
 
 
 class VideoWriteBody(BaseModel):
-    still: str
-    idea: dict
-    duration_s: int = 5
+    kind: str
+    duration_s: int | None = None
+
+
+def _video_length(session: dict, duration_s: int | None) -> None:
+    """The panel's seconds picker, taken whenever it is sent with a move."""
+    if duration_s in video_expand.DURATIONS and session.get("video"):
+        session["video"]["duration_s"] = duration_s
 
 
 def _db(request: Request):
@@ -367,77 +372,71 @@ def _video_error(session: dict, status: int, ja: str, en: str) -> HTTPException:
     return HTTPException(status, ja if locale.startswith("ja") else en)
 
 
-def _video_duration(session: dict, duration_s: int) -> int:
-    if duration_s not in video_expand.DURATIONS:
-        raise _video_error(session, 400, "秒数は 5、10、15 です", "Length is 5, 10 or 15 seconds")
-    return duration_s
+async def _video(request: Request, session: dict, move):
+    try:
+        session = await move()
+    except video_talk.VideoTalkError as exc:
+        raise HTTPException(400, exc.message) from exc
+    return service.public_view(session)
 
 
-def _video_cast(session: dict) -> list[dict[str, str]]:
-    people = video_expand.cast(session)
-    if not people:
-        raise _video_error(session, 400, "女優が決まっていません", "No actress is cast yet")
-    return people
+@router.get("/video/source/{sha256}")
+async def video_source(sha256: str, request: Request):
+    """Which Muse session a picture came out of, and who is in it.
 
-
-@router.post("/sessions/{session_id}/video/ideas")
-async def video_ideas(session_id: str, body: VideoIdeasBody, request: Request):
-    """Look at one finished still and pitch one video idea per kind of scene.
-
-    The note is optional: without one the ideas start from the still and the
-    cast alone. The session is not saved.
+    The gallery's "make a video" opens that session to carry on from the shoot;
+    a picture with no session starts a new one with an actress to talk it over.
     """
+    docs = await _db(request).get_by_sha256s([sha256])
+    meta = docs[0] if docs else {}
+    sid = str(meta.get("muse_session_id") or "")
+    if sid and await session_db.load(_db(request), sid) is None:
+        sid = ""
+    return {
+        "session_id": sid,
+        "character_id": str(meta.get("character_id") or ""),
+        "partner_character_id": str(meta.get("partner_character_id") or ""),
+    }
+
+
+@router.post("/sessions/{session_id}/video/start")
+async def video_start(session_id: str, body: VideoStartBody, request: Request):
+    """Bring a picture to the table and talk it into a video with the actress."""
     session = await _session(request, session_id)
-    duration_s = _video_duration(session, body.duration_s)
-    sha = body.sha256.strip()
-    if sha not in video_expand.shoot_shas(session):
-        raise _video_error(session, 400, "本番の画像を選んでください", "Pick one of the final stills")
-    people = _video_cast(session)
-    inputs = session.get("inputs") or {}
-    locale = str(inputs.get("locale") or "ja")
-    num_ctx = refine_num_ctx(session)
-    still, blind = body.still.strip(), False
-    if not still:
-        images = await images_by_sha(_db(request), [sha])
-        if not images:
-            raise _video_error(session, 400, "画像を読めません", "Could not read the still")
-        still, blind = await video_expand.look(
-            _ollama(request), image=images[0], people=people,
-            model=_vision_model(inputs), num_ctx=num_ctx,
-            fallback=str((session.get("shoot") or {}).get("prompt") or ""),
-        )
-    if not still:
-        raise _video_error(
-            session, 502, "画像を読めるモデルが要ります（vision_model）",
-            "An image-capable model is needed (vision_model)",
-        )
-    ideas = await video_expand.ideas(
-        _ollama(request), still=still, people=people, short=body.short,
-        duration_s=duration_s, locale=locale,
-        model=str(inputs.get("model") or ""), num_ctx=num_ctx,
-    )
-    return {"still": still, "blind": blind, "ideas": ideas, "duration_s": duration_s}
+    if body.duration_s not in video_expand.DURATIONS:
+        raise _video_error(session, 400, "秒数は 5、10、15 です", "Length is 5, 10 or 15 seconds")
+    if not (session.get("character") or {}).get("character_id"):
+        raise _video_error(session, 400, "女優を選んでください", "Pick an actress first")
+    return await _video(request, session, lambda: video_talk.start(
+        _db(request), _ollama(request), session,
+        sha=body.sha256.strip(), short=body.short, duration_s=body.duration_s,
+    ))
+
+
+@router.post("/sessions/{session_id}/video/chat")
+async def video_chat(session_id: str, body: VideoChatBody, request: Request):
+    session = await _session(request, session_id)
+    if not body.message.strip():
+        raise _video_error(session, 400, "ひとこと書いてください", "Say something first")
+    _video_length(session, body.duration_s)
+    return await _video(request, session, lambda: video_talk.chat(
+        _db(request), _ollama(request), session, body.message.strip(),
+    ))
 
 
 @router.post("/sessions/{session_id}/video/write")
 async def video_write(session_id: str, body: VideoWriteBody, request: Request):
-    """Write the idea the Showrunner picked as an H3 prompt. Not saved."""
     session = await _session(request, session_id)
-    duration_s = _video_duration(session, body.duration_s)
-    if not [b for b in (body.idea.get("beats") or []) if str(b).strip()]:
-        raise _video_error(session, 400, "案を選んでください", "Pick an idea first")
-    inputs = session.get("inputs") or {}
-    locale = str(inputs.get("locale") or "ja")
-    try:
-        out = await video_expand.write(
-            _ollama(request), still=body.still, people=_video_cast(session),
-            idea=body.idea, duration_s=duration_s,
-            model=str(inputs.get("model") or ""),
-            num_ctx=refine_num_ctx(session), locale=locale,
-        )
-    except video_expand.VideoError as exc:
-        raise HTTPException(502, exc.message) from exc
-    return {"prompt": out["prompt"], "shots": out["shots"], "duration_s": duration_s}
+    _video_length(session, body.duration_s)
+    return await _video(request, session, lambda: video_talk.write(
+        _db(request), _ollama(request), session, body.kind.strip(),
+    ))
+
+
+@router.post("/sessions/{session_id}/video/stop")
+async def video_stop(session_id: str, request: Request):
+    session = await _session(request, session_id)
+    return await _video(request, session, lambda: video_talk.stop(_db(request), session))
 
 
 @router.post("/sessions/{session_id}/finish")

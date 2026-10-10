@@ -163,7 +163,15 @@ def cast(session: dict[str, Any]) -> list[dict[str, str]]:
 HOOKS: dict[str, str] = {"habit": "a habit", "likes": "likes", "prop": "often carries"}
 
 
+_UNNAMED = (
+    "- Not known by name. They are whoever the photograph shows; name each "
+    "one by how they look (hair, eyes, clothes)."
+)
+
+
 def _who(people: list[dict[str, str]], *, hook: str | None = None, ground: bool = False) -> str:
+    if not people:
+        return _UNNAMED
     lines = []
     for p in people:
         looks = ", ".join(x for x in (p["hair"], p["eyes"]) if x)
@@ -228,7 +236,7 @@ async def look(
 
 def idea_prompt(
     kind: str, *, still: str, people: list[dict[str, str]], short: str,
-    duration_s: int, locale: str, hook: str | None = None,
+    duration_s: int, locale: str, hook: str | None = None, context: str = "",
 ) -> tuple[str, str]:
     """(system, prompt) for one idea of one kind."""
     k = KINDS[kind]
@@ -261,7 +269,8 @@ def idea_prompt(
         f"Length: {duration_s} seconds.\n"
         f"Who is in it:\n{_who(people, hook=hook, ground=True)}\n\n"
         f"What the photograph shows (this is second 0):\n{still.strip()}\n\n"
-        f"{direction}"
+        + (f"The shoot this photograph came out of:\n{context.strip()}\n\n" if context.strip() else "")
+        + f"{direction}"
     )
     return system, prompt
 
@@ -279,6 +288,7 @@ async def ideas(
     ollama, *, still: str, people: list[dict[str, str]], short: str,
     duration_s: int, locale: str, model: str | None, num_ctx: int | None,
     kinds: tuple[str, ...] = tuple(KINDS), rng: random.Random | None = None,
+    context: str = "",
 ) -> list[dict[str, Any]]:
     """One idea per kind. A kind that fails is reported, not dropped silently."""
     out: list[dict[str, Any]] = []
@@ -287,7 +297,7 @@ async def ideas(
     for kind in kinds:
         system, prompt = idea_prompt(
             kind, still=still, people=people, short=short,
-            duration_s=duration_s, locale=locale, hook=hooks[kind],
+            duration_s=duration_s, locale=locale, hook=hooks[kind], context=context,
         )
         entry: dict[str, Any] = {"kind": kind, "label": KINDS[kind]["ja" if ja else "en"]}
         raw = ""
@@ -323,7 +333,7 @@ SHOT 2 AT seconds: ...
 SOUND: ...
 MUSIC: ...
 
-- SHOT: one paragraph in English on a single line. The number after AT is when the shot starts, in seconds; later shots are cuts and start before the clip ends. The video model has no memory between shots, so in each shot name every person on screen with her hair and eyes, say what her body and face do in order, and give the camera one move (static, push in, pull out, pan, truck, tilt, arc, tracking or handheld), its amplitude (small, medium or large), its speed (slow, medium or fast) and the motion that motivates it. Write a later shot so it reads after the words "the camera cuts to".
+- SHOT: one paragraph in English on a single line. The number after AT is when the shot starts, in seconds; later shots are cuts and start before the clip ends. The video model has no memory between shots, so in each shot name every person on screen with her hair and eyes (by name when you are given one, otherwise by how she looks), say what her body and face do in order, and give the camera one move (static, push in, pull out, pan, truck, tilt, arc, tracking or handheld), its amplitude (small, medium or large), its speed (slow, medium or fast) and the motion that motivates it. Write a later shot so it reads after the words "the camera cuts to".
 - SOUND: the physical sounds in order. No dialogue.
 - MUSIC: the instrument you are given, its tempo, and whether it rises or falls."""
 
@@ -363,7 +373,9 @@ def parse_instruments(raw: str) -> list[str]:
     out: list[str] = []
     for line in (raw or "").splitlines():
         name = re.sub(r"^\s*(?:[-*•]|\d+[.)])\s*", "", line).strip().strip("*").strip()
-        if name and len(name) <= 60 and name.lower() not in {n.lower() for n in out}:
+        # An instrument is a few words. Asked about an unnamed person it once
+        # answered with a description of her ("A girl with dark hair, …").
+        if name and len(name.split()) <= 4 and name.lower() not in {n.lower() for n in out}:
             out.append(name)
     return out
 
@@ -373,9 +385,11 @@ async def pick_instrument(
     model: str | None, num_ctx: int | None, rng: random.Random | None = None,
 ) -> str:
     """One instrument for this clip, or "" to let the writer choose."""
+    who = (
+        f"Who is in it:\n{_who(people, hook='likes', ground=True)}\n\n" if people else ""
+    )
     prompt = (
-        f"Who is in it:\n{_who(people, hook='likes', ground=True)}\n\n"
-        f"The clip: {idea.get('title') or ''}\n"
+        f"{who}The clip: {idea.get('title') or ''}\n"
         + "\n".join(f"- {b}" for b in idea.get("beats") or [])
     )
     try:
@@ -440,6 +454,7 @@ def _times(raw: list[Any], duration_s: int) -> list[float]:
 
 
 _CUT_LEAD = "the camera cuts to"
+_CUT_AT_END = re.compile(r"[\s,;]*the camera cuts to[\s.:,]*$", re.IGNORECASE)
 _CUT_IN_TEXT = re.compile(r"(?<=[.!?])\s+the camera cuts to\s+", re.IGNORECASE)
 
 
@@ -456,7 +471,11 @@ def layout(data: dict[str, Any], *, duration_s: int) -> str:
                 data = {**data, key: shot[key]}
         # A cut written inside a shot's paragraph is a new shot (2026-10-10:
         # "... The camera cuts to a close-up of Mio" in the middle of shot 1).
-        pieces = _CUT_IN_TEXT.split(str(shot.get("text") or "").strip())
+        text = str(shot.get("text") or "").strip()
+        # …and one left dangling at the end of a shot, with the next shot's
+        # header still to come ("…push in. the camera cuts to [Shot 2]").
+        text = _CUT_AT_END.sub("", text)
+        pieces = _CUT_IN_TEXT.split(text)
         for n, text in enumerate(p.strip() for p in pieces):
             # It also repeats shot 1 word for word as a second shot.
             if text and text not in seen:

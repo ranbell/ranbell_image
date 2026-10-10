@@ -34,6 +34,12 @@ def _inputs(session: dict[str, Any]) -> dict[str, Any]:
     return dict(session.get("inputs") or {})
 
 
+def _video_public(session: dict[str, Any]) -> dict[str, Any]:
+    from . import video_talk
+
+    return video_talk.public(session)
+
+
 def public_view(session: dict[str, Any]) -> dict[str, Any]:
     """Panel payload — keep it small and stable."""
     inputs = _inputs(session)
@@ -128,6 +134,9 @@ def public_view(session: dict[str, Any]) -> dict[str, Any]:
         },
         "diary": session.get("diary") or {},
         "opened": bool(session.get("opened")),
+        # Talking a still into a video (`video_talk`). The cards and the written
+        # prompt are chat rows; this says whether the input goes to that talk.
+        "video": _video_public(session),
         # The studio shoot (with a crew). The screen chooses which buttons to show
         # from these two.
         "crew_open": bool(session.get(crew_room.TABLE_OPEN)),

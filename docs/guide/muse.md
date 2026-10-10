@@ -361,13 +361,18 @@ Renders go through the scheduler. A busy card means wait; climbing on while it i
 
 ---
 
-## 10. A video prompt from this still
+## 10. A video from this still
 
-Once the final image is done, you can get video ideas that start from it as second 0. If there is something you want to see, write it in one line. You can also leave it empty, and she works from the picture and from who she is.
+Press "🎬 Video" on the corner of any still — a test shot, a final, or a picture opened from the gallery — and you can talk that picture into a video with the actress, with the still as second 0.
 
-Press "Pitch ideas" and Muse first looks at the picture to see what is in it. Then it pitches four ideas of different kinds: the moment goes on, the camera reveals, somewhere else, and the world changes. Each idea is thought up on its own, so they do not drift into the same shape. If none of them fits, "Pitch other ideas" draws again.
+- **A still from her shoot** opens that session and carries on from it. She remembers what you were shooting.
+- **Any other photo** asks you to pick who to look at it with first (two are fine). The people in it are not her, so she talks about them as the people in the photo.
 
-Pick one and press "Write this one" to get the MiniMax H3 prompt. Paste it with Hailuo's prompt optimizer off. Left on, it rewrites the times and the names. This does not change the photo ledger. The video itself is not rendered here.
+She looks at the picture and brings four ideas of different kinds: the moment goes on, the camera reveals, somewhere else, and the world changes. They sit in the chat as cards.
+
+Then you just talk. Say "make it rain" or "it needs more movement" and she changes the idea and shows you the changed card. Say "let's go with that", or press "Write this one" on a card, and you get the MiniMax H3 prompt. Pick the length (5, 10 or 15 seconds) on the bar above the input. "Back to stills" returns to the usual shoot.
+
+Paste the prompt with Hailuo's prompt optimizer off. Left on, it rewrites the times and the names. The video itself is not rendered here.
 
 ---
 

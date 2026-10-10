@@ -2770,6 +2770,31 @@ const musePendingCharacterId = ref('')
 const musePendingPartnerId = ref('')
 // A paused shoot. Held so the roster can show "shooting".
 const museResume = ref({ available: false, name: '', sessionId: '' })
+// "Make a video" from the gallery, handed to the panel ({ sha, sessionId, nonce }).
+const museVideoRequest = ref(null)
+
+// A still from a Muse shoot opens that shoot and carries on from it; any other
+// picture goes through the roster, so the Showrunner picks who to talk it over
+// with (the Showrunner, 2026-10-10).
+async function makeVideoFrom(sha) {
+  if (!sha) return
+  let source = { session_id: '' }
+  try {
+    const r = await fetch(`/api/muse/video/source/${sha}`)
+    if (r.ok) source = await r.json()
+  } catch {}
+  museVideoRequest.value = { sha, sessionId: source.session_id || '', nonce: Date.now() }
+  if (source.session_id) {
+    selected.value = null
+    showMuseGallery.value = false
+    musePendingCharacterId.value = ''
+    musePendingPartnerId.value = ''
+    showMuse.value = true
+    return
+  }
+  showToast(t('muse.videoPickActress'), 'info')
+  await openMuse()
+}
 
 function startDuetPair({ leadId, partnerId }) {
   showMuseGallery.value = false
@@ -4801,6 +4826,12 @@ onUnmounted(() => {
                   class="text-2xl leading-none transition-colors"
                   :class="selected.star_rating >= n ? 'text-yellow-400' : 'text-gray-700 hover:text-yellow-400/60'">★</button>
                 <span v-if="selected.star_rating" class="text-xs text-gray-500 ml-2">★{{ selected.star_rating }}</span>
+                <button
+                  type="button"
+                  class="ml-auto px-2.5 py-1 rounded-full border border-amber-500/50 bg-amber-950/40 text-amber-100 hover:bg-amber-900/60 text-xs"
+                  :title="$t('muse.videoMake')"
+                  @click="makeVideoFrom(selected.sha256)"
+                >🎬 {{ $t('muse.videoMakeShort') }}</button>
               </div>
 
               <!-- Muse cast + secret diary -->
@@ -5515,7 +5546,7 @@ onUnmounted(() => {
       :resume-available="museResume.available && !showMuse"
       :resume-name="museResume.name"
       @pick="pickMuseCharacter"
-      @close="showMuseGallery = false"
+      @close="showMuseGallery = false; museVideoRequest = null"
       @toast="showToast($event.msg, $event.type)"
       @update:workflow="museGalleryWorkflow = $event"
       @start-duet-pair="startDuetPair"
@@ -5549,6 +5580,7 @@ onUnmounted(() => {
       :get-jobs-map="getJobsMap"
       :initial-character-id="musePendingCharacterId"
       :initial-partner-id="musePendingPartnerId"
+      :video-request="museVideoRequest"
       @update:show="onMuseShow"
       @session-state="onMuseSessionState"
       @select-image="openImageBySha($event)"

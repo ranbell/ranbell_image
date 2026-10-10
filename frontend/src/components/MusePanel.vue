@@ -20,6 +20,10 @@ const props = defineProps({
   // With classic retired, the path from the roster comes here (2026-09-12).
   initialCharacterId: { type: String, default: '' },
   initialPartnerId: { type: String, default: '' },
+  // "Make a video" from the gallery: { sha, sessionId, nonce }. With a
+  // sessionId the still came out of that shoot and the talk carries on there;
+  // without one the roster has just seated someone to talk a photo over with.
+  videoRequest: { type: Object, default: null },
 })
 const emit = defineEmits(['update:show', 'toast', 'select-image', 'session-state'])
 const { t, locale } = useI18n()
@@ -40,18 +44,9 @@ function toggleDebug() {
   try { localStorage.setItem(DEBUG_KEY, museDebug.value ? '1' : '0') } catch { /* private window */ }
 }
 const chatInput = ref('')
-// Video from the final still: look -> one idea per kind -> the Showrunner picks
-// -> written as an H3 prompt. Nothing here is saved on the session.
-const videoShort = ref('')
+// Talking a still into a video with her (`video_talk`). The ideas, her lines
+// and the written prompt are chat rows; `session.video` says the talk is open.
 const videoSeconds = ref(5)
-const videoPick = ref(0)
-const videoStill = ref('')
-const videoStillSha = ref('')
-const videoBlind = ref(false)
-const videoIdeas = ref([])
-const videoChosen = ref('')
-const videoPrompt = ref('')
-const videoBusy = ref('')
 const chatEl = ref(null)
 const preview = ref('')
 const job = ref(null)
@@ -596,100 +591,94 @@ function shaOf(img) {
   return img && (img.image_id || img.sha256 || img)
 }
 
-function resetVideo() {
-  videoStill.value = ''
-  videoBlind.value = false
-  videoIdeas.value = []
-  videoChosen.value = ''
-  videoPrompt.value = ''
+const videoActive = computed(() => !!session.value?.video?.active)
+
+async function videoCall(path, body, { speak = true } = {}) {
+  const sid = session.value?.session_id
+  if (!sid || chatLocked.value) return
+  busy.value = true
+  if (speak) {
+    speaking.value = true
+    if (!startedAt) startedAt = Date.now()
+  }
+  try {
+    const next = await api(`/api/muse/sessions/${sid}/video/${path}`, {
+      method: 'POST',
+      body: JSON.stringify(body || {}),
+    })
+    if (session.value?.session_id !== sid) return
+    session.value = next
+    stopSpeaking()
+    await scrollChat()
+  } catch (err) {
+    fail(err)
+  } finally {
+    busy.value = false
+    stopSpeaking()
+    startedAt = 0
+    elapsed.value = 0
+  }
 }
 
-watch(() => session.value?.session_id, () => {
-  resetVideo()
-  videoPick.value = 0
+async function startVideo(sha) {
+  if (!sha) return
+  if (!inputs.value.character_id) { fail(new Error(t('muse.needCharacter'))); return }
+  if (!inputs.value.model) { fail(new Error(t('muse.needModel'))); return }
+  await videoCall('start', { sha256: sha, duration_s: videoSeconds.value })
+}
+
+async function writeVideo(kind) {
+  await videoCall('write', { kind, duration_s: videoSeconds.value })
+}
+
+async function stopVideo() {
+  await videoCall('stop', {}, { speak: false })
+}
+
+watch(() => session.value?.video?.duration_s, (sec) => {
+  if (sec) videoSeconds.value = sec
 })
 
-async function videoAskIdeas() {
-  const sid = session.value?.session_id
-  if (!sid || videoBusy.value) return
-  const sha = shaOf(shootImages.value[videoPick.value] || shootImages.value[0])
-  if (!sha) return
-  videoBusy.value = 'ideas'
-  // Same still as last time: reuse its reading instead of looking again.
-  const still = videoStillSha.value === sha ? videoStill.value : ''
-  const blind = still ? videoBlind.value : false
-  // The current ideas stay on screen until new ones arrive — a failed re-pitch
-  // after half a minute should not leave the Showrunner with nothing.
+// The gallery's "make a video" (App → `videoRequest`). Read once per nonce.
+let lastVideoNonce = 0
+async function consumeVideoRequest() {
+  const req = props.videoRequest
+  if (!req?.sha || !req.nonce || req.nonce === lastVideoNonce) return
+  lastVideoNonce = req.nonce
   try {
-    const data = await api(
-      `/api/muse/sessions/${sid}/video/ideas`,
-      {
-        method: 'POST',
-        body: JSON.stringify({
-          sha256: sha,
-          short: videoShort.value.trim(),
-          duration_s: videoSeconds.value,
-          still,
-        }),
-      },
-    )
-    if (session.value?.session_id !== sid) return
-    resetVideo()
-    videoStill.value = data.still || ''
-    videoStillSha.value = sha
-    videoBlind.value = still ? blind : !!data.blind
-    videoIdeas.value = data.ideas || []
-  } catch (err) {
-    fail(err)
-  } finally {
-    videoBusy.value = ''
-  }
-}
-
-async function videoWrite(idea) {
-  const sid = session.value?.session_id
-  if (!sid || videoBusy.value || !idea?.beats?.length) return
-  videoBusy.value = 'write'
-  videoChosen.value = idea.kind
-  try {
-    const data = await api(
-      `/api/muse/sessions/${sid}/video/write`,
-      {
-        method: 'POST',
-        body: JSON.stringify({
-          still: videoStill.value,
-          idea,
-          duration_s: videoSeconds.value,
-        }),
-      },
-    )
-    if (session.value?.session_id !== sid) return
-    videoPrompt.value = data.prompt || ''
-  } catch (err) {
-    fail(err)
-  } finally {
-    videoBusy.value = ''
-  }
-}
-
-async function copyVideoPrompt() {
-  const text = videoPrompt.value.trim()
-  if (!text) return
-  try {
-    // `navigator.clipboard` exists only on https or localhost; the panel is
-    // usually opened over plain http on the LAN (App.vue's copyToClipboard).
-    if (navigator.clipboard) {
-      await navigator.clipboard.writeText(text)
-    } else {
-      const el = document.createElement('textarea')
-      el.value = text
-      el.style.cssText = 'position:fixed;opacity:0'
-      document.body.appendChild(el)
-      el.select()
-      const ok = document.execCommand('copy')
-      document.body.removeChild(el)
-      if (!ok) throw new Error(t('muse.videoCopyFailed'))
+    if (req.sessionId && req.sessionId !== session.value?.session_id) {
+      session.value = await api(`/api/muse/sessions/${req.sessionId}`)
+      openStream(req.sessionId)
     }
+  } catch (err) {
+    fail(err)
+    return
+  }
+  await startVideo(req.sha)
+}
+watch(() => props.videoRequest?.nonce, () => {
+  if (props.show) consumeVideoRequest()
+})
+
+function copyText(text) {
+  // `navigator.clipboard` exists only on https or localhost; the panel is
+  // usually opened over plain http on the LAN (App.vue's copyToClipboard).
+  if (navigator.clipboard) return navigator.clipboard.writeText(text)
+  const el = document.createElement('textarea')
+  el.value = text
+  el.style.cssText = 'position:fixed;opacity:0'
+  document.body.appendChild(el)
+  el.select()
+  const ok = document.execCommand('copy')
+  document.body.removeChild(el)
+  if (!ok) throw new Error(t('muse.videoCopyFailed'))
+  return Promise.resolve()
+}
+
+async function copyVideoPrompt(text) {
+  if (!String(text || '').trim()) return
+  try {
+    await copyText(String(text).trim())
     emit('toast', { msg: t('muse.videoCopied'), type: 'info' })
   } catch (err) {
     fail(err)
@@ -776,8 +765,13 @@ async function sendChat() {
   if (!startedAt) startedAt = Date.now()
   try {
     session.value = await api(
-      `/api/muse/sessions/${session.value.session_id}/chat`,
-      { method: 'POST', body: JSON.stringify({ message: msg }) },
+      `/api/muse/sessions/${session.value.session_id}/${videoActive.value ? 'video/chat' : 'chat'}`,
+      {
+        method: 'POST',
+        body: JSON.stringify(videoActive.value
+          ? { message: msg, duration_s: videoSeconds.value }
+          : { message: msg }),
+      },
     )
     // The real rows have arrived. What was streaming folds **here** — wait until
     // `finally` and the same line appears twice for that instant.
@@ -1082,13 +1076,18 @@ watch(() => props.show, async (open) => {
     if (wanted && wanted !== seated) {
       await startFresh(wanted)
       if (props.initialPartnerId) await pickPartner(props.initialPartnerId)
+      await consumeVideoRequest()
       return
     }
-    if (!session.value) await startFresh()
-    else openStream(session.value.session_id)
+    // A "make a video" request for a past shoot opens that session itself —
+    // do not seat an empty one first.
+    const pendingShoot = props.videoRequest?.sessionId && props.videoRequest.nonce !== lastVideoNonce
+    if (!session.value && !pendingShoot) await startFresh()
+    else if (session.value) openStream(session.value.session_id)
   } catch (err) {
     fail(err)
   }
+  await consumeVideoRequest()
 })
 
 // Tell the roster about a shoot that is paused (the "shooting" tag). A session
@@ -1157,6 +1156,9 @@ function rowKindLabel(row, t) {
   if (kind === 'contract') return t('muse.contract')
   if (kind === 'theme') return t('muse.theme')
   if (kind === 'table_open') return t('muse.tableOpened')
+  if (kind === 'video_ideas') return `🎬 ${t('muse.videoIdeasTitle')}`
+  if (kind === 'video_prompt') return `🎬 ${t('muse.videoPromptTitle')}`
+  if (kind === 'video_start' || kind === 'video_stop' || kind === 'video_blind') return '🎬'
   return chatName(row) || row.role
 }
 function isStruckRow(row) {
@@ -1518,6 +1520,68 @@ function isStruckRow(row) {
                   </div>
                 </div>
                 <div
+                  v-else-if="row.meta?.kind === 'video_ideas'"
+                  class="grid w-full max-w-[95%] gap-1.5 sm:grid-cols-2"
+                >
+                  <div
+                    v-for="idea in row.meta.ideas || []"
+                    :key="`${i}-${idea.kind}`"
+                    class="space-y-1 rounded-xl border p-2.5"
+                    :class="session?.video?.chosen === idea.kind
+                      ? 'border-amber-400/70 bg-amber-950/30'
+                      : 'border-violet-500/40 bg-violet-950/25'"
+                  >
+                    <div class="flex items-center gap-1.5">
+                      <span class="rounded bg-white/5 px-1.5 text-[9px] text-gray-400">{{ idea.label }}</span>
+                      <span v-if="row.meta.revised" class="text-[9px] text-amber-300">✎ {{ t('muse.videoRevised') }}</span>
+                    </div>
+                    <div class="text-[12px] font-medium text-violet-50">{{ idea.title || '' }}</div>
+                    <p v-if="idea.error" class="text-[10px] text-amber-300/90">{{ idea.error }}</p>
+                    <p v-else class="whitespace-pre-wrap text-[11px] leading-relaxed text-gray-300">{{ idea.story }}</p>
+                    <button
+                      v-if="!idea.error"
+                      type="button"
+                      class="rounded-full border border-amber-500/50 bg-amber-950/40 px-2.5 py-1 text-[10px] text-amber-100 hover:bg-amber-900/60 disabled:opacity-40"
+                      :disabled="chatLocked || !videoActive"
+                      @click="writeVideo(idea.kind)"
+                    >{{ t('muse.videoExpand') }}</button>
+                  </div>
+                </div>
+                <div
+                  v-else-if="row.meta?.kind === 'video_prompt'"
+                  class="w-full max-w-[95%] space-y-1.5 rounded-xl border border-amber-500/40 bg-gray-950/80 p-2.5"
+                >
+                  <div class="text-[11px] text-amber-100">
+                    {{ row.meta.title }}<span v-if="row.meta.instrument" class="text-gray-500"> · ♪ {{ row.meta.instrument }}</span>
+                  </div>
+                  <textarea
+                    :value="row.meta.prompt"
+                    readonly
+                    rows="7"
+                    class="w-full rounded border border-white/10 bg-black/40 px-2 py-1 font-mono text-[10px] leading-relaxed text-gray-100"
+                  />
+                  <div class="flex items-center gap-2">
+                    <button
+                      type="button"
+                      class="rounded border border-amber-500/50 px-2.5 py-0.5 text-[11px] text-amber-100 hover:bg-amber-900/40"
+                      @click="copyVideoPrompt(row.meta.prompt)"
+                    >{{ t('muse.videoCopy') }}</button>
+                    <span class="text-[10px] text-gray-500">{{ t('muse.videoPasteHint') }}</span>
+                  </div>
+                </div>
+                <div
+                  v-else-if="row.meta?.kind === 'video_start' && row.meta?.sha256"
+                  class="flex items-center gap-2 rounded-xl border border-slate-700/40 bg-slate-900/60 px-2.5 py-1.5 text-[11px] text-gray-300"
+                >
+                  <img
+                    :src="thumb(row.meta.sha256)"
+                    class="h-12 w-auto cursor-zoom-in rounded"
+                    alt=""
+                    @click="openLightboxSha(row.meta.sha256)"
+                  />
+                  <span>{{ row.text }}</span>
+                </div>
+                <div
                   v-else-if="!isChangeRow(row) || row.text"
                   class="max-w-[90%] whitespace-pre-wrap leading-relaxed shadow-sm"
                   :class="[
@@ -1666,6 +1730,27 @@ function isStruckRow(row) {
                 is one way to send: the button. Grab the edge to make it taller
                 (`resize-y`).
               -->
+              <div
+                v-if="videoActive"
+                class="flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-950/20 px-2.5 py-1.5 text-[11px] text-amber-100"
+              >
+                <span>🎬 {{ t('muse.videoTalking') }}</span>
+                <span class="text-[10px] text-amber-200/70">{{ t('muse.videoLength') }}</span>
+                <button
+                  v-for="sec in [5, 10, 15]"
+                  :key="sec"
+                  type="button"
+                  class="rounded border px-1.5 py-0.5 text-[10px]"
+                  :class="videoSeconds === sec ? 'border-amber-400/70 text-amber-50' : 'border-white/10 text-gray-400'"
+                  @click="videoSeconds = sec"
+                >{{ sec }}s</button>
+                <button
+                  type="button"
+                  class="ml-auto rounded border border-white/15 px-2 py-0.5 text-[10px] text-gray-300 hover:bg-white/5 disabled:opacity-40"
+                  :disabled="chatLocked"
+                  @click="stopVideo"
+                >📷 {{ t('muse.videoBack') }}</button>
+              </div>
               <div class="flex items-end gap-2">
                 <textarea
                   v-model="chatInput"
@@ -1726,7 +1811,7 @@ function isStruckRow(row) {
                 <figure
                   v-for="img in boardImages"
                   :key="img.image_id || img.sha256 || img"
-                  class="cursor-zoom-in overflow-hidden rounded border border-white/10"
+                  class="relative cursor-zoom-in overflow-hidden rounded border border-white/10"
                   :title="t('muse.zoomImage')"
                   @click="openLightboxSha(img.image_id || img.sha256 || img)"
                 >
@@ -1735,6 +1820,13 @@ function isStruckRow(row) {
                     class="block w-full"
                     alt=""
                   />
+                  <button
+                    type="button"
+                    class="absolute bottom-1 right-1 rounded-full border border-amber-400/60 bg-black/70 px-2 py-0.5 text-[10px] text-amber-100 hover:bg-amber-900/70 disabled:opacity-40"
+                    :disabled="chatLocked"
+                    :title="t('muse.videoMake')"
+                    @click.stop="startVideo(shaOf(img))"
+                  >🎬 {{ t('muse.videoMakeShort') }}</button>
                 </figure>
               </div>
             </div>
@@ -1745,7 +1837,7 @@ function isStruckRow(row) {
                 <figure
                   v-for="img in shootImages"
                   :key="img.image_id || img.sha256 || img"
-                  class="cursor-zoom-in overflow-hidden rounded border border-pink-500/40"
+                  class="relative cursor-zoom-in overflow-hidden rounded border border-pink-500/40"
                   :title="t('muse.zoomImage')"
                   @click="openLightboxSha(img.image_id || img.sha256 || img)"
                 >
@@ -1754,89 +1846,14 @@ function isStruckRow(row) {
                     class="block w-full"
                     alt=""
                   />
+                  <button
+                    type="button"
+                    class="absolute bottom-1 right-1 rounded-full border border-amber-400/60 bg-black/70 px-2 py-0.5 text-[10px] text-amber-100 hover:bg-amber-900/70 disabled:opacity-40"
+                    :disabled="chatLocked"
+                    :title="t('muse.videoMake')"
+                    @click.stop="startVideo(shaOf(img))"
+                  >🎬 {{ t('muse.videoMakeShort') }}</button>
                 </figure>
-              </div>
-              <div class="rounded-xl border border-white/10 bg-gray-950/60 p-3 space-y-2">
-                <div class="text-[11px] font-medium text-amber-200/90">{{ t('muse.videoTitle') }}</div>
-                <p class="text-[10px] text-gray-500">{{ t('muse.videoHint') }}</p>
-                <div v-if="shootImages.length > 1" class="flex flex-wrap items-center gap-1.5 text-[10px] text-gray-400">
-                  <span>{{ t('muse.videoWhich') }}</span>
-                  <button
-                    v-for="(img, i) in shootImages"
-                    :key="shaOf(img)"
-                    type="button"
-                    class="overflow-hidden rounded border-2 disabled:opacity-40"
-                    :class="videoPick === i ? 'border-amber-400' : 'border-transparent opacity-60'"
-                    :disabled="!!videoBusy"
-                    @click="videoPick = i; resetVideo()"
-                  >
-                    <img :src="thumb(shaOf(img))" class="block h-12 w-auto" alt="" />
-                  </button>
-                </div>
-                <textarea
-                  v-model="videoShort"
-                  rows="2"
-                  class="w-full rounded border border-white/10 bg-black/40 px-2 py-1 text-[11px] text-gray-100"
-                  :placeholder="t('muse.videoPlaceholder')"
-                />
-                <div class="flex flex-wrap items-center gap-2">
-                  <button
-                    v-for="sec in [5, 10, 15]"
-                    :key="sec"
-                    type="button"
-                    class="rounded border px-2 py-0.5 text-[10px]"
-                    :class="videoSeconds === sec
-                      ? 'border-amber-400/60 text-amber-100'
-                      : 'border-white/10 text-gray-400'"
-                    @click="videoSeconds = sec"
-                  >{{ sec }}s</button>
-                  <button
-                    type="button"
-                    class="rounded border border-amber-500/40 px-2 py-0.5 text-[11px] text-amber-100 disabled:opacity-40"
-                    :disabled="!!videoBusy"
-                    @click="videoAskIdeas"
-                  >{{ videoBusy === 'ideas'
-                    ? t('muse.videoThinking')
-                    : (videoIdeas.length ? t('muse.videoAgain') : t('muse.videoIdeas')) }}</button>
-                </div>
-                <p v-if="videoBlind" class="text-[10px] text-amber-300/90">{{ t('muse.videoBlind') }}</p>
-                <div v-if="videoIdeas.length" class="space-y-2">
-                  <div
-                    v-for="idea in videoIdeas"
-                    :key="idea.kind"
-                    class="rounded border p-2 space-y-1"
-                    :class="videoChosen === idea.kind ? 'border-amber-400/60' : 'border-white/10'"
-                  >
-                    <div class="flex items-center gap-2">
-                      <span class="rounded bg-white/5 px-1.5 text-[9px] text-gray-400">{{ idea.label }}</span>
-                      <span class="text-[11px] text-gray-100">{{ idea.title || '' }}</span>
-                    </div>
-                    <p v-if="idea.error" class="text-[10px] text-amber-300/90">{{ idea.error }}</p>
-                    <p v-else class="text-[10px] text-gray-400">{{ idea.story }}</p>
-                    <button
-                      v-if="!idea.error"
-                      type="button"
-                      class="rounded border border-amber-500/40 px-2 py-0.5 text-[10px] text-amber-100 disabled:opacity-40"
-                      :disabled="!!videoBusy"
-                      @click="videoWrite(idea)"
-                    >{{ videoBusy === 'write' && videoChosen === idea.kind
-                      ? t('muse.videoWorking')
-                      : t('muse.videoExpand') }}</button>
-                  </div>
-                </div>
-                <textarea
-                  v-if="videoPrompt"
-                  :value="videoPrompt"
-                  readonly
-                  rows="8"
-                  class="w-full rounded border border-white/10 bg-black/40 px-2 py-1 text-[11px] text-gray-100"
-                />
-                <button
-                  v-if="videoPrompt"
-                  type="button"
-                  class="rounded border border-white/15 px-2 py-0.5 text-[11px] text-gray-200"
-                  @click="copyVideoPrompt"
-                >{{ t('muse.videoCopy') }}</button>
               </div>
             </div>
 
