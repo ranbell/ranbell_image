@@ -9,6 +9,7 @@ import AdminModal from './components/AdminModal.vue'
 import InspirePanel from './components/InspirePanel.vue'
 import InvokePanel from './components/InvokePanel.vue'
 import MusePanel from './components/MusePanel.vue'
+import VideoStudio from './components/VideoStudio.vue'
 import CharacterGallery from './components/CharacterGallery.vue'
 import ActressDiaryModal from './components/muse/ActressDiaryModal.vue'
 import CharacterDossier from './components/muse/CharacterDossier.vue'
@@ -2770,30 +2771,17 @@ const musePendingCharacterId = ref('')
 const musePendingPartnerId = ref('')
 // A paused shoot. Held so the roster can show "shooting".
 const museResume = ref({ available: false, name: '', sessionId: '' })
-// "Make a video" from the gallery, handed to the panel ({ sha, sessionId, nonce }).
-const museVideoRequest = ref(null)
 
-// A still from a Muse shoot opens that shoot and carries on from it; any other
-// picture goes through the roster, so the Showrunner picks who to talk it over
-// with (the Showrunner, 2026-10-10).
-async function makeVideoFrom(sha) {
+// ── Video studio ──────────────────────────────────────────────────────────────
+// Any still's 🎬 (the gallery detail, a Muse test shot or final) opens the
+// studio on that picture. Its own screen: the talk does not live in the shoot.
+const showVideoStudio = ref(false)
+const videoRequest = ref(null)
+function makeVideoFrom(sha) {
   if (!sha) return
-  let source = { session_id: '' }
-  try {
-    const r = await fetch(`/api/muse/video/source/${sha}`)
-    if (r.ok) source = await r.json()
-  } catch {}
-  museVideoRequest.value = { sha, sessionId: source.session_id || '', nonce: Date.now() }
-  if (source.session_id) {
-    selected.value = null
-    showMuseGallery.value = false
-    musePendingCharacterId.value = ''
-    musePendingPartnerId.value = ''
-    showMuse.value = true
-    return
-  }
-  showToast(t('muse.videoPickActress'), 'info')
-  await openMuse()
+  selected.value = null
+  videoRequest.value = { sha, nonce: Date.now() }
+  showVideoStudio.value = true
 }
 
 function startDuetPair({ leadId, partnerId }) {
@@ -4829,9 +4817,9 @@ onUnmounted(() => {
                 <button
                   type="button"
                   class="ml-auto px-2.5 py-1 rounded-full border border-amber-500/50 bg-amber-950/40 text-amber-100 hover:bg-amber-900/60 text-xs"
-                  :title="$t('muse.videoMake')"
+                  :title="$t('video.make')"
                   @click="makeVideoFrom(selected.sha256)"
-                >🎬 {{ $t('muse.videoMakeShort') }}</button>
+                >🎬 {{ $t('video.makeShort') }}</button>
               </div>
 
               <!-- Muse cast + secret diary -->
@@ -5546,7 +5534,7 @@ onUnmounted(() => {
       :resume-available="museResume.available && !showMuse"
       :resume-name="museResume.name"
       @pick="pickMuseCharacter"
-      @close="showMuseGallery = false; museVideoRequest = null"
+      @close="showMuseGallery = false"
       @toast="showToast($event.msg, $event.type)"
       @update:workflow="museGalleryWorkflow = $event"
       @start-duet-pair="startDuetPair"
@@ -5580,10 +5568,17 @@ onUnmounted(() => {
       :get-jobs-map="getJobsMap"
       :initial-character-id="musePendingCharacterId"
       :initial-partner-id="musePendingPartnerId"
-      :video-request="museVideoRequest"
       @update:show="onMuseShow"
       @session-state="onMuseSessionState"
       @select-image="openImageBySha($event)"
+      @make-video="makeVideoFrom($event)"
+      @toast="showToast($event.msg, $event.type)"
+    />
+
+    <VideoStudio
+      :show="showVideoStudio"
+      :request="videoRequest"
+      @update:show="showVideoStudio = $event"
       @toast="showToast($event.msg, $event.type)"
     />
 

@@ -58,6 +58,11 @@ CHARACTER_COMPAT_COLLECTION = "character_compat"
 # Payload-only — same shape as muse_sessions.
 MUSE_LOUNGE_COLLECTION = "muse_lounge"
 MUSE_HANDPOST_COLLECTION = "muse_handpost"
+# Video talks (the video studio): a still talked into a video prompt with an
+# actress. Kept apart from muse_sessions so the session list, chemistry
+# (`characters/compat.py` reads co-shoots there) and the lounge never take a
+# talk about a photo for a shoot. Payload-only.
+MUSE_VIDEO_COLLECTION = "muse_video_talks"
 # What the scanner saw last time, one point per directory: its mtime when it
 # was last reconciled. A directory whose mtime has not moved has had nothing
 # added, removed or renamed in it, so a heal does not list it. Payload-only and
@@ -868,6 +873,7 @@ class QdrantDBClient:
         # Lounge threads + studio handpost (payload-only social layer).
         await self.ensure_muse_lounge_collection()
         await self.ensure_muse_handpost_collection()
+        await self.ensure_muse_video_collection()
 
         count = await self.total_count()
         logger.info("Qdrant ready: %d images", count)
@@ -2069,6 +2075,27 @@ class QdrantDBClient:
                 wait=False,
             )
         logger.info("Created collection: %s", MUSE_LOUNGE_COLLECTION)
+
+    async def ensure_muse_video_collection(self) -> None:
+        """Video studio talks — one record per still talked over."""
+        if await self._qc.collection_exists(MUSE_VIDEO_COLLECTION):
+            return
+        await self._qc.create_collection(
+            collection_name=MUSE_VIDEO_COLLECTION,
+            vectors_config={},
+            on_disk_payload=True,
+        )
+        for field, schema in (
+            ("created_at", qm.PayloadSchemaType.FLOAT),
+            ("sha256", qm.PayloadSchemaType.KEYWORD),
+        ):
+            await self._qc.create_payload_index(
+                collection_name=MUSE_VIDEO_COLLECTION,
+                field_name=field,
+                field_schema=schema,
+                wait=False,
+            )
+        logger.info("Created collection: %s", MUSE_VIDEO_COLLECTION)
 
     async def ensure_muse_handpost_collection(self) -> None:
         """Studio handpost pages — director notices and preference history."""

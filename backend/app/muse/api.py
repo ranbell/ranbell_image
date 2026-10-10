@@ -12,7 +12,6 @@ from starlette.responses import StreamingResponse
 from . import events
 from .catalog import build_muse_catalog
 from . import service
-from . import session_db, video_expand, video_talk
 
 logger = logging.getLogger(__name__)
 
@@ -72,28 +71,6 @@ class ChatBody(BaseModel):
 
 class StandingBody(BaseModel):
     standing: list[str] = Field(default_factory=list)
-
-
-class VideoStartBody(BaseModel):
-    sha256: str
-    short: str = ""
-    duration_s: int = 5
-
-
-class VideoChatBody(BaseModel):
-    message: str
-    duration_s: int | None = None
-
-
-class VideoWriteBody(BaseModel):
-    kind: str
-    duration_s: int | None = None
-
-
-def _video_length(session: dict, duration_s: int | None) -> None:
-    """The panel's seconds picker, taken whenever it is sent with a move."""
-    if duration_s in video_expand.DURATIONS and session.get("video"):
-        session["video"]["duration_s"] = duration_s
 
 
 def _db(request: Request):
@@ -365,78 +342,6 @@ async def approve_or_shoot(session_id: str, request: Request):
     except service.RefineError as exc:
         raise HTTPException(400, exc.message) from exc
     return service.public_view(session)
-
-
-def _video_error(session: dict, status: int, ja: str, en: str) -> HTTPException:
-    locale = str((session.get("inputs") or {}).get("locale") or "ja")
-    return HTTPException(status, ja if locale.startswith("ja") else en)
-
-
-async def _video(request: Request, session: dict, move):
-    try:
-        session = await move()
-    except video_talk.VideoTalkError as exc:
-        raise HTTPException(400, exc.message) from exc
-    return service.public_view(session)
-
-
-@router.get("/video/source/{sha256}")
-async def video_source(sha256: str, request: Request):
-    """Which Muse session a picture came out of, and who is in it.
-
-    The gallery's "make a video" opens that session to carry on from the shoot;
-    a picture with no session starts a new one with an actress to talk it over.
-    """
-    docs = await _db(request).get_by_sha256s([sha256])
-    meta = docs[0] if docs else {}
-    sid = str(meta.get("muse_session_id") or "")
-    if sid and await session_db.load(_db(request), sid) is None:
-        sid = ""
-    return {
-        "session_id": sid,
-        "character_id": str(meta.get("character_id") or ""),
-        "partner_character_id": str(meta.get("partner_character_id") or ""),
-    }
-
-
-@router.post("/sessions/{session_id}/video/start")
-async def video_start(session_id: str, body: VideoStartBody, request: Request):
-    """Bring a picture to the table and talk it into a video with the actress."""
-    session = await _session(request, session_id)
-    if body.duration_s not in video_expand.DURATIONS:
-        raise _video_error(session, 400, "秒数は 5、10、15 です", "Length is 5, 10 or 15 seconds")
-    if not (session.get("character") or {}).get("character_id"):
-        raise _video_error(session, 400, "女優を選んでください", "Pick an actress first")
-    return await _video(request, session, lambda: video_talk.start(
-        _db(request), _ollama(request), session,
-        sha=body.sha256.strip(), short=body.short, duration_s=body.duration_s,
-    ))
-
-
-@router.post("/sessions/{session_id}/video/chat")
-async def video_chat(session_id: str, body: VideoChatBody, request: Request):
-    session = await _session(request, session_id)
-    if not body.message.strip():
-        raise _video_error(session, 400, "ひとこと書いてください", "Say something first")
-    _video_length(session, body.duration_s)
-    return await _video(request, session, lambda: video_talk.chat(
-        _db(request), _ollama(request), session, body.message.strip(),
-    ))
-
-
-@router.post("/sessions/{session_id}/video/write")
-async def video_write(session_id: str, body: VideoWriteBody, request: Request):
-    session = await _session(request, session_id)
-    _video_length(session, body.duration_s)
-    return await _video(request, session, lambda: video_talk.write(
-        _db(request), _ollama(request), session, body.kind.strip(),
-    ))
-
-
-@router.post("/sessions/{session_id}/video/stop")
-async def video_stop(session_id: str, request: Request):
-    session = await _session(request, session_id)
-    return await _video(request, session, lambda: video_talk.stop(_db(request), session))
 
 
 @router.post("/sessions/{session_id}/finish")

@@ -229,42 +229,62 @@ async def test_write_picks_the_instrument_first_and_retries_once():
         )
 
 
-# ── Video talk (video_talk) ──────────────────────────────────────────────────
+# ── Video studio (video_talk) ────────────────────────────────────────────────
 
 from backend.app.muse import video_talk as vt
 
+MIO_ID = "c007"
+RIN_ID = "c006"
+CHARS = {
+    MIO_ID: {**MIO, "name_ja": "各務 みお"},
+    RIN_ID: {**RIN, "name_ja": "緒方 りん"},
+}
+CFG = {"muse_model": "m", "ollama_num_ctx": 16384}
+
 
 class _FakeDb:
-    def __init__(self, meta: dict | None = None):
+    """Image records by sha; Muse sessions by id."""
+
+    def __init__(self, meta: dict | None = None, sessions: dict | None = None):
         self.meta = meta or {}
-        self.saved = 0
+        self.sessions = sessions or {}
 
     async def get_by_sha256s(self, shas):
-        return [{"sha256": shas[0], **self.meta}] if self.meta is not None else []
-
-
-def _session(**extra):
-    return {
-        "session_id": "s1",
-        "inputs": {"locale": "ja", "model": "m", "theme": "radio booth at night"},
-        "character": {**MIO, "character_id": "c007", "name_ja": "各務 みお"},
-        "shoot": {"images": [{"image_id": "final"}]},
-        "chat": [],
-        **extra,
-    }
+        return [{"sha256": shas[0], **self.meta}]
 
 
 @pytest.fixture
-def quiet_store(monkeypatch):
-    async def save(db, session, publish=True):
-        return session
+def studio(monkeypatch):
+    saved = {}
+
+    async def save(db, talk):
+        saved[talk["talk_id"]] = talk
+        return talk
+
+    async def load_session(db, sid):
+        return db.sessions.get(sid)
 
     async def images(db, shas):
         return [b"png"]
 
-    monkeypatch.setattr(vt.session_db, "save", save)
+    async def character(db, cid):
+        if cid not in CHARS:
+            raise KeyError(cid)
+        return {**CHARS[cid], "character_id": cid, "board": {"portrait": f"face-{cid}"}}
+
+    async def load_memory(db, talk):
+        talk.setdefault("memories", [])
+
+    monkeypatch.setattr(vt.video_db, "save", save)
+    monkeypatch.setattr(vt.session_db, "load", load_session)
     monkeypatch.setattr(vt, "images_by_sha", images)
-    monkeypatch.setattr(vt.talk.events, "publish", lambda *a, **k: None)
+    monkeypatch.setattr(vt, "_character", character)
+    monkeypatch.setattr(vt.persona, "load_memory", load_memory)
+    return saved
+
+
+def _pitch_replies(opener="SAY: 総監督さん、4つ考えました……かな"):
+    return ["A booth.", *[_idea(k) for k in ve.KINDS], opener]
 
 
 def test_reply_lines_parse():
@@ -277,179 +297,182 @@ def test_reply_lines_parse():
 
 
 @pytest.mark.asyncio
-async def test_a_still_from_her_shoot_carries_on_from_it():
-    session = _session()
-    source, people = await vt.photo_people(_FakeDb({"muse_session_id": "s1"}), session, "x")
-    assert source == "shoot" and people[0]["name"] == "Mio Kagami"
-    # The board and the final count as hers even without the image's record.
-    assert (await vt.photo_people(_FakeDb({}), session, "final"))[0] == "shoot"
-
-
-@pytest.mark.asyncio
-async def test_a_photo_from_elsewhere_has_nobody_named_unless_recorded():
-    source, people = await vt.photo_people(_FakeDb({}), _session(), "elsewhere")
-    assert (source, people) == ("photo", [])
-    assert "Not known by name" in ve._who(people)
-
-
-@pytest.mark.asyncio
-async def test_start_pitches_in_her_voice_then_shows_the_cards(quiet_store):
-    session = _session()
-    ollama = _FakeOllama([
-        "A booth.",                       # look
-        *[_idea(k) for k in ve.KINDS],     # one idea per kind
-        "SAY: 総監督さん、4つ考えました……かな\nPICK: reveal",
-    ])
-    await vt.start(_FakeDb({"muse_session_id": "s1"}), ollama, session, sha="final")
-    talk_call = ollama.calls[-1]
-    assert "your own shoot" in talk_call["system"]
-    assert "VOICE (how she actually talks" in talk_call["system"]  # her voice block
+async def test_a_still_from_her_shoot_carries_on_from_it(studio):
+    shoot = {
+        "session_id": "s1", "character": {**MIO, "character_id": MIO_ID},
+        "inputs": {"theme": "radio booth at night"},
+    }
+    db = _FakeDb({"muse_session_id": "s1"}, {"s1": shoot})
+    ollama = _FakeOllama(_pitch_replies())
+    talk = await vt.create(db, ollama, sha="final", character_id=MIO_ID, cfg=CFG)
+    assert talk["source_session_id"] == "s1"
+    assert "your own shoot" in ollama.calls[-1]["system"]
     assert "radio booth at night" in ollama.calls[1]["prompt"]  # the shoot's context
-    kinds = [r.get("meta", {}).get("kind") for r in session["chat"]]
-    assert kinds == ["video_start", "say", "video_ideas"]
-    assert session["video"]["chosen"] == "reveal"
-    assert session["opened"] is True
-    assert vt.public(session)["active"] is True
+    assert "radio booth at night" in ollama.calls[-1]["prompt"]
+    assert talk["chat"][-1]["name"] == "各務 みお"
+    assert talk["talk_id"] in studio
 
 
 @pytest.mark.asyncio
-async def test_a_photo_talk_says_the_people_are_not_her(quiet_store):
-    session = _session(shoot={})
-    ollama = _FakeOllama(["Two people on a pier.", *[_idea(k) for k in ve.KINDS], "SAY: へえ"])
-    await vt.start(_FakeDb({}), ollama, session, sha="pier")
+async def test_another_actress_on_her_shoot_does_not_claim_it(studio):
+    shoot = {"session_id": "s1", "character": {**MIO, "character_id": MIO_ID}, "inputs": {}}
+    db = _FakeDb({"muse_session_id": "s1"}, {"s1": shoot})
+    ollama = _FakeOllama(_pitch_replies("SAY: みおさんの撮影ですね"))
+    await vt.create(db, ollama, sha="final", character_id=RIN_ID, cfg=CFG)
+    assert "not with you" in ollama.calls[-1]["system"]
+    assert "Mio Kagami" in ollama.calls[-1]["system"]
+
+
+@pytest.mark.asyncio
+async def test_a_photo_from_elsewhere_names_nobody_and_is_not_her(studio):
+    ollama = _FakeOllama(_pitch_replies("SAY: へえ"))
+    talk = await vt.create(_FakeDb({}), ollama, sha="pier", character_id=MIO_ID, cfg=CFG)
+    assert talk["people"] == [] and talk["source_session_id"] == ""
     assert "not you" in ollama.calls[-1]["system"]
+    assert "Not known by name" in ollama.calls[1]["prompt"]
     assert "works as" not in ollama.calls[1]["prompt"]
 
 
-def _talking(session):
-    session["video"] = {
-        "active": True, "still": "A booth.", "people": ve.cast(session), "duration_s": 5,
-        "ideas": [{"kind": "shift", "label": "x", "title": "t", "story": "s", "beats": ["a"]}],
-        "chosen": "shift", "started_at": 0,
-    }
-    return session
+@pytest.mark.asyncio
+async def test_a_second_actress_reuses_the_reading(studio):
+    first = await vt.create(_FakeDb({}), _FakeOllama(_pitch_replies()), sha="pier", character_id=MIO_ID, cfg=CFG)
+    ollama = _FakeOllama([*[_idea(k) for k in ve.KINDS], "SAY: A: へえ\nB: いいじゃん"])
+    talk = await vt.create(
+        _FakeDb({}), ollama, sha="pier", character_id=MIO_ID, partner_id=RIN_ID,
+        cfg=CFG, reuse=first,
+    )
+    assert not any(c["images"] for c in ollama.calls)  # the picture was not read again
+    assert [r["name"] for r in talk["chat"]] == ["各務 みお", "緒方 りん"]
 
 
 @pytest.mark.asyncio
-async def test_a_changed_idea_is_shown_before_it_is_written(quiet_store):
-    session = _talking(_session())
+async def test_no_model_says_so(studio):
+    with pytest.raises(vt.VideoTalkError):
+        await vt.create(_FakeDb({}), _FakeOllama([]), sha="x", character_id=MIO_ID, cfg={})
+
+
+def _talking():
+    return {
+        "talk_id": "t1", "inputs": {"locale": "ja", "model": "m", "num_ctx": None},
+        "character": {**MIO, "character_id": MIO_ID, "name_ja": "各務 みお"},
+        "partner_character": {}, "still": "A booth.", "people": [], "duration_s": 5,
+        "ideas": [{"kind": "shift", "label": "x", "title": "t", "story": "s", "beats": ["a"]}],
+        "chosen": "shift", "chat": [], "prompts": [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_changed_idea_is_shown_before_it_is_written(studio):
+    talk = _talking()
     ollama = _FakeOllama([
         "SAY: じゃあ雨で！\nPICK: shift\nSTORY: 雨が降り出す\nBEATS: She looks up / Rain falls\nWRITE: yes",
     ])
-    await vt.chat(_FakeDb(), ollama, session, "雨にして")
-    idea = session["video"]["ideas"][0]
-    assert idea["beats"] == ["She looks up", "Rain falls"] and idea["revised"]
-    kinds = [r.get("meta", {}).get("kind") for r in session["chat"]]
-    assert kinds == ["video", "say", "video_ideas"]
+    await vt.chat(_FakeDb(), ollama, talk, "雨にして")
+    idea = talk["ideas"][0]
+    assert idea["beats"] == ["She looks up", "Rain falls"] and idea["revised"] == 1
+    assert talk["prompts"] == []
+    assert talk["chat"][-1]["kind"] == "revised"
 
 
 @pytest.mark.asyncio
-async def test_switching_to_another_idea_is_not_going_ahead(quiet_store):
-    session = _talking(_session())
-    session["video"]["ideas"].append({"kind": "cut", "label": "y", "title": "u", "story": "s", "beats": ["b"]})
-    ollama = _FakeOllama(["SAY: じゃあ別の場所へ！\nPICK: cut\nWRITE: yes"])
-    await vt.chat(_FakeDb(), ollama, session, "もっと動きがほしい")
-    assert session["video"]["chosen"] == "cut"
-    assert session["chat"][-1]["meta"]["kind"] == "say"
+async def test_switching_to_another_idea_is_not_going_ahead(studio):
+    talk = _talking()
+    talk["ideas"].append({"kind": "cut", "label": "y", "title": "u", "story": "s", "beats": ["b"]})
+    await vt.chat(_FakeDb(), _FakeOllama(["SAY: じゃあ別の場所へ！\nPICK: cut\nWRITE: yes"]), talk, "もっと動き")
+    assert talk["chosen"] == "cut" and talk["prompts"] == []
 
 
 @pytest.mark.asyncio
-async def test_she_goes_ahead_when_told(quiet_store):
-    session = _talking(_session())
+async def test_she_goes_ahead_when_told(studio):
+    talk = _talking()
     ollama = _FakeOllama([
         "SAY: いきましょう\nPICK: shift\nWRITE: yes",
         "Theremin",
         "SHOT 1 AT 0: Mio looks up as rain falls.\nSOUND: rain\nMUSIC: theremin, slow, rising",
     ])
-    await vt.chat(_FakeDb(), ollama, session, "これでいこう")
-    assert session["chat"][-1]["meta"]["kind"] == "video_prompt"
-    assert session["chat"][-1]["meta"]["prompt"].startswith(ve.H3_OPENING)
+    await vt.chat(_FakeDb(), ollama, talk, "これでいこう")
+    assert talk["prompts"][-1]["prompt"].startswith(ve.H3_OPENING)
+    assert talk["chat"][-1]["kind"] == "written"
 
 
 @pytest.mark.asyncio
-async def test_duet_lines_without_a_say_label_still_reach_the_chat(quiet_store):
-    session = _talking(_session(partner_character={**RIN, "character_id": "c006", "name_ja": "緒方 りん"}))
+async def test_duet_lines_without_a_say_label_still_reach_the_chat(studio):
+    talk = _talking()
+    talk["partner_character"] = {**RIN, "character_id": RIN_ID, "name_ja": "緒方 りん"}
     ollama = _FakeOllama([
-        "A: (各務 みお) [shift]みたいに雨、どうかな B:(緒方 りん) えー、走りたい！\nPICK: shift",
+        "A: (各務 みお) [shift]みたいに雨、どうかな<br>B:(緒方 りん) えー、走りたい！\nPICK: shift",
     ])
-    await vt.chat(_FakeDb(), ollama, session, "どれがいい？")
-    said = [r["text"] for r in session["chat"] if r.get("meta", {}).get("kind") == "say"]
-    assert said == ["「t」みたいに雨、どうかな", "えー、走りたい！"]
+    await vt.chat(_FakeDb(), ollama, talk, "どれがいい？")
+    said = [(r["name"], r["text"]) for r in talk["chat"] if r["role"] == "assistant"]
+    assert said == [("各務 みお", "「t」みたいに雨、どうかな"), ("緒方 りん", "えー、走りたい！")]
 
 
 def test_instrument_lines_are_short():
     assert ve.parse_instruments("Theremin\nA girl with dark hair, wide eyes, and an apron.") == ["Theremin"]
 
 
+def test_the_screen_view_carries_faces_and_cards():
+    talk = _talking()
+    talk["character"]["board"] = {"portrait": "face"}
+    v = vt.view(talk)
+    assert v["character"]["portrait"] == "face"
+    assert v["ideas"][0]["title"] == "t" and "beats" not in v["ideas"][0]
+
+
 # ── HTTP wiring ──────────────────────────────────────────────────────────────
 
-def _client(monkeypatch, session, replies, meta=None):
+def _client(monkeypatch, studio, replies, meta=None, sessions=None):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
-    from backend.app.muse import api as muse_api
+    from backend.app.muse import video_api
 
-    async def load(db, sid):
-        return session
+    async def load(db, talk_id):
+        return studio.get(talk_id)
 
-    async def save(db, s, publish=True):
-        return s
+    async def cfg(request):
+        return CFG
 
-    async def images(db, shas):
-        return [b"png"]
-
-    monkeypatch.setattr(muse_api.service, "load_refine", load)
-    monkeypatch.setattr(vt.session_db, "save", save)
-    monkeypatch.setattr(vt, "images_by_sha", images)
-    monkeypatch.setattr(vt.talk.events, "publish", lambda *a, **k: None)
+    monkeypatch.setattr(video_api.video_db, "load", load)
+    monkeypatch.setattr(video_api, "_cfg", cfg)
     app = FastAPI()
-    app.include_router(muse_api.router)
-    app.state.db = _FakeDb(meta)
+    app.include_router(video_api.router)
+    app.state.db = _FakeDb(meta, sessions)
     app.state.ollama = _FakeOllama(replies)
     return TestClient(app), app.state.ollama
 
 
-def test_start_chat_write_stop_over_http(monkeypatch):
-    session = _session()
-    session["inputs"]["locale"] = "en"
-    client, ollama = _client(monkeypatch, session, [
-        "A booth.", *[_idea(k) for k in ve.KINDS], "SAY: Four ideas!",
-    ], meta={"muse_session_id": "s1"})
-
-    r = client.post("/api/muse/sessions/s1/video/start", json={"sha256": "final"})
+def test_create_chat_write_repitch_over_http(monkeypatch, studio):
+    client, ollama = _client(monkeypatch, studio, _pitch_replies("SAY: Four ideas!"))
+    r = client.post("/api/muse/video/talks", json={"sha256": "pier", "character_id": MIO_ID, "locale": "en"})
     assert r.status_code == 200, r.text
-    assert r.json()["video"]["active"] is True
-    cards = [row for row in r.json()["chat"] if row.get("meta", {}).get("kind") == "video_ideas"]
-    assert [c["kind"] for c in cards[0]["meta"]["ideas"]] == list(ve.KINDS)
+    tid = r.json()["talk_id"]
+    assert [i["kind"] for i in r.json()["ideas"]] == list(ve.KINDS)
 
     ollama.replies = ["SAY: The moment goes on, then.\nPICK: stay"]
-    r = client.post("/api/muse/sessions/s1/video/chat", json={"message": "the first one"})
-    assert r.status_code == 200 and r.json()["video"]["chosen"] == "stay"
+    r = client.post(f"/api/muse/video/talks/{tid}/chat", json={"message": "the first one", "duration_s": 10})
+    assert r.status_code == 200 and r.json()["chosen"] == "stay" and r.json()["duration_s"] == 10
 
     ollama.replies = ["Theremin", "SHOT 1 AT 0: Mio turns.\nSOUND: s\nMUSIC: theremin, slow, rising"]
-    r = client.post("/api/muse/sessions/s1/video/write", json={"kind": "stay"})
+    r = client.post(f"/api/muse/video/talks/{tid}/write", json={"kind": "stay"})
     assert r.status_code == 200, r.text
-    assert r.json()["chat"][-1]["meta"]["prompt"].startswith(ve.H3_OPENING)
+    assert r.json()["prompts"][-1]["prompt"].startswith(ve.H3_OPENING)
 
-    r = client.post("/api/muse/sessions/s1/video/stop")
-    assert r.status_code == 200 and r.json()["video"]["active"] is False
-
-
-def test_start_needs_an_actress(monkeypatch):
-    session = _session(character={})
-    session["inputs"]["locale"] = "en"
-    client, _ = _client(monkeypatch, session, [])
-    r = client.post("/api/muse/sessions/s1/video/start", json={"sha256": "x"})
-    assert r.status_code == 400 and r.json()["detail"] == "Pick an actress first"
+    ollama.replies = [*[_idea(k) for k in ve.KINDS], "SAY: New ones!"]
+    r = client.post(f"/api/muse/video/talks/{tid}/repitch")
+    assert r.status_code == 200 and r.json()["chosen"] == ""
 
 
-def test_source_lookup_finds_the_shoot(monkeypatch):
-    from backend.app.muse import api as muse_api
+def test_unknown_actress_is_a_400(monkeypatch, studio):
+    client, _ = _client(monkeypatch, studio, [])
+    r = client.post("/api/muse/video/talks", json={"sha256": "x", "character_id": "nobody"})
+    assert r.status_code == 400
 
-    async def load(db, sid):
-        return {"session_id": sid}
 
-    monkeypatch.setattr(muse_api.session_db, "load", load)
-    client, _ = _client(monkeypatch, _session(), [], meta={"muse_session_id": "s9", "character_id": "c007"})
+def test_source_lookup_finds_the_shoot(monkeypatch, studio):
+    client, _ = _client(
+        monkeypatch, studio, [], meta={"muse_session_id": "s9", "character_id": MIO_ID},
+        sessions={"s9": {"session_id": "s9"}},
+    )
     r = client.get("/api/muse/video/source/abc")
-    assert r.json() == {"session_id": "s9", "character_id": "c007", "partner_character_id": ""}
+    assert r.json() == {"session_id": "s9", "character_id": MIO_ID, "partner_character_id": ""}

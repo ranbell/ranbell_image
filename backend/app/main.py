@@ -34,6 +34,7 @@ from .characters.api import router as characters_router
 # independent (the URLs stay `/api/muse/lounge/...` — that is how the screen calls
 # them).
 from .muse.lounge_api import router as muse_lounge_router
+from .muse.video_api import router as muse_video_router
 
 
 def _abort(msg: str) -> None:
@@ -292,6 +293,7 @@ app.include_router(alignment_router)
 app.include_router(invoke_router)
 app.include_router(characters_router)
 app.include_router(muse_lounge_router)
+app.include_router(muse_video_router)
 app.include_router(muse_router)
 
 
