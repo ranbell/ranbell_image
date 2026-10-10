@@ -226,6 +226,44 @@ def test_a_shot_header_written_mid_line_starts_a_shot():
     assert "[Shot 2] At 00:02.000, the camera cuts to a close-up of the clock. its hands frozen." in ve.layout(data, duration_s=5)
 
 
+@pytest.mark.parametrize("raw", [
+    "**SHOT 1 AT 0:** a bed\nBODY: she wakes\n**SHOT 2** AT 2: a window\nBODY: rain\nSOUND: s\nMUSIC: m",
+    "### SHOT 1 AT 0: a bed\n- BODY: she wakes\n### SHOT 2 (AT 2s): a window\n- BODY: rain\nSOUND: s\nMUSIC: m",
+    "SHOT 1 AT 0:\na bed\nBODY: she wakes\nSHOT 2 AT 2：a window\nBODY: rain\nSOUND: s\nMUSIC: m",
+])
+def test_shot_labels_survive_markdown_and_drift(raw):
+    data = ve.parse_shots(raw)
+    assert [s["at"] for s in data["shots"]] == ["0", "2"]
+    text = ve.layout(data, duration_s=5)
+    assert "[Shot 1] a bed. she wakes." in text
+    assert "[Shot 2] At 00:02.000, the camera cuts to a window. rain." in text
+
+
+def test_parts_without_a_shot_line_are_shot_one():
+    data = ve.parse_shots("LOOK: silver hair\nBODY: she turns\nSOUND: s\nMUSIC: m")
+    assert data["shots"] == [{"at": "0", "text": "", "look": "silver hair", "body": "she turns"}]
+    assert "[Shot 1] silver hair. she turns." in ve.layout(data, duration_s=5)
+
+
+@pytest.mark.asyncio
+async def test_a_failed_write_keeps_what_the_model_said(studio):
+    talk = _talking()
+    ollama = _FakeOllama(["Theremin", "no labels at all", "still nothing"])
+    with pytest.raises(vt.VideoTalkError):
+        await vt.write(_FakeDb(), ollama, talk, "shift")
+    assert talk["last_write_failure"]["raw"] == "still nothing"
+    assert talk["talk_id"] in studio  # saved, so it can be read afterwards
+
+
+@pytest.mark.asyncio
+async def test_a_failed_write_in_the_talk_keeps_her_reply(studio):
+    talk = _talking()
+    ollama = _FakeOllama(["SAY: いきましょう\nPICK: shift\nWRITE: yes", "Theremin", "x", "y"])
+    await vt.chat(_FakeDb(), ollama, talk, "これでいこう")
+    kinds = [(r["role"], r.get("kind")) for r in talk["chat"]]
+    assert kinds == [("user", None), ("assistant", None), ("system", "write_failed")]
+
+
 def test_the_writer_hears_what_was_agreed_in_their_words():
     prompt = ve.write_prompt(
         still="A bed.", people=[], idea={"kind": "stay", "beats": ["She wakes."], "story": "寝起きのぼーっとした可愛らしさ"},

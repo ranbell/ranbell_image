@@ -498,14 +498,22 @@ async def chat(db, ollama, talk: dict[str, Any], message: str) -> dict[str, Any]
     # "make it rain", "more movement" and "which do you two like?" were each
     # written in the same turn, before the Showrunner had seen what was meant.
     elif reply.get("write") and on_table and talk.get("chosen") == on_table:
-        await _write(ollama, talk, on_table)
+        try:
+            await _write(ollama, talk, on_table)
+        except VideoTalkError as exc:
+            # Her reply stands; the failed write is said in the talk, not lost with it.
+            _row(talk, "system", exc.message, kind="write_failed")
     await video_db.save(db, talk)
     return talk
 
 
 async def write(db, ollama, talk: dict[str, Any], kind: str) -> dict[str, Any]:
     """The card's button: write that idea as an H3 prompt."""
-    await _write(ollama, talk, kind)
+    try:
+        await _write(ollama, talk, kind)
+    except VideoTalkError:
+        await video_db.save(db, talk)  # keeps `last_write_failure` to read later
+        raise
     await video_db.save(db, talk)
     return talk
 
@@ -522,6 +530,8 @@ async def _write(ollama, talk: dict[str, Any], kind: str) -> None:
             num_ctx=inputs["num_ctx"], locale=_locale(talk),
         )
     except ve.VideoError as exc:
+        # What the model returned, kept on the record: the screen only says it failed.
+        talk["last_write_failure"] = {"at": time.time(), "idea": kind, "raw": (exc.raw or "")[:3000]}
         raise VideoTalkError(exc.message) from exc
     talk["chosen"] = kind
     talk.setdefault("prompts", []).append({

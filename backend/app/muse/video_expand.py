@@ -88,11 +88,13 @@ KINDS: dict[str, dict[str, str]] = {
 
 
 class VideoError(Exception):
-    """A stage produced nothing usable. `message` is for the panel."""
+    """A stage produced nothing usable. `message` is for the panel; `raw` is
+    what the model last returned, kept so a failure can be read afterwards."""
 
-    def __init__(self, message: str) -> None:
+    def __init__(self, message: str, raw: str = "") -> None:
         super().__init__(message)
         self.message = message
+        self.raw = raw
 
 
 def shoot_shas(session: dict[str, Any]) -> list[str]:
@@ -433,7 +435,13 @@ async def pick_instrument(
     return (rng or random).choice(names) if names else ""
 
 
-_SHOT_LINE = re.compile(r"^\s*\**\s*SHOT\s*(\d+)\s*(?:AT\s*([\d.]+)\s*s?)?\s*\**\s*:\s*(.+)$", re.IGNORECASE)
+# "SHOT 2 AT 2.5:", and the shapes it drifts into: "SHOT 2 (AT 2.5s):", a
+# full-width colon, nothing after the colon. Markdown is stripped first
+# (`_unmark`), so "**SHOT 2** AT 2.5:" and "### SHOT 2 AT 2.5:" reach here plain.
+_SHOT_LINE = re.compile(
+    r"^\s*SHOT\s*(\d+)\s*[(\[]?\s*(?:AT\s*([\d.]+)\s*s?)?\s*[)\]]?\s*[:：]\s*(.*)$",
+    re.IGNORECASE,
+)
 _FIELD_LINE = re.compile(r"^\s*\**\s*(SOUND|MUSIC)\s*\**\s*:\s*(.+)$", re.IGNORECASE)
 
 
@@ -449,6 +457,11 @@ _INLINE_LABEL = re.compile(
 )
 
 
+def _unmark(line: str) -> str:
+    """A line without the heading or bullet a model puts before a label."""
+    return re.sub(r"^\s*(?:#+|[-*>•])\s+", "", line)
+
+
 def parse_shots(raw: str) -> dict[str, Any]:
     """The labelled-line answer as {"shots": [{"at", "text", "look", …}], "sound", "music"}.
 
@@ -456,7 +469,14 @@ def parse_shots(raw: str) -> dict[str, Any]:
     """
     data: dict[str, Any] = {"shots": []}
     field = ""
-    for line in _INLINE_LABEL.sub("\n", raw or "").splitlines():
+    # Bold goes first, everywhere, so "… **SHOT 2** AT 2: …" splits like the rest.
+    text = (raw or "").replace("**", "").replace("__", "")
+    for line in (_unmark(x) for x in _INLINE_LABEL.sub("\n", text).splitlines()):
+        if re.fullmatch(r"\s*[#*>•-]*\s*", line):
+            continue  # a heading mark or bullet the label split left on its own
+        if not data["shots"] and _PART_LINE.match(line):
+            # The parts came without a SHOT line: that is shot 1, from second 0.
+            data["shots"].append({"at": "0", "text": ""})
         if m := _SHOT_LINE.match(line):
             data["shots"].append({"at": m.group(2), "text": m.group(3).lstrip("* ").strip()})
             field = "text"
@@ -579,7 +599,8 @@ async def write(
     for _ in range(2):
         ask = prompt if not problem else (
             f"{prompt}\n\nYour last answer could not be used ({problem}). "
-            f"It was:\n{raw[:1500]}\n\nAnswer again in the SHOT / SOUND / MUSIC lines only."
+            f"It was:\n{raw[:1500]}\n\nAnswer again in the labelled lines only: SHOT, LOOK, "
+            "BODY, FACE, LIGHT and CAMERA for each shot, then SOUND and MUSIC."
         )
         try:
             raw = await chain._call(
@@ -596,8 +617,10 @@ async def write(
             problem = "it was empty"
         except ValueError as exc:
             problem = str(exc) or "it had no SHOT lines"
+    logger.warning("[muse.video] write failed (%s): %r", problem, (raw or "")[:500])
     raise VideoError(
         "撮影文に清書できませんでした。もう一度押すか、別の案を選んでください。"
         if str(locale or "").startswith("ja") else
-        "Could not write this idea as a prompt. Try again or pick another idea."
+        "Could not write this idea as a prompt. Try again or pick another idea.",
+        raw=raw,
     )
