@@ -199,6 +199,45 @@ def test_labelled_lines_parse_and_wrap():
     assert data["music"] == "theremin, slow, rising"
 
 
+def test_a_shot_is_laid_out_from_its_five_parts():
+    raw = (
+        "SHOT 1 AT 0: Mio stands at the microphone in a dim booth\n"
+        "LOOK: Mio Kagami, long silver hair falling past her shoulders, blue eyes, a cream knit cardigan\n"
+        "FACE: her eyes lift to the window, a small breath escapes\n"
+        "BODY: she slowly lets go of the microphone\n"
+        "LIGHT: grey rain light from the left window\n"
+        "CAMERA: static, small, slow, holding on her stillness\n"
+        "SOUND: rain on glass\nMUSIC: theremin, slow, rising"
+    )
+    text = ve.layout(ve.parse_shots(raw), duration_s=5)
+    shot = text.split("[Shot 1] ")[1].split("\n")[0]
+    order = ["dim booth.", "cardigan.", "microphone.", "escapes.", "window.", "stillness."]
+    assert [shot.index(w) for w in order] == sorted(shot.index(w) for w in order)
+
+
+def test_a_shot_header_written_mid_line_starts_a_shot():
+    raw = (
+        "SHOT 1 AT 0: A girl sits on a bed. BODY: she pans toward the clock. SHOT 2 AT 2: a close-up of the clock\n"
+        "BODY: its hands frozen\nSOUND: ticking\nMUSIC: metronome, steady"
+    )
+    data = ve.parse_shots(raw)
+    assert [s["at"] for s in data["shots"]] == ["0", "2"]
+    assert data["shots"][0]["body"] == "she pans toward the clock."
+    assert "[Shot 2] At 00:02.000, the camera cuts to a close-up of the clock. its hands frozen." in ve.layout(data, duration_s=5)
+
+
+def test_the_writer_hears_what_was_agreed_in_their_words():
+    prompt = ve.write_prompt(
+        still="A bed.", people=[], idea={"kind": "stay", "beats": ["She wakes."], "story": "寝起きのぼーっとした可愛らしさ"},
+        duration_s=5,
+    )
+    assert "寝起きのぼーっとした可愛らしさ" in prompt
+    assert "about 440 English words" in prompt
+    # A longer clip is never asked for less.
+    words = [ve._words(sec) for sec in ve.DURATIONS]
+    assert words == sorted(words)
+
+
 def test_instrument_candidates_are_cleaned():
     assert ve.parse_instruments("1. Theremin\n- **Upright bass**\n3) Glockenspiel\ntheremin") == [
         "Theremin", "Upright bass", "Glockenspiel",

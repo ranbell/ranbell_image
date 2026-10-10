@@ -327,15 +327,41 @@ _WRITE_SYSTEM = """You write the shots of a short image-to-video clip for MiniMa
 
 The photograph is second 0. Shot 1 starts as exactly that picture and then moves. A new shot means the camera cuts; a continuous take is one shot however much happens in it, so do not split a take that never cuts.
 
-Answer in this shape and nothing else, one field per line:
-SHOT 1 AT 0: ...
+H3 builds only what it is told. Whatever a shot leaves out it makes up, and then the face, the clothes or the room drift away from the photograph. So each shot is written in five fields, each a different part of what the viewer sees; together they are that stretch of the clip. The request says how long the whole answer should be.
+
+Answer in this shape and nothing else, every field on its own single line:
+SHOT 1 AT 0: who is on screen and where, in one sentence, without their looks
+LOOK: ...
+BODY: ...
+FACE: ...
+LIGHT: ...
+CAMERA: ...
 SHOT 2 AT seconds: ...
+LOOK: ...
+(the same five fields for every shot)
 SOUND: ...
 MUSIC: ...
 
-- SHOT: one paragraph in English on a single line. The number after AT is when the shot starts, in seconds; later shots are cuts and start before the clip ends. The video model has no memory between shots, so in each shot name every person on screen with her hair and eyes (by name when you are given one, otherwise by how she looks), say what her body and face do in order, and give the camera one move (static, push in, pull out, pan, truck, tilt, arc, tracking or handheld), its amplitude (small, medium or large), its speed (slow, medium or fast) and the motion that motivates it. Write a later shot so it reads after the words "the camera cuts to".
+- SHOT: the place and who is in it. Their looks belong in LOOK, so they are said once. The number after AT is when the shot starts, in seconds; later shots are cuts and start before the clip ends. Write a later shot's line so it reads after the words "the camera cuts to".
+- LOOK: every person on screen, by name when you are given one, otherwise by how she looks — hair colour and how it falls and moves, eyes, and the clothes with their material and how they move. The video model has no memory between shots, so say it again in every shot.
+- BODY: what the body and hands do, in order, to the very end of the shot, with how fast each thing happens (slowly, in one quick motion, a beat of stillness).
+- FACE: where she looks, the mouth, the cheeks, the breath, and the feeling that changes across the shot.
+- LIGHT: where the light comes from, its colour and how it changes; what hangs in the air; what moves in the background.
+- CAMERA: one move (static, push in, pull out, pan, truck, tilt, arc, tracking or handheld), its amplitude (small, medium or large), its speed (slow, medium or fast) and the motion that motivates it.
 - SOUND: the physical sounds in order. No dialogue.
 - MUSIC: the instrument you are given, its tempo, and whether it rises or falls."""
+
+
+def _words(duration_s: int) -> int:
+    """How long to ask for: at least about 2,000 characters, never trimmed.
+
+    The Showrunner (2026-10-11) asked for about 2,000. Asked for 350 words, the
+    26B wrote ~1,550 characters for a 5-second clip (one shot) and ~2,570 for
+    10 seconds (three shots). The short clip is raised to reach 2,000; a longer
+    clip is never asked for less — "a long clip coming out shorter defeats the
+    point". Measured, not derived — re-measure if the shot fields change.
+    """
+    return 440 if duration_s <= 10 else 520
 
 
 def write_prompt(
@@ -344,12 +370,16 @@ def write_prompt(
 ) -> str:
     beats = "\n".join(f"- {b}" for b in idea.get("beats") or [])
     kind = KINDS.get(str(idea.get("kind") or ""), {})
+    story = str(idea.get("story") or "").strip()
     return (
         f"Length: {duration_s} seconds.\n"
+        f"Write about {_words(duration_s)} English words in all.\n"
         f"Who is in it:\n{_who(people)}\n\n"
         f"What the photograph shows (second 0):\n{still.strip()}\n\n"
         + (f"Kind of scene: {kind['brief']}\n\n" if kind else "")
         + f"The idea the director chose, in order:\n{beats}\n\n"
+        # Their words for it: the feeling the beats alone do not carry.
+        + (f"What the director and the actress agreed on, in their words:\n{story}\n\n" if story else "")
         + (f"The music is played on: {instrument}" if instrument else
            "Choose one instrument for the music.")
     )
@@ -407,23 +437,54 @@ _SHOT_LINE = re.compile(r"^\s*\**\s*SHOT\s*(\d+)\s*(?:AT\s*([\d.]+)\s*s?)?\s*\**
 _FIELD_LINE = re.compile(r"^\s*\**\s*(SOUND|MUSIC)\s*\**\s*:\s*(.+)$", re.IGNORECASE)
 
 
+# The five parts of a shot, in the order they are laid out (2026-10-11: one
+# paragraph per shot came back about 1,000 characters for the whole clip; the
+# Showrunner wanted motion, faces, light and looks in detail, about 2,000).
+_SHOT_PARTS = ("look", "body", "face", "light", "camera")
+_PART_LINE = re.compile(r"^\s*\**\s*(LOOK|BODY|FACE|LIGHT|CAMERA)\s*\**\s*:\s*(.*)$", re.IGNORECASE)
+# A label written mid-line ("…toward the clock. SHOT 2 AT 2: The camera…",
+# 2026-10-11) starts a line of its own.
+_INLINE_LABEL = re.compile(
+    r"[ \t]+(?=\**(?:SHOT\s*\d+\s*AT\s*[\d.]+\s*s?|LOOK|BODY|FACE|LIGHT|CAMERA|SOUND|MUSIC)\s*\**\s*:)",
+)
+
+
 def parse_shots(raw: str) -> dict[str, Any]:
-    """The labelled-line answer as {"shots": [{"at", "text"}], "sound", "music"}.
+    """The labelled-line answer as {"shots": [{"at", "text", "look", …}], "sound", "music"}.
 
     Falls back to a JSON object, in case the model answers in the old shape.
     """
     data: dict[str, Any] = {"shots": []}
-    for line in (raw or "").splitlines():
+    field = ""
+    for line in _INLINE_LABEL.sub("\n", raw or "").splitlines():
         if m := _SHOT_LINE.match(line):
             data["shots"].append({"at": m.group(2), "text": m.group(3).lstrip("* ").strip()})
+            field = "text"
+        elif data["shots"] and (m := _PART_LINE.match(line)):
+            field = m.group(1).lower()
+            data["shots"][-1][field] = m.group(2).lstrip("* ").strip()
         elif m := _FIELD_LINE.match(line):
-            data[m.group(1).lower()] = m.group(2).lstrip("* ").strip()
-        elif data["shots"] and line.strip() and len(data) == 1:
-            # A shot paragraph that wrapped onto the next line.
-            data["shots"][-1]["text"] += " " + line.strip()
+            field = m.group(1).lower()
+            data[field] = m.group(2).lstrip("* ").strip()
+        elif line.strip() and field:
+            # A field that wrapped onto the next line.
+            target = data["shots"][-1] if field in ("text", *_SHOT_PARTS) else data
+            target[field] = f"{target.get(field, '')} {line.strip()}".strip()
     if not data["shots"] and "{" in (raw or ""):
         return parse_json_object(raw)
     return data
+
+
+def _sentence(text: str) -> str:
+    text = str(text or "").strip()
+    return text if not text or text[-1] in ".!?;:" else f"{text}."
+
+
+def _shot_text(shot: dict[str, Any]) -> str:
+    """One shot's paragraph: what it is, then look, body, face, light, camera."""
+    return " ".join(
+        _sentence(shot.get(k)) for k in ("text", *_SHOT_PARTS) if str(shot.get(k) or "").strip()
+    )
 
 
 def _stamp(seconds: float) -> str:
@@ -471,7 +532,7 @@ def layout(data: dict[str, Any], *, duration_s: int) -> str:
                 data = {**data, key: shot[key]}
         # A cut written inside a shot's paragraph is a new shot (2026-10-10:
         # "... The camera cuts to a close-up of Mio" in the middle of shot 1).
-        text = str(shot.get("text") or "").strip()
+        text = _shot_text(shot)
         # …and one left dangling at the end of a shot, with the next shot's
         # header still to come ("…push in. the camera cuts to [Shot 2]").
         text = _CUT_AT_END.sub("", text)
