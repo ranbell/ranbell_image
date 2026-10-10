@@ -142,6 +142,9 @@ class LlmGateway:
     async def vision_ollama_models(self, url: str | None = None) -> list[str]:
         return await self._ollama.vision_models(url)
 
+    async def loaded(self) -> list[dict]:
+        return await self._ollama.loaded()
+
     async def unload(self, model: str | None = None) -> None:
         """Free the card before handing over to a renderer."""
         await self._ollama.unload(model)

@@ -55,6 +55,27 @@ async def _talk(request: Request, talk_id: str) -> dict:
     return talk
 
 
+async def make_room(request: Request, model: str) -> None:
+    """Before an idea round, let the LLM have the card (the Showrunner, 2026-10-11).
+
+    A still often comes straight off a render, with ComfyUI's checkpoint still
+    resident; the 26B then loads mostly onto the CPU and a pitch takes minutes.
+    Nothing is done when the model is already on the GPU, so a talk does not
+    pay for this on every reply — only at the start and on a fresh pitch.
+    """
+    comfy = getattr(request.app.state, "comfy", None)
+    if comfy is None or not hasattr(comfy, "free_vram"):
+        return
+    try:
+        for m in await _ollama(request).loaded():
+            if model in (m.get("name"), m.get("model")):
+                if int(m.get("size_vram") or 0) >= 0.8 * int(m.get("size") or 1):
+                    return
+    except Exception:
+        pass
+    await comfy.free_vram()
+
+
 def _length(talk: dict, duration_s: int | None) -> None:
     """The screen's seconds picker, taken whenever it is sent with a move."""
     if duration_s in video_expand.DURATIONS:
@@ -89,6 +110,7 @@ async def create_talk(body: TalkCreate, request: Request):
         raise HTTPException(400, "duration_s must be 5, 10 or 15")
     reuse = await video_db.load(_db(request), body.reuse_talk_id) if body.reuse_talk_id else None
     cfg = await _cfg(request)
+    await make_room(request, video_talk.model_inputs(cfg, body.locale)["model"])
     return await _run(lambda: video_talk.create(
         _db(request), _ollama(request), sha=body.sha256.strip(),
         character_id=body.character_id.strip(), partner_id=body.partner_id.strip(),
@@ -125,6 +147,7 @@ async def write(talk_id: str, body: TalkWrite, request: Request):
 @router.post("/talks/{talk_id}/repitch")
 async def repitch(talk_id: str, request: Request):
     talk = await _talk(request, talk_id)
+    await make_room(request, str((talk.get("inputs") or {}).get("model") or ""))
     return await _run(lambda: video_talk.repitch(_db(request), _ollama(request), talk))
 
 

@@ -361,18 +361,27 @@ Renders go through the scheduler. A busy card means wait; climbing on while it i
 
 ---
 
-## 10. A video from this still
+## 10. The video studio — a video from this still
 
-Press "🎬 Video" on the corner of any still — a test shot, a final, or a picture opened from the gallery — and you can talk that picture into a video with the actress, with the still as second 0.
+A place to settle a short video that starts from a still, by talking it over with an actress. It is its own screen, apart from the photo shoot.
 
-- **A still from her shoot** opens that session and carries on from it. She remembers what you were shooting.
-- **Any other photo** asks you to pick who to look at it with first (two are fine). The people in it are not her, so she talks about them as the people in the photo.
+**Opening it.** Press "🎬 Video" in the gallery's image detail, or on the corner of a Muse test shot or final.
 
-She looks at the picture and brings four ideas of different kinds: the moment goes on, the camera reveals, somewhere else, and the world changes. They sit in the chat as cards.
+**Who to talk with.** The actresses' faces sit under the picture on the left; press one to talk with her. "+ Add a second" brings in another, and the two of them talk it over together.
 
-Then you just talk. Say "make it rain" or "it needs more movement" and she changes the idea and shows you the changed card. Say "let's go with that", or press "Write this one" on a card, and you get the MiniMax H3 prompt. Pick the length (5, 10 or 15 seconds) on the bar above the input. "Back to stills" returns to the usual shoot.
+- A still from a Muse shoot seats that shoot's actress already, and the talk carries on from the shoot. She remembers what you were shooting.
+- You can pick someone else instead; she then talks about it as someone else's shoot, not her own.
+- In a photo from elsewhere, the people in it are not her, and she talks about them as the people in the photo.
 
-Paste the prompt with Hailuo's prompt optimizer off. Left on, it rewrites the times and the names. The video itself is not rendered here.
+Pick the length (5, 10 or 15 seconds), add a line about what you want to see if you like, and press "Start the talk".
+
+**Ideas and the talk.** She looks at the picture and brings four ideas of different kinds: the moment goes on, the camera reveals, somewhere else, and the world changes. They sit as cards under the picture; the talk is on the right. Say "make it rain" or "it needs more movement" and she changes the idea and shows you the changed card. If none of them is right, "Ask for other ideas" draws again.
+
+**Writing the prompt.** Say "let's go with that", or press "Write this one" on a card, and the MiniMax H3 prompt appears under the picture; "Copy" takes it. Paste it with Hailuo's prompt optimizer off — left on, it rewrites the times and the names.
+
+**Coming back.** Talks are kept. Pressing "🎬 Video" on the same still again picks its talk back up, and "Recent talks" at the top opens any of them. "Change the cast" starts again with someone else.
+
+When a talk starts, and on "Ask for other ideas", an image model still resident on the GPU is unloaded first (never while a render is running), so a talk right after a shoot does not crawl. The video itself is not rendered here.
 
 ---
 

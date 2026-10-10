@@ -341,7 +341,7 @@ def _apply(talk: dict[str, Any], reply: dict[str, str]) -> dict[str, Any] | None
     return None
 
 
-def _model_inputs(cfg: dict[str, Any], locale: str) -> dict[str, Any]:
+def model_inputs(cfg: dict[str, Any], locale: str) -> dict[str, Any]:
     """The admin screen's Muse model; the video studio has no picker of its own."""
     model = str(cfg.get("muse_model") or "").strip() or str(cfg.get("vlm_model") or "").strip()
     return {
@@ -364,7 +364,7 @@ async def create(
     `reuse` is an earlier talk about the same picture: its reading is kept, so
     calling a different actress in does not look at the picture again.
     """
-    inputs = _model_inputs(cfg or {}, locale)
+    inputs = model_inputs(cfg or {}, locale)
     talk: dict[str, Any] = {
         "talk_id": str(uuid.uuid4()), "created_at": time.time(), "sha256": sha,
         "inputs": inputs, "duration_s": duration_s, "short": short.strip(),

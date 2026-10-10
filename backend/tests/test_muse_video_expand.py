@@ -476,3 +476,90 @@ def test_source_lookup_finds_the_shoot(monkeypatch, studio):
     )
     r = client.get("/api/muse/video/source/abc")
     assert r.json() == {"session_id": "s9", "character_id": MIO_ID, "partner_character_id": ""}
+
+
+# ── Making room on the card before a pitch ───────────────────────────────────
+
+def _comfy(handler):
+    import httpx
+
+    from backend.app.ai.comfy import ComfyUIClient
+
+    c = ComfyUIClient()
+    c._http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    return c
+
+
+@pytest.mark.asyncio
+async def test_comfy_is_left_alone_while_it_renders():
+    seen = []
+
+    def handler(request):
+        import httpx
+        seen.append(request.url.path)
+        return httpx.Response(200, json={"queue_running": [["x"]], "queue_pending": []})
+
+    assert await _comfy(handler).free_vram(wait_s=0.1) is False
+    assert "/free" not in seen
+
+
+@pytest.mark.asyncio
+async def test_comfy_frees_and_waits_until_the_memory_moves(monkeypatch):
+    import asyncio as aio
+
+    import httpx
+
+    async def no_sleep(_):
+        return None
+
+    monkeypatch.setattr(aio, "sleep", no_sleep)
+    state = {"free": 1 << 30, "freed": False}
+
+    def handler(request):
+        path = request.url.path
+        if path == "/queue":
+            return httpx.Response(200, json={"queue_running": [], "queue_pending": []})
+        if path == "/free":
+            state["freed"] = True
+            return httpx.Response(200)
+        if state["freed"]:
+            state["free"] = 14 << 30  # takes effect on the next look
+        return httpx.Response(200, json={"devices": [{"vram_free": state["free"]}]})
+
+    assert await _comfy(handler).free_vram(wait_s=5) is True
+
+
+class _Room:
+    def __init__(self, loaded):
+        self._loaded = loaded
+        self.freed = 0
+
+    async def loaded(self):
+        return self._loaded
+
+    async def free_vram(self):
+        self.freed += 1
+        return True
+
+
+@pytest.mark.asyncio
+async def test_room_is_made_only_when_the_model_is_not_on_the_gpu():
+    from types import SimpleNamespace
+
+    from backend.app.muse import video_api
+
+    def request(loaded):
+        room = _Room(loaded)
+        return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(comfy=room, ollama=room))), room
+
+    req, room = request([{"name": "m", "size": 100, "size_vram": 95}])
+    await video_api.make_room(req, "m")
+    assert room.freed == 0
+
+    req, room = request([{"name": "m", "size": 100, "size_vram": 2}])
+    await video_api.make_room(req, "m")
+    assert room.freed == 1
+
+    req, room = request([])  # not loaded yet: the load is about to happen
+    await video_api.make_room(req, "m")
+    assert room.freed == 1

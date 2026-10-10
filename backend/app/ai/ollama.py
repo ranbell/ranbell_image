@@ -407,6 +407,16 @@ class OllamaClient:
         self._raise_with_body(r)
         return self._extract_generate_text(r.json(), model=model_name)
 
+    async def loaded(self) -> list[dict]:
+        """The models resident right now (`/api/ps`), with `size` and `size_vram`.
+
+        Not behind the spooler semaphore: it is a read, and waiting behind a long
+        generation to learn what is loaded would defeat the point.
+        """
+        r = await self._client.get(f"{self.base_url}/api/ps", timeout=5.0)
+        r.raise_for_status()
+        return list((r.json() or {}).get("models") or [])
+
     async def unload(self, model: str | None = None) -> None:
         """Drop a model from VRAM now instead of waiting out its keep_alive.
 

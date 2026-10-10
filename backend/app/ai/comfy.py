@@ -2,6 +2,7 @@ import asyncio
 import copy
 import json
 import logging
+import time
 import uuid
 from pathlib import Path
 from typing import AsyncGenerator
@@ -837,6 +838,51 @@ class ComfyUIClient:
         except Exception as exc:
             logger.error("ComfyUI WebSocket error: %s", exc)
             yield {"type": "error", "message": str(exc)}
+
+    async def _vram_free(self) -> int | None:
+        r = await self._http.get(f"{settings.comfyui_url}/system_stats", timeout=3.0)
+        r.raise_for_status()
+        devices = (r.json() or {}).get("devices") or []
+        return int(devices[0].get("vram_free") or 0) if devices else None
+
+    async def free_vram(self, *, wait_s: float = 20.0) -> bool:
+        """Drop ComfyUI's resident models so an LLM can have the card.
+
+        The other direction of `ollama.unload()` before a render. ComfyUI keeps
+        a checkpoint resident after it renders; an LLM loaded after that gets
+        the scraps — gemma4 26B came up with 0.3 GiB of 16.4 on the GPU and ran
+        on the CPU, four ideas taking 80–210 s instead of 20 (2026-10-10/11).
+        (`torch_vram_total` read 0.06 GiB meanwhile: under cudaMallocAsync it
+        does not show what is held, so it is not consulted.)
+
+        Never while anything is queued or running. `/free` is acted on between
+        jobs, seconds later, so this waits until the free memory actually moves
+        (or `wait_s` passes). Returns whether it moved.
+        """
+        base = settings.comfyui_url
+        try:
+            q = (await self._http.get(f"{base}/queue", timeout=3.0)).json()
+            if q.get("queue_running") or q.get("queue_pending"):
+                return False
+            before = await self._vram_free()
+            r = await self._http.post(
+                f"{base}/free", json={"unload_models": True, "free_memory": True}, timeout=5.0,
+            )
+            r.raise_for_status()
+        except Exception as exc:
+            logger.info("ComfyUI free skipped: %s", exc)
+            return False
+        deadline = time.monotonic() + wait_s
+        while time.monotonic() < deadline:
+            await asyncio.sleep(1.0)
+            try:
+                now = await self._vram_free()
+            except Exception:
+                return False
+            if before is not None and now is not None and now > before + (1 << 30):
+                logger.info("ComfyUI freed %.1f GiB", (now - before) / (1 << 30))
+                return True
+        return False
 
     async def interrupt(self) -> None:
         """Send an interrupt signal to the currently running job (assumes concurrency=1)."""
