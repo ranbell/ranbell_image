@@ -284,6 +284,8 @@ async def _reply(ollama, talk: dict[str, Any], line: str) -> dict[str, str]:
     )
     # "…間違ってないって！<br>B: ふふ…" — gemma sometimes breaks lines with HTML.
     say = re.sub(r"<br\s*/?>", "\n", say, flags=re.IGNORECASE)
+    # "…すごく好みです。 /" — a line-separator slash left at the end (seen on e4b).
+    say = re.sub(r"[ \t　]+/[ \t　]*$", "", say, flags=re.MULTILINE)
     if _has_partner(talk):
         say = _INLINE_SPEAKER.sub("\n", say)
     say = _NAME_AFTER_PREFIX.sub(r"\1", say)
@@ -341,13 +343,19 @@ def _apply(talk: dict[str, Any], reply: dict[str, str]) -> dict[str, Any] | None
     return None
 
 
-def model_inputs(cfg: dict[str, Any], locale: str) -> dict[str, Any]:
-    """The admin screen's Muse model; the video studio has no picker of its own."""
-    model = str(cfg.get("muse_model") or "").strip() or str(cfg.get("vlm_model") or "").strip()
+def model_inputs(cfg: dict[str, Any], locale: str, model: str = "") -> dict[str, Any]:
+    """The studio's chosen model, else the admin screen's Muse default.
+
+    The chosen one reads the picture too: the studio offers only models that
+    can see. The admin default was a small e4b while the shoots ran on the 26B
+    (2026-10-11), so the screen chooses rather than inheriting it silently.
+    """
+    chosen = model.strip()
+    fallback = str(cfg.get("muse_model") or "").strip() or str(cfg.get("vlm_model") or "").strip()
     return {
         "locale": locale,
-        "model": model,
-        "vision_model": str(cfg.get("muse_vision_model") or "").strip() or model,
+        "model": chosen or fallback,
+        "vision_model": chosen or str(cfg.get("muse_vision_model") or "").strip() or fallback,
         "num_ctx": int(cfg.get("ollama_num_ctx") or 0) or None,
     }
 
@@ -358,13 +366,14 @@ async def create(
     db, ollama, *, sha: str, character_id: str, partner_id: str = "",
     duration_s: int = 5, short: str = "", locale: str = "ja",
     cfg: dict[str, Any] | None = None, reuse: dict[str, Any] | None = None,
+    model: str = "",
 ) -> dict[str, Any]:
     """Bring a photograph to the table: look, pitch, and let her open the talk.
 
     `reuse` is an earlier talk about the same picture: its reading is kept, so
     calling a different actress in does not look at the picture again.
     """
-    inputs = model_inputs(cfg or {}, locale)
+    inputs = model_inputs(cfg or {}, locale, model)
     talk: dict[str, Any] = {
         "talk_id": str(uuid.uuid4()), "created_at": time.time(), "sha256": sha,
         "inputs": inputs, "duration_s": duration_s, "short": short.strip(),
@@ -530,6 +539,7 @@ def view(talk: dict[str, Any]) -> dict[str, Any]:
         "updated_at": talk.get("updated_at"),
         "duration_s": talk.get("duration_s", 5),
         "short": talk.get("short", ""),
+        "model": (talk.get("inputs") or {}).get("model", ""),
         "character": _who(talk.get("character") or {}),
         "partner_character": _who(talk.get("partner_character") or {}),
         "source_session_id": talk.get("source_session_id", ""),

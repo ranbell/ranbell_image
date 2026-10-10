@@ -373,7 +373,7 @@ A place to settle a short video that starts from a still, by talking it over wit
 - You can pick someone else instead; she then talks about it as someone else's shoot, not her own.
 - In a photo from elsewhere, the people in it are not her, and she talks about them as the people in the photo.
 
-Pick the length (5, 10 or 15 seconds), add a line about what you want to see if you like, and press "Start the talk".
+Pick the length (5, 10 or 15 seconds) and the model, add a line about what you want to see if you like, and press "Start the talk". The model starts on the one that shoot ran on for a still from a shoot, otherwise on your last pick here (the latest shoot's the first time). Only models that can read pictures are listed.
 
 **Ideas and the talk.** She looks at the picture and brings four ideas of different kinds: the moment goes on, the camera reveals, somewhere else, and the world changes. They sit as cards under the picture; the talk is on the right. Say "make it rain" or "it needs more movement" and she changes the idea and shows you the changed card. If none of them is right, "Ask for other ideas" draws again.
 

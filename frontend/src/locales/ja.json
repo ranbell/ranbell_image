@@ -1883,7 +1883,7 @@
     "start": "この顔ぶれで相談する",
     "restart": "この顔ぶれで相談し直す",
     "cancel": "やめる",
-    "changeCast": "顔ぶれを変える",
+    "changeCast": "顔ぶれ・モデルを変える",
     "ideas": "案",
     "repitch": "別の案を出してもらう",
     "revised": "直した",
@@ -1900,6 +1900,8 @@
     "beforeTalk": "話し相手を選んで「この顔ぶれで相談する」を押すと始まります",
     "chatPlaceholder": "話しかける（Enter は改行、送るのはボタン）",
     "chatBeforeTalk": "相談を始めると話しかけられます",
-    "send": "送る"
+    "send": "送る",
+    "model": "モデル",
+    "noModel": "モデルを選んでください"
   }
 }

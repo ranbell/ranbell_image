@@ -16,6 +16,8 @@ class TalkCreate(BaseModel):
     duration_s: int = 5
     short: str = ""
     locale: str = "ja"
+    # The screen's model picker; empty falls back to the admin screen's default.
+    model: str = ""
     # An earlier talk about the same picture: its reading is reused, so a
     # different actress can be called in without looking at the picture again.
     reuse_talk_id: str = ""
@@ -89,11 +91,30 @@ async def _run(move):
         raise HTTPException(400, exc.message) from exc
 
 
+async def _last_muse_model(db) -> str:
+    """The model the most recent Muse shoot ran on — the studio's first default."""
+    from . import service, session_db
+
+    for row in await session_db.list_recent(db, limit=5, studio=service.STUDIO):
+        session = await session_db.load(db, row["session_id"])
+        model = str(((session or {}).get("inputs") or {}).get("model") or "")
+        if model:
+            return model
+    return ""
+
+
 @router.get("/source/{sha256}")
 async def source(sha256: str, request: Request):
-    """Who a picture's own record says is in it, to seat them by default."""
+    """Who a picture's own record says is in it, to seat them by default, and
+    which model to offer first: that shoot's, else the latest shoot's."""
     src = await video_talk.source_of(_db(request), sha256)
-    return {k: src[k] for k in ("session_id", "character_id", "partner_character_id")}
+    out = {k: src[k] for k in ("session_id", "character_id", "partner_character_id")}
+    out["session_model"] = str(((src.get("session") or {}).get("inputs") or {}).get("model") or "")
+    try:
+        out["last_muse_model"] = await _last_muse_model(_db(request))
+    except Exception:
+        out["last_muse_model"] = ""
+    return out
 
 
 @router.get("/talks")
@@ -110,12 +131,12 @@ async def create_talk(body: TalkCreate, request: Request):
         raise HTTPException(400, "duration_s must be 5, 10 or 15")
     reuse = await video_db.load(_db(request), body.reuse_talk_id) if body.reuse_talk_id else None
     cfg = await _cfg(request)
-    await make_room(request, video_talk.model_inputs(cfg, body.locale)["model"])
+    await make_room(request, video_talk.model_inputs(cfg, body.locale, body.model)["model"])
     return await _run(lambda: video_talk.create(
         _db(request), _ollama(request), sha=body.sha256.strip(),
         character_id=body.character_id.strip(), partner_id=body.partner_id.strip(),
         duration_s=body.duration_s, short=body.short, locale=body.locale,
-        cfg=cfg, reuse=reuse,
+        cfg=cfg, reuse=reuse, model=body.model,
     ))
 
 

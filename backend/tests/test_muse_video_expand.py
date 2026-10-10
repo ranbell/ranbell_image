@@ -407,6 +407,14 @@ async def test_duet_lines_without_a_say_label_still_reach_the_chat(studio):
     assert said == [("各務 みお", "「t」みたいに雨、どうかな"), ("緒方 りん", "えー、走りたい！")]
 
 
+@pytest.mark.asyncio
+async def test_a_trailing_slash_is_not_part_of_her_line(studio):
+    talk = _talking()
+    await vt.chat(_FakeDb(), _FakeOllama(["SAY: すごく好みです。 /\nねえ、どうする？"]), talk, "どう？")
+    said = [r["text"] for r in talk["chat"] if r["role"] == "assistant"]
+    assert said == ["すごく好みです。\nねえ、どうする？"]
+
+
 def test_instrument_lines_are_short():
     assert ve.parse_instruments("Theremin\nA girl with dark hair, wide eyes, and an apron.") == ["Theremin"]
 
@@ -474,8 +482,25 @@ def test_source_lookup_finds_the_shoot(monkeypatch, studio):
         monkeypatch, studio, [], meta={"muse_session_id": "s9", "character_id": MIO_ID},
         sessions={"s9": {"session_id": "s9"}},
     )
+    async def last(db):
+        return "big:26b"
+
+    from backend.app.muse import video_api
+    monkeypatch.setattr(video_api, "_last_muse_model", last)
     r = client.get("/api/muse/video/source/abc")
-    assert r.json() == {"session_id": "s9", "character_id": MIO_ID, "partner_character_id": ""}
+    assert r.json() == {
+        "session_id": "s9", "character_id": MIO_ID, "partner_character_id": "",
+        "session_model": "", "last_muse_model": "big:26b",
+    }
+
+
+@pytest.mark.asyncio
+async def test_the_chosen_model_reads_the_picture_and_talks(studio):
+    ollama = _FakeOllama(_pitch_replies())
+    talk = await vt.create(_FakeDb({}), ollama, sha="x", character_id=MIO_ID, cfg=CFG, model="big:26b")
+    assert talk["inputs"]["model"] == "big:26b"
+    assert {c["model"] for c in ollama.calls} == {"big:26b"}
+    assert vt.view(talk)["model"] == "big:26b"
 
 
 # ── Making room on the card before a pitch ───────────────────────────────────

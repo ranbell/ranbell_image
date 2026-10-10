@@ -27,6 +27,20 @@ const partnerId = ref('')
 const choosingPartner = ref(false)
 const seconds = ref(5)
 const note = ref('')
+const catalog = ref(null)
+const model = ref('')
+const MODEL_KEY = 'ranbell.video.model'
+function storedModel() {
+  try { return localStorage.getItem(MODEL_KEY) || '' } catch { return '' }
+}
+function storeModel(m) {
+  try { localStorage.setItem(MODEL_KEY, m) } catch { /* private window */ }
+}
+// Only models that can read the picture: the chosen one looks at the still too.
+const models = computed(() => {
+  const llm = catalog.value?.llm || {}
+  return [...new Set(llm.vision_models?.length ? llm.vision_models : (llm.models || []))]
+})
 const talk = ref(null)
 const shaTalks = ref([])
 const recentTalks = ref([])
@@ -104,9 +118,20 @@ async function scrollChat() {
 }
 
 async function ensureCharacters() {
+  if (!catalog.value) catalog.value = await api('/api/muse/catalog')
   if (characters.value.length) return
   const data = await api('/api/characters')
   characters.value = (data.characters || []).filter(c => c.id)
+}
+
+// That shoot's model for its own still; else the studio's last pick; else the
+// latest Muse shoot's; else the admin screen's default (the Showrunner, 2026-10-11:
+// the admin default was a small e4b while the shoots ran on the 26B).
+function defaultModel(src) {
+  const known = new Set(models.value)
+  const pick = [src.session_model, storedModel(), src.last_muse_model,
+    catalog.value?.admin_defaults?.muse_model].find(m => m && known.has(m))
+  return pick || models.value[0] || ''
 }
 
 async function loadRecent() {
@@ -129,6 +154,7 @@ async function openStill(newSha) {
     source.value = await api(`/api/muse/video/source/${newSha}`)
     leadId.value = source.value.character_id || ''
     partnerId.value = source.value.partner_character_id || ''
+    model.value = defaultModel(source.value)
     shaTalks.value = (await api(`/api/muse/video/talks?sha256=${newSha}&limit=10`)).talks || []
     // Coming back to a picture already talked over: pick the talk up again.
     if (shaTalks.value.length) await openTalk(shaTalks.value[0].talk_id)
@@ -143,6 +169,7 @@ async function openTalk(id) {
   sha.value = data.sha256
   leadId.value = data.character?.character_id || ''
   partnerId.value = data.partner_character?.character_id || ''
+  if (data.model) model.value = data.model
   seconds.value = data.duration_s || 5
   setupOpen.value = false
   showRecent.value = false
@@ -151,6 +178,8 @@ async function openTalk(id) {
 
 async function startTalk() {
   if (!leadId.value) { fail(new Error(t('video.noActress'))); return }
+  if (!model.value) { fail(new Error(t('video.noModel'))); return }
+  storeModel(model.value)
   await run('start', async () => {
     const prev = talk.value?.sha256 === sha.value ? talk.value.talk_id : (shaTalks.value[0]?.talk_id || '')
     talk.value = await api('/api/muse/video/talks', {
@@ -162,6 +191,7 @@ async function startTalk() {
         duration_s: seconds.value,
         short: note.value.trim(),
         locale: isJa.value ? 'ja' : 'en',
+        model: model.value,
         reuse_talk_id: prev,
       }),
     })
@@ -397,6 +427,15 @@ const waitingLabel = computed(() => ({
                   @click="seconds = sec"
                 >{{ sec }}s</button>
               </div>
+              <label class="flex items-center gap-2 text-xs text-gray-400">
+                <span class="shrink-0">{{ t('video.model') }}</span>
+                <select
+                  v-model="model"
+                  class="min-w-0 flex-1 rounded-lg border border-white/10 bg-black/40 px-2 py-1 text-xs text-gray-100 outline-none focus:border-amber-500/60"
+                >
+                  <option v-for="m in models" :key="m" :value="m">{{ m }}</option>
+                </select>
+              </label>
               <input
                 v-model="note"
                 type="text"
@@ -440,6 +479,7 @@ const waitingLabel = computed(() => ({
                   :class="seconds === sec ? 'border-amber-400/70 text-amber-50' : 'border-white/10 text-gray-400'"
                   @click="seconds = sec"
                 >{{ sec }}s</button>
+                <span v-if="talk.model" class="max-w-[12rem] truncate text-[10px] text-gray-500" :title="talk.model">· {{ talk.model }}</span>
                 <button
                   type="button"
                   class="ml-auto text-[11px] text-gray-400 underline hover:text-gray-200"
