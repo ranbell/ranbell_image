@@ -361,4 +361,14 @@ Renders go through the scheduler. A busy card means wait; climbing on while it i
 
 ---
 
+## 10. A video prompt from this still
+
+Once the final image is done, you can get video ideas that start from it as second 0. If there is something you want to see, write it in one line. You can also leave it empty, and she works from the picture and from who she is.
+
+Press "Pitch ideas" and Muse first looks at the picture to see what is in it. Then it pitches four ideas of different kinds: the moment goes on, the camera reveals, somewhere else, and the world changes. Each idea is thought up on its own, so they do not drift into the same shape. If none of them fits, "Pitch other ideas" draws again.
+
+Pick one and press "Write this one" to get the MiniMax H3 prompt. Paste it with Hailuo's prompt optimizer off. Left on, it rewrites the times and the names. This does not change the photo ledger. The video itself is not rendered here.
+
+---
+
 If you want the inside of the room, the [technical reference](../tech/muse.md) is next.
