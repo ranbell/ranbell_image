@@ -415,6 +415,22 @@ async def test_a_trailing_slash_is_not_part_of_her_line(studio):
     assert said == ["すごく好みです。\nねえ、どうする？"]
 
 
+@pytest.mark.asyncio
+async def test_her_diary_is_not_brought_into_the_studio(studio):
+    talk = _talking()
+    talk.update({
+        "caught": {"ids": ["d1"], "summary": "木漏れ日の道を歩いた日"},
+        "diary_memories": ["木漏れ日の道で、総監督に見られた気がした。"],
+        "memories": ["前回の撮影：雨の路地"],
+        "bond": {"distance": "少し打ち解けてきた"},
+    })
+    ollama = _FakeOllama(["SAY: 可愛らしく、ですね"])
+    await vt.chat(_FakeDb(), ollama, talk, "どんな感じがいいかな")
+    system = ollama.calls[0]["system"]
+    assert "木漏れ日" not in system and "雨の路地" not in system
+    assert "少し打ち解けてきた" in system
+
+
 def test_instrument_lines_are_short():
     assert ve.parse_instruments("Theremin\nA girl with dark hair, wide eyes, and an apron.") == ["Theremin"]
 

@@ -202,11 +202,26 @@ def talk_system(talk: dict[str, Any]) -> str:
         lang="Japanese" if _ja(talk) else "English",
         duet=_DUET.format(a=a, b=b) if duet else "",
     )
-    parts = [head, _voices(talk)]
-    mem = persona.memory_prompt_blocks(talk)
-    if mem:
-        parts.append(mem[:1500])
-    return "\n\n".join(parts)
+    return "\n\n".join(p for p in [head, _voices(talk), relationship_blocks(talk)] if p)
+
+
+def relationship_blocks(talk: dict[str, Any]) -> str:
+    """How she stands with the Showrunner — and nothing she would retell.
+
+    Not `persona.memory_prompt_blocks`: that carries the shoot-room's memory —
+    diary bodies, recaps of past shoots, outings, and the one-off "the
+    Showrunner read your diary" line, which a shoot consumes after she has
+    raised it. Handed to every studio reply, Asahi answered "how should it
+    look?" with "ふふっ……見ちゃいました？" and came back to her diary's
+    木漏れ日の道 again two turns later (2026-10-11). A still's own shoot reaches
+    the talk through `context` (its theme and ledger), not through her diary.
+    """
+    from . import shared
+
+    blocks = [shared._bond_block(talk), shared._taste_block(talk)]
+    if _has_partner(talk):
+        blocks.append(shared._chemistry_block(talk))
+    return "\n\n".join(b for b in blocks if b)[:1500]
 
 
 def _ideas_block(talk: dict[str, Any]) -> str:
@@ -426,9 +441,9 @@ async def create(
             "このモデルは絵を読めなかったので、撮影のプロンプトから考えました。画像を読めるモデルを管理画面で指定してください。",
             "This model could not read the picture, so the ideas start from the shoot's prompt. Set an image-capable model on the admin screen.",
         ), kind="blind")
-    # Her memory of the Showrunner (bond, diary, the shoots they did) colours
-    # how she talks, as it does in a shoot. The loader reads who she is from the
-    # inputs, as a session carries them.
+    # Her standing with the Showrunner (bond, his taste, a duet's chemistry)
+    # colours how she talks; see `relationship_blocks` for what is left out.
+    # The loader reads who she is from the inputs, as a session carries them.
     inputs["character_id"] = character_id
     inputs["partner_preset"] = talk["partner_character"].get("character_id", "")
     await persona.load_memory(db, talk)
