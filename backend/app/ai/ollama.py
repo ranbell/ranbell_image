@@ -417,6 +417,16 @@ class OllamaClient:
         r.raise_for_status()
         return list((r.json() or {}).get("models") or [])
 
+    async def unload_all(self) -> list[str]:
+        """Drop every resident model. Returns the names that were dropped."""
+        dropped = []
+        for m in await self.loaded():
+            name = str(m.get("name") or m.get("model") or "")
+            if name:
+                await self.unload(name)
+                dropped.append(name)
+        return dropped
+
     async def unload(self, model: str | None = None) -> None:
         """Drop a model from VRAM now instead of waiting out its keep_alive.
 

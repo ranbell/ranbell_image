@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -29,6 +30,9 @@ from .api.analyzer import router as analyzer_router
 from .api.alignment import router as alignment_router
 from .api.invoke import router as invoke_router
 from .characters.api import router as characters_router
+
+logger = logging.getLogger(__name__)
+
 # **Muse Classic retired (2026-09-12).** There is one studio, Muse Refine. Only the
 # green room and the notebook shared classic's router, so those were made
 # independent (the URLs stay `/api/muse/lounge/...` — that is how the screen calls
@@ -158,6 +162,14 @@ async def lifespan(app: FastAPI):
     spooler = JobSpooler(resources=resources, lane_resource=lane_resource)
     # Throttle all LLM traffic (every lane) at the client, per HTTP request
     ollama.set_resource(resources.get("remote-ollama"))
+
+    if _settings.unload_llm_before_render:
+        async def _free_card_for_render() -> None:
+            dropped = await ollama.unload_all()
+            if dropped:
+                logger.info("[render] unloaded %s before queueing", ", ".join(dropped))
+
+        comfy.before_queue = _free_card_for_render
 
     app.state.db = db
     app.state.ollama = ollama

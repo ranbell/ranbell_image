@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     # single-worker PROMPT lane for this long — lower it if that matters more
     # than very long generations.
     ollama_timeout_sec: float = 300.0
+    # Unload every resident Ollama model just before a graph is queued to
+    # ComfyUI, whoever loaded it (ComfyUIClient.before_queue). On a 16GB card a
+    # resident 26B leaves ComfyUI too little and the render runs out of memory.
+    unload_llm_before_render: bool = True
 
     # WD14 tagger
     wd14_model_dir: str = "/mnt/models/wd14"

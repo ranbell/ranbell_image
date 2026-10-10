@@ -699,3 +699,57 @@ def test_search_over_http(monkeypatch, studio):
     assert client.get("/api/muse/video/search?q=").json() == {"talks": []}
     r = client.get("/api/muse/video/search?q=rain").json()
     assert r["talks"][0]["talk_id"] == "a"
+
+
+# ── The card is freed for every render ───────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_every_queued_render_frees_the_llm_first():
+    import httpx
+
+    order = []
+
+    def handler(request):
+        order.append(request.url.path)
+        return httpx.Response(200, json={"prompt_id": "p1"})
+
+    comfy = _comfy(handler)
+
+    async def unload():
+        order.append("unload")
+
+    comfy.before_queue = unload
+    assert await comfy.queue_prompt({"1": {}}) == "p1"
+    assert order == ["unload", "/prompt"]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_unload_never_holds_a_render_back():
+    import httpx
+
+    comfy = _comfy(lambda request: httpx.Response(200, json={"prompt_id": "p2"}))
+
+    async def broken():
+        raise RuntimeError("ollama is down")
+
+    comfy.before_queue = broken
+    assert await comfy.queue_prompt({"1": {}}) == "p2"
+
+
+@pytest.mark.asyncio
+async def test_unload_all_drops_every_resident_model():
+    from backend.app.ai.ollama import OllamaClient
+
+    client = OllamaClient(base_url="http://ollama")
+    dropped = []
+
+    async def loaded():
+        return [{"name": "big:26b"}, {"model": "embed:small"}]
+
+    async def unload(name=None):
+        dropped.append(name)
+
+    client.loaded = loaded
+    client.unload = unload
+    assert await client.unload_all() == ["big:26b", "embed:small"]
+    assert dropped == ["big:26b", "embed:small"]

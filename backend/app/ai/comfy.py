@@ -111,6 +111,13 @@ class ComfyUIClient:
     def __init__(self) -> None:
         self._http = httpx.AsyncClient(timeout=60.0)
         self.client_id = str(uuid.uuid4())
+        # Called just before every graph is queued (wired in main.py to unload
+        # Ollama). Every render reaches ComfyUI through `queue_prompt` — Muse,
+        # Inspire, Invoke, Refine — so this is the one seam that sees them all.
+        # Muse's own `unload_vlm` drops only its session's model; a video studio
+        # talk on another model stayed resident and a render ran out of memory
+        # (2026-10-11).
+        self.before_queue = None
 
     async def is_available(self) -> bool:
         try:
@@ -721,6 +728,12 @@ class ComfyUIClient:
         # `prompt_id`, so `stream_progress` can only take it as "whatever this client
         # is waiting for right now". **Separate the clientIds and that assumption
         # becomes true.**
+        if self.before_queue is not None:
+            try:
+                await asyncio.wait_for(self.before_queue(), 60.0)
+            except Exception as exc:
+                # A render is never held back for this; it is only made safer.
+                logger.warning("before_queue failed: %s", exc)
         body: dict = {"prompt": workflow, "client_id": client_id or self.client_id}
         if preview:
             body["extra_data"] = {"preview_method": "auto"}
