@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+import unicodedata
 import uuid
 from typing import Any
 
@@ -550,9 +551,81 @@ def view(talk: dict[str, Any]) -> dict[str, Any]:
             for i in talk.get("ideas") or []
         ],
         "chosen": talk.get("chosen", ""),
-        "prompts": list(talk.get("prompts") or [])[-5:],
+        "prompts": list(talk.get("prompts") or []),
         "chat": list(talk.get("chat") or [])[-60:],
     }
+
+
+# ── Text search ─────────────────────────────────────────────────────────────
+
+def _norm(text: str) -> str:
+    # Full-width and half-width, upper and lower case all match each other.
+    return unicodedata.normalize("NFKC", str(text or "")).lower()
+
+
+def _snippet(text: str, term: str, width: int = 40) -> str:
+    flat = " ".join(str(text or "").split())
+    at = _norm(flat).find(term)
+    if at < 0:
+        return flat[: width * 2]
+    start, end = max(0, at - width), min(len(flat), at + len(term) + width)
+    return ("…" if start else "") + flat[start:end] + ("…" if end < len(flat) else "")
+
+
+def _fields(talk: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every searchable piece of a talk, with where it came from."""
+    out: list[dict[str, Any]] = []
+    for i, p in enumerate(talk.get("prompts") or []):
+        out.append({"field": "prompt", "text": p.get("prompt", ""), "title": p.get("title", ""), "prompt_index": i})
+        out.append({"field": "title", "text": p.get("title", ""), "title": p.get("title", ""), "prompt_index": i})
+    for idea in talk.get("ideas") or []:
+        out.append({"field": "title", "text": idea.get("title", ""), "title": idea.get("title", "")})
+        out.append({"field": "story", "text": idea.get("story", ""), "title": idea.get("title", "")})
+    for key in ("character", "partner_character"):
+        c = talk.get(key) or {}
+        out.append({"field": "name", "text": f"{c.get('name', '')} {c.get('name_ja', '')}"})
+    out.append({"field": "note", "text": talk.get("short", "")})
+    for row in talk.get("chat") or []:
+        if row.get("role") in ("user", "assistant"):
+            out.append({"field": "chat", "text": row.get("text", ""), "name": row.get("name", "")})
+    return [f for f in out if str(f["text"]).strip()]
+
+
+# Which hit to show first when a talk matches in several places.
+_FIELD_ORDER = {"prompt": 0, "title": 1, "story": 2, "note": 3, "name": 4, "chat": 5}
+
+
+def search(talks: list[dict[str, Any]], query: str, *, limit: int = 30) -> list[dict[str, Any]]:
+    """Talks containing every word of the query, newest first.
+
+    Words are split on spaces (full-width too). Each result carries its hits —
+    which field, a snippet around the word, and for a prompt its index — so
+    the screen can say where it matched and open that prompt.
+    """
+    terms = [t for t in _norm(query).split() if t]
+    if not terms:
+        return []
+    out = []
+    for talk in talks:
+        fields = _fields(talk)
+        normed = [_norm(f["text"]) for f in fields]
+        whole = "\n".join(normed)
+        if not all(t in whole for t in terms):
+            continue
+        hits = []
+        for f, n in zip(fields, normed):
+            term = next((t for t in terms if t in n), None)
+            if term is None:
+                continue
+            hit = {"field": f["field"], "snippet": _snippet(f["text"], term)}
+            for k in ("title", "prompt_index", "name"):
+                if f.get(k) not in (None, ""):
+                    hit[k] = f[k]
+            hits.append(hit)
+        hits.sort(key=lambda h: _FIELD_ORDER.get(h["field"], 9))
+        out.append({**summary(talk), "hits": hits[:4]})
+    out.sort(key=lambda r: r.get("updated_at") or 0.0, reverse=True)
+    return out[:limit]
 
 
 def summary(row: dict[str, Any]) -> dict[str, Any]:

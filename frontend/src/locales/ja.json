@@ -1870,7 +1870,7 @@
     "title": "動画スタジオ",
     "make": "この絵から動画を相談する",
     "makeShort": "動画",
-    "recent": "最近の相談",
+    "recent": "相談を探す",
     "noRecent": "まだ相談はありません",
     "empty": "ギャラリーや Muse の絵の「🎬 動画」から始めます",
     "fromShoot": "Muse の撮影の絵です。撮影の続きとして相談します",
@@ -1902,6 +1902,9 @@
     "chatBeforeTalk": "相談を始めると話しかけられます",
     "send": "送る",
     "model": "モデル",
-    "noModel": "モデルを選んでください"
+    "noModel": "モデルを選んでください",
+    "searchPlaceholder": "撮影文・案・女優名・会話の言葉で探す",
+    "searching": "探しています…",
+    "noHits": "見つかりませんでした"
   }
 }

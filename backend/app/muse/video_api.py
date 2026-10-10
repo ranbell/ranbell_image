@@ -125,6 +125,14 @@ async def list_talks(request: Request, limit: int = 30, sha256: str = ""):
     return {"talks": [video_talk.summary(r) for r in rows]}
 
 
+@router.get("/search")
+async def search(request: Request, q: str = "", limit: int = 30):
+    """Past talks and prompts containing every word of `q`."""
+    if not q.strip():
+        return {"talks": []}
+    return {"talks": video_talk.search(await video_db.all_talks(_db(request)), q, limit=limit)}
+
+
 @router.post("/talks")
 async def create_talk(body: TalkCreate, request: Request):
     if body.duration_s not in video_expand.DURATIONS:

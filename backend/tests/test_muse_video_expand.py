@@ -588,3 +588,59 @@ async def test_room_is_made_only_when_the_model_is_not_on_the_gpu():
     req, room = request([])  # not loaded yet: the load is about to happen
     await video_api.make_room(req, "m")
     assert room.freed == 1
+
+
+# ── Studio search ────────────────────────────────────────────────────────────
+
+def _archived(talk_id, *, prompt="", title="", story="", chat="", updated=0.0, name="Mio Kagami"):
+    return {
+        "talk_id": talk_id, "sha256": f"sha-{talk_id}", "updated_at": updated,
+        "character": {"character_id": MIO_ID, "name": name, "name_ja": "各務 みお"},
+        "partner_character": {},
+        "ideas": [{"kind": "stay", "title": title, "story": story, "beats": ["x"]}],
+        "prompts": [{"kind": "stay", "title": title, "prompt": prompt}] if prompt else [],
+        "chat": [{"role": "user", "text": chat}] if chat else [],
+        "short": "",
+    }
+
+
+def test_search_finds_words_in_prompts_and_says_which_prompt():
+    talks = [
+        _archived("a", prompt="Rain streaks the studio window. MUSIC: theremin", title="雨の残響", updated=2),
+        _archived("b", prompt="A girl runs along a pier.", title="桟橋", updated=3),
+    ]
+    out = vt.search(talks, "rain")
+    assert [r["talk_id"] for r in out] == ["a"]
+    assert out[0]["hits"][0]["field"] == "prompt"
+    assert out[0]["hits"][0]["prompt_index"] == 0
+    assert "Rain streaks" in out[0]["hits"][0]["snippet"]
+
+
+def test_search_ignores_width_and_case_and_needs_every_word():
+    talks = [
+        _archived("a", title="雨の残響", story="ＲＥＣの赤灯が消える", updated=1),
+        _archived("b", title="雨上がり", story="虹が出る", updated=2),
+    ]
+    assert [r["talk_id"] for r in vt.search(talks, "rec")] == ["a"]
+    assert [r["talk_id"] for r in vt.search(talks, "雨")] == ["b", "a"]  # newest first
+    assert [r["talk_id"] for r in vt.search(talks, "雨　虹")] == ["b"]   # full-width space splits
+    assert vt.search(talks, "   ") == []
+
+
+def test_search_reaches_names_and_the_talk():
+    talks = [_archived("a", title="t", chat="もっと派手にして")]
+    assert vt.search(talks, "派手")[0]["hits"][0]["field"] == "chat"
+    assert vt.search(talks, "みお")[0]["hits"][0]["field"] == "name"
+
+
+def test_search_over_http(monkeypatch, studio):
+    client, _ = _client(monkeypatch, studio, [])
+    from backend.app.muse import video_api
+
+    async def everything(db):
+        return [_archived("a", prompt="Rain falls", title="雨")]
+
+    monkeypatch.setattr(video_api.video_db, "all_talks", everything)
+    assert client.get("/api/muse/video/search?q=").json() == {"talks": []}
+    r = client.get("/api/muse/video/search?q=rain").json()
+    assert r["talks"][0]["talk_id"] == "a"

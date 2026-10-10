@@ -53,6 +53,22 @@ async def list_recent(db, *, limit: int = 30) -> list[dict[str, Any]]:
     return rows[:max(1, int(limit))]
 
 
+async def all_talks(db) -> list[dict[str, Any]]:
+    """Every talk in full, for the studio's text search (a personal archive —
+    hundreds of talks at most, so reading them whole beats keeping an index)."""
+    rows: list[dict[str, Any]] = []
+    offset = None
+    while True:
+        points, offset = await db._qc.scroll(
+            collection_name=MUSE_VIDEO_COLLECTION, limit=_PAGE, offset=offset,
+            with_payload=True,
+        )
+        rows.extend(dict(p.payload or {}) for p in points)
+        if offset is None or not points:
+            break
+    return rows
+
+
 async def delete(db, talk_id: str) -> None:
     await db._qc.delete(
         collection_name=MUSE_VIDEO_COLLECTION,

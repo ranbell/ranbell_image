@@ -1870,7 +1870,7 @@
     "title": "Video studio",
     "make": "Talk this still into a video",
     "makeShort": "Video",
-    "recent": "Recent talks",
+    "recent": "Find a talk",
     "noRecent": "No talks yet",
     "empty": "Start from “🎬 Video” on a picture in the gallery or in Muse",
     "fromShoot": "A still from a Muse shoot — the talk carries on from that shoot",
@@ -1902,6 +1902,9 @@
     "chatBeforeTalk": "Start a talk to say something",
     "send": "Send",
     "model": "Model",
-    "noModel": "Pick a model"
+    "noModel": "Pick a model",
+    "searchPlaceholder": "Search prompts, ideas, names and the talk",
+    "searching": "Searching…",
+    "noHits": "Nothing found"
   }
 }

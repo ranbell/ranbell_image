@@ -379,7 +379,7 @@ Pick the length (5, 10 or 15 seconds) and the model, add a line about what you w
 
 **Writing the prompt.** Say "let's go with that", or press "Write this one" on a card, and the MiniMax H3 prompt appears under the picture; "Copy" takes it. Paste it with Hailuo's prompt optimizer off — left on, it rewrites the times and the names.
 
-**Coming back.** Talks are kept. Pressing "🎬 Video" on the same still again picks its talk back up, and "Recent talks" at the top opens any of them. "Change the cast" starts again with someone else.
+**Coming back.** Talks are kept. Pressing "🎬 Video" on the same still again picks its talk back up, and "🔍 Find a talk" at the top opens any of them. Type there to search the prompts, the ideas' titles and stories, the actresses' names and the talk itself (several words narrow it to talks with all of them); a hit in a prompt opens that prompt. When a talk wrote several prompts, the numbers on the prompt box switch between them. "Change the cast" starts again with someone else.
 
 When a talk starts, and on "Ask for other ideas", an image model still resident on the GPU is unloaded first (never while a render is running), so a talk right after a shoot does not crawl. The video itself is not rendered here.
 

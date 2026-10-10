@@ -45,6 +45,13 @@ const talk = ref(null)
 const shaTalks = ref([])
 const recentTalks = ref([])
 const showRecent = ref(false)
+// Search over every talk: prompts, idea titles and stories, names, the talk.
+const query = ref('')
+const results = ref([])
+const searching = ref(false)
+let searchTimer = null
+// Which of the talk's prompts is shown (search can land on an older one).
+const promptIndex = ref(-1)
 const setupOpen = ref(true)
 const busy = ref('')
 const input = ref('')
@@ -79,7 +86,17 @@ const lead = computed(() => byId.value[leadId.value] || null)
 const partner = computed(() => byId.value[partnerId.value] || null)
 const fromShoot = computed(() => !!source.value.session_id)
 const ideas = computed(() => talk.value?.ideas || [])
-const latestPrompt = computed(() => (talk.value?.prompts || []).slice(-1)[0] || null)
+const prompts = computed(() => talk.value?.prompts || [])
+const latestPrompt = computed(() => {
+  const list = prompts.value
+  if (!list.length) return null
+  const i = promptIndex.value
+  return list[i >= 0 && i < list.length ? i : list.length - 1]
+})
+const shownPromptIndex = computed(() => {
+  const i = promptIndex.value
+  return i >= 0 && i < prompts.value.length ? i : prompts.value.length - 1
+})
 const castLine = computed(() => {
   const c = talk.value
   if (!c) return ''
@@ -163,8 +180,9 @@ async function openStill(newSha) {
   }
 }
 
-async function openTalk(id) {
+async function openTalk(id, atPrompt = -1) {
   const data = await api(`/api/muse/video/talks/${id}`)
+  promptIndex.value = atPrompt
   talk.value = data
   sha.value = data.sha256
   leadId.value = data.character?.character_id || ''
@@ -205,6 +223,7 @@ async function send() {
   const msg = input.value.trim()
   if (!msg || !talk.value) return
   input.value = ''
+  promptIndex.value = -1
   // Shown at once; the real row replaces it when she answers.
   talk.value = { ...talk.value, chat: [...(talk.value.chat || []), { role: 'user', text: msg }] }
   await scrollChat()
@@ -218,6 +237,7 @@ async function send() {
 }
 
 async function writeIdea(kind) {
+  promptIndex.value = -1
   await run('write', async () => {
     talk.value = await api(`/api/muse/video/talks/${talk.value.talk_id}/write`, {
       method: 'POST',
@@ -265,6 +285,28 @@ async function copyPrompt(text) {
   } catch (err) {
     fail(err)
   }
+}
+
+function onQuery() {
+  if (searchTimer) clearTimeout(searchTimer)
+  const q = query.value.trim()
+  if (!q) { results.value = []; searching.value = false; return }
+  searching.value = true
+  searchTimer = setTimeout(async () => {
+    try {
+      const data = await api(`/api/muse/video/search?q=${encodeURIComponent(q)}&limit=30`)
+      if (query.value.trim() === q) results.value = data.talks || []
+    } catch (err) {
+      fail(err)
+    } finally {
+      if (query.value.trim() === q) searching.value = false
+    }
+  }, 300)
+}
+const FIELD_ICON = { prompt: '📝', title: '🎬', story: '🎬', name: '🌸', note: '✏️', chat: '💬' }
+function openHit(row) {
+  const hit = (row.hits || []).find(h => h.prompt_index != null)
+  openTalk(row.talk_id, hit ? hit.prompt_index : -1)
 }
 
 function toggleRecent() {
@@ -333,11 +375,43 @@ const waitingLabel = computed(() => ({
               type="button"
               class="rounded-lg border border-white/10 px-2.5 py-1 text-xs text-gray-300 hover:bg-white/5"
               @click="toggleRecent"
-            >{{ t('video.recent') }}</button>
+            >🔍 {{ t('video.recent') }}</button>
             <div
               v-if="showRecent"
               class="absolute right-0 z-10 mt-1 max-h-[60vh] w-72 overflow-y-auto rounded-xl border border-white/10 bg-gray-900 p-1.5 shadow-xl"
             >
+              <input
+                v-model="query"
+                type="search"
+                class="mb-1.5 w-full rounded-lg border border-white/10 bg-black/40 px-2.5 py-1.5 text-xs text-gray-100 outline-none focus:border-amber-500/60"
+                :placeholder="t('video.searchPlaceholder')"
+                @input="onQuery"
+              />
+              <template v-if="query.trim()">
+                <p v-if="searching" class="px-2 py-2 text-xs text-gray-500">{{ t('video.searching') }}</p>
+                <p v-else-if="!results.length" class="px-2 py-2 text-xs text-gray-500">{{ t('video.noHits') }}</p>
+                <button
+                  v-for="row in results"
+                  :key="`hit-${row.talk_id}`"
+                  type="button"
+                  class="flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-white/5"
+                  @click="openHit(row)"
+                >
+                  <img :src="thumb(row.sha256)" class="mt-0.5 h-10 w-10 shrink-0 rounded object-cover" alt="" />
+                  <span class="min-w-0 flex-1">
+                    <span class="block truncate text-xs text-gray-200">
+                      {{ [nameOf(row.character), nameOf(row.partner_character)].filter(Boolean).join(' × ') }}
+                      <span class="text-[10px] text-gray-500"> · {{ when(row.updated_at) }}</span>
+                    </span>
+                    <span
+                      v-for="(hit, hi) in (row.hits || []).slice(0, 2)"
+                      :key="hi"
+                      class="block text-[10px] leading-snug text-gray-400"
+                    >{{ FIELD_ICON[hit.field] || '·' }} <template v-if="hit.title && hit.field !== 'title'">「{{ hit.title }}」</template>{{ hit.snippet }}</span>
+                  </span>
+                </button>
+              </template>
+              <template v-else>
               <p v-if="!recentTalks.length" class="px-2 py-3 text-xs text-gray-500">{{ t('video.noRecent') }}</p>
               <button
                 v-for="row in recentTalks"
@@ -356,6 +430,7 @@ const waitingLabel = computed(() => ({
                   </span>
                 </span>
               </button>
+              </template>
             </div>
           </div>
           <button
@@ -525,6 +600,17 @@ const waitingLabel = computed(() => ({
               <div v-if="latestPrompt" class="space-y-1.5 rounded-xl border border-amber-500/40 bg-black/40 p-2.5">
                 <div class="flex items-center gap-2 text-[11px] text-amber-100">
                   <span>📝 {{ t('video.prompt') }}</span>
+                  <span v-if="prompts.length > 1" class="flex shrink-0 gap-0.5">
+                    <button
+                      v-for="(p, pi) in prompts"
+                      :key="pi"
+                      type="button"
+                      class="rounded border px-1.5 text-[10px]"
+                      :class="pi === shownPromptIndex ? 'border-amber-400/70 text-amber-50' : 'border-white/10 text-gray-500 hover:text-gray-300'"
+                      :title="p.title"
+                      @click="promptIndex = pi"
+                    >{{ pi + 1 }}</button>
+                  </span>
                   <span class="truncate text-gray-400">{{ latestPrompt.title }}<template v-if="latestPrompt.instrument"> · ♪ {{ latestPrompt.instrument }}</template> · {{ latestPrompt.duration_s }}s</span>
                 </div>
                 <textarea
