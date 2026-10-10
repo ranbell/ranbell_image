@@ -1891,7 +1891,7 @@
     "writing": "Writing…",
     "prompt": "Prompt (MiniMax H3)",
     "copy": "Copy",
-    "copied": "Copied the prompt",
+    "copied": "Copied the prompt. Freeing the GPU for the render",
     "copyFailed": "Could not copy. Select the text and copy it by hand",
     "pasteHint": "Paste with Hailuo's optimizer off",
     "thinking": "Looking at the picture and thinking up ideas…",

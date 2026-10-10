@@ -103,6 +103,21 @@ async def _last_muse_model(db) -> str:
     return ""
 
 
+@router.post("/release")
+async def release(request: Request):
+    """Unload every Ollama model: the prompt is about to be rendered elsewhere.
+
+    The studio calls this when a prompt is copied and when it closes. A prompt
+    pasted straight into ComfyUI never passes `ComfyUIClient.before_queue`, so
+    the 26B stayed resident and ComfyUI ran out of memory (2026-10-11).
+    Never fails the screen: what went wrong is returned, not raised.
+    """
+    try:
+        return {"unloaded": await _ollama(request).unload_all()}
+    except Exception as exc:
+        return {"unloaded": [], "error": str(exc)}
+
+
 @router.get("/source/{sha256}")
 async def source(sha256: str, request: Request):
     """Who a picture's own record says is in it, to seat them by default, and

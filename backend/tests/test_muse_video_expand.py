@@ -753,3 +753,20 @@ async def test_unload_all_drops_every_resident_model():
     client.unload = unload
     assert await client.unload_all() == ["big:26b", "embed:small"]
     assert dropped == ["big:26b", "embed:small"]
+
+
+def test_release_unloads_and_never_fails(monkeypatch, studio):
+    client, ollama = _client(monkeypatch, studio, [])
+
+    async def unload_all():
+        return ["big:26b"]
+
+    ollama.unload_all = unload_all
+    assert client.post("/api/muse/video/release").json() == {"unloaded": ["big:26b"]}
+
+    async def broken():
+        raise RuntimeError("ollama is down")
+
+    ollama.unload_all = broken
+    r = client.post("/api/muse/video/release")
+    assert r.status_code == 200 and r.json()["unloaded"] == []

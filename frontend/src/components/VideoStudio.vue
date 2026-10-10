@@ -278,10 +278,18 @@ function copyText(text) {
   if (!ok) throw new Error(t('video.copyFailed'))
   return Promise.resolve()
 }
+// The prompt goes to ComfyUI or Hailuo next, outside Ranbell: free the card
+// now, or a resident 26B leaves ComfyUI too little (it ran out of memory,
+// 2026-10-11). Best effort — the screen never waits on it or fails for it.
+function releaseCard() {
+  fetch('/api/muse/video/release', { method: 'POST' }).catch(() => {})
+}
+
 async function copyPrompt(text) {
   try {
     await copyText(String(text || '').trim())
     emit('toast', { msg: t('video.copied'), type: 'info' })
+    releaseCard()
   } catch (err) {
     fail(err)
   }
@@ -313,7 +321,10 @@ function toggleRecent() {
   showRecent.value = !showRecent.value
   if (showRecent.value) loadRecent()
 }
-function close() { emit('update:show', false) }
+function close() {
+  if (talk.value) releaseCard()
+  emit('update:show', false)
+}
 function onKey(e) { if (e.key === 'Escape' && !busy.value) close() }
 
 watch(() => props.show, (open) => {
