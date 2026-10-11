@@ -405,6 +405,11 @@ async def test_duet_lines_without_a_say_label_still_reach_the_chat(studio):
     said = [(r["name"], r["text"]) for r in talk["chat"] if r["role"] == "assistant"]
     assert said == [("各務 みお", "「t」みたいに雨、どうかな"), ("緒方 りん", "えー、走りたい！")]
 
+    talk["chat"] = []
+    await vt.chat(_FakeDb(), _FakeOllama(["SETTLED: no", "SAY: A: 力が入っちゃいそう。B: 待って待って！"]), talk, "もっと！")
+    said = [(r["name"], r["text"]) for r in talk["chat"] if r["role"] == "assistant"]
+    assert said == [("各務 みお", "力が入っちゃいそう。"), ("緒方 りん", "待って待って！")]
+
 
 @pytest.mark.asyncio
 async def test_a_trailing_slash_is_not_part_of_her_line(studio):
@@ -428,6 +433,21 @@ async def test_her_diary_is_not_brought_into_the_studio(studio):
     system = ollama.calls[1]["system"]
     assert "木漏れ日" not in system and "雨の路地" not in system
     assert "少し打ち解けてきた" in system
+
+
+@pytest.mark.asyncio
+async def test_her_aside_loses_the_brackets_and_names_written_in(studio):
+    talk = _talking()
+    talk["partner_character"] = {**RIN, "character_id": RIN_ID, "name_ja": "緒方 りん"}
+    for aside, who, text in [
+        ("(A: 嘘じゃないけど……)", "各務 みお", "嘘じゃないけど……"),
+        ("(緒方 りん) 腕が痛い", "緒方 りん", "腕が痛い"),
+        ("（ちょっと照れる）", "各務 みお", "ちょっと照れる"),
+    ]:
+        talk["chat"] = []
+        await vt.chat(_FakeDb(), _FakeOllama(["SETTLED: no", f"SAY: A: うん\nASIDE: {aside}"]), talk, "どう？")
+        row = next(r for r in talk["chat"] if r.get("kind") == "aside")
+        assert (row["name"], row["text"]) == (who, text)
 
 
 def test_instrument_lines_are_short():

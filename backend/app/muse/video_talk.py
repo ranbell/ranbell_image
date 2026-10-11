@@ -301,9 +301,19 @@ def talk_prompt(talk: dict[str, Any], line: str) -> str:
         if _phase(talk) == "timeline" else
         f"THE WRITERS' NOTES:\n{_notes_block(talk)}\n\n"
     )
+    # "Hazuki" in the reading came out as 羽月さん — a guessed kanji (Kanade,
+    # 2026-10-11): she gets the names as the studio writes them.
+    names = [
+        f"{p['name']} = {p['name_ja']}" for p in talk.get("people") or []
+        if p.get("name_ja") and _ja(talk)
+    ]
+    names_block = (
+        "THE PEOPLE IN IT, as their names are written in Japanese:\n" + "\n".join(names) + "\n\n"
+        if names else ""
+    )
     return (
         f"PHOTOGRAPH (second 0):\n{talk.get('still', '')}\n\n"
-        f"{context}{material}"
+        f"{names_block}{context}{material}"
         f"RECENT TALK:\n{_recent(talk) or '(none)'}\n\n"
         f"SHOWRUNNER:\n{line}"
     )
@@ -315,7 +325,8 @@ _KEY_IN_SAY = re.compile(r"\[(" + "|".join(ve.KINDS) + r")\]\s*", re.IGNORECASE)
 # "A: (緒方 りん) うわ…" — the prefix already says who is talking.
 _NAME_AFTER_PREFIX = re.compile(r"^([AB]:\s*)[(（][^)）]{1,20}[)）]\s*", re.MULTILINE)
 # "…いくよ！ B:ふふ、張り切りすぎ" — the second speaker on the first one's line.
-_INLINE_SPEAKER = re.compile(r"[ \t　]+(?=[AB][:：])")
+# "…入っちゃいそう。B: 待って" — or straight after the full stop.
+_INLINE_SPEAKER = re.compile(r"(?:[ \t　]+|(?<=[。！？!?…」』）)]))(?=[AB][:：])")
 # "**ASIDE:** ふふ" — the bold can close after the colon.
 _FIELD = re.compile(r"^\s*\**\s*(SAY|ASIDE|PITCH|WRITE)\s*\**\s*[:：]\s*\**\s*(.*)$", re.IGNORECASE)
 
@@ -400,17 +411,32 @@ def _post_say(talk: dict[str, Any], say: str) -> None:
             _row(talk, "assistant", text, name=_name(who, ja=ja), character_id=who.get("character_id"))
 
 
+def _unwrap_aside(text: str) -> str:
+    """"(A: 嘘じゃないけど……)" — the brackets the screen adds, written in."""
+    text = text.strip()
+    if re.fullmatch(r"[(（].*[)）]", text, re.DOTALL) and not re.search(r"[)）].*[(（]", text[1:-1]):
+        text = text[1:-1].strip()
+    return text
+
+
 def _post_reply(talk: dict[str, Any], reply: dict[str, str]) -> None:
     """Her lines, then her mutter, then the fork she offers (as buttons)."""
     _post_say(talk, reply["say"])
     lead = talk.get("character") or {}
     partner = talk.get("partner_character") or {}
-    aside = reply.get("aside") or ""
+    aside = _unwrap_aside(reply.get("aside") or "")
     if aside:
         who = lead
         if m := re.match(r"^([AB])[:：]\s*", aside):
             who = partner if m.group(1) == "B" and _has_partner(talk) else lead
             aside = aside[m.end():]
+        # "(東野 はづき) ……" — her name in front, as on a script.
+        if m := re.match(r"^[(（]([^)）]{1,20})[)）]\s*", aside):
+            named = m.group(1).replace(" ", "")
+            if named == _name(partner, ja=True).replace(" ", "") and _has_partner(talk):
+                who = partner
+            if named in {_name(c, ja=True).replace(" ", "") for c in (lead, partner) if c}:
+                aside = aside[m.end():]
         _row(talk, "assistant", aside, kind="aside", name=_name(who, ja=_ja(talk)),
              character_id=who.get("character_id"))
     options = [o.strip(" 「」\"'") for o in (reply.get("pitch") or "").split("|")]
@@ -442,7 +468,7 @@ _SETTLE_SYSTEM = """You keep the notes of a talk between a director (the Showrun
 
 Answer in two lines and nothing else:
 SETTLED: yes or no
-DIRECTION: when yes, the settled direction in two or three sentences in {lang}, keeping the Showrunner's own words where they gave them. When no, leave it empty."""
+DIRECTION: when yes, the settled direction in two or three sentences in {lang}, keeping the Showrunner's own words where they gave them. What the Showrunner wants is the heart of the clip and comes first; what was added on top of it comes after, as how it is done. Write it as a plain note about the clip, in nobody's voice — not as the actress or the Showrunner talking. When no, leave it empty."""
 
 _FORCE_SETTLE = (
     "\n\nThe Showrunner has pressed the button to settle the direction now: answer "
@@ -451,7 +477,11 @@ _FORCE_SETTLE = (
 
 
 async def settle_direction(ollama, talk: dict[str, Any], *, force: bool = False) -> str:
-    """The settled direction, or "" when the talk has not settled it yet."""
+    """The settled direction, or "" when the talk has not settled it yet.
+
+    The heart first: "eat a burger as if it is delicious" was settled along
+    with her prank and leaves on an equal footing, and the timetable opened on
+    the prank and reached the bite at 8 s of 10 (Kanade, 2026-10-11)."""
     system = _SETTLE_SYSTEM.format(lang="Japanese" if _ja(talk) else "English")
     prompt = (
         f"THE WRITERS' NOTES:\n{_notes_block(talk)}\n\n"

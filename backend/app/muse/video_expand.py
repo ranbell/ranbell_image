@@ -131,6 +131,8 @@ def _person(char: dict[str, Any] | None) -> dict[str, str] | None:
     ]
     return {
         "name": name,
+        # For the talk only: the writers work in English.
+        "name_ja": str(char.get("name_ja") or "").strip(),
         "hair": ", ".join(t.replace("_", " ") for t in tags if t.endswith("_hair")),
         "eyes": ", ".join(t.replace("_", " ") for t in tags if t.endswith("_eyes")),
         "habit": str(look.get("habit") or "").strip(),
@@ -165,13 +167,19 @@ _UNNAMED = (
 )
 
 
-def _who(people: list[dict[str, str]], *, hook: str | None = None, ground: bool = False) -> str:
+def _who(
+    people: list[dict[str, str]], *, hook: str | None = None, ground: bool = False,
+    ja: bool = False,
+) -> str:
     if not people:
         return _UNNAMED
     lines = []
     for p in people:
         looks = ", ".join(x for x in (p["hair"], p["eyes"]) if x)
         line = f"- {p['name']}" + (f" ({looks})" if looks else "")
+        # Ideas written in Japanese guessed the kanji ("Hazuki" → 羽月, 2026-10-11).
+        if ja and p.get("name_ja"):
+            line += f"\n  in Japanese: {p['name_ja']}"
         if ground and p.get("occupation"):
             line += f"\n  works as: {p['occupation']}"
         if hook and p.get(hook):
@@ -282,7 +290,7 @@ def idea_prompt(
     )
     prompt = (
         f"Length: {duration_s} seconds.\n"
-        f"Who is in it:\n{_who(people, hook=hook, ground=True)}\n\n"
+        f"Who is in it:\n{_who(people, hook=hook, ground=True, ja=locale == 'ja')}\n\n"
         f"What the photograph shows (this is second 0):\n{still.strip()}\n\n"
         + (f"The shoot this photograph came out of:\n{context.strip()}\n\n" if context.strip() else "")
         + f"{direction}"
@@ -362,12 +370,16 @@ _STAGE_COMMON = (
     "(Hailuo / MiniMax). The picture is the first frame, 0:00; the clip is what "
     "happens from there. The clip is split into whole-second segments.\n\n"
     "What the director asked for is absolute. Every stage keeps it; nothing is ever "
-    "a reason to drop it."
+    "a reason to drop it.\n\n"
+    # "kusu-tto giggle": the director's クスッと, spelled out for a model that
+    # reads English (Sena, 2026-10-11).
+    "The prompt is in English. When the director's words are Japanese, write what "
+    "they mean — never a Japanese word spelled out in Latin letters."
 )
 
 _DRAFT_SYSTEM = _STAGE_COMMON + """
 
-Your stage: the draft. Decide the segments and what happens in each — one feeling that grows across the whole clip toward what the director asked for, every segment moving it one step. Each segment shows the viewer something change that a camera can see. A segment with nothing new to show is not a segment. A cut only when the idea goes to another place or time; say so in that segment's action. Other stages will add the acting detail, the camera and the music — leave those to them.
+Your stage: the draft. The first segment starts from exactly what the photograph shows — where she is, what she holds, how she sits or stands. If what the director wants happens somewhere else or needs something not in the picture, the timetable gets there: she moves, or a segment cuts to it. Decide the segments and what happens in each — one feeling that grows across the whole clip toward what the director asked for, every segment moving it one step. Each segment shows the viewer something change that a camera can see. A segment with nothing new to show is not a segment. A cut only when the idea goes to another place or time; say so in that segment's action. Other stages will add the acting detail, the camera and the music — leave those to them.
 
 Answer in this shape and nothing else, every field on its own line:
 SEGMENT 0:00-0:01 | a few words naming what happens
