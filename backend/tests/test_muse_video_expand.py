@@ -413,6 +413,27 @@ async def test_quoted_lines_and_a_duet_line_after_the_aside(studio):
     ]
 
 
+def test_spice_is_drawn_now_and_then_and_never_twice_running():
+    talk = _talking()
+    rng = random.Random(3)
+    picks = [vt.draw_spice(talk, rng) for _ in range(200)]
+    assert 60 < picks.count("") < 140
+    assert all(a != b or not a for a, b in zip(picks, picks[1:]))
+    assert "duet" not in picks  # only with two of them
+    assert set(picks) - {""} == set(vt.SPICES)
+
+
+@pytest.mark.asyncio
+async def test_a_plain_line_may_carry_a_spice_and_stage_directions_go(studio, monkeypatch):
+    talk = _on_timeline()
+    monkeypatch.setattr(vt, "draw_spice", lambda t, rng=None: "curious")
+    ollama = _FakeOllama(["no", "NO CHANGE", "SAY: えっ、笑うの？\n***\n(The Showrunner looks at the screen.)\nASIDE: ふふ"])
+    await vt.chat(_FakeDb(), ollama, talk, "最後は笑顔に")
+    assert "THIS TIME, ALSO: Ask the Showrunner something about themselves" in ollama.calls[2]["prompt"]
+    said = [r["text"] for r in talk["chat"] if r["role"] == "assistant"]
+    assert said == ["えっ、笑うの？", "ふふ"]
+
+
 def test_pitch_options_keep_their_inner_quotes():
     talk = _talking()
     vt._post_reply(talk, {"say": "どっち？", "pitch": "瞳に宿る感情を「驚き」にする | 「覚悟」にする"})

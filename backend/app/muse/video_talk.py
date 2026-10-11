@@ -20,6 +20,7 @@ unless the photograph says so.
 from __future__ import annotations
 
 import logging
+import random
 import re
 import time
 import unicodedata
@@ -152,7 +153,7 @@ _TALK = """You are {who}, at the studio with the Showrunner — the person who d
 
 {where}
 
-You make it together. You are not passing on instructions or presenting other people's work: you react to what the Showrunner says, bring ideas of your own, ask back, and say so when you would do it differently. Who you are shows in what you notice and what you want, and in how you say it.
+You make it together, and making it should be fun — for you and for the Showrunner. You are not taking orders or reporting back. When the Showrunner says something, react first as yourself — pleased, doubtful, amused, teasing, caught off guard, whatever you really feel — and get to work after that. Bring ideas of your own, and push back when you would do it differently. Who you are shows in what you notice and what you want, and in how you say it.
 
 {phase}
 
@@ -171,8 +172,9 @@ _PHASE_DIRECTION = (
 _PHASE_TIMELINE = (
     "The direction is settled:\n{direction}\n\n"
     "Now the two of you are working through the timetable below, moment by moment, while "
-    "looking at it. Talk about particular moments — what happens at that second, how the "
-    "face changes, how it ends. Suggest one change at a time and ask which they prefer. "
+    "looking at it. Most of what you say is about the moments on it — what happens at that "
+    "second, how the face changes, how it ends — but not every line has to be: it is a talk, "
+    "not a meeting. Suggest one change at a time. "
     "The timetable is kept by someone else: it changes only when the Showrunner asks for "
     "something or says yes to it."
 )
@@ -379,6 +381,10 @@ def parse_reply(raw: str) -> dict[str, str]:
     # out of three in one run came back as "……" before this).
     field = "say"
     for line in (raw or "").splitlines():
+        # "***" and "(The Showrunner looks at the screen…)": a script's
+        # stage directions, written in (2026-10-12).
+        if re.fullmatch(r"\s*[*_\-=]{3,}\s*", line) or re.match(r"\s*[(（]\s*The Showrunner\b", line):
+            continue
         if m := _FIELD.match(line):
             field = m.group(1).lower()
             out[field] = m.group(2).strip()
@@ -422,8 +428,38 @@ async def _call(ollama, talk: dict[str, Any], system: str, prompt: str) -> str:
         return ""
 
 
-async def _reply(ollama, talk: dict[str, Any], line: str) -> dict[str, str]:
-    raw = await _call(ollama, talk, talk_system(talk), talk_prompt(talk, line))
+# A little something drawn for some of her replies. Asked in the brief to
+# bring her own life in "now and then" or to be curious about the
+# Showrunner, she did neither in 18 replies of 18 — but whatever field the
+# answer has, she fills every time (a two-way choice on 18 of 18). So the
+# brief stays general and the something is drawn per reply, about half the
+# time and never the same twice running, the way the ideas draw a hook.
+SPICES: dict[str, str] = {
+    "life": "Something from your own life or work comes to mind here; tell it in a sentence or two, the way you would.",
+    "curious": "Ask the Showrunner something about themselves that this makes you curious about.",
+    "tease": "Tease the Showrunner a little, or make a small joke, the way you would.",
+    "feeling": "Say honestly how this bit makes you feel, before anything else.",
+}
+_DUET_SPICE = "The two of you don't quite agree about this; have it out between you, then settle it."
+
+
+def draw_spice(talk: dict[str, Any], rng: random.Random | None = None) -> str:
+    """The key of this reply's something, or "" for a plain reply."""
+    rng = rng or random
+    keys = [k for k in [*SPICES, *(["duet"] if _has_partner(talk) else [])] if k != talk.get("last_spice")]
+    pick = rng.choice(keys) if rng.random() < 0.5 else ""
+    talk["last_spice"] = pick
+    return pick
+
+
+def _spice_line(key: str) -> str:
+    text = _DUET_SPICE if key == "duet" else SPICES.get(key, "")
+    return f"\n\nTHIS TIME, ALSO: {text}" if text else ""
+
+
+async def _reply(ollama, talk: dict[str, Any], line: str, *, spice: bool = False) -> dict[str, str]:
+    prompt = talk_prompt(talk, line) + (_spice_line(draw_spice(talk)) if spice else "")
+    raw = await _call(ollama, talk, talk_system(talk), prompt)
     reply = parse_reply(raw)
     reply["say"] = identity.sanitize_muse_say(_clean(talk, reply.get("say") or ""), locale=_locale(talk))
     reply["aside"] = _clean(talk, reply.get("aside") or "").strip()
@@ -750,7 +786,7 @@ async def _direction_turn(ollama, talk: dict[str, Any], message: str) -> None:
         return
     direction = await settle_direction(ollama, talk)
     if not direction:
-        _post_reply(talk, await _reply(ollama, talk, message))
+        _post_reply(talk, await _reply(ollama, talk, message, spice=True))
         return
     await _start_timeline(ollama, talk, direction)
     _post_reply(talk, await _reply(ollama, talk, (
@@ -785,7 +821,7 @@ async def _timeline_turn(ollama, talk: dict[str, Any], message: str) -> None:
         talk["board"] = board
         _row(talk, "system", _say(talk, "🗒 時間割を書き直しました", "🗒 Updated the timetable"), kind="board")
     if not wants_write:
-        _post_reply(talk, await _reply(ollama, talk, message))
+        _post_reply(talk, await _reply(ollama, talk, message, spice=True))
         return
     await _write(ollama, talk)
     reply = await _reply(ollama, talk, (
