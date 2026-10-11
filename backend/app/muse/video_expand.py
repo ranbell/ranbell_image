@@ -377,7 +377,9 @@ _STAGE_COMMON = (
 # told only to "start from the picture", it had a boy in the middle of the
 # rink hold her hands at the railing within the first second (Akari). A
 # separate continuity check after the draft was tried and answered "follows"
-# four times of four, the jump included (2026-10-12) — not kept.
+# four times of four, the jump included (2026-10-12) — not kept. Nor was a
+# line explaining that a jump renders as a glitch: no change in four runs.
+# GAP has it say what must happen before the asked-for moment can.
 # A rendered clip jumped from the still at 0:00 and cut on every segment:
     # each stage had written each segment as a fresh shot (Akari, 2026-10-11).
     "The clip is one continuous shot that grows out of the photograph. At 0:00 it is the "
@@ -397,6 +399,7 @@ Your stage: the draft. The first segment starts from exactly what the photograph
 
 Answer in this shape and nothing else, every field on its own line:
 START: one or two sentences — where each person is in the photograph at 0:00, how far apart they are, which way they face, and what they are doing.
+GAP: what has to happen first, from START, before what the director asked for can happen — who has to move where, turn, or pick something up. "Nothing" when it can start at once.
 SEGMENT 0:00-0:01 | a few words naming what happens
 ACTION: two or three plain sentences — what happens and what she feels.
 (the next segment the same way)

@@ -159,7 +159,7 @@ You make it together, and making it should be fun — for you and for the Showru
 
 Answer in these labelled lines and nothing else:
 SAY: what you say, in {lang} — as much as you would really say here, the way you talk (your VOICE decides: a girl of few words says little); never more than six sentences.{duet}
-ASIDE: one short line you mutter to yourself, in {lang}. Leave it out when nothing comes.
+ASIDE: one short line you mutter to yourself, in {lang} — about something other than what you muttered before. Leave it out when nothing comes.
 PITCH: when there is a real choice to make next, the two options as two short phrases in {lang}, separated by " | ". Leave it out otherwise."""
 
 _PHASE_DIRECTION = (
@@ -327,10 +327,16 @@ def _board_text(talk: dict[str, Any]) -> str:
 
 def _recent(talk: dict[str, Any], n: int = 10) -> str:
     rows = [r for r in talk.get("chat") or [] if r.get("role") != "system" and r.get("text")][-n:]
-    return "\n".join(
-        f"{'Showrunner' if r.get('role') == 'user' else r.get('name') or 'you'}: {r['text']}"
-        for r in rows
-    )
+
+    def who(r: dict[str, Any]) -> str:
+        if r.get("role") == "user":
+            return "Showrunner"
+        # Marked: listed like speech, three mutters about her knees read as
+        # a topic she had been on, and she stayed on it (Hazuki, 2026-10-12).
+        name = r.get("name") or "you"
+        return f"{name} (muttering to herself)" if r.get("kind") == "aside" else name
+
+    return "\n".join(f"{who(r)}: {r['text']}" for r in rows)
 
 
 def talk_prompt(talk: dict[str, Any], line: str) -> str:
@@ -463,8 +469,18 @@ def _spice_line(key: str) -> str:
     return f"\n\nTHIS TIME, ALSO: {text}" if text else ""
 
 
+def _mutterer(talk: dict[str, Any], rng: random.Random | None = None) -> str:
+    """In a duet, who mutters this time ("A" or "B"). Left to her, it was the
+    lead every time (2026-10-12)."""
+    if not _has_partner(talk):
+        return ""
+    talk["aside_by"] = (rng or random).choice("AB")
+    who = talk["partner_character"] if talk["aside_by"] == "B" else talk.get("character") or {}
+    return f"\n\nIf anyone mutters this time, it is {talk['aside_by']} ({_name(who, ja=True)}): start the ASIDE with {talk['aside_by']}:."
+
+
 async def _reply(ollama, talk: dict[str, Any], line: str, *, spice: bool = False) -> dict[str, str]:
-    prompt = talk_prompt(talk, line) + (_spice_line(draw_spice(talk)) if spice else "")
+    prompt = talk_prompt(talk, line) + (_spice_line(draw_spice(talk)) if spice else "") + _mutterer(talk)
     raw = await _call(ollama, talk, talk_system(talk), prompt)
     reply = parse_reply(raw)
     reply["say"] = identity.sanitize_muse_say(_clean(talk, reply.get("say") or ""), locale=_locale(talk))
@@ -533,7 +549,7 @@ def _post_reply(talk: dict[str, Any], reply: dict[str, str]) -> None:
     partner = talk.get("partner_character") or {}
     aside = _unwrap_aside(reply.get("aside") or "")
     if aside:
-        who = lead
+        who = partner if talk.get("aside_by") == "B" and _has_partner(talk) else lead
         if m := re.match(r"^([AB])[:：]\s*", aside):
             who = partner if m.group(1) == "B" and _has_partner(talk) else lead
             aside = aside[m.end():]
@@ -544,13 +560,13 @@ def _post_reply(talk: dict[str, Any], reply: dict[str, str]) -> None:
             if re.sub(r"[\s()（）]", "", ln) not in names
         ).strip()
         aside = _unwrap_aside(aside)
-        # "(東野 はづき) ……" — her name in front, as on a script.
-        if m := re.match(r"^[(（]([^)）]{1,20})[)）]\s*", aside):
+        # "(東野 はづき) ……" — her name in front, as on a script; once
+        # misspelt ("(東野 はづキ)"), so any short bracketed tag goes.
+        if m := re.match(r"^[(（]([^)）。、！？…]{1,12})[)）]\s*(?=\S)", aside):
             named = m.group(1).replace(" ", "")
             if named == _name(partner, ja=True).replace(" ", "") and _has_partner(talk):
                 who = partner
-            if named in {_name(c, ja=True).replace(" ", "") for c in (lead, partner) if c}:
-                aside = aside[m.end():]
+            aside = aside[m.end():]
         _row(talk, "assistant", aside, kind="aside", name=_name(who, ja=_ja(talk)),
              character_id=who.get("character_id"))
     options = [_unquote(o) for o in (reply.get("pitch") or "").split("|")]

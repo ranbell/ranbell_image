@@ -199,6 +199,19 @@ class _FakeDb:
         return [{"sha256": shas[0], **self.meta}]
 
 
+class _Pinned(random.Random):
+    """The lead mutters, and no spice is drawn."""
+
+    def __init__(self):
+        super().__init__(0)
+
+    def choice(self, seq):
+        return "A" if seq == "AB" else super().choice(seq)
+
+    def random(self):
+        return 0.99
+
+
 @pytest.fixture
 def studio(monkeypatch):
     saved = {}
@@ -226,6 +239,8 @@ def studio(monkeypatch):
     monkeypatch.setattr(vt, "images_by_sha", images)
     monkeypatch.setattr(vt, "_character", character)
     monkeypatch.setattr(vt.persona, "load_memory", load_memory)
+    # The mutterer and the spice are drawn; tests that care pin them.
+    monkeypatch.setattr(vt, "random", _Pinned())
     return saved
 
 
@@ -398,7 +413,7 @@ def test_the_later_words_outrank_the_settled_direction():
 
 
 @pytest.mark.asyncio
-async def test_quoted_lines_and_a_duet_line_after_the_aside(studio):
+async def test_quoted_lines_and_a_duet_line_after_the_aside(studio, monkeypatch):
     talk = _talking()
     talk["partner_character"] = {**RIN, "character_id": RIN_ID, "name_ja": "緒方 りん"}
     await vt.chat(_FakeDb(), _FakeOllama([
@@ -448,6 +463,21 @@ async def test_lines_after_the_one_line_fields_are_speech(studio):
     assert aside["text"] == "重たいなぁ……。"
     said = " ".join(r["text"] for r in talk["chat"] if r["role"] == "assistant" and not r.get("kind"))
     assert "無理やりだなぁ" in said
+
+
+@pytest.mark.asyncio
+async def test_mutters_are_marked_in_the_history_and_the_partner_gets_a_turn(studio, monkeypatch):
+    talk = _talking()
+    talk["partner_character"] = {**RIN, "character_id": RIN_ID, "name_ja": "緒方 りん"}
+    talk["chat"] = [{"role": "assistant", "kind": "aside", "name": "各務 みお", "text": "膝が痛い"}]
+    monkeypatch.setattr(vt.random, "choice", lambda seq: "B" if seq == "AB" else seq[0])  # B mutters
+    ollama = _FakeOllama(["SETTLED: no", "SAY: A: うん\nB: いくよ\nASIDE: 重たいなぁ"])
+    await vt.chat(_FakeDb(), ollama, talk, "どう？")
+    prompt = ollama.calls[1]["prompt"]
+    assert "各務 みお (muttering to herself): 膝が痛い" in prompt
+    assert "it is B (緒方 りん): start the ASIDE with B:" in prompt
+    aside = [r for r in talk["chat"] if r.get("kind") == "aside"][-1]
+    assert (aside["name"], aside["text"]) == ("緒方 りん", "重たいなぁ")
 
 
 def test_pitch_options_keep_their_inner_quotes():
@@ -516,6 +546,7 @@ async def test_her_aside_loses_the_brackets_and_names_written_in(studio):
         ("(A: 嘘じゃないけど……)", "各務 みお", "嘘じゃないけど……"),
         ("(緒方 りん) 腕が痛い", "緒方 りん", "腕が痛い"),
         ("（ちょっと照れる）", "各務 みお", "ちょっと照れる"),
+        ("(東野 はづキ) ……膝すりむかないかな", "各務 みお", "……膝すりむかないかな"),
     ]:
         talk["chat"] = []
         await vt.chat(_FakeDb(), _FakeOllama(["SETTLED: no", f"SAY: A: うん\nASIDE: {aside}"]), talk, "どう？")
