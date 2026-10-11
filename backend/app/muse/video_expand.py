@@ -373,7 +373,12 @@ _STAGE_COMMON = (
     "happens from there. The clip is split into whole-second segments.\n\n"
     "What the director asked for is absolute. Every stage keeps it; nothing is ever "
     "a reason to drop it.\n\n"
-    # A rendered clip jumped from the still at 0:00 and cut on every segment:
+    # The draft also restates the photograph (START) before its first segment:
+# told only to "start from the picture", it had a boy in the middle of the
+# rink hold her hands at the railing within the first second (Akari). A
+# separate continuity check after the draft was tried and answered "follows"
+# four times of four, the jump included (2026-10-12) — not kept.
+# A rendered clip jumped from the still at 0:00 and cut on every segment:
     # each stage had written each segment as a fresh shot (Akari, 2026-10-11).
     "The clip is one continuous shot that grows out of the photograph. At 0:00 it is the "
     "photograph exactly — the same framing, the same places, the same poses — and every "
@@ -388,9 +393,10 @@ _STAGE_COMMON = (
 
 _DRAFT_SYSTEM = _STAGE_COMMON + """
 
-Your stage: the draft. The first segment starts from exactly what the photograph shows — where she is, what she holds, how she sits or stands. If what the director wants happens somewhere else or needs something not in the picture, the timetable gets there: she moves, or a segment cuts to it. Decide the segments and what happens in each — one feeling that grows across the whole clip toward what the director asked for, every segment moving it one step. Each segment shows the viewer something change that a camera can see. A segment with nothing new to show is not a segment. A cut only when the idea goes to another place or time; say so in that segment's action. Other stages will add the acting detail, the camera and the music — leave those to them.
+Your stage: the draft. The first segment starts from exactly what the photograph shows — where each person is, how far apart they are, what they hold, how they sit or stand. If what the director wants needs them somewhere else, closer together, or holding something they are not, the timetable gets there and shows it: someone across the room takes time to cross it, a hand has to reach before it holds. Or a segment cuts to it. Decide the segments and what happens in each — one feeling that grows across the whole clip toward what the director asked for, every segment moving it one step. Each segment shows the viewer something change that a camera can see. A segment with nothing new to show is not a segment. A cut only when the idea goes to another place or time; say so in that segment's action. Other stages will add the acting detail, the camera and the music — leave those to them.
 
 Answer in this shape and nothing else, every field on its own line:
+START: one or two sentences — where each person is in the photograph at 0:00, how far apart they are, which way they face, and what they are doing.
 SEGMENT 0:00-0:01 | a few words naming what happens
 ACTION: two or three plain sentences — what happens and what she feels.
 (the next segment the same way)

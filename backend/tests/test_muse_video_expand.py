@@ -54,6 +54,7 @@ def _idea(title: str) -> str:
 # then draft, acting, camera, music.
 WRITE_REPLIES = [
     "Theremin",
+    "START: She lies in bed, eyes closed.\n"
     "SEGMENT 0:00-0:02 | wakes\nACTION: An anime girl with red twin tails wakes.\n"
     "SEGMENT 0:02-0:05 | smiles\nACTION: She smiles.",
     "SEGMENT 0:00-0:02 | wakes\nACTION: Her lashes flutter open; she yawns behind her fingers.\n"
