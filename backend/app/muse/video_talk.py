@@ -157,7 +157,7 @@ You make it together. You are not passing on instructions or presenting other pe
 {phase}
 
 Answer in these labelled lines and nothing else:
-SAY: what you say, in {lang} — two to six sentences, the way you talk.{duet}
+SAY: what you say, in {lang} — as much as you would really say here, the way you talk (your VOICE decides: a girl of few words says little); never more than six sentences.{duet}
 ASIDE: one short line you mutter to yourself, in {lang}. Leave it out when nothing comes.
 PITCH: when there is a real choice to make next, the two options as two short phrases in {lang}, separated by " | ". Leave it out otherwise."""
 
@@ -243,10 +243,49 @@ def talk_system(talk: dict[str, Any]) -> str:
         lang="Japanese" if _ja(talk) else "English",
         duet=_DUET.format(a=a, b=b) if duet else "",
     )
-    # Her own persona, fenced: it is her talking, so who she is should show
-    # in her opinions — as influence, not as words to repeat.
-    own = ve.reference_block(talk.get("character"))
-    return "\n\n".join(p for p in [head, _voices(talk), own, relationship_blocks(talk)] if p)
+    # Who she is, fenced: as influence on what she notices and wants, not as
+    # words to repeat. Both of them in a duet.
+    ja = _ja(talk)
+    own = [own_block(talk.get("character"), ja=ja)]
+    if duet:
+        own.append(own_block(talk.get("partner_character"), ja=ja))
+    return "\n\n".join(p for p in [head, _voices(talk), *own, relationship_blocks(talk)] if p)
+
+
+def own_block(char: dict[str, Any] | None, *, ja: bool) -> str:
+    """Who she is, for the talk — her work, her life, her taste.
+
+    The talk once had the acting stage's block, headed "how she moves and
+    reacts in this clip": read as being about the people in the photo, it
+    left her own opinions generic — a deadpan night-shift worker talking
+    in long, lyrical lines (Akari, 2026-10-11).
+    """
+    char = char or {}
+    pers = char.get("personality") if isinstance(char.get("personality"), dict) else {}
+
+    def pick(key: str) -> Any:
+        return (pers.get(f"{key}_ja") if ja else None) or pers.get(key)
+
+    inner = pick("inner")
+    lines = [
+        ("work", pick("occupation")),
+        ("who you are", pick("summary")),
+        ("what you feel and never say", " / ".join(inner) if isinstance(inner, list) else inner),
+        ("likes", ", ".join(str(x) for x in pers.get("likes") or [])),
+        ("dislikes", ", ".join(str(x) for x in pers.get("dislikes") or [])),
+        ("dream", pick("dream")),
+    ]
+    body = "\n".join(f"{k}: {str(v).strip()}" for k, v in lines if str(v or "").strip())
+    if not body:
+        return ""
+    name = _name(char, ja=True) or "you"
+    return (
+        f"** This is you, {name} — not the people in the photograph. Let it decide what "
+        "you notice in the photo, what you like in an idea and what you would never do, "
+        "and what from your own work or life it brings to mind; say that, in your own "
+        "words. Do not recite these lines or explain yourself with them. **\n"
+        f"</start REFERENCE ONLY>\n{body}\n</end REFERENCE ONLY>"
+    )
 
 
 def relationship_blocks(talk: dict[str, Any]) -> str:
@@ -411,6 +450,20 @@ def _post_say(talk: dict[str, Any], say: str) -> None:
             _row(talk, "assistant", text, name=_name(who, ja=ja), character_id=who.get("character_id"))
 
 
+_QUOTES = {"「": "」", "『": "』", '"': '"', "'": "'", "“": "”"}
+
+
+def _unquote(option: str) -> str:
+    """Quotes around a whole option go; quotes inside it stay.
+
+    Stripping every bracket off both ends turned 「覚悟」にする into
+    覚悟」にする (Akari, 2026-10-11)."""
+    o = option.strip()
+    while len(o) >= 2 and _QUOTES.get(o[0]) == o[-1] and o[0] not in o[1:-1]:
+        o = o[1:-1].strip()
+    return o
+
+
 def _unwrap_aside(text: str) -> str:
     """"(A: 嘘じゃないけど……)" — the brackets the screen adds, written in."""
     text = text.strip()
@@ -439,7 +492,7 @@ def _post_reply(talk: dict[str, Any], reply: dict[str, str]) -> None:
                 aside = aside[m.end():]
         _row(talk, "assistant", aside, kind="aside", name=_name(who, ja=_ja(talk)),
              character_id=who.get("character_id"))
-    options = [o.strip(" 「」\"'") for o in (reply.get("pitch") or "").split("|")]
+    options = [_unquote(o) for o in (reply.get("pitch") or "").split("|")]
     options = [o for o in options if o][:2]
     if len(options) == 2:
         _row(talk, "assistant", "", kind="pitch", options=options)
@@ -509,6 +562,31 @@ async def asks_to_write(ollama, talk: dict[str, Any], message: str) -> bool:
         f"THE SHOWRUNNER'S LATEST LINE:\n{message}"
     ))
     return bool(re.match(r"\W*yes\b", raw or "", re.IGNORECASE))
+
+
+# ── The clerk: does the timetable talk change the direction? ────────────────
+#
+# The polishing stages read the direction as absolute. "No trembling" was
+# taken out of the timetable but the direction still opened on "her trembling
+# hand", and the prompt put the trembling back three times (Akari, 2026-10-11).
+
+_REDIRECT_SYSTEM = """You keep the notes of a talk between a director (the Showrunner) and an actress who are planning a short video together. The direction of the clip was settled earlier; now they are working out the timing, and the Showrunner has just said something. Does it change anything the direction says — take something out of it, replace it, or change what the clip is about or how it feels? A change to the timing or to one small moment does not, unless the direction itself names that moment.
+
+If it does, answer with the direction written again with that change, in {lang}, as a plain note about the clip in nobody's voice, keeping everything else it said. If it does not, answer exactly: NO CHANGE"""
+
+
+async def redirect(ollama, talk: dict[str, Any], message: str) -> str:
+    """The direction rewritten for the Showrunner's latest line, or ""."""
+    direction = (talk.get("direction") or "").strip()
+    if not direction:
+        return ""
+    raw = (await _call(ollama, talk, _REDIRECT_SYSTEM.format(lang="Japanese" if _ja(talk) else "English"), (
+        f"THE DIRECTION:\n{direction}\n\nTHE SHOWRUNNER JUST SAID:\n{message}"
+    ))).strip()
+    if not raw or re.search(r"\bNO CHANGE\b", raw, re.IGNORECASE):
+        return ""
+    raw = re.sub(r"^\s*\**\s*DIRECTION\s*\**\s*[:：]\s*\**\s*", "", raw, flags=re.IGNORECASE).strip()
+    return "" if raw == direction else raw
 
 # ── The moves ────────────────────────────────────────────────────────────────
 async def create(
@@ -721,6 +799,13 @@ async def _timeline_turn(ollama, talk: dict[str, Any], message: str) -> None:
     if board and not _same_board(board, talk["board"]):
         talk["board"] = board
         _row(talk, "system", _say(talk, "🗒 時間割を書き直しました", "🗒 Updated the timetable"), kind="board")
+        # Only when something was asked for: a line that changed nothing
+        # cannot have changed the direction either.
+        if direction := await redirect(ollama, talk, message):
+            talk["direction"] = direction
+            _row(talk, "system", _say(
+                talk, f"🎯 方針も書き直しました：{direction}", f"🎯 Updated the direction: {direction}",
+            ), kind="redirected")
     if not wants_write:
         _post_reply(talk, await _reply(ollama, talk, message))
         return

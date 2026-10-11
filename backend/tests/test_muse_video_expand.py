@@ -371,6 +371,7 @@ async def test_the_timetable_is_written_only_when_asked(studio):
         "no",
         "SEGMENT 0:00-0:02 | wakes\nACTION: An anime girl with red twin tails wakes.\n"
         "SEGMENT 0:02-0:05 | caught\nACTION: She notices the camera and blushes.",
+        "NO CHANGE",  # the direction stands
         # She thinks it is time; she does not decide that (2026-10-11).
         "SAY: いいですね、書きましょうか\nWRITE: yes",
     ])
@@ -383,6 +384,31 @@ async def test_the_timetable_is_written_only_when_asked(studio):
     await vt.chat(_FakeDb(), ollama, talk, "いいね、撮影文にして")
     assert talk["prompts"][-1]["prompt"].startswith("0:00 - 0:02 | wakes")
     assert [r.get("kind") for r in talk["chat"][-3:]] == [None, "written", None]
+
+
+@pytest.mark.asyncio
+async def test_a_line_that_undoes_the_direction_rewrites_it(studio):
+    talk = _on_timeline()
+    talk["direction"] = "震える手から始める"
+    await vt.chat(_FakeDb(), _FakeOllama([
+        "no",
+        "SEGMENT 0:00-0:01 | grip\nACTION: She holds the barrier.\n"
+        "SEGMENT 0:01-0:05 | glide\nACTION: Bit by bit she gets used to the ice.",
+        "**DIRECTION:** 手すりから、少しずつ慣れて滑り出す",
+        "SAY: 震えは無しで",
+    ]), talk, "震えはいらない。徐々に慣れて前に進む感じ")
+    assert talk["direction"] == "手すりから、少しずつ慣れて滑り出す"
+    assert [r.get("kind") for r in talk["chat"]] == [None, "board", "redirected", None]
+    # The polish reads the new direction, not the old one.
+    assert "少しずつ慣れて" in vt._context(talk)
+
+
+def test_pitch_options_keep_their_inner_quotes():
+    talk = _talking()
+    vt._post_reply(talk, {"say": "どっち？", "pitch": "瞳に宿る感情を「驚き」にする | 「覚悟」にする"})
+    assert talk["chat"][-1]["options"] == ["瞳に宿る感情を「驚き」にする", "「覚悟」にする"]
+    vt._post_reply(talk, {"say": "どっち？", "pitch": "「ゆっくり」 | 'fast'"})
+    assert talk["chat"][-1]["options"] == ["ゆっくり", "fast"]
 
 
 @pytest.mark.asyncio

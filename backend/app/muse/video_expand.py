@@ -220,6 +220,8 @@ _LOOK_SYSTEM = (
     "eyes, build, and clothes with their fit and material; by name when names are given;\n"
     "- what each body, hand and face is doing right now, what that moment reads as "
     "(yawning, about to laugh, startled, sulking…) and the feeling it gives;\n"
+    "- the framing: how close the camera is (face, waist up, full body, wide), its height and angle, "
+    "where each person is in the frame and which way they face, and what is in front of and behind them;\n"
     "- the place, where the light comes from and its quality, and what sits at the edges of the frame.\n"
     "Say what the moment looks like to a viewer; do not invent what happens next."
 )
@@ -371,6 +373,13 @@ _STAGE_COMMON = (
     "happens from there. The clip is split into whole-second segments.\n\n"
     "What the director asked for is absolute. Every stage keeps it; nothing is ever "
     "a reason to drop it.\n\n"
+    # A rendered clip jumped from the still at 0:00 and cut on every segment:
+    # each stage had written each segment as a fresh shot (Akari, 2026-10-11).
+    "The clip is one continuous shot that grows out of the photograph. At 0:00 it is the "
+    "photograph exactly — the same framing, the same places, the same poses — and every "
+    "segment picks up where the one before it ended. Nothing appears, disappears or "
+    "changes place without being shown moving. Only a segment whose action says it cuts "
+    "may start somewhere new.\n\n"
     # "kusu-tto giggle": the director's クスッと, spelled out for a model that
     # reads English (Sena, 2026-10-11).
     "The prompt is in English. When the director's words are Japanese, write what "
@@ -395,11 +404,11 @@ Answer in the same shape as the draft — the SEGMENT lines exactly as given, ea
 
 _CAMERA_SYSTEM = _STAGE_COMMON + """
 
-Your stage: the camera and the light. You are given the segments. For each one, write how it is filmed: the shot size, one camera movement and its speed, what stays in focus (and what falls out of it), and how the light sits or changes in that segment. The camera moves for a reason the viewer can feel — it follows the acting. Do not rewrite the action.
+Your stage: the camera and the light. You are given the segments. The camera starts where the photograph's camera is — its framing is in the description of the picture. For each segment write: where the camera starts (for the first segment, the photograph's framing; after that, exactly where the segment before ended), the one movement it makes and its speed (push in, pull back, pan, tilt, follow, or hold still), the framing it ends on, what stays in focus, and how the light sits or changes. The camera moves for a reason the viewer can feel — it follows the acting. A different framing with no movement between is a cut: only where the segment's action says it cuts. Do not rewrite the action.
 
 Answer with one line per segment, in order, and nothing else:
-CAMERA 1: ...
-CAMERA 2: ..."""
+CAMERA 1: starts …; moves …; ends …; focus …; light …
+CAMERA 2: starts …; moves …; ends …; focus …; light …"""
 
 _SCORE_SYSTEM = _STAGE_COMMON + """
 
@@ -417,9 +426,12 @@ MUSIC 2: ..."""
 # Given "Actress: … / Showrunner: …", it once wrote in her suggestion and
 # dropped the director's own ask (Asahi, 2026-10-11): the director's line
 # now comes first, and hers is marked as what is being answered.
+# Asked to keep everything, it never moved a boundary, and four asks piled
+# into the last second of five (Akari, 2026-10-11): it may share the
+# seconds out again when a moment has grown.
 _BOARD_SYSTEM = _STAGE_COMMON + """
 
-Your stage: keeping the timetable. The director and the actress are working the clip out segment by segment while looking at this timetable. You are given the timetable, what the director just said, and what the actress had said just before it. Write in what the director just asked for — a change to one moment, a new beat, a different ending, a different length of a segment. What the actress had said goes in only when the director's line says yes to it ("yes", "let's do that", picking her option); otherwise it is only there so that you understand what the director is answering. Change only that; every segment and every word nobody asked to change stays exactly as it is.
+Your stage: keeping the timetable. The director and the actress are working the clip out segment by segment while looking at this timetable. You are given the timetable, what the director just said, and what the actress had said just before it. Write in what the director just asked for — a change to one moment, a new beat, a different ending, a different length of a segment. What the actress had said goes in only when the director's line says yes to it ("yes", "let's do that", picking her option); otherwise it is only there so that you understand what the director is answering. When a moment now has more to do than its seconds can hold — "she gets used to it bit by bit" in a single second — give it more seconds by taking them from a moment that has less to do; the whole clip stays the same length. Change only that; every segment and every word nobody asked to change stays exactly as it is.
 
 Answer with the whole timetable in the same shape — SEGMENT lines with their ACTION — and nothing else. If nothing in the exchange changes the timetable, answer exactly: NO CHANGE"""
 
