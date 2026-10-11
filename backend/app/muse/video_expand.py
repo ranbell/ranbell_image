@@ -1,23 +1,22 @@
-"""Turn a finished still into a MiniMax H3 image-to-video prompt, in stages.
+"""Turn a still into an image-to-video prompt (Hailuo / MiniMax), in stages.
 
-**One call that both invents and formats lands on one shape.** The probe of
-2026-10-10 (`private/muse_video_probe/`) asked a single call to read the still,
-invent the motion and spell the H3 lines at once; every draft came back as
-"still, cut, run with the prop". The fault check then rewrote any draft that
-did not cut, so even a model that chose otherwise was pulled back.
+**A local model asked to do everything in one call fails** (the Showrunner;
+`private/muse/design.ja.md`, the image chain, learned it first). The probe of
+2026-10-10 (`private/muse_video_probe/`) asked one call to read the still,
+invent the motion and format the prompt at once; every draft came back as
+"still, cut, run with the prop".
 
-So the work is split, and each stage sees only its own job:
+So the work is split, and each call has one job:
 
-1. look  — a vision call says plainly what is in the still (both people in a
-           duet). Nothing is invented here.
-2. ideas — one call per kind of scene. Each call is told only its own kind,
-           so the ideas differ because their briefs differ, not because one
-           call was asked for "three different ideas" (which converge).
-3. pick  — the Showrunner chooses on the panel. Nothing here picks.
-4. write — the chosen idea becomes shots as JSON. Code lays out the H3 text,
-           so the fixed opening line and the shot headers cannot be misspelt.
+1. look  — a vision call says what is in the still: style, each person, and
+           what the moment reads as. Nothing is invented here.
+2. ideas — one call per kind of scene, each told only its own kind, so the
+           ideas differ because their briefs differ.
+3. pick  — the Showrunner chooses, in the talk. Nothing here picks.
+4. write — the chosen idea in time segments, written in four stages (draft,
+           acting, camera, music; see `write`). Code lays out what is pasted.
 
-The photo ledger is not written and the video API is not called.
+The photo ledger is not written and no video is rendered here.
 """
 from __future__ import annotations
 
@@ -32,11 +31,6 @@ from . import chain
 logger = logging.getLogger(__name__)
 
 DURATIONS = (5, 10, 15)
-
-H3_OPENING = (
-    "For the target video, at 0.00 seconds into the target video, "
-    "<Picture 1> (from [Shot 1]) is fully referenced."
-)
 
 # The kinds of scene a still can open. Each idea call sees exactly one of
 # these, written as what that kind is *for*. No brief lists examples: the
@@ -200,14 +194,26 @@ def _lang(locale: str) -> str:
 
 # ── 1. look ──────────────────────────────────────────────────────────────────
 
+# What the moment reads as is asked for, not only what is visible. The first
+# version said "describe only what the picture shows, no guesses": on Asahi's
+# still it wrote "a person with short red hair, head tilted down, one hand at
+# the mouth", where Gemini read "an anime girl with red twin tails, sleepy
+# orange eyes, yawning" — and every later stage built on the flatter reading
+# (2026-10-11). Asked for style, hair style and what the moment reads as, the
+# same 26B wrote "anime illustration… red pigtails held by gold bows… as if she
+# is mid-yawn".
 _LOOK_SYSTEM = (
-    "You are looking at one finished photograph. It will become the first frame "
-    "of a short video, and the people planning that video cannot see it — they "
-    "only get what you write. Say plainly, in English, what is in it: the place, "
-    "each person (who is who, using the names you are given, and what they wear), "
-    "what each body and face is doing, what the hands hold, where the light comes "
-    "from, and what sits at the edges of the frame. Describe only what the "
-    "picture shows. No guesses about what happens next, no praise."
+    "You are looking at one picture. It becomes the first frame of a short video, and "
+    "the people who will plan and write that video cannot see it — your words are all "
+    "they get, so what you leave out they will get wrong.\n\n"
+    "Write in English, plainly:\n"
+    "- the style of the picture (anime illustration, photograph, 3D render, painting…) and its colours;\n"
+    "- each person: apparent gender and age range, hair (colour, length, style — twin tails, bob, bun…), "
+    "eyes, build, and clothes with their fit and material; by name when names are given;\n"
+    "- what each body, hand and face is doing right now, what that moment reads as "
+    "(yawning, about to laugh, startled, sulking…) and the feeling it gives;\n"
+    "- the place, where the light comes from and its quality, and what sits at the edges of the frame.\n"
+    "Say what the moment looks like to a viewer; do not invent what happens next."
 )
 
 
@@ -220,7 +226,7 @@ async def look(
     A model that cannot read images answers blind rather than failing; then the
     shoot's own prompt stands in for the picture and `blind` says so out loud.
     """
-    prompt = f"The people in it:\n{_who(people)}\n\nDescribe this photograph."
+    prompt = f"The people in it:\n{_who(people)}\n\nDescribe this picture."
     try:
         raw, blind = await chain._call_seeing(
             ollama, system=_LOOK_SYSTEM, prompt=prompt, model=model,
@@ -247,25 +253,32 @@ def idea_prompt(
         "You are a director's assistant pitching one idea for a short video that "
         "starts from a finished photograph. The director reads several pitches "
         "side by side and picks one, and each pitch was asked for a different "
-        "kind of scene — so yours is useful only if it is truly this kind, and "
-        "only if it could not be pitched for any other photograph or any other "
-        "person. A safe, generic idea is the one the director skips.\n\n"
+        "kind of scene — so yours is useful only if it is truly this kind.\n\n"
+        # The feeling first. Told "a safe idea is the one the director skips"
+        # and asked why it was surprising, the pitches for a still the director
+        # wanted "sleepy and cute" were a trembling hand at a clock, black birds
+        # over the window, a painter's studio and a magic meadow (2026-10-11).
+        "What the director wants decides how the clip should feel; the kind only "
+        "decides how it moves. When they want something quiet, sweet or simple, the "
+        "right pitch is quiet, sweet or simple — a twist that works against that "
+        "feeling is a wrong pitch, however surprising. Be specific rather than "
+        "generic: the idea should belong to this photograph and this person.\n\n"
         f"The kind you are pitching: {k['brief']}\n\n"
         "Answer with one JSON object and nothing else:\n"
         '{"title": ..., "story": ..., "beats": [...]}\n'
         f"title is one short line in {lang} the director reads first. story is "
         f"two or three sentences in {lang} saying what the viewer sees, in order, "
-        "and why it is surprising or right for her. beats is the same video in "
+        "and why it is right for what the director wants. beats is the same video in "
         "English as a list of plain physical actions in order, each one thing a "
         "camera can see; the person who writes the shots works only from these."
     )
     direction = (
-        "The director's note for this video. Honour what it asks for, read "
-        f"through the kind you are pitching: {short.strip()}\n"
-        "If this kind cannot deliver the note literally, find how it can deliver "
-        "what the note is after — the director asked for that reading on purpose."
+        "What the director wants, in their words:\n"
+        f"{short.strip()}\n"
+        "Honour it, read through the kind you are pitching. If this kind cannot "
+        "deliver it literally, find how it can deliver what they are after."
         if short.strip() else
-        "The director left no note. What happens is yours to decide."
+        "The director left it to you. What happens is yours to decide."
     )
     prompt = (
         f"Length: {duration_s} seconds.\n"
@@ -322,76 +335,131 @@ async def ideas(
 
 # ── 4. write ─────────────────────────────────────────────────────────────────
 
-# Labelled lines, not JSON (2026-10-10). Asked for {"shots": [...], "sound",
-# "music"}, gemma kept closing the shots array after sound and music, so half the
-# answers did not parse; a line per field has nothing to nest.
-_WRITE_SYSTEM = """You write the shots of a short image-to-video clip for MiniMax H3. The opening line, the field names and the shot headers are added by code; you supply only what goes inside them.
+# A time-step prompt: the clip in whole-second segments, each with a short
+# title, what the viewer sees, the camera, and the music. The Showrunner's
+# reference (2026-10-11) is a prompt written this way that works pasted into
+# Hailuo as it is. The reference itself is not shown to the model: an example
+# becomes the answer (`project_examples_dominate`); its shape is described.
+#
+# **Written in four stages, one job each** — the image chain's lesson
+# (`private/muse/design.ja.md`: A writes the moment, then B/C/D each rewrite it
+# for one thing) and the Showrunner's: "a local LLM asked to do everything at
+# once fails". One call asked for arc, acting, camera, light and music came
+# back thin in all of them, and a list of fields per shot was filled with
+# nothing ("no face is visible"):
+#
+#   1. draft   — the segments and the feeling that grows through them
+#   2. acting  — rewrites each segment's action: face, hands, timing, hair and cloth
+#   3. camera  — writes only the camera (and light) line of each segment
+#   4. music   — writes only the music line of each segment
+#
+# 3 and 4 never touch the action, so they cannot drop it. What the director
+# asked for opens every stage as absolute: the image chain's C stage, told to
+# shorten, dropped the costume the theme named.
 
-The photograph is second 0. Shot 1 starts as exactly that picture and then moves. A new shot means the camera cuts; a continuous take is one shot however much happens in it, so do not split a take that never cuts.
+_STAGE_COMMON = (
+    "This is one stage of writing the prompt for a short image-to-video clip "
+    "(Hailuo / MiniMax). The picture is the first frame, 0:00; the clip is what "
+    "happens from there. The clip is split into whole-second segments.\n\n"
+    "What the director asked for is absolute. Every stage keeps it; nothing is ever "
+    "a reason to drop it."
+)
 
-H3 builds only what it is told. Whatever a shot leaves out it makes up, and then the face, the clothes or the room drift away from the photograph. So each shot is written in five fields, each a different part of what the viewer sees; together they are that stretch of the clip. The request says how long the whole answer should be.
+_DRAFT_SYSTEM = _STAGE_COMMON + """
 
-Answer in this shape and nothing else, every field on its own single line:
-SHOT 1 AT 0: who is on screen and where, in one sentence, without their looks
-LOOK: ...
-BODY: ...
-FACE: ...
-LIGHT: ...
-CAMERA: ...
-SHOT 2 AT seconds: ...
-LOOK: ...
-(the same five fields for every shot)
-SOUND: ...
-MUSIC: ...
+Your stage: the draft. Decide the segments and what happens in each — one feeling that grows across the whole clip toward what the director asked for, every segment moving it one step. Each segment shows the viewer something change that a camera can see. A segment with nothing new to show is not a segment. A cut only when the idea goes to another place or time; say so in that segment's action. Other stages will add the acting detail, the camera and the music — leave those to them.
 
-- SHOT: the place and who is in it. Their looks belong in LOOK, so they are said once. The number after AT is when the shot starts, in seconds; later shots are cuts and start before the clip ends. Write a later shot's line so it reads after the words "the camera cuts to".
-- LOOK: every person on screen, by name when you are given one, otherwise by how she looks — hair colour and how it falls and moves, eyes, and the clothes with their material and how they move. The video model has no memory between shots, so say it again in every shot.
-- BODY: what the body and hands do, in order, to the very end of the shot, with how fast each thing happens (slowly, in one quick motion, a beat of stillness).
-- FACE: where she looks, the mouth, the cheeks, the breath, and the feeling that changes across the shot.
-- LIGHT: where the light comes from, its colour and how it changes; what hangs in the air; what moves in the background.
-- CAMERA: one move (static, push in, pull out, pan, truck, tilt, arc, tracking or handheld), its amplitude (small, medium or large), its speed (slow, medium or fast) and the motion that motivates it.
-- SOUND: the physical sounds in order. No dialogue.
-- MUSIC: the instrument you are given, its tempo, and whether it rises or falls."""
+Answer in this shape and nothing else, every field on its own line:
+SEGMENT 0:00-0:01 | a few words naming what happens
+ACTION: two or three plain sentences — what happens and what she feels.
+(the next segment the same way)
+In the first segment's action, say the style of the picture and how each person looks (hair, eyes, clothes)."""
 
+_ACTING_SYSTEM = _STAGE_COMMON + """
 
-def _words(duration_s: int) -> int:
-    """How long to ask for: at least about 2,000 characters, never trimmed.
+Your stage: the acting. You are given the draft. Rewrite every segment's action so a video model can perform it: the face first — the eyes, brows, mouth, cheeks, the breath — then the hands and fingers, the shoulders, the timing (slowly, a beat of stillness, all at once), and what moves with her (hair, sleeves, the hem). Keep what happens, the order and the feeling of the draft; you are making it visible, not changing it. Keep the first segment's style and looks. When it suits the idea, she can notice the camera and react to being watched.
 
-    The Showrunner (2026-10-11) asked for about 2,000. Asked for 350 words, the
-    26B wrote ~1,550 characters for a 5-second clip (one shot) and ~2,570 for
-    10 seconds (three shots). The short clip is raised to reach 2,000; a longer
-    clip is never asked for less — "a long clip coming out shorter defeats the
-    point". Measured, not derived — re-measure if the shot fields change.
-    """
-    return 440 if duration_s <= 10 else 520
+Answer in the same shape as the draft — the SEGMENT lines exactly as given, each followed by its rewritten ACTION line (three to five sentences)."""
+
+_CAMERA_SYSTEM = _STAGE_COMMON + """
+
+Your stage: the camera and the light. You are given the segments. For each one, write how it is filmed: the shot size, one camera movement and its speed, what stays in focus (and what falls out of it), and how the light sits or changes in that segment. The camera moves for a reason the viewer can feel — it follows the acting. Do not rewrite the action.
+
+Answer with one line per segment, in order, and nothing else:
+CAMERA 1: ...
+CAMERA 2: ..."""
+
+_SCORE_SYSTEM = _STAGE_COMMON + """
+
+Your stage: the music. You are given the segments. Write what plays in each one. The first segment starts on the instrument you are given; from there the music follows the feeling — add one layer, change the rhythm, or drop to a single sound where the clip turns — so that each segment's music builds on the one before. Do not rewrite the action.
+
+Answer with one line per segment, in order, and nothing else:
+MUSIC 1: ...
+MUSIC 2: ..."""
 
 
-def write_prompt(
+def _segments(duration_s: int) -> int:
+    """About two seconds a segment, with a beat at each end of a short clip."""
+    return {5: 3, 10: 5, 15: 6}.get(duration_s, max(3, round(duration_s / 2)))
+
+
+def write_context(
     *, still: str, people: list[dict[str, str]], idea: dict[str, Any],
-    duration_s: int, instrument: str = "",
+    duration_s: int, intent: str = "", persona: str = "",
 ) -> str:
+    """What every stage is told about the clip, the absolute first."""
     beats = "\n".join(f"- {b}" for b in idea.get("beats") or [])
-    kind = KINDS.get(str(idea.get("kind") or ""), {})
     story = str(idea.get("story") or "").strip()
     return (
-        f"Length: {duration_s} seconds.\n"
-        f"Write about {_words(duration_s)} English words in all.\n"
+        # What the director asked for in the talk, in their own words. Without
+        # it the writer had only the idea, and "make it cute" came back as a
+        # ghost story (Asahi, 2026-10-11).
+        (f"What the director wants (absolute), in their words:\n{intent.strip()}\n\n" if intent.strip() else "")
+        + f"Length: {duration_s} seconds, in {_segments(duration_s)} segments.\n"
         f"Who is in it:\n{_who(people)}\n\n"
-        f"What the photograph shows (second 0):\n{still.strip()}\n\n"
-        + (f"Kind of scene: {kind['brief']}\n\n" if kind else "")
-        + f"The idea the director chose, in order:\n{beats}\n\n"
-        # Their words for it: the feeling the beats alone do not carry.
-        + (f"What the director and the actress agreed on, in their words:\n{story}\n\n" if story else "")
-        + (f"The music is played on: {instrument}" if instrument else
-           "Choose one instrument for the music.")
+        + (persona.strip() + "\n\n" if persona.strip() else "")
+        + f"The picture (0:00):\n{still.strip()}\n\n"
+        + f"The idea, in order:\n{beats}"
+        + (f"\n\nThe idea as the director and the actress put it:\n{story}" if story else "")
     )
 
 
-# The instrument is chosen before the shots are written. Asked inside the
-# writing call — even told to take it from her life, or warned off stock
-# choices — gemma4 answered "a solo cello" for 11 of 13 clips across four
-# people. Asked on its own for a few candidates, it names instruments from her
-# work and her likes, and one of the first three is drawn here.
+def reference_block(char: dict[str, Any] | None) -> str:
+    """Who she is, fenced so it shapes how she moves without being copied.
+
+    The image chain's brief: personality handed over plainly becomes something
+    the picture must contain (a thermos drawn into a scene with no coffee);
+    fenced and marked "do not use these words", the influence stays and the
+    words do not (0 leaks across the verification runs). The video ideas, given
+    her charm line plainly, re-enacted it in every pitch — so only the acting
+    stage gets her, and only fenced, and only when she is in the picture.
+    """
+    char = char or {}
+    pers = char.get("personality") if isinstance(char.get("personality"), dict) else {}
+    look = pers.get("appearance") if isinstance(pers.get("appearance"), dict) else {}
+    lines = [
+        ("personality", ", ".join(str(t) for t in pers.get("traits") or [])),
+        ("charm", pers.get("charm")),
+        ("habit", look.get("habit")),
+        ("expression", look.get("expression")),
+        ("body", look.get("body")),
+        ("voice", look.get("voice")),
+    ]
+    body = "\n".join(f"{k}: {str(v).strip()}" for k, v in lines if str(v or "").strip())
+    if not body:
+        return ""
+    name = char.get("name") or char.get("name_ja") or "her"
+    return (
+        f"** This is {name}'s background. For reference: use it to imagine how she "
+        "moves and reacts in this clip. Do not put these words into the prompt. **\n"
+        f"</start REFERENCE ONLY>\n{body}\n</end REFERENCE ONLY>"
+    )
+
+
+# The music still opens on an instrument picked beforehand: asked inside the
+# writing call, gemma4 answered "a solo cello" for 11 of 13 clips. Asked on
+# its own for a few candidates, it names instruments from her work and her
+# likes, and one of the first three is drawn here.
 _MUSIC_SYSTEM = (
     "You suggest the instrument for the score of a short video clip. The score "
     "should sound like the person in it: something from her work, what she "
@@ -435,192 +503,213 @@ async def pick_instrument(
     return (rng or random).choice(names) if names else ""
 
 
-# "SHOT 2 AT 2.5:", and the shapes it drifts into: "SHOT 2 (AT 2.5s):", a
-# full-width colon, nothing after the colon. Markdown is stripped first
-# (`_unmark`), so "**SHOT 2** AT 2.5:" and "### SHOT 2 AT 2.5:" reach here plain.
-_SHOT_LINE = re.compile(
-    r"^\s*SHOT\s*(\d+)\s*[(\[]?\s*(?:AT\s*([\d.]+)\s*s?)?\s*[)\]]?\s*[:：]\s*(.*)$",
+# "SEGMENT 0:00-0:01 | Title", and the shapes it drifts into: no "SEGMENT",
+# an en dash or "~", spaces around the dash, a full-width bar, no title.
+_SEGMENT_LINE = re.compile(
+    r"^\s*(?:SEGMENT\s*)?(\d+):(\d{2})\s*[-–~〜]\s*(\d+):(\d{2})\s*[|｜:]?\s*(.*)$",
     re.IGNORECASE,
 )
-_FIELD_LINE = re.compile(r"^\s*\**\s*(SOUND|MUSIC)\s*\**\s*:\s*(.+)$", re.IGNORECASE)
-
-
-# The five parts of a shot, in the order they are laid out (2026-10-11: one
-# paragraph per shot came back about 1,000 characters for the whole clip; the
-# Showrunner wanted motion, faces, light and looks in detail, about 2,000).
-_SHOT_PARTS = ("look", "body", "face", "light", "camera")
-_PART_LINE = re.compile(r"^\s*\**\s*(LOOK|BODY|FACE|LIGHT|CAMERA)\s*\**\s*:\s*(.*)$", re.IGNORECASE)
-# A label written mid-line ("…toward the clock. SHOT 2 AT 2: The camera…",
-# 2026-10-11) starts a line of its own.
-_INLINE_LABEL = re.compile(
-    r"[ \t]+(?=\**(?:SHOT\s*\d+\s*AT\s*[\d.]+\s*s?|LOOK|BODY|FACE|LIGHT|CAMERA|SOUND|MUSIC)\s*\**\s*:)",
+_SEGMENT_FIELD = re.compile(
+    r"^\s*(ACTION|VISUAL ACTION|CAMERA|CAMERA WORK|MUSIC)\s*(?:\([^)]*\))?\s*[:：]\s*(.*)$",
+    re.IGNORECASE,
 )
+_FIELD_KEY = {"action": "action", "visual action": "action", "camera": "camera",
+              "camera work": "camera", "music": "music"}
 
 
 def _unmark(line: str) -> str:
     """A line without the heading or bullet a model puts before a label."""
-    return re.sub(r"^\s*(?:#+|[-*>•])\s+", "", line)
+    return re.sub(r"^\s*(?:#+|[-*>•]|⏱️)\s*", "", line)
 
 
-def parse_shots(raw: str) -> dict[str, Any]:
-    """The labelled-line answer as {"shots": [{"at", "text", "look", …}], "sound", "music"}.
-
-    Falls back to a JSON object, in case the model answers in the old shape.
-    """
-    data: dict[str, Any] = {"shots": []}
+def parse_segments(raw: str) -> list[dict[str, Any]]:
+    """The labelled answer as [{"start", "end", "title", "action", "camera", "music"}]."""
+    segments: list[dict[str, Any]] = []
     field = ""
-    # Bold goes first, everywhere, so "… **SHOT 2** AT 2: …" splits like the rest.
-    text = (raw or "").replace("**", "").replace("__", "")
-    for line in (_unmark(x) for x in _INLINE_LABEL.sub("\n", text).splitlines()):
-        if re.fullmatch(r"\s*[#*>•-]*\s*", line):
-            continue  # a heading mark or bullet the label split left on its own
-        if not data["shots"] and _PART_LINE.match(line):
-            # The parts came without a SHOT line: that is shot 1, from second 0.
-            data["shots"].append({"at": "0", "text": ""})
-        if m := _SHOT_LINE.match(line):
-            data["shots"].append({"at": m.group(2), "text": m.group(3).lstrip("* ").strip()})
-            field = "text"
-        elif data["shots"] and (m := _PART_LINE.match(line)):
-            field = m.group(1).lower()
-            data["shots"][-1][field] = m.group(2).lstrip("* ").strip()
-        elif m := _FIELD_LINE.match(line):
-            field = m.group(1).lower()
-            data[field] = m.group(2).lstrip("* ").strip()
-        elif line.strip() and field:
+    for line in (raw or "").replace("**", "").replace("__", "").splitlines():
+        line = _unmark(line).strip()
+        if not line:
+            continue
+        if m := _SEGMENT_LINE.match(line):
+            a, b, c, d, title = m.groups()
+            segments.append({
+                "start": int(a) * 60 + int(b), "end": int(c) * 60 + int(d),
+                "title": title.strip(),
+            })
+            field = "title"
+        elif segments and (m := _SEGMENT_FIELD.match(line)):
+            field = _FIELD_KEY[m.group(1).lower()]
+            segments[-1][field] = m.group(2).strip()
+        elif segments and field:
             # A field that wrapped onto the next line.
-            target = data["shots"][-1] if field in ("text", *_SHOT_PARTS) else data
-            target[field] = f"{target.get(field, '')} {line.strip()}".strip()
-    if not data["shots"] and "{" in (raw or ""):
-        return parse_json_object(raw)
-    return data
+            segments[-1][field] = f"{segments[-1].get(field, '')} {line}".strip()
+    return [s for s in segments if str(s.get("action") or "").strip()]
 
 
-def _sentence(text: str) -> str:
-    text = str(text or "").strip()
-    return text if not text or text[-1] in ".!?;:" else f"{text}."
+def _clock(seconds: int) -> str:
+    return f"{seconds // 60}:{seconds % 60:02d}"
 
 
-def _shot_text(shot: dict[str, Any]) -> str:
-    """One shot's paragraph: what it is, then look, body, face, light, camera."""
-    return " ".join(
-        _sentence(shot.get(k)) for k in ("text", *_SHOT_PARTS) if str(shot.get(k) or "").strip()
+def _fit_times(segments: list[dict[str, Any]], duration_s: int) -> None:
+    """Whole seconds from 0:00 to the end, in order. The model's times are kept
+    when they already are; otherwise the clip is shared out evenly."""
+    n = len(segments)
+    ok = (
+        segments[0]["start"] == 0 and segments[-1]["end"] == duration_s
+        and all(s["start"] < s["end"] for s in segments)
+        and all(a["end"] == b["start"] for a, b in zip(segments, segments[1:]))
     )
+    if ok:
+        return
+    edges = [round(duration_s * i / n) for i in range(n + 1)]
+    for s, start, end in zip(segments, edges, edges[1:]):
+        s["start"], s["end"] = start, max(end, start + 1)
 
 
-def _stamp(seconds: float) -> str:
-    whole, ms = divmod(round(seconds * 1000), 1000)
-    return f"{whole // 60:02d}:{whole % 60:02d}.{ms:03d}"
+def layout(segments: list[dict[str, Any]], *, duration_s: int) -> str:
+    """The prompt as it is pasted: one block per segment. ValueError if empty."""
+    if not segments:
+        raise ValueError("no segments with an action")
+    _fit_times(segments, duration_s)
+    blocks = []
+    for s in segments:
+        head = f"{_clock(s['start'])} - {_clock(s['end'])}"
+        if s.get("title"):
+            head += f" | {s['title']}"
+        lines = [head, f"Visual Action: {s['action']}"]
+        if s.get("camera"):
+            lines.append(f"Camera Work: {s['camera']}")
+        if s.get("music"):
+            lines.append(f"Music: {s['music']}")
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
 
 
-def _times(raw: list[Any], duration_s: int) -> list[float]:
-    """Start times for shots 2..n, kept inside the clip and in order.
+_NUMBERED = re.compile(r"^\s*(CAMERA|MUSIC)\s*(\d+)?\s*[:：]\s*(.+)$", re.IGNORECASE)
 
-    The model chooses them; a missing, late or out-of-order time is spread
-    evenly instead of being sent back for another round.
+
+def parse_numbered(raw: str, label: str, count: int) -> list[str]:
+    """One "LABEL n: text" line per segment, in segment order.
+
+    A numbered line goes to its segment; unnumbered ones fill the rest in
+    order. Missing segments come back empty and their line is left out.
     """
-    n = len(raw)
-    out: list[float] = []
-    prev = 0.0
-    for i, value in enumerate(raw):
-        try:
-            t = float(value)
-        except (TypeError, ValueError):
-            t = -1.0
-        if not prev < t < duration_s:
-            # Share what is left of the clip between this shot and the rest.
-            t = round(prev + (duration_s - prev) / (n - i + 1), 3)
-        out.append(t)
-        prev = t
+    out = [""] * count
+    loose: list[str] = []
+    for line in (raw or "").replace("**", "").splitlines():
+        m = _NUMBERED.match(_unmark(line))
+        if not m or m.group(1).upper() != label:
+            continue
+        n, text = m.group(2), m.group(3).strip()
+        if n and 1 <= int(n) <= count and not out[int(n) - 1]:
+            out[int(n) - 1] = text
+        else:
+            loose.append(text)
+    for i in range(count):
+        if not out[i] and loose:
+            out[i] = loose.pop(0)
     return out
 
 
-_CUT_LEAD = "the camera cuts to"
-_CUT_AT_END = re.compile(r"[\s,;]*the camera cuts to[\s.:,]*$", re.IGNORECASE)
-_CUT_IN_TEXT = re.compile(r"(?<=[.!?])\s+the camera cuts to\s+", re.IGNORECASE)
-
-
-def layout(data: dict[str, Any], *, duration_s: int) -> str:
-    """The H3 text from the shots JSON. Raises ValueError when there are no shots."""
-    shots: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for shot in data.get("shots") or []:
-        if not isinstance(shot, dict):
-            continue
-        # gemma sometimes nests sound and music inside the last shot.
-        for key in ("sound", "music"):
-            if shot.get(key) and not data.get(key):
-                data = {**data, key: shot[key]}
-        # A cut written inside a shot's paragraph is a new shot (2026-10-10:
-        # "... The camera cuts to a close-up of Mio" in the middle of shot 1).
-        text = _shot_text(shot)
-        # …and one left dangling at the end of a shot, with the next shot's
-        # header still to come ("…push in. the camera cuts to [Shot 2]").
-        text = _CUT_AT_END.sub("", text)
-        pieces = _CUT_IN_TEXT.split(text)
-        for n, text in enumerate(p.strip() for p in pieces):
-            # It also repeats shot 1 word for word as a second shot.
-            if text and text not in seen:
-                seen.add(text)
-                shots.append({**shot, "text": text} if n == 0 else {"text": text})
-    if not shots:
-        raise ValueError("no shots")
-    parts = [f"[Shot 1] {str(shots[0]['text']).strip()}"]
-    times = _times([s.get("at") for s in shots[1:]], duration_s)
-    for i, (shot, t) in enumerate(zip(shots[1:], times), start=2):
-        text = str(shot["text"]).strip()
-        if text.lower().startswith(_CUT_LEAD):
-            text = text[len(_CUT_LEAD):].lstrip(" ,")
-        parts.append(f"[Shot {i}] At {_stamp(t)}, {_CUT_LEAD} {text}")
-    sound = str(data.get("sound") or "").strip() or "none"
-    music = str(data.get("music") or "").strip() or "none"
-    return (
-        f"{H3_OPENING}\n\n"
-        f"integrated_multimodal_description: {' '.join(parts)}\n\n"
-        f"overall_soundscape: {sound}\n"
-        f"non_diegetic_music: {music}"
+def _segments_text(segments: list[dict[str, Any]]) -> str:
+    return "\n".join(
+        f"SEGMENT {_clock(s['start'])}-{_clock(s['end'])} | {s.get('title', '')}\nACTION: {s['action']}"
+        for s in segments
     )
+
+
+async def _stage(ollama, system: str, prompt: str, *, model, num_ctx) -> str:
+    try:
+        return await chain._call(
+            ollama, system=system, prompt=prompt, model=model,
+            images=None, num_ctx=num_ctx, think=False,
+        )
+    except chain.ChainError:
+        return ""
 
 
 async def write(
     ollama, *, still: str, people: list[dict[str, str]], idea: dict[str, Any],
     duration_s: int, model: str | None, num_ctx: int | None, locale: str = "ja",
-    rng: random.Random | None = None,
+    rng: random.Random | None = None, intent: str = "", persona: str = "",
 ) -> dict[str, Any]:
-    """The chosen idea as an H3 prompt. One retry when the answer cannot be laid out."""
+    """The chosen idea as a time-step prompt, written in four stages.
+
+    The draft must come out (one retry); the later stages only improve it — a
+    stage that fails leaves the draft's version of its part in place, and what
+    each stage returned is kept in `stages` to read afterwards.
+    """
     instrument = await pick_instrument(
         ollama, people=people, idea=idea, model=model, num_ctx=num_ctx, rng=rng,
     )
-    prompt = write_prompt(
-        still=still, people=people, idea=idea, duration_s=duration_s,
-        instrument=instrument,
+    context = write_context(
+        still=still, people=people, idea=idea, duration_s=duration_s, intent=intent,
     )
-    raw = ""
-    problem = ""
+    stages: dict[str, str] = {}
+
+    # 1. draft — the segments. Without it there is nothing to improve.
+    raw, problem, segments = "", "", []
     for _ in range(2):
-        ask = prompt if not problem else (
-            f"{prompt}\n\nYour last answer could not be used ({problem}). "
-            f"It was:\n{raw[:1500]}\n\nAnswer again in the labelled lines only: SHOT, LOOK, "
-            "BODY, FACE, LIGHT and CAMERA for each shot, then SOUND and MUSIC."
+        ask = context if not problem else (
+            f"{context}\n\nYour last answer could not be used ({problem}). It was:\n"
+            f"{raw[:1500]}\n\nAnswer again in the SEGMENT / ACTION lines only."
         )
-        try:
-            raw = await chain._call(
-                ollama, system=_WRITE_SYSTEM, prompt=ask, model=model,
-                images=None, num_ctx=num_ctx, think=False,
-            )
-            data = parse_shots(raw)
-            text = layout(data, duration_s=duration_s)
-            return {
-                "prompt": text, "shots": len(data.get("shots") or []),
-                "instrument": instrument, "raw": raw,
-            }
-        except chain.ChainError:
-            problem = "it was empty"
-        except ValueError as exc:
-            problem = str(exc) or "it had no SHOT lines"
-    logger.warning("[muse.video] write failed (%s): %r", problem, (raw or "")[:500])
-    raise VideoError(
-        "撮影文に清書できませんでした。もう一度押すか、別の案を選んでください。"
-        if str(locale or "").startswith("ja") else
-        "Could not write this idea as a prompt. Try again or pick another idea.",
-        raw=raw,
+        raw = await _stage(ollama, _DRAFT_SYSTEM, ask, model=model, num_ctx=num_ctx)
+        segments = parse_segments(raw)
+        if segments:
+            break
+        problem = "it was empty" if not raw.strip() else "it had no SEGMENT lines with an ACTION"
+    stages["draft"] = raw
+    if not segments:
+        logger.warning("[muse.video] draft failed (%s): %r", problem, (raw or "")[:500])
+        raise VideoError(
+            "撮影文に清書できませんでした。もう一度押すか、別の案を選んでください。"
+            if str(locale or "").startswith("ja") else
+            "Could not write this idea as a prompt. Try again or pick another idea.",
+            raw=raw,
+        )
+    _fit_times(segments, duration_s)
+
+    # 2. acting — her persona (fenced) reaches this stage only.
+    acting_ctx = write_context(
+        still=still, people=people, idea=idea, duration_s=duration_s,
+        intent=intent, persona=persona,
     )
+    raw = await _stage(
+        ollama, _ACTING_SYSTEM, f"{acting_ctx}\n\nThe draft:\n{_segments_text(segments)}",
+        model=model, num_ctx=num_ctx,
+    )
+    stages["acting"] = raw
+    acted = parse_segments(raw)
+    if len(acted) == len(segments):
+        for seg, new in zip(segments, acted):
+            seg["action"] = new["action"]
+            if new.get("title"):
+                seg["title"] = new["title"]
+
+    # 3 and 4 write only their own line, so they cannot drop the action.
+    listing = _segments_text(segments)
+    raw = await _stage(
+        ollama, _CAMERA_SYSTEM, f"{context}\n\nThe segments:\n{listing}",
+        model=model, num_ctx=num_ctx,
+    )
+    stages["camera"] = raw
+    for seg, line in zip(segments, parse_numbered(raw, "CAMERA", len(segments))):
+        if line:
+            seg["camera"] = line
+
+    raw = await _stage(
+        ollama, _SCORE_SYSTEM,
+        f"{context}\n\nThe segments:\n{listing}\n\n"
+        + (f"The music starts on: {instrument}" if instrument else "Choose where the music starts."),
+        model=model, num_ctx=num_ctx,
+    )
+    stages["music"] = raw
+    for seg, line in zip(segments, parse_numbered(raw, "MUSIC", len(segments))):
+        if line:
+            seg["music"] = line
+
+    return {
+        "prompt": layout(segments, duration_s=duration_s), "segments": len(segments),
+        "instrument": instrument, "stages": stages,
+    }

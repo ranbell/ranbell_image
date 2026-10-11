@@ -1879,7 +1879,7 @@
     "addPartner": "二人目",
     "noActress": "話し相手を選んでください",
     "length": "長さ",
-    "notePlaceholder": "見せたいことがあれば一文で（なくてもかまいません）",
+    "notePlaceholder": "どんな動画にしたいか一文で（空欄なら、始めてから会話で伝えます）",
     "start": "この顔ぶれで相談する",
     "restart": "この顔ぶれで相談し直す",
     "cancel": "やめる",
@@ -1889,7 +1889,7 @@
     "revised": "直した",
     "write": "この案で撮影文にする",
     "writing": "書いています…",
-    "prompt": "撮影文（MiniMax H3）",
+    "prompt": "撮影文（Hailuo / MiniMax）",
     "copy": "コピー",
     "copied": "撮影文をコピーしました。描画のために GPU を空けます",
     "copyFailed": "コピーできませんでした。欄を選択してコピーしてください",
@@ -1905,6 +1905,8 @@
     "noModel": "モデルを選んでください",
     "searchPlaceholder": "撮影文・案・女優名・会話の言葉で探す",
     "searching": "探しています…",
-    "noHits": "見つかりませんでした"
+    "noHits": "見つかりませんでした",
+    "pitchAnyway": "おまかせで案を出してもらう",
+    "waitingForWish": "どんな動画にしたいかを右の会話で伝えると、それに沿った案が4つ出ます。"
   }
 }

@@ -50,6 +50,19 @@ def _idea(title: str) -> str:
     return json.dumps({"title": title, "story": "s", "beats": ["She looks up."]})
 
 
+# What the four writing stages return in a stub run: the instrument pick,
+# then draft, acting, camera, music.
+WRITE_REPLIES = [
+    "Theremin",
+    "SEGMENT 0:00-0:02 | wakes\nACTION: An anime girl with red twin tails wakes.\n"
+    "SEGMENT 0:02-0:05 | smiles\nACTION: She smiles.",
+    "SEGMENT 0:00-0:02 | wakes\nACTION: Her lashes flutter open; she yawns behind her fingers.\n"
+    "SEGMENT 0:02-0:05 | smiles\nACTION: She notices the camera, blushes and smiles.",
+    "CAMERA 1: close-up, slow push in, eyes in focus\nCAMERA 2: gentle arc left to right",
+    "MUSIC 1: a thin theremin line\nMUSIC 2: soft pizzicato joins",
+]
+
+
 def test_only_finished_stills_are_eligible():
     session = {
         "board": {"images": [{"sha256": "board"}]},
@@ -131,118 +144,7 @@ async def test_a_failed_idea_is_reported_not_dropped():
     assert len(out) == len(ve.KINDS)
     assert out[0]["error"] and "beats" not in out[0]
     assert out[1]["title"] == "b"
-    assert "left no note" in ollama.calls[0]["prompt"]
-
-
-def test_layout_writes_the_fixed_lines_in_code():
-    text = ve.layout({
-        "shots": [
-            {"at": 0, "text": "Mio stands at the mic."},
-            {"at": 2.5, "text": "The camera cuts to a night street."},
-            {"at": 99, "text": "a rooftop."},
-        ],
-        "sound": "click, then steps",
-        "music": "",
-    }, duration_s=5)
-    assert text.startswith(ve.H3_OPENING + "\n\nintegrated_multimodal_description: [Shot 1] Mio")
-    assert "[Shot 2] At 00:02.500, the camera cuts to a night street." in text
-    assert "the camera cuts to the camera cuts to" not in text.lower()
-    # A time past the end is pulled back inside the clip, after shot 2.
-    assert "[Shot 3] At 00:03.750, the camera cuts to a rooftop." in text
-    assert text.endswith("overall_soundscape: click, then steps\nnon_diegetic_music: none")
-
-
-def test_a_repeated_shot_and_nested_sound_are_folded():
-    text = ve.layout({"shots": [
-        {"at": 0, "text": "She turns."},
-        {"at": 0, "text": "She turns.", "sound": "a click", "music": "cello, slow, rising"},
-    ]}, duration_s=5)
-    assert "[Shot 2]" not in text
-    assert "overall_soundscape: a click" in text
-    assert "non_diegetic_music: cello, slow, rising" in text
-
-
-def test_a_cut_inside_a_paragraph_becomes_its_own_shot():
-    text = ve.layout({"shots": [
-        {"at": 0, "text": "The camera pans to the booth. The camera cuts to a close-up of Mio."},
-    ]}, duration_s=5)
-    assert "[Shot 1] The camera pans to the booth. [Shot 2] At 00:02.500, the camera cuts to a close-up of Mio." in text
-
-
-def test_a_dangling_cut_at_the_end_of_a_shot_is_dropped():
-    text = ve.layout({"shots": [
-        {"at": 0, "text": "Steam fills the frame. the camera cuts to"},
-        {"at": 3, "text": "a bakery oven."},
-    ]}, duration_s=5)
-    assert "[Shot 1] Steam fills the frame. [Shot 2] At 00:03.000, the camera cuts to a bakery oven." in text
-
-
-def test_one_continuous_take_is_one_shot():
-    text = ve.layout({"shots": [{"at": 0, "text": "She turns."}]}, duration_s=10)
-    assert "[Shot 2]" not in text
-
-
-def test_labelled_lines_parse_and_wrap():
-    raw = (
-        "SHOT 1 AT 0: Mio stands at the mic.\n"
-        "She smiles.\n"
-        "**SHOT 2 AT 2.5s:** a night street.\n"
-        "SOUND: a click, then steps\n"
-        "MUSIC: theremin, slow, rising"
-    )
-    data = ve.parse_shots(raw)
-    assert data["shots"] == [
-        {"at": "0", "text": "Mio stands at the mic. She smiles."},
-        {"at": "2.5", "text": "a night street."},
-    ]
-    assert data["sound"] == "a click, then steps"
-    assert data["music"] == "theremin, slow, rising"
-
-
-def test_a_shot_is_laid_out_from_its_five_parts():
-    raw = (
-        "SHOT 1 AT 0: Mio stands at the microphone in a dim booth\n"
-        "LOOK: Mio Kagami, long silver hair falling past her shoulders, blue eyes, a cream knit cardigan\n"
-        "FACE: her eyes lift to the window, a small breath escapes\n"
-        "BODY: she slowly lets go of the microphone\n"
-        "LIGHT: grey rain light from the left window\n"
-        "CAMERA: static, small, slow, holding on her stillness\n"
-        "SOUND: rain on glass\nMUSIC: theremin, slow, rising"
-    )
-    text = ve.layout(ve.parse_shots(raw), duration_s=5)
-    shot = text.split("[Shot 1] ")[1].split("\n")[0]
-    order = ["dim booth.", "cardigan.", "microphone.", "escapes.", "window.", "stillness."]
-    assert [shot.index(w) for w in order] == sorted(shot.index(w) for w in order)
-
-
-def test_a_shot_header_written_mid_line_starts_a_shot():
-    raw = (
-        "SHOT 1 AT 0: A girl sits on a bed. BODY: she pans toward the clock. SHOT 2 AT 2: a close-up of the clock\n"
-        "BODY: its hands frozen\nSOUND: ticking\nMUSIC: metronome, steady"
-    )
-    data = ve.parse_shots(raw)
-    assert [s["at"] for s in data["shots"]] == ["0", "2"]
-    assert data["shots"][0]["body"] == "she pans toward the clock."
-    assert "[Shot 2] At 00:02.000, the camera cuts to a close-up of the clock. its hands frozen." in ve.layout(data, duration_s=5)
-
-
-@pytest.mark.parametrize("raw", [
-    "**SHOT 1 AT 0:** a bed\nBODY: she wakes\n**SHOT 2** AT 2: a window\nBODY: rain\nSOUND: s\nMUSIC: m",
-    "### SHOT 1 AT 0: a bed\n- BODY: she wakes\n### SHOT 2 (AT 2s): a window\n- BODY: rain\nSOUND: s\nMUSIC: m",
-    "SHOT 1 AT 0:\na bed\nBODY: she wakes\nSHOT 2 AT 2：a window\nBODY: rain\nSOUND: s\nMUSIC: m",
-])
-def test_shot_labels_survive_markdown_and_drift(raw):
-    data = ve.parse_shots(raw)
-    assert [s["at"] for s in data["shots"]] == ["0", "2"]
-    text = ve.layout(data, duration_s=5)
-    assert "[Shot 1] a bed. she wakes." in text
-    assert "[Shot 2] At 00:02.000, the camera cuts to a window. rain." in text
-
-
-def test_parts_without_a_shot_line_are_shot_one():
-    data = ve.parse_shots("LOOK: silver hair\nBODY: she turns\nSOUND: s\nMUSIC: m")
-    assert data["shots"] == [{"at": "0", "text": "", "look": "silver hair", "body": "she turns"}]
-    assert "[Shot 1] silver hair. she turns." in ve.layout(data, duration_s=5)
+    assert "left it to you" in ollama.calls[0]["prompt"]
 
 
 @pytest.mark.asyncio
@@ -264,46 +166,10 @@ async def test_a_failed_write_in_the_talk_keeps_her_reply(studio):
     assert kinds == [("user", None), ("assistant", None), ("system", "write_failed")]
 
 
-def test_the_writer_hears_what_was_agreed_in_their_words():
-    prompt = ve.write_prompt(
-        still="A bed.", people=[], idea={"kind": "stay", "beats": ["She wakes."], "story": "寝起きのぼーっとした可愛らしさ"},
-        duration_s=5,
-    )
-    assert "寝起きのぼーっとした可愛らしさ" in prompt
-    assert "about 440 English words" in prompt
-    # A longer clip is never asked for less.
-    words = [ve._words(sec) for sec in ve.DURATIONS]
-    assert words == sorted(words)
-
-
 def test_instrument_candidates_are_cleaned():
     assert ve.parse_instruments("1. Theremin\n- **Upright bass**\n3) Glockenspiel\ntheremin") == [
         "Theremin", "Upright bass", "Glockenspiel",
     ]
-
-
-@pytest.mark.asyncio
-async def test_write_picks_the_instrument_first_and_retries_once():
-    good = "SHOT 1 AT 0: She turns.\nSOUND: s\nMUSIC: theremin, slow, rising"
-    ollama = _FakeOllama(["Theremin\nGlockenspiel\nUpright bass", "nope", good])
-    out = await ve.write(
-        ollama, still="A booth.", people=ve.cast({"character": MIO}),
-        idea={"kind": "stay", "title": "t", "beats": ["She turns."]}, duration_s=5,
-        model="m", num_ctx=None, rng=random.Random(0),
-    )
-    assert "[Shot 1] She turns." in out["prompt"]
-    assert out["instrument"] in {"Theremin", "Glockenspiel", "Upright bass"}
-    # The instrument call knows her work; the writer is told what to play.
-    assert "works as: late-night radio host" in ollama.calls[0]["prompt"]
-    assert f"The music is played on: {out['instrument']}" in ollama.calls[1]["prompt"]
-    assert "could not be used" in ollama.calls[2]["prompt"]
-
-    with pytest.raises(ve.VideoError):
-        await ve.write(
-            _FakeOllama(["", "nope", "still nope"]), still="A booth.",
-            people=ve.cast({"character": MIO}), idea={"beats": ["x"]},
-            duration_s=5, model="m", num_ctx=None,
-        )
 
 
 # ── Video studio (video_talk) ────────────────────────────────────────────────
@@ -381,7 +247,7 @@ async def test_a_still_from_her_shoot_carries_on_from_it(studio):
     }
     db = _FakeDb({"muse_session_id": "s1"}, {"s1": shoot})
     ollama = _FakeOllama(_pitch_replies())
-    talk = await vt.create(db, ollama, sha="final", character_id=MIO_ID, cfg=CFG)
+    talk = await vt.create(db, ollama, sha="final", character_id=MIO_ID, cfg=CFG, short="ほっとした瞬間")
     assert talk["source_session_id"] == "s1"
     assert "your own shoot" in ollama.calls[-1]["system"]
     assert "radio booth at night" in ollama.calls[1]["prompt"]  # the shoot's context
@@ -403,7 +269,7 @@ async def test_another_actress_on_her_shoot_does_not_claim_it(studio):
 @pytest.mark.asyncio
 async def test_a_photo_from_elsewhere_names_nobody_and_is_not_her(studio):
     ollama = _FakeOllama(_pitch_replies("SAY: へえ"))
-    talk = await vt.create(_FakeDb({}), ollama, sha="pier", character_id=MIO_ID, cfg=CFG)
+    talk = await vt.create(_FakeDb({}), ollama, sha="pier", character_id=MIO_ID, cfg=CFG, short="静かに")
     assert talk["people"] == [] and talk["source_session_id"] == ""
     assert "not you" in ollama.calls[-1]["system"]
     assert "Not known by name" in ollama.calls[1]["prompt"]
@@ -412,14 +278,29 @@ async def test_a_photo_from_elsewhere_names_nobody_and_is_not_her(studio):
 
 @pytest.mark.asyncio
 async def test_a_second_actress_reuses_the_reading(studio):
-    first = await vt.create(_FakeDb({}), _FakeOllama(_pitch_replies()), sha="pier", character_id=MIO_ID, cfg=CFG)
-    ollama = _FakeOllama([*[_idea(k) for k in ve.KINDS], "SAY: A: へえ\nB: いいじゃん"])
+    first = await vt.create(_FakeDb({}), _FakeOllama(["A pier.", "SAY: どうする？"]), sha="pier", character_id=MIO_ID, cfg=CFG)
+    ollama = _FakeOllama(["SAY: A: へえ\nB: いいじゃん"])
     talk = await vt.create(
         _FakeDb({}), ollama, sha="pier", character_id=MIO_ID, partner_id=RIN_ID,
         cfg=CFG, reuse=first,
     )
     assert not any(c["images"] for c in ollama.calls)  # the picture was not read again
     assert [r["name"] for r in talk["chat"]] == ["各務 みお", "緒方 りん"]
+
+
+@pytest.mark.asyncio
+async def test_without_a_wish_she_asks_and_the_first_answer_shapes_the_ideas(studio):
+    ollama = _FakeOllama(["A bed.", "SAY: 総監督さん、どんな動画にしますか？"])
+    talk = await vt.create(_FakeDb({}), ollama, sha="bed", character_id=MIO_ID, cfg=CFG)
+    assert talk["ideas"] == [] and len(ollama.calls) == 2  # read the picture, then asked
+    assert "ask what kind of video" in ollama.calls[1]["prompt"]
+
+    ollama.replies = [*[_idea(k) for k in ve.KINDS], "SAY: じゃあこの4つ！\nPICK: stay"]
+    await vt.chat(_FakeDb({}), ollama, talk, "寝起きのぼーっとした可愛らしさで")
+    idea_calls = ollama.calls[2:6]
+    assert all("寝起きのぼーっとした可愛らしさで" in c["prompt"] for c in idea_calls)
+    assert [i["kind"] for i in talk["ideas"]] == list(ve.KINDS)
+    assert talk["chosen"] == "stay" and talk["prompts"] == []
 
 
 @pytest.mark.asyncio
@@ -464,11 +345,10 @@ async def test_she_goes_ahead_when_told(studio):
     talk = _talking()
     ollama = _FakeOllama([
         "SAY: いきましょう\nPICK: shift\nWRITE: yes",
-        "Theremin",
-        "SHOT 1 AT 0: Mio looks up as rain falls.\nSOUND: rain\nMUSIC: theremin, slow, rising",
+        *WRITE_REPLIES,
     ])
     await vt.chat(_FakeDb(), ollama, talk, "これでいこう")
-    assert talk["prompts"][-1]["prompt"].startswith(ve.H3_OPENING)
+    assert talk["prompts"][-1]["prompt"].startswith("0:00 - 0:02 | wakes")
     assert talk["chat"][-1]["kind"] == "written"
 
 
@@ -544,20 +424,26 @@ def _client(monkeypatch, studio, replies, meta=None, sessions=None):
 
 
 def test_create_chat_write_repitch_over_http(monkeypatch, studio):
-    client, ollama = _client(monkeypatch, studio, _pitch_replies("SAY: Four ideas!"))
+    client, ollama = _client(monkeypatch, studio, ["A pier.", "SAY: What shall we make of it?"])
     r = client.post("/api/muse/video/talks", json={"sha256": "pier", "character_id": MIO_ID, "locale": "en"})
     assert r.status_code == 200, r.text
     tid = r.json()["talk_id"]
+    assert r.json()["ideas"] == []  # she asks first
+
+    ollama.replies = [*[_idea(k) for k in ve.KINDS], "SAY: Four ideas!"]
+    r = client.post(f"/api/muse/video/talks/{tid}/chat", json={"message": "something sleepy"})
     assert [i["kind"] for i in r.json()["ideas"]] == list(ve.KINDS)
 
     ollama.replies = ["SAY: The moment goes on, then.\nPICK: stay"]
     r = client.post(f"/api/muse/video/talks/{tid}/chat", json={"message": "the first one", "duration_s": 10})
     assert r.status_code == 200 and r.json()["chosen"] == "stay" and r.json()["duration_s"] == 10
 
-    ollama.replies = ["Theremin", "SHOT 1 AT 0: Mio turns.\nSOUND: s\nMUSIC: theremin, slow, rising"]
+    ollama.replies = list(WRITE_REPLIES)
     r = client.post(f"/api/muse/video/talks/{tid}/write", json={"kind": "stay"})
     assert r.status_code == 200, r.text
-    assert r.json()["prompts"][-1]["prompt"].startswith(ve.H3_OPENING)
+    # The talk was set to 10 s; the draft's 5 s of segments are shared out over it.
+    assert r.json()["prompts"][-1]["prompt"].startswith("0:00 - 0:05 | wakes")
+    assert "stages" not in r.json()["prompts"][-1]  # kept on the record, not sent to the screen
 
     ollama.replies = [*[_idea(k) for k in ve.KINDS], "SAY: New ones!"]
     r = client.post(f"/api/muse/video/talks/{tid}/repitch")
@@ -808,3 +694,114 @@ def test_release_unloads_and_never_fails(monkeypatch, studio):
     ollama.unload_all = broken
     r = client.post("/api/muse/video/release")
     assert r.status_code == 200 and r.json()["unloaded"] == []
+
+
+# ── The four-stage writer ────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("head", [
+    "SEGMENT 0:00-0:02 | wakes",
+    "**SEGMENT 0:00 - 0:02 | wakes**",
+    "### 0:00–0:02 ｜ wakes",
+    "- SEGMENT 0:00~0:02: wakes",
+])
+def test_segment_headers_survive_drift(head):
+    segs = ve.parse_segments(f"{head}\nACTION: she wakes\nand stretches\n0:02-0:05 | smiles\nACTION: she smiles")
+    assert [(s["start"], s["end"], s["title"]) for s in segs] == [(0, 2, "wakes"), (2, 5, "smiles")]
+    assert segs[0]["action"] == "she wakes and stretches"
+
+
+def test_a_segment_without_an_action_is_not_a_segment():
+    assert ve.parse_segments("SEGMENT 0:00-0:02 | wakes\nSEGMENT 0:02-0:05 | x\nACTION: y") == [
+        {"start": 2, "end": 5, "title": "x", "action": "y"},
+    ]
+
+
+def test_layout_shares_out_bad_times_and_writes_the_pasted_shape():
+    segs = [
+        {"start": 0, "end": 9, "title": "a", "action": "one", "camera": "push in", "music": "guitar"},
+        {"start": 9, "end": 9, "title": "b", "action": "two"},
+    ]
+    text = ve.layout(segs, duration_s=5)
+    assert text == (
+        "0:00 - 0:02 | a\nVisual Action: one\nCamera Work: push in\nMusic: guitar\n\n"
+        "0:02 - 0:05 | b\nVisual Action: two"
+    )
+    with pytest.raises(ValueError):
+        ve.layout([], duration_s=5)
+
+
+def test_numbered_lines_go_to_their_segment():
+    assert ve.parse_numbered("CAMERA 2: b\nCAMERA 1: a\nMUSIC 1: x", "CAMERA", 3) == ["a", "b", ""]
+    assert ve.parse_numbered("**CAMERA:** a\nCAMERA: b", "CAMERA", 2) == ["a", "b"]
+
+
+@pytest.mark.asyncio
+async def test_the_four_stages_each_do_one_job():
+    ollama = _FakeOllama(list(WRITE_REPLIES))
+    out = await ve.write(
+        ollama, still="A bed.", people=[], idea={"kind": "stay", "beats": ["She wakes."], "story": "可愛い寝起き"},
+        duration_s=5, model="m", num_ctx=None, rng=random.Random(0),
+        intent="- 寝起きの可愛らしさ", persona="</start REFERENCE ONLY>\nhabit: yawns\n</end REFERENCE ONLY>",
+    )
+    draft, acting, camera, music = ollama.calls[1:5]
+    assert [c["system"] for c in (draft, acting, camera, music)] == [
+        ve._DRAFT_SYSTEM, ve._ACTING_SYSTEM, ve._CAMERA_SYSTEM, ve._SCORE_SYSTEM,
+    ]
+    # What the director asked for opens every stage.
+    assert all(c["prompt"].startswith("What the director wants (absolute)") for c in (draft, acting, camera, music))
+    # Her persona reaches the acting stage only.
+    assert "REFERENCE ONLY" in acting["prompt"]
+    assert not any("REFERENCE ONLY" in c["prompt"] for c in (draft, camera, music))
+    assert "The music starts on: Theremin" in music["prompt"]
+    # The acting rewrite is what ships; camera and music only add their lines.
+    assert out["prompt"] == (
+        "0:00 - 0:02 | wakes\nVisual Action: Her lashes flutter open; she yawns behind her fingers.\n"
+        "Camera Work: close-up, slow push in, eyes in focus\nMusic: a thin theremin line\n\n"
+        "0:02 - 0:05 | smiles\nVisual Action: She notices the camera, blushes and smiles.\n"
+        "Camera Work: gentle arc left to right\nMusic: soft pizzicato joins"
+    )
+    assert set(out["stages"]) == {"draft", "acting", "camera", "music"}
+
+
+@pytest.mark.asyncio
+async def test_a_failed_later_stage_keeps_the_draft():
+    replies = list(WRITE_REPLIES)
+    replies[2] = "the acting stage lost the format"  # acting
+    replies[3] = ""  # camera came back empty
+    out = await ve.write(
+        _FakeOllama(replies), still="A bed.", people=[], idea={"beats": ["x"]},
+        duration_s=5, model="m", num_ctx=None,
+    )
+    assert "Visual Action: An anime girl with red twin tails wakes." in out["prompt"]
+    assert "Camera Work" not in out["prompt"]
+    assert "Music: a thin theremin line" in out["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_the_draft_is_retried_once_then_says_so():
+    with pytest.raises(ve.VideoError) as err:
+        await ve.write(
+            _FakeOllama(["Theremin", "no labels", "still none"]), still="A bed.", people=[],
+            idea={"beats": ["x"]}, duration_s=5, model="m", num_ctx=None,
+        )
+    assert err.value.raw == "still none"
+
+
+def test_her_reference_is_fenced_and_says_not_to_copy():
+    block = ve.reference_block({**MIO, "personality": {
+        **MIO["personality"], "traits": ["shy_offstage", "playful"],
+    }})
+    assert block.startswith("** This is Mio Kagami's background.")
+    assert "Do not put these words into the prompt" in block
+    assert "</start REFERENCE ONLY>" in block and block.endswith("</end REFERENCE ONLY>")
+    assert "habit: presses one headphone cup" in block
+    assert ve.reference_block({}) == ""
+
+
+def test_persona_goes_only_to_who_is_in_the_picture():
+    talk = _talking()
+    talk["character"] = {**talk["character"], "personality": {"appearance": {"habit": "presses one headphone cup"}}}
+    talk["people_ids"] = [MIO_ID]
+    assert "presses one headphone cup" in vt.persona_of(talk)
+    talk["people_ids"] = []  # a photograph of someone else
+    assert vt.persona_of(talk) == ""

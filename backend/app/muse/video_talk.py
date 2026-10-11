@@ -225,6 +225,8 @@ def relationship_blocks(talk: dict[str, Any]) -> str:
 
 
 def _ideas_block(talk: dict[str, Any]) -> str:
+    if not talk.get("ideas"):
+        return "(none yet — the writers pitch once the Showrunner says what they want)"
     return "\n".join(
         f"[{i['kind']}] {i.get('title', '')} — {i.get('story', '')}\n"
         f"  beats: {' / '.join(i['beats'])}"
@@ -447,36 +449,59 @@ async def create(
     inputs["character_id"] = character_id
     inputs["partner_preset"] = talk["partner_character"].get("character_id", "")
     await persona.load_memory(db, talk)
-    await _pitch(ollama, talk, opener=True)
+    if talk.get("short"):
+        await _pitch(ollama, talk, why="open")
+    else:
+        await _ask_first(ollama, talk)
     await video_db.save(db, talk)
     return talk
 
 
-async def _pitch(ollama, talk: dict[str, Any], *, opener: bool) -> None:
+_PITCH_LINES = {
+    "open": "(The Showrunner has just put the photograph down and asks what video it could "
+            "become. Open the conversation: react to the photograph and pitch the ideas.)",
+    "wish": "(The Showrunner has just said what they want — their line is the last one in "
+            "the talk. The writers pitched with it; the ideas listed now are theirs. Answer "
+            "the Showrunner and pitch the ideas.)",
+    "fresh": "(The Showrunner asked the writers for a fresh set of ideas; they are the ones "
+             "listed now. React to them.)",
+}
+
+
+async def _pitch(ollama, talk: dict[str, Any], *, why: str) -> None:
+    """Ideas for what the director wants so far, then her pitch of them."""
     inputs = talk["inputs"]
     talk["ideas"] = await ve.ideas(
-        ollama, still=talk["still"], people=talk.get("people") or [], short=talk.get("short", ""),
+        ollama, still=talk["still"], people=talk.get("people") or [], short=intent_of(talk),
         duration_s=int(talk.get("duration_s") or 5), locale=_locale(talk),
         model=inputs["model"], num_ctx=inputs["num_ctx"], context=talk.get("context", ""),
     )
     talk["chosen"] = ""
-    note = (f"The Showrunner's note for this video: {talk['short']}\n" if talk.get("short") else "")
-    line = note + (
-        "(The Showrunner has just put the photograph down and asks what video it could "
-        "become. Open the conversation: react to the photograph and pitch the ideas.)"
-        if opener else
-        "(The Showrunner asked the writers for a fresh set of ideas; they are the ones "
-        "listed now. React to them.)"
-    )
-    reply = await _reply(ollama, talk, line)
+    reply = await _reply(ollama, talk, _PITCH_LINES[why])
     _post_say(talk, reply["say"])
     _apply(talk, reply)
+
+
+async def _ask_first(ollama, talk: dict[str, Any]) -> None:
+    """No wish yet: she reacts to the photograph and asks what they want.
+
+    Pitched before the director had said anything, the ideas were written
+    blind, and only the one idea she later reworked ever heard the wish —
+    "sleepy and cute" came back as a magic meadow (Asahi, 2026-10-11). The
+    ideas now wait for the first thing the director says (or the note).
+    """
+    reply = await _reply(ollama, talk, (
+        "(The Showrunner has just put the photograph down. The writers have not pitched "
+        "yet. React to the photograph in a line or two, then ask what kind of video "
+        "they want to make of it.)"
+    ))
+    _post_say(talk, reply["say"])
 
 
 async def repitch(db, ollama, talk: dict[str, Any]) -> dict[str, Any]:
     """A fresh set of ideas for the same picture and the same actress."""
     _row(talk, "system", _say(talk, "新しい案を頼みました", "Asked for fresh ideas"), kind="repitch")
-    await _pitch(ollama, talk, opener=False)
+    await _pitch(ollama, talk, why="fresh")
     await video_db.save(db, talk)
     return talk
 
@@ -484,6 +509,11 @@ async def repitch(db, ollama, talk: dict[str, Any]) -> dict[str, Any]:
 async def chat(db, ollama, talk: dict[str, Any], message: str) -> dict[str, Any]:
     """One line from the Showrunner."""
     _row(talk, "user", message)
+    if not talk.get("ideas"):
+        # The first thing the director says is what they want: pitch with it.
+        await _pitch(ollama, talk, why="wish")
+        await video_db.save(db, talk)
+        return talk
     on_table = talk.get("chosen") or ""
     reply = await _reply(ollama, talk, message)
     _post_say(talk, reply["say"])
@@ -518,6 +548,31 @@ async def write(db, ollama, talk: dict[str, Any], kind: str) -> dict[str, Any]:
     return talk
 
 
+def intent_of(talk: dict[str, Any]) -> str:
+    """What the Showrunner asked for: the note, then their lines in the talk.
+
+    The writer once had only the idea, and a talk that had settled on "sleepy
+    and cute" came back as a ghost story (Asahi, 2026-10-11).
+    """
+    lines = [talk.get("short", "")] + [
+        r.get("text", "") for r in talk.get("chat") or [] if r.get("role") == "user"
+    ][-6:]
+    return "\n".join(f"- {x.strip()}" for x in lines if str(x or "").strip())
+
+
+def persona_of(talk: dict[str, Any]) -> str:
+    """Her (and her partner's) persona, fenced, for the acting stage — only for
+    whoever of the cast is actually in the picture. A photograph of someone
+    else gets none: those people are not her."""
+    in_photo = set(talk.get("people_ids") or [])
+    blocks = [
+        ve.reference_block(talk.get(k))
+        for k in ("character", "partner_character")
+        if str((talk.get(k) or {}).get("character_id") or "") in in_photo
+    ]
+    return "\n\n".join(b for b in blocks if b)
+
+
 async def _write(ollama, talk: dict[str, Any], kind: str) -> None:
     idea = next((i for i in talk.get("ideas") or [] if i.get("kind") == kind and "beats" in i), None)
     if idea is None:
@@ -527,7 +582,8 @@ async def _write(ollama, talk: dict[str, Any], kind: str) -> None:
         out = await ve.write(
             ollama, still=talk.get("still", ""), people=talk.get("people") or [], idea=idea,
             duration_s=int(talk.get("duration_s") or 5), model=inputs["model"],
-            num_ctx=inputs["num_ctx"], locale=_locale(talk),
+            num_ctx=inputs["num_ctx"], locale=_locale(talk), intent=intent_of(talk),
+            persona=persona_of(talk),
         )
     except ve.VideoError as exc:
         # What the model returned, kept on the record: the screen only says it failed.
@@ -538,6 +594,8 @@ async def _write(ollama, talk: dict[str, Any], kind: str) -> None:
         "kind": kind, "title": idea.get("title", ""), "prompt": out["prompt"],
         "instrument": out.get("instrument", ""), "duration_s": talk.get("duration_s"),
         "at": time.time(),
+        # What each writing stage returned, to read when a prompt disappoints.
+        "stages": {k: str(v)[:4000] for k, v in (out.get("stages") or {}).items()},
     })
     _row(talk, "system", _say(
         talk, f"📝 「{idea.get('title', '')}」を撮影文にしました",
@@ -576,7 +634,9 @@ def view(talk: dict[str, Any]) -> dict[str, Any]:
             for i in talk.get("ideas") or []
         ],
         "chosen": talk.get("chosen", ""),
-        "prompts": list(talk.get("prompts") or []),
+        "prompts": [
+            {k: v for k, v in p.items() if k != "stages"} for p in talk.get("prompts") or []
+        ],
         "chat": list(talk.get("chat") or [])[-60:],
     }
 

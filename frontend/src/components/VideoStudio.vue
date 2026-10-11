@@ -580,8 +580,12 @@ const waitingLabel = computed(() => ({
                   class="text-[11px] text-gray-400 hover:text-gray-200 disabled:opacity-40"
                   :disabled="!!busy"
                   @click="repitch"
-                >↻ {{ t('video.repitch') }}</button>
+                >↻ {{ ideas.length ? t('video.repitch') : t('video.pitchAnyway') }}</button>
               </div>
+              <!-- No ideas until the director says what they want (or leaves it to her). -->
+              <p v-if="!ideas.length" class="rounded-lg border border-dashed border-white/10 px-3 py-2 text-[11px] text-gray-400">
+                {{ t('video.waitingForWish') }}
+              </p>
               <div class="grid gap-2 sm:grid-cols-2">
                 <div
                   v-for="idea in ideas"

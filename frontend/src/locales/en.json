@@ -1879,7 +1879,7 @@
     "addPartner": "Add a second",
     "noActress": "Pick who to talk it over with",
     "length": "Length",
-    "notePlaceholder": "Anything you want to see, in one line (optional)",
+    "notePlaceholder": "What kind of video you want, in one line (or say it in the talk once it starts)",
     "start": "Start the talk",
     "restart": "Start again with this cast",
     "cancel": "Cancel",
@@ -1889,7 +1889,7 @@
     "revised": "changed",
     "write": "Write this one",
     "writing": "Writing…",
-    "prompt": "Prompt (MiniMax H3)",
+    "prompt": "Prompt (Hailuo / MiniMax)",
     "copy": "Copy",
     "copied": "Copied the prompt. Freeing the GPU for the render",
     "copyFailed": "Could not copy. Select the text and copy it by hand",
@@ -1905,6 +1905,8 @@
     "noModel": "Pick a model",
     "searchPlaceholder": "Search prompts, ideas, names and the talk",
     "searching": "Searching…",
-    "noHits": "Nothing found"
+    "noHits": "Nothing found",
+    "pitchAnyway": "Let them pitch anyway",
+    "waitingForWish": "Tell her in the talk what kind of video you want, and four ideas will be pitched to fit it."
   }
 }
