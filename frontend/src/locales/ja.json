@@ -1886,8 +1886,7 @@
     "changeCast": "顔ぶれ・モデルを変える",
     "ideas": "案",
     "repitch": "別の案を出してもらう",
-    "revised": "直した",
-    "write": "この案で撮影文にする",
+    "write": "この時間割で撮影文にする",
     "writing": "書いています…",
     "prompt": "撮影文（Hailuo / MiniMax）",
     "copy": "コピー",
@@ -1907,6 +1906,20 @@
     "searching": "探しています…",
     "noHits": "見つかりませんでした",
     "pitchAnyway": "おまかせで案を出してもらう",
-    "waitingForWish": "どんな動画にしたいかを右の会話で伝えると、それに沿った案が4つ出ます。"
+    "waitingForWish": "どんな動画にしたいかを右の会話で伝えると、それに沿った案が4つ出ます。",
+    "ideasAreMaterial": "案は話し合いの材料です。気になるものを会話で拾ってください。",
+    "step": {
+      "direction": "方針",
+      "timeline": "時間割",
+      "prompt": "撮影文"
+    },
+    "directionHint": "まず、どんな動画にするかを話し合います。会話で決まれば自動で時間割に進みます。話がまとまったらボタンでも進めます。",
+    "settle": "この方針で時間割を作る",
+    "settling": "方針をまとめて、時間割を作っています…",
+    "direction": "方針",
+    "backToDirection": "方針の相談に戻る",
+    "timetable": "時間割",
+    "timetableHint": "会話で直すと書き換わります",
+    "lengthChanged": "長さを {n} 秒に変えました。撮影文にするとき時間を割り直します"
   }
 }

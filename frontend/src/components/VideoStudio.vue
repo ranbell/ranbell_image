@@ -86,6 +86,17 @@ const lead = computed(() => byId.value[leadId.value] || null)
 const partner = computed(() => byId.value[partnerId.value] || null)
 const fromShoot = computed(() => !!source.value.session_id)
 const ideas = computed(() => talk.value?.ideas || [])
+const phase = computed(() => talk.value?.phase || 'direction')
+const board = computed(() => talk.value?.board || [])
+// Only the latest choice is live; older ones are what was asked then.
+const livePitch = computed(() => {
+  const chat = talk.value?.chat || []
+  for (let i = chat.length - 1; i >= 0; i--) {
+    if (chat[i].role === 'user') return -1
+    if (chat[i].kind === 'pitch') return i
+  }
+  return -1
+})
 const prompts = computed(() => talk.value?.prompts || [])
 const latestPrompt = computed(() => {
   const list = prompts.value
@@ -236,15 +247,40 @@ async function send() {
   })
 }
 
-async function writeIdea(kind) {
+// The talk goes direction → timetable → prompt. Settling is also noticed in the
+// talk itself; the button settles it as the talk stands.
+async function settleDirection() {
+  await run('settle', async () => {
+    talk.value = await api(`/api/muse/video/talks/${talk.value.talk_id}/settle`, { method: 'POST' })
+    await scrollChat()
+  })
+}
+
+async function backToDirection() {
+  await run('back', async () => {
+    talk.value = await api(`/api/muse/video/talks/${talk.value.talk_id}/phase`, {
+      method: 'POST',
+      body: JSON.stringify({ phase: 'direction' }),
+    })
+    await scrollChat()
+  })
+}
+
+async function writePrompt() {
   promptIndex.value = -1
   await run('write', async () => {
     talk.value = await api(`/api/muse/video/talks/${talk.value.talk_id}/write`, {
       method: 'POST',
-      body: JSON.stringify({ kind, duration_s: seconds.value }),
+      body: JSON.stringify({ duration_s: seconds.value }),
     })
     await scrollChat()
   })
+}
+
+// Her two-way choice: picking one says it in the talk, as the Showrunner.
+async function pickOption(option) {
+  input.value = isJa.value ? `「${option}」がいいな` : `I'd go with "${option}"`
+  await send()
 }
 
 async function repitch() {
@@ -366,6 +402,8 @@ const waitingLabel = computed(() => ({
   reply: t('video.replying', { name: castLine.value }),
   write: t('video.writing'),
   repitch: t('video.thinking'),
+  settle: t('video.settling'),
+  back: '',
 }[busy.value] || ''))
 </script>
 
@@ -573,44 +611,106 @@ const waitingLabel = computed(() => ({
                 >{{ t('video.changeCast') }}</button>
               </div>
 
-              <div class="flex items-center justify-between">
-                <h3 class="text-xs font-medium text-amber-100">{{ t('video.ideas') }}</h3>
+              <!-- Where the talk is: direction, then the timetable, then the prompt -->
+              <ol class="flex items-center gap-1.5 text-[10px]">
+                <li
+                  v-for="(step, si) in ['direction', 'timeline', 'prompt']"
+                  :key="step"
+                  class="flex items-center gap-1.5"
+                >
+                  <span v-if="si" class="text-gray-600">→</span>
+                  <span
+                    class="rounded-full border px-2 py-0.5"
+                    :class="(step === 'prompt' ? prompts.length && phase === 'timeline' : phase === step)
+                      ? 'border-amber-400/70 bg-amber-950/40 text-amber-50'
+                      : 'border-white/10 text-gray-500'"
+                  >{{ si + 1 }} {{ t(`video.step.${step}`) }}</span>
+                </li>
+              </ol>
+
+              <!-- 1. The direction: talked over, with the writers' notes as material -->
+              <template v-if="phase === 'direction'">
+                <div class="space-y-2 rounded-xl border border-white/10 bg-gray-900/60 p-2.5">
+                  <p class="text-[11px] leading-relaxed text-gray-300">{{ t('video.directionHint') }}</p>
+                  <button
+                    type="button"
+                    class="rounded-full border border-amber-500/50 bg-amber-950/40 px-3 py-1 text-[11px] text-amber-100 hover:bg-amber-900/60 disabled:opacity-40"
+                    :disabled="!!busy || (!ideas.length && !talk.short)"
+                    @click="settleDirection"
+                  >🎯 {{ t('video.settle') }}</button>
+                </div>
+
+                <div class="flex items-center justify-between">
+                  <h3 class="text-xs font-medium text-amber-100">{{ t('video.ideas') }}</h3>
+                  <button
+                    type="button"
+                    class="text-[11px] text-gray-400 hover:text-gray-200 disabled:opacity-40"
+                    :disabled="!!busy"
+                    @click="repitch"
+                  >↻ {{ ideas.length ? t('video.repitch') : t('video.pitchAnyway') }}</button>
+                </div>
+                <!-- No ideas until the director says what they want (or leaves it to her). -->
+                <p v-if="!ideas.length" class="rounded-lg border border-dashed border-white/10 px-3 py-2 text-[11px] text-gray-400">
+                  {{ t('video.waitingForWish') }}
+                </p>
+                <p v-else class="text-[10px] text-gray-500">{{ t('video.ideasAreMaterial') }}</p>
+                <div class="grid gap-2 sm:grid-cols-2">
+                  <div
+                    v-for="idea in ideas"
+                    :key="idea.kind"
+                    class="flex flex-col gap-1 rounded-xl border border-violet-500/30 bg-violet-950/20 p-2.5"
+                  >
+                    <span class="self-start rounded bg-white/5 px-1.5 text-[9px] text-gray-400">{{ idea.label }}</span>
+                    <div class="text-[12px] font-medium text-violet-50">{{ idea.title || '' }}</div>
+                    <p v-if="idea.error" class="text-[10px] text-amber-300/90">{{ idea.error }}</p>
+                    <p v-else class="flex-1 whitespace-pre-wrap text-[11px] leading-relaxed text-gray-300">{{ idea.story }}</p>
+                  </div>
+                </div>
+              </template>
+
+              <!-- 2. The timetable: what the two of them are working through -->
+              <template v-else>
+                <div class="space-y-1 rounded-xl border border-amber-500/30 bg-amber-950/20 p-2.5">
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="text-[11px] font-medium text-amber-100">🎯 {{ t('video.direction') }}</span>
+                    <button
+                      type="button"
+                      class="text-[10px] text-gray-400 underline hover:text-gray-200 disabled:opacity-40"
+                      :disabled="!!busy"
+                      @click="backToDirection"
+                    >{{ t('video.backToDirection') }}</button>
+                  </div>
+                  <p class="whitespace-pre-wrap text-[11px] leading-relaxed text-amber-50/90">{{ talk.direction }}</p>
+                </div>
+
+                <div class="space-y-1.5">
+                  <div class="flex items-center justify-between">
+                    <h3 class="text-xs font-medium text-amber-100">🗒 {{ t('video.timetable') }}</h3>
+                    <span class="text-[10px] text-gray-500">{{ t('video.timetableHint') }}</span>
+                  </div>
+                  <div
+                    v-for="(seg, gi) in board"
+                    :key="gi"
+                    class="rounded-lg border border-white/10 bg-black/30 px-2.5 py-1.5"
+                  >
+                    <div class="flex items-baseline gap-2 text-[11px]">
+                      <span class="shrink-0 font-mono text-amber-300/90">{{ clock(seg.start) }}–{{ clock(seg.end) }}</span>
+                      <span class="truncate font-medium text-gray-100">{{ seg.title }}</span>
+                    </div>
+                    <p class="text-[11px] leading-relaxed text-gray-300">{{ seg.action }}</p>
+                  </div>
+                  <p v-if="board.length && board[board.length - 1].end !== seconds" class="text-[10px] text-amber-300/80">
+                    {{ t('video.lengthChanged', { n: seconds }) }}
+                  </p>
+                </div>
+
                 <button
                   type="button"
-                  class="text-[11px] text-gray-400 hover:text-gray-200 disabled:opacity-40"
-                  :disabled="!!busy"
-                  @click="repitch"
-                >↻ {{ ideas.length ? t('video.repitch') : t('video.pitchAnyway') }}</button>
-              </div>
-              <!-- No ideas until the director says what they want (or leaves it to her). -->
-              <p v-if="!ideas.length" class="rounded-lg border border-dashed border-white/10 px-3 py-2 text-[11px] text-gray-400">
-                {{ t('video.waitingForWish') }}
-              </p>
-              <div class="grid gap-2 sm:grid-cols-2">
-                <div
-                  v-for="idea in ideas"
-                  :key="idea.kind"
-                  class="flex flex-col gap-1 rounded-xl border p-2.5"
-                  :class="talk.chosen === idea.kind
-                    ? 'border-amber-400/70 bg-amber-950/30'
-                    : 'border-violet-500/30 bg-violet-950/20'"
-                >
-                  <div class="flex items-center gap-1.5">
-                    <span class="rounded bg-white/5 px-1.5 text-[9px] text-gray-400">{{ idea.label }}</span>
-                    <span v-if="idea.revised" class="text-[9px] text-amber-300">✎ {{ t('video.revised') }}</span>
-                  </div>
-                  <div class="text-[12px] font-medium text-violet-50">{{ idea.title || '' }}</div>
-                  <p v-if="idea.error" class="text-[10px] text-amber-300/90">{{ idea.error }}</p>
-                  <p v-else class="flex-1 whitespace-pre-wrap text-[11px] leading-relaxed text-gray-300">{{ idea.story }}</p>
-                  <button
-                    v-if="!idea.error"
-                    type="button"
-                    class="self-start rounded-full border border-amber-500/50 bg-amber-950/40 px-2.5 py-1 text-[10px] text-amber-100 hover:bg-amber-900/60 disabled:opacity-40"
-                    :disabled="!!busy"
-                    @click="writeIdea(idea.kind)"
-                  >{{ busy === 'write' ? t('video.writing') : t('video.write') }}</button>
-                </div>
-              </div>
+                  class="self-start rounded-full border border-amber-500/60 bg-amber-900/40 px-3 py-1 text-[11px] font-medium text-amber-50 hover:bg-amber-800/60 disabled:opacity-40"
+                  :disabled="!!busy || !board.length"
+                  @click="writePrompt"
+                >📝 {{ busy === 'write' ? t('video.writing') : t('video.write') }}</button>
+              </template>
 
               <div v-if="latestPrompt" class="space-y-1.5 rounded-xl border border-amber-500/40 bg-black/40 p-2.5">
                 <div class="flex items-center gap-2 text-[11px] text-amber-100">
@@ -651,7 +751,23 @@ const waitingLabel = computed(() => ({
             <div ref="chatEl" class="min-h-0 flex-1 space-y-2.5 overflow-y-auto p-4">
               <p v-if="!talk && !busy" class="pt-8 text-center text-xs text-gray-500">{{ t('video.beforeTalk') }}</p>
               <template v-for="(row, i) in talk?.chat || []" :key="i">
-                <div v-if="row.role === 'system'" class="text-center text-[10px] text-gray-500">{{ row.text }}</div>
+                <div v-if="row.role === 'system'" class="whitespace-pre-wrap text-center text-[10px] text-gray-500">{{ row.text }}</div>
+                <!-- What she mutters to herself -->
+                <div v-else-if="row.kind === 'aside'" class="pl-8 text-[11px] italic text-pink-200/50">（{{ row.text }}）</div>
+                <!-- Her two-way choice: a click says it as the Showrunner -->
+                <div v-else-if="row.kind === 'pitch'" class="flex flex-wrap gap-1.5 pl-8">
+                  <button
+                    v-for="opt in row.options || []"
+                    :key="opt"
+                    type="button"
+                    class="rounded-full border px-2.5 py-1 text-[11px] disabled:cursor-default"
+                    :class="i === livePitch
+                      ? 'border-pink-400/50 bg-pink-950/40 text-pink-50 hover:bg-pink-900/60'
+                      : 'border-white/10 text-gray-500'"
+                    :disabled="i !== livePitch || !!busy"
+                    @click="pickOption(opt)"
+                  >{{ opt }}</button>
+                </div>
                 <div v-else-if="row.role === 'user'" class="flex flex-col items-end gap-0.5">
                   <span class="px-0.5 text-[10px] text-emerald-300/80">🎬 {{ t('video.director') }}</span>
                   <div class="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-tr-sm border border-emerald-500/40 bg-emerald-950/50 px-3.5 py-2 text-[12px] text-emerald-100">{{ row.text }}</div>

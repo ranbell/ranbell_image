@@ -29,8 +29,11 @@ class TalkChat(BaseModel):
 
 
 class TalkWrite(BaseModel):
-    kind: str
     duration_s: int | None = None
+
+
+class TalkPhase(BaseModel):
+    phase: str
 
 
 def _db(request: Request):
@@ -183,9 +186,23 @@ async def chat(talk_id: str, body: TalkChat, request: Request):
 async def write(talk_id: str, body: TalkWrite, request: Request):
     talk = await _talk(request, talk_id)
     _length(talk, body.duration_s)
-    return await _run(lambda: video_talk.write(
-        _db(request), _ollama(request), talk, body.kind.strip(),
-    ))
+    return await _run(lambda: video_talk.write(_db(request), _ollama(request), talk))
+
+
+@router.post("/talks/{talk_id}/settle")
+async def settle(talk_id: str, request: Request):
+    """The button: settle the direction as the talk stands; draft the timetable."""
+    talk = await _talk(request, talk_id)
+    return await _run(lambda: video_talk.settle(_db(request), _ollama(request), talk))
+
+
+@router.post("/talks/{talk_id}/phase")
+async def phase(talk_id: str, body: TalkPhase, request: Request):
+    """Back to the direction talk (the only way back; forward is `settle`)."""
+    if body.phase != "direction":
+        raise HTTPException(400, "phase can only go back to direction")
+    talk = await _talk(request, talk_id)
+    return await _run(lambda: video_talk.back_to_direction(_db(request), talk))
 
 
 @router.post("/talks/{talk_id}/repitch")

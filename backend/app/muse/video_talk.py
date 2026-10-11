@@ -131,19 +131,51 @@ def shoot_context(session: dict[str, Any]) -> str:
 
 # ── Her side of the conversation ─────────────────────────────────────────────
 
-_TALK = """You are {who}, at the studio with the Showrunner — the person who directs every shoot here. You are not shooting stills now. The two of you have a photograph and are deciding what short video ({seconds} seconds) it could become; the video model will start from that photograph as its first frame.
+# **Made together, in two stages** (the Showrunner, 2026-10-11: "it is only
+# instructions to Muse, not a conversation — we cannot build it up while
+# talking"). She used to carry the writers' cards to the director and stop
+# at "let's go with that"; nothing was built between them. Now, as in the
+# photo shoot (talk -> ledger -> board), there is something the two of them
+# grow: first the direction, then the timetable, second by second.
+#
+#   direction — what the clip is about and how it feels. The writers' ideas are
+#               her material; a clerk call notices when the director settles it.
+#   timeline  — the timetable on screen. Each turn its keeper writes in what the
+#               director asked for or accepted, and she talks over the new one.
+#
+# One job per call: she only talks; the clerks only judge; the keeper only
+# keeps the timetable; the prompt is polished from the timetable on request.
+# She once decided when to write as a field of her reply, and wrote on "make
+# her smile at the end" — two runs of three (2026-10-11): judging is not her job.
+
+_TALK = """You are {who}, at the studio with the Showrunner — the person who directs every shoot here. You are not shooting stills now: the two of you are making a short video ({seconds} seconds) together from a photograph, which the video model will use as its first frame.
 
 {where}
 
-The studio's writers have pitched ideas, each a different kind of scene, listed below. The key in brackets is for the PICK line only; in SAY call an idea by what happens in it, since the Showrunner never sees the keys. Your part is the conversation: talk about the photograph and the ideas the way you would, say which one you would want and why, answer what the Showrunner says, and push back when you disagree. When the Showrunner asks for a change, change that idea. The ideas belong to the writers — who you are shows in how you talk about them, not in turning them into scenes about yourself.
+You make it together. You are not passing on instructions or presenting other people's work: you react to what the Showrunner says, bring ideas of your own, ask back, and say so when you would do it differently. Who you are shows in what you notice and what you want, and in how you say it.
+
+{phase}
 
 Answer in these labelled lines and nothing else:
-SAY: what you say, one to four short lines, in {lang}.{duet}
-PICK: the key of the idea the conversation is on now. Leave it out when none is.
-STORY: only when you changed an idea — two or three sentences in {lang} on what the viewer now sees.
-BEATS: only when you changed an idea — the whole changed idea as plain physical actions in English, separated by " / ".
-WRITE: yes — only when the Showrunner's latest line accepts an idea as it stands. Asking for a change, or asking which one you like, is not that: change it, show it, and wait for the answer."""
+SAY: what you say, in {lang} — two to six sentences, the way you talk.{duet}
+ASIDE: one short line you mutter to yourself, in {lang}. Leave it out when nothing comes.
+PITCH: when there is a real choice to make next, the two options as two short phrases in {lang}, separated by " | ". Leave it out otherwise."""
 
+_PHASE_DIRECTION = (
+    "Right now you are settling the direction: what this clip is about and how it should "
+    "feel. Talk it through until the Showrunner settles it. The writers' notes below are "
+    "material for you — when they fit, bring one or two of them in your own words, or "
+    "bring your own idea instead. Do not go into second-by-second detail yet; that comes "
+    "once the direction is settled."
+)
+_PHASE_TIMELINE = (
+    "The direction is settled:\n{direction}\n\n"
+    "Now the two of you are working through the timetable below, moment by moment, while "
+    "looking at it. Talk about particular moments — what happens at that second, how the "
+    "face changes, how it ends. Suggest one change at a time and ask which they prefer. "
+    "The timetable is kept by someone else: it changes only when the Showrunner asks for "
+    "something or says yes to it."
+)
 _DUET = (
     "\nYou voice both {a} and {b}. Every SAY line starts with A: ({a}) or B: ({b}). "
     "They talk to each other as well as to the Showrunner."
@@ -191,18 +223,30 @@ def _voices(talk: dict[str, Any]) -> str:
     )
 
 
+def _phase(talk: dict[str, Any]) -> str:
+    return "timeline" if talk.get("phase") == "timeline" and talk.get("board") else "direction"
+
+
 def talk_system(talk: dict[str, Any]) -> str:
     a = _name(talk.get("character") or {}, ja=True) or "A"
     b = _name(talk.get("partner_character") or {}, ja=True) or "B"
     duet = _has_partner(talk)
+    timeline = _phase(talk) == "timeline"
     head = _TALK.format(
         who=f"{a} and {b}" if duet else a,
         seconds=talk.get("duration_s") or 5,
         where=_where(talk),
+        phase=(
+            _PHASE_TIMELINE.format(direction=talk.get("direction") or "")
+            if timeline else _PHASE_DIRECTION
+        ),
         lang="Japanese" if _ja(talk) else "English",
         duet=_DUET.format(a=a, b=b) if duet else "",
     )
-    return "\n\n".join(p for p in [head, _voices(talk), relationship_blocks(talk)] if p)
+    # Her own persona, fenced: it is her talking, so who she is should show
+    # in her opinions — as influence, not as words to repeat.
+    own = ve.reference_block(talk.get("character"))
+    return "\n\n".join(p for p in [head, _voices(talk), own, relationship_blocks(talk)] if p)
 
 
 def relationship_blocks(talk: dict[str, Any]) -> str:
@@ -224,18 +268,24 @@ def relationship_blocks(talk: dict[str, Any]) -> str:
     return "\n\n".join(b for b in blocks if b)[:1500]
 
 
-def _ideas_block(talk: dict[str, Any]) -> str:
+def _notes_block(talk: dict[str, Any]) -> str:
     if not talk.get("ideas"):
         return "(none yet — the writers pitch once the Showrunner says what they want)"
     return "\n".join(
-        f"[{i['kind']}] {i.get('title', '')} — {i.get('story', '')}\n"
-        f"  beats: {' / '.join(i['beats'])}"
+        f"- {i.get('title', '')}: {i.get('story', '')}"
         for i in talk.get("ideas") or [] if "beats" in i
     )
 
 
-def _recent(talk: dict[str, Any]) -> str:
-    rows = [r for r in talk.get("chat") or [] if r.get("role") != "system" and r.get("text")][-10:]
+def _board_text(talk: dict[str, Any]) -> str:
+    return "\n".join(
+        f"{ve._clock(s['start'])}-{ve._clock(s['end'])} {s.get('title', '')}: {s['action']}"
+        for s in talk.get("board") or []
+    )
+
+
+def _recent(talk: dict[str, Any], n: int = 10) -> str:
+    rows = [r for r in talk.get("chat") or [] if r.get("role") != "system" and r.get("text")][-n:]
     return "\n".join(
         f"{'Showrunner' if r.get('role') == 'user' else r.get('name') or 'you'}: {r['text']}"
         for r in rows
@@ -246,32 +296,36 @@ def talk_prompt(talk: dict[str, Any], line: str) -> str:
     context = (
         f"THE SHOOT IT CAME OUT OF:\n{talk['context']}\n\n" if talk.get("context") else ""
     )
+    material = (
+        f"THE TIMETABLE (what the screen shows now):\n{_board_text(talk)}\n\n"
+        if _phase(talk) == "timeline" else
+        f"THE WRITERS' NOTES:\n{_notes_block(talk)}\n\n"
+    )
     return (
         f"PHOTOGRAPH (second 0):\n{talk.get('still', '')}\n\n"
-        f"{context}"
-        f"IDEAS:\n{_ideas_block(talk)}\n\n"
-        f"ON THE TABLE: {talk.get('chosen') or 'none yet'}\n\n"
+        f"{context}{material}"
         f"RECENT TALK:\n{_recent(talk) or '(none)'}\n\n"
         f"SHOWRUNNER:\n{line}"
     )
 
 
-# The keys are for PICK; in her lines they read as code (「[stay]みたいに」),
-# so a key that slips into SAY becomes that idea's title.
+# A writers' key that slips into SAY reads as code (「[stay]みたいに」): it
+# becomes that idea's title.
 _KEY_IN_SAY = re.compile(r"\[(" + "|".join(ve.KINDS) + r")\]\s*", re.IGNORECASE)
 # "A: (緒方 りん) うわ…" — the prefix already says who is talking.
 _NAME_AFTER_PREFIX = re.compile(r"^([AB]:\s*)[(（][^)）]{1,20}[)）]\s*", re.MULTILINE)
 # "…いくよ！ B:ふふ、張り切りすぎ" — the second speaker on the first one's line.
 _INLINE_SPEAKER = re.compile(r"[ \t　]+(?=[AB][:：])")
-_FIELD = re.compile(r"^\s*\**\s*(SAY|PICK|STORY|BEATS|WRITE)\s*\**\s*:\s*(.*)$", re.IGNORECASE)
+# "**ASIDE:** ふふ" — the bold can close after the colon.
+_FIELD = re.compile(r"^\s*\**\s*(SAY|ASIDE|PITCH|WRITE)\s*\**\s*[:：]\s*\**\s*(.*)$", re.IGNORECASE)
 
 
 def parse_reply(raw: str) -> dict[str, str]:
     """Her labelled lines. SAY may run over several lines (a duet's A:/B:)."""
     out: dict[str, str] = {}
     # Lines before any label are what she said: in a duet gemma often starts
-    # straight in with "A: …" and only labels PICK / WRITE (2026-10-10, three
-    # turns out of three in one run came back as "……" before this).
+    # straight in with "A: …" and only labels the rest (2026-10-10, three turns
+    # out of three in one run came back as "……" before this).
     field = "say"
     for line in (raw or "").splitlines():
         if m := _FIELD.match(line):
@@ -279,35 +333,41 @@ def parse_reply(raw: str) -> dict[str, str]:
             out[field] = m.group(2).strip()
         elif line.strip():
             out[field] = f"{out.get(field, '')}\n{line.strip()}".strip()
-    out["pick"] = re.sub(r"[^a-z]", "", (out.get("pick") or "").lower())
     out["write"] = "yes" if (out.get("write") or "").strip().lower().startswith("y") else ""
     return out
 
 
-async def _reply(ollama, talk: dict[str, Any], line: str) -> dict[str, str]:
-    inputs = talk.get("inputs") or {}
-    try:
-        raw = await chain._call(
-            ollama, system=talk_system(talk), prompt=talk_prompt(talk, line),
-            model=str(inputs.get("model") or ""), images=None,
-            num_ctx=inputs.get("num_ctx") or None, think=False,
-        )
-    except chain.ChainError:
-        raw = ""
-    reply = parse_reply(raw)
+def _clean(talk: dict[str, Any], text: str) -> str:
     titles = {i["kind"]: i.get("title", "") for i in talk.get("ideas") or []}
-    say = _KEY_IN_SAY.sub(
+    text = _KEY_IN_SAY.sub(
         lambda m: f"「{titles[m.group(1).lower()]}」" if titles.get(m.group(1).lower()) else "",
-        reply.get("say") or "",
+        text or "",
     )
     # "…間違ってないって！<br>B: ふふ…" — gemma sometimes breaks lines with HTML.
-    say = re.sub(r"<br\s*/?>", "\n", say, flags=re.IGNORECASE)
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
     # "…すごく好みです。 /" — a line-separator slash left at the end (seen on e4b).
-    say = re.sub(r"[ \t　]+/[ \t　]*$", "", say, flags=re.MULTILINE)
+    text = re.sub(r"[ \t　]+/[ \t　]*$", "", text, flags=re.MULTILINE)
     if _has_partner(talk):
-        say = _INLINE_SPEAKER.sub("\n", say)
-    say = _NAME_AFTER_PREFIX.sub(r"\1", say)
-    reply["say"] = identity.sanitize_muse_say(say, locale=_locale(talk))
+        text = _INLINE_SPEAKER.sub("\n", text)
+    return _NAME_AFTER_PREFIX.sub(r"\1", text)
+
+
+async def _call(ollama, talk: dict[str, Any], system: str, prompt: str) -> str:
+    inputs = talk.get("inputs") or {}
+    try:
+        return await chain._call(
+            ollama, system=system, prompt=prompt, model=str(inputs.get("model") or ""),
+            images=None, num_ctx=inputs.get("num_ctx") or None, think=False,
+        )
+    except chain.ChainError:
+        return ""
+
+
+async def _reply(ollama, talk: dict[str, Any], line: str) -> dict[str, str]:
+    raw = await _call(ollama, talk, talk_system(talk), talk_prompt(talk, line))
+    reply = parse_reply(raw)
+    reply["say"] = identity.sanitize_muse_say(_clean(talk, reply.get("say") or ""), locale=_locale(talk))
+    reply["aside"] = _clean(talk, reply.get("aside") or "").strip()
     if not reply["say"]:
         logger.warning("[muse.video] she said nothing: %r", (raw or "")[:300])
         reply["say"] = "……" if _ja(talk) else "..."
@@ -316,7 +376,7 @@ async def _reply(ollama, talk: dict[str, Any], line: str) -> dict[str, str]:
 
 def _row(talk: dict[str, Any], role: str, text: str, **meta: Any) -> None:
     row = {"role": role, "text": text, "at": time.time()}
-    row.update({k: v for k, v in meta.items() if v not in (None, "")})
+    row.update({k: v for k, v in meta.items() if v not in (None, "", [])})
     talk.setdefault("chat", []).append(row)
     talk["chat"] = talk["chat"][-120:]
 
@@ -340,25 +400,23 @@ def _post_say(talk: dict[str, Any], say: str) -> None:
             _row(talk, "assistant", text, name=_name(who, ja=ja), character_id=who.get("character_id"))
 
 
-def _apply(talk: dict[str, Any], reply: dict[str, str]) -> dict[str, Any] | None:
-    """Take her PICK / STORY / BEATS onto the ideas. Returns the changed idea."""
-    keys = {i["kind"] for i in talk.get("ideas") or [] if "beats" in i}
-    if reply.get("pick") in keys:
-        talk["chosen"] = reply["pick"]
-    beats = [b.strip() for b in (reply.get("beats") or "").split("/") if b.strip()]
-    target = talk.get("chosen")
-    if not beats or target not in keys:
-        return None
-    for idea in talk["ideas"]:
-        # The same beats sent back are not a change (she restates the idea
-        # when told to go ahead).
-        if idea["kind"] == target and [b.lower() for b in beats] != [b.lower() for b in idea["beats"]]:
-            idea["beats"] = beats
-            if reply.get("story"):
-                idea["story"] = reply["story"]
-            idea["revised"] = int(idea.get("revised") or 0) + 1
-            return idea
-    return None
+def _post_reply(talk: dict[str, Any], reply: dict[str, str]) -> None:
+    """Her lines, then her mutter, then the fork she offers (as buttons)."""
+    _post_say(talk, reply["say"])
+    lead = talk.get("character") or {}
+    partner = talk.get("partner_character") or {}
+    aside = reply.get("aside") or ""
+    if aside:
+        who = lead
+        if m := re.match(r"^([AB])[:：]\s*", aside):
+            who = partner if m.group(1) == "B" and _has_partner(talk) else lead
+            aside = aside[m.end():]
+        _row(talk, "assistant", aside, kind="aside", name=_name(who, ja=_ja(talk)),
+             character_id=who.get("character_id"))
+    options = [o.strip(" 「」\"'") for o in (reply.get("pitch") or "").split("|")]
+    options = [o for o in options if o][:2]
+    if len(options) == 2:
+        _row(talk, "assistant", "", kind="pitch", options=options)
 
 
 def model_inputs(cfg: dict[str, Any], locale: str, model: str = "") -> dict[str, Any]:
@@ -378,15 +436,58 @@ def model_inputs(cfg: dict[str, Any], locale: str, model: str = "") -> dict[str,
     }
 
 
-# ── The moves ────────────────────────────────────────────────────────────────
+# ── The clerk: has the director settled the direction? ───────────────────────
 
+_SETTLE_SYSTEM = """You keep the notes of a talk between a director (the Showrunner) and an actress who are planning a short video together. Read the talk. Has the Showrunner settled the direction — what the clip is about and how it should feel — so that the two of them can go on to work out the timing? Taking up one of the actress's suggestions counts. Asking a question, or still weighing options, does not.
+
+Answer in two lines and nothing else:
+SETTLED: yes or no
+DIRECTION: when yes, the settled direction in two or three sentences in {lang}, keeping the Showrunner's own words where they gave them. When no, leave it empty."""
+
+_FORCE_SETTLE = (
+    "\n\nThe Showrunner has pressed the button to settle the direction now: answer "
+    "SETTLED: yes, and write the direction as the talk stands."
+)
+
+
+async def settle_direction(ollama, talk: dict[str, Any], *, force: bool = False) -> str:
+    """The settled direction, or "" when the talk has not settled it yet."""
+    system = _SETTLE_SYSTEM.format(lang="Japanese" if _ja(talk) else "English")
+    prompt = (
+        f"THE WRITERS' NOTES:\n{_notes_block(talk)}\n\n"
+        f"THE TALK:\n{_recent(talk, 16) or '(none)'}"
+        + (_FORCE_SETTLE if force else "")
+    )
+    raw = await _call(ollama, talk, system, prompt)
+    settled = re.search(r"SETTLED\s*[:：]\s*(\w+)", raw or "", re.IGNORECASE)
+    direction = re.search(r"DIRECTION\s*[:：]\s*(.+)", raw or "", re.IGNORECASE | re.DOTALL)
+    text = (direction.group(1).strip() if direction else "").strip()
+    if (settled and settled.group(1).lower().startswith("y")) or force:
+        return text or intent_of(talk)
+    return ""
+
+
+
+_ASKS_WRITE_SYSTEM = """You keep the notes of a talk between a director (the Showrunner) and an actress who are planning a short video together. Read the Showrunner's latest line. Does it ask to finish now and write the video prompt from the timetable? Asking for a change, agreeing to a suggestion, or asking a question does not — only a request to write it up now.
+
+Answer with one word and nothing else: yes or no"""
+
+
+async def asks_to_write(ollama, talk: dict[str, Any], message: str) -> bool:
+    raw = await _call(ollama, talk, _ASKS_WRITE_SYSTEM, (
+        f"THE TALK SO FAR:\n{_recent(talk, 6) or '(none)'}\n\n"
+        f"THE SHOWRUNNER'S LATEST LINE:\n{message}"
+    ))
+    return bool(re.match(r"\W*yes\b", raw or "", re.IGNORECASE))
+
+# ── The moves ────────────────────────────────────────────────────────────────
 async def create(
     db, ollama, *, sha: str, character_id: str, partner_id: str = "",
     duration_s: int = 5, short: str = "", locale: str = "ja",
     cfg: dict[str, Any] | None = None, reuse: dict[str, Any] | None = None,
     model: str = "",
 ) -> dict[str, Any]:
-    """Bring a photograph to the table: look, pitch, and let her open the talk.
+    """Bring a photograph to the table: look, and let her open the talk.
 
     `reuse` is an earlier talk about the same picture: its reading is kept, so
     calling a different actress in does not look at the picture again.
@@ -395,7 +496,8 @@ async def create(
     talk: dict[str, Any] = {
         "talk_id": str(uuid.uuid4()), "created_at": time.time(), "sha256": sha,
         "inputs": inputs, "duration_s": duration_s, "short": short.strip(),
-        "chat": [], "ideas": [], "chosen": "", "prompts": [],
+        "chat": [], "ideas": [], "prompts": [],
+        "phase": "direction", "direction": "", "board": [],
     }
     if not inputs["model"]:
         raise VideoTalkError(_say(
@@ -458,89 +560,178 @@ async def create(
 
 
 _PITCH_LINES = {
-    "open": "(The Showrunner has just put the photograph down and asks what video it could "
-            "become. Open the conversation: react to the photograph and pitch the ideas.)",
-    "wish": "(The Showrunner has just said what they want — their line is the last one in "
-            "the talk. The writers pitched with it; the ideas listed now are theirs. Answer "
-            "the Showrunner and pitch the ideas.)",
-    "fresh": "(The Showrunner asked the writers for a fresh set of ideas; they are the ones "
-             "listed now. React to them.)",
+    "open": "(The Showrunner has just put the photograph down, with the note above for what "
+            "they want. React to the photograph and start working out the direction with them.)",
+    "wish": "(The Showrunner has just said what they want — their line is the last one in the "
+            "talk. Answer it, and start working out the direction with them.)",
+    "fresh": "(The Showrunner asked the writers for fresh notes; they are the ones listed now. "
+             "React to them.)",
 }
 
 
-async def _pitch(ollama, talk: dict[str, Any], *, why: str) -> None:
-    """Ideas for what the director wants so far, then her pitch of them."""
+async def _ideas(ollama, talk: dict[str, Any]) -> None:
     inputs = talk["inputs"]
     talk["ideas"] = await ve.ideas(
         ollama, still=talk["still"], people=talk.get("people") or [], short=intent_of(talk),
         duration_s=int(talk.get("duration_s") or 5), locale=_locale(talk),
         model=inputs["model"], num_ctx=inputs["num_ctx"], context=talk.get("context", ""),
     )
-    talk["chosen"] = ""
-    reply = await _reply(ollama, talk, _PITCH_LINES[why])
-    _post_say(talk, reply["say"])
-    _apply(talk, reply)
+
+
+async def _pitch(ollama, talk: dict[str, Any], *, why: str) -> None:
+    """The writers' notes for what the director wants so far, then her take."""
+    await _ideas(ollama, talk)
+    note = f"The Showrunner's note: {talk['short']}\n" if talk.get("short") else ""
+    _post_reply(talk, await _reply(ollama, talk, note + _PITCH_LINES[why]))
 
 
 async def _ask_first(ollama, talk: dict[str, Any]) -> None:
     """No wish yet: she reacts to the photograph and asks what they want.
 
     Pitched before the director had said anything, the ideas were written
-    blind, and only the one idea she later reworked ever heard the wish —
-    "sleepy and cute" came back as a magic meadow (Asahi, 2026-10-11). The
-    ideas now wait for the first thing the director says (or the note).
+    blind — "sleepy and cute" came back as a magic meadow (Asahi, 2026-10-11).
+    The writers wait for the first thing the director says (or the note).
     """
-    reply = await _reply(ollama, talk, (
-        "(The Showrunner has just put the photograph down. The writers have not pitched "
-        "yet. React to the photograph in a line or two, then ask what kind of video "
-        "they want to make of it.)"
-    ))
-    _post_say(talk, reply["say"])
+    _post_reply(talk, await _reply(ollama, talk, (
+        "(The Showrunner has just put the photograph down. React to it in a line or two, "
+        "then ask what kind of video they want to make of it.)"
+    )))
 
 
 async def repitch(db, ollama, talk: dict[str, Any]) -> dict[str, Any]:
-    """A fresh set of ideas for the same picture and the same actress."""
+    """Fresh notes from the writers, for the direction talk."""
     _row(talk, "system", _say(talk, "新しい案を頼みました", "Asked for fresh ideas"), kind="repitch")
+    talk["phase"] = "direction"
     await _pitch(ollama, talk, why="fresh")
     await video_db.save(db, talk)
     return talk
 
 
+def _context(talk: dict[str, Any], *, persona: bool = False) -> str:
+    return ve.write_context(
+        still=talk.get("still", ""), people=talk.get("people") or [],
+        duration_s=int(talk.get("duration_s") or 5), intent=intent_of(talk),
+        direction=talk.get("direction", ""), persona=persona_of(talk) if persona else "",
+    )
+
+
+async def _start_timeline(ollama, talk: dict[str, Any], direction: str) -> None:
+    """The direction is settled: draft the timetable and move on to it."""
+    inputs = talk["inputs"]
+    talk["direction"] = direction
+    try:
+        talk["board"], _ = await ve.draft(
+            ollama, context=_context(talk), duration_s=int(talk.get("duration_s") or 5),
+            model=inputs["model"], num_ctx=inputs["num_ctx"], locale=_locale(talk),
+        )
+    except ve.VideoError as exc:
+        talk["last_write_failure"] = {"at": time.time(), "idea": "board", "raw": (exc.raw or "")[:3000]}
+        raise VideoTalkError(exc.message) from exc
+    talk["phase"] = "timeline"
+    _row(talk, "system", _say(
+        talk, f"🎯 方針が決まりました：{direction}\n🗒 時間割を作りました",
+        f"🎯 Direction settled: {direction}\n🗒 Drafted the timetable",
+    ), kind="settled")
+
+
 async def chat(db, ollama, talk: dict[str, Any], message: str) -> dict[str, Any]:
     """One line from the Showrunner."""
     _row(talk, "user", message)
-    if not talk.get("ideas"):
-        # The first thing the director says is what they want: pitch with it.
-        await _pitch(ollama, talk, why="wish")
-        await video_db.save(db, talk)
-        return talk
-    on_table = talk.get("chosen") or ""
-    reply = await _reply(ollama, talk, message)
-    _post_say(talk, reply["say"])
-    changed = _apply(talk, reply)
-    if changed:
-        _row(talk, "system", _say(
-            talk, f"✎ 「{changed.get('title', '')}」を直しました",
-            f"✎ Changed \u201c{changed.get('title', '')}\u201d",
-        ), kind="revised", idea=changed["kind"])
-    # Only the idea that was on the table when the Showrunner spoke is written.
-    # One she has just changed, or just switched to, is shown first — live,
-    # "make it rain", "more movement" and "which do you two like?" were each
-    # written in the same turn, before the Showrunner had seen what was meant.
-    elif reply.get("write") and on_table and talk.get("chosen") == on_table:
-        try:
-            await _write(ollama, talk, on_table)
-        except VideoTalkError as exc:
-            # Her reply stands; the failed write is said in the talk, not lost with it.
-            _row(talk, "system", exc.message, kind="write_failed")
+    try:
+        if _phase(talk) == "direction":
+            await _direction_turn(ollama, talk, message)
+        else:
+            await _timeline_turn(ollama, talk, message)
+    except VideoTalkError as exc:
+        # Said in the talk, not lost with it.
+        _row(talk, "system", exc.message, kind="write_failed")
     await video_db.save(db, talk)
     return talk
 
 
-async def write(db, ollama, talk: dict[str, Any], kind: str) -> dict[str, Any]:
-    """The card's button: write that idea as an H3 prompt."""
+async def _direction_turn(ollama, talk: dict[str, Any], message: str) -> None:
+    if not talk.get("ideas"):
+        # The first thing the director says is what they want: the writers
+        # pitch with it, and she takes it from there.
+        await _pitch(ollama, talk, why="wish")
+        return
+    direction = await settle_direction(ollama, talk)
+    if not direction:
+        _post_reply(talk, await _reply(ollama, talk, message))
+        return
+    await _start_timeline(ollama, talk, direction)
+    _post_reply(talk, await _reply(ollama, talk, (
+        f"{message}\n(The direction is settled and the timetable is on the screen now. "
+        "Say so in your own way, and bring up the first moment you would work on.)"
+    )))
+
+
+def _same_board(a: list[dict[str, Any]], b: list[dict[str, Any]]) -> bool:
+    def key(segs):
+        return [(s.get("start"), s.get("end"), " ".join(str(s.get("action") or "").split())) for s in segs]
+    return key(a) == key(b)
+
+
+async def _timeline_turn(ollama, talk: dict[str, Any], message: str) -> None:
+    inputs = talk["inputs"]
+    her_last = next(
+        (r["text"] for r in reversed(talk.get("chat") or [])
+         if r.get("role") == "assistant" and r.get("text") and r.get("kind") != "aside"),
+        "",
+    )
+    wants_write = await asks_to_write(ollama, talk, message)
+    exchange = f"What the director just said:\n{message}" + (
+        f"\n\nWhat the actress had said just before (it goes in only if the director "
+        f"says yes to it):\n{her_last}" if her_last else ""
+    )
+    board, _ = await ve.keep_board(
+        ollama, context=_context(talk), segments=talk["board"], exchange=exchange,
+        duration_s=int(talk.get("duration_s") or 5), model=inputs["model"], num_ctx=inputs["num_ctx"],
+    )
+    if board and not _same_board(board, talk["board"]):
+        talk["board"] = board
+        _row(talk, "system", _say(talk, "🗒 時間割を書き直しました", "🗒 Updated the timetable"), kind="board")
+    if not wants_write:
+        _post_reply(talk, await _reply(ollama, talk, message))
+        return
+    await _write(ollama, talk)
+    reply = await _reply(ollama, talk, (
+        f"{message}\n(The prompt has just been written from this timetable and is on the "
+        "screen. Say so briefly in your own way.)"
+    ))
+    reply["pitch"] = ""  # nothing left to choose on this one
+    _post_reply(talk, reply)
+
+
+async def settle(db, ollama, talk: dict[str, Any]) -> dict[str, Any]:
+    """The button: settle the direction as the talk stands, and draft the timetable."""
+    if not talk.get("ideas") and not intent_of(talk):
+        raise VideoTalkError(_say(
+            talk, "どんな動画にしたいか、まずひとこと伝えてください",
+            "Say what kind of video you want first",
+        ))
+    direction = await settle_direction(ollama, talk, force=True)
+    await _start_timeline(ollama, talk, direction)
+    _post_reply(talk, await _reply(ollama, talk, (
+        "(The Showrunner settled the direction and the timetable is on the screen now. "
+        "Say so in your own way, and bring up the first moment you would work on.)"
+    )))
+    await video_db.save(db, talk)
+    return talk
+
+
+async def back_to_direction(db, talk: dict[str, Any]) -> dict[str, Any]:
+    """Reopen the direction. The timetable stays until a new one is drafted."""
+    talk["phase"] = "direction"
+    _row(talk, "system", _say(talk, "🎯 方針の相談に戻りました", "🎯 Back to the direction"), kind="reopened")
+    await video_db.save(db, talk)
+    return talk
+
+
+async def write(db, ollama, talk: dict[str, Any]) -> dict[str, Any]:
+    """The button: polish the timetable into the prompt."""
     try:
-        await _write(ollama, talk, kind)
+        await _write(ollama, talk)
     except VideoTalkError:
         await video_db.save(db, talk)  # keeps `last_write_failure` to read later
         raise
@@ -573,34 +764,33 @@ def persona_of(talk: dict[str, Any]) -> str:
     return "\n\n".join(b for b in blocks if b)
 
 
-async def _write(ollama, talk: dict[str, Any], kind: str) -> None:
-    idea = next((i for i in talk.get("ideas") or [] if i.get("kind") == kind and "beats" in i), None)
-    if idea is None:
-        raise VideoTalkError(_say(talk, "案を選んでください", "Pick an idea first"))
+async def _write(ollama, talk: dict[str, Any]) -> None:
+    """Polish the timetable (drafting one first if the talk never settled)."""
     inputs = talk["inputs"]
+    if not talk.get("board"):
+        await _start_timeline(ollama, talk, await settle_direction(ollama, talk, force=True))
+    title = talk["board"][0].get("title", "") if talk.get("board") else ""
     try:
         out = await ve.write(
-            ollama, still=talk.get("still", ""), people=talk.get("people") or [], idea=idea,
+            ollama, still=talk.get("still", ""), people=talk.get("people") or [], idea={},
             duration_s=int(talk.get("duration_s") or 5), model=inputs["model"],
             num_ctx=inputs["num_ctx"], locale=_locale(talk), intent=intent_of(talk),
-            persona=persona_of(talk),
+            persona=persona_of(talk), direction=talk.get("direction", ""),
+            segments=talk["board"],
         )
     except ve.VideoError as exc:
         # What the model returned, kept on the record: the screen only says it failed.
-        talk["last_write_failure"] = {"at": time.time(), "idea": kind, "raw": (exc.raw or "")[:3000]}
+        talk["last_write_failure"] = {"at": time.time(), "idea": "write", "raw": (exc.raw or "")[:3000]}
         raise VideoTalkError(exc.message) from exc
-    talk["chosen"] = kind
+    label = (talk.get("direction") or title or "").strip().splitlines()[0][:40] if (talk.get("direction") or title) else ""
     talk.setdefault("prompts", []).append({
-        "kind": kind, "title": idea.get("title", ""), "prompt": out["prompt"],
+        "title": label, "prompt": out["prompt"],
         "instrument": out.get("instrument", ""), "duration_s": talk.get("duration_s"),
         "at": time.time(),
         # What each writing stage returned, to read when a prompt disappoints.
         "stages": {k: str(v)[:4000] for k, v in (out.get("stages") or {}).items()},
     })
-    _row(talk, "system", _say(
-        talk, f"📝 「{idea.get('title', '')}」を撮影文にしました",
-        f"📝 Wrote \u201c{idea.get('title', '')}\u201d as a prompt",
-    ), kind="written", idea=kind)
+    _row(talk, "system", _say(talk, "📝 撮影文にしました", "📝 Wrote the prompt"), kind="written")
 
 
 def _who(char: dict[str, Any]) -> dict[str, Any]:
@@ -633,7 +823,12 @@ def view(talk: dict[str, Any]) -> dict[str, Any]:
             {k: i[k] for k in ("kind", "label", "title", "story", "error", "revised") if k in i}
             for i in talk.get("ideas") or []
         ],
-        "chosen": talk.get("chosen", ""),
+        "phase": _phase(talk),
+        "direction": talk.get("direction", ""),
+        "board": [
+            {k: s.get(k) for k in ("start", "end", "title", "action")}
+            for s in talk.get("board") or []
+        ],
         "prompts": [
             {k: v for k, v in p.items() if k != "stages"} for p in talk.get("prompts") or []
         ],
@@ -666,6 +861,9 @@ def _fields(talk: dict[str, Any]) -> list[dict[str, Any]]:
     for idea in talk.get("ideas") or []:
         out.append({"field": "title", "text": idea.get("title", ""), "title": idea.get("title", "")})
         out.append({"field": "story", "text": idea.get("story", ""), "title": idea.get("title", "")})
+    out.append({"field": "story", "text": talk.get("direction", "")})
+    for seg in talk.get("board") or []:
+        out.append({"field": "story", "text": seg.get("action", ""), "title": seg.get("title", "")})
     for key in ("character", "partner_character"):
         c = talk.get(key) or {}
         out.append({"field": "name", "text": f"{c.get('name', '')} {c.get('name_ja', '')}"})

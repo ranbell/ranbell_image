@@ -18,9 +18,11 @@ _PAGE = 256
 
 async def save(db, talk: dict[str, Any]) -> dict[str, Any]:
     talk["updated_at"] = time.time()
-    talk["chosen_title"] = next(
-        (i.get("title", "") for i in talk.get("ideas") or [] if i.get("kind") == talk.get("chosen")),
-        "",
+    # The list shows what the talk settled on, else what was last written.
+    talk["chosen_title"] = (
+        (talk.get("direction") or "").strip().splitlines()[0][:60]
+        if (talk.get("direction") or "").strip()
+        else next((p.get("title", "") for p in reversed(talk.get("prompts") or [])), "")
     )
     talk["prompts_count"] = len(talk.get("prompts") or [])
     await db._qc.upsert(

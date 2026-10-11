@@ -149,21 +149,23 @@ async def test_a_failed_idea_is_reported_not_dropped():
 
 @pytest.mark.asyncio
 async def test_a_failed_write_keeps_what_the_model_said(studio):
+    # Never settled: the button settles it, and the timetable draft fails twice.
     talk = _talking()
-    ollama = _FakeOllama(["Theremin", "no labels at all", "still nothing"])
+    ollama = _FakeOllama(["SETTLED: yes\nDIRECTION: 雨", "no labels at all", "still nothing"])
     with pytest.raises(vt.VideoTalkError):
-        await vt.write(_FakeDb(), ollama, talk, "shift")
+        await vt.write(_FakeDb(), ollama, talk)
     assert talk["last_write_failure"]["raw"] == "still nothing"
     assert talk["talk_id"] in studio  # saved, so it can be read afterwards
 
 
 @pytest.mark.asyncio
-async def test_a_failed_write_in_the_talk_keeps_her_reply(studio):
+async def test_a_failed_draft_is_said_in_the_talk(studio):
     talk = _talking()
-    ollama = _FakeOllama(["SAY: いきましょう\nPICK: shift\nWRITE: yes", "Theremin", "x", "y"])
+    ollama = _FakeOllama(["SETTLED: yes\nDIRECTION: 雨", "x", "y"])
     await vt.chat(_FakeDb(), ollama, talk, "これでいこう")
     kinds = [(r["role"], r.get("kind")) for r in talk["chat"]]
-    assert kinds == [("user", None), ("assistant", None), ("system", "write_failed")]
+    assert kinds == [("user", None), ("system", "write_failed")]
+    assert talk["phase"] == "direction" and talk["board"] == []
 
 
 def test_instrument_candidates_are_cleaned():
@@ -231,11 +233,10 @@ def _pitch_replies(opener="SAY: 総監督さん、4つ考えました……か�
 
 
 def test_reply_lines_parse():
-    raw = "SAY: A: それ、いいかも\nB: えー、雨の方がいいって\nPICK: Shift\nBEATS: She looks up / Rain starts\nWRITE: no"
+    raw = "SAY: A: それ、いいかも\nB: えー、雨の方がいいって\n**ASIDE:** ふふ\nPITCH: 雨 | 晴れ"
     r = vt.parse_reply(raw)
     assert r["say"] == "A: それ、いいかも\nB: えー、雨の方がいいって"
-    assert r["pick"] == "shift" and r["write"] == ""
-    assert r["beats"] == "She looks up / Rain starts"
+    assert r["aside"] == "ふふ" and r["pitch"] == "雨 | 晴れ"
     assert vt.parse_reply("ただの返事")["say"] == "ただの返事"
 
 
@@ -295,12 +296,13 @@ async def test_without_a_wish_she_asks_and_the_first_answer_shapes_the_ideas(stu
     assert talk["ideas"] == [] and len(ollama.calls) == 2  # read the picture, then asked
     assert "ask what kind of video" in ollama.calls[1]["prompt"]
 
-    ollama.replies = [*[_idea(k) for k in ve.KINDS], "SAY: じゃあこの4つ！\nPICK: stay"]
+    ollama.replies = [*[_idea(k) for k in ve.KINDS], "SAY: じゃあ、こんなのはどう？"]
     await vt.chat(_FakeDb({}), ollama, talk, "寝起きのぼーっとした可愛らしさで")
     idea_calls = ollama.calls[2:6]
     assert all("寝起きのぼーっとした可愛らしさで" in c["prompt"] for c in idea_calls)
     assert [i["kind"] for i in talk["ideas"]] == list(ve.KINDS)
-    assert talk["chosen"] == "stay" and talk["prompts"] == []
+    # Still talking it over: no timetable, nothing written.
+    assert talk["phase"] == "direction" and talk["board"] == [] and not talk.get("prompts")
 
 
 @pytest.mark.asyncio
@@ -315,41 +317,80 @@ def _talking():
         "character": {**MIO, "character_id": MIO_ID, "name_ja": "各務 みお"},
         "partner_character": {}, "still": "A booth.", "people": [], "duration_s": 5,
         "ideas": [{"kind": "shift", "label": "x", "title": "t", "story": "s", "beats": ["a"]}],
-        "chosen": "shift", "chat": [], "prompts": [],
+        "phase": "direction", "direction": "", "board": [], "chat": [], "prompts": [],
     }
 
 
+BOARD = [
+    {"start": 0, "end": 2, "title": "wakes", "action": "An anime girl with red twin tails wakes."},
+    {"start": 2, "end": 5, "title": "smiles", "action": "She smiles."},
+]
+
+
+def _on_timeline():
+    talk = _talking()
+    talk.update({"phase": "timeline", "direction": "寝起きの可愛さ", "board": [dict(s) for s in BOARD]})
+    return talk
+
+
 @pytest.mark.asyncio
-async def test_a_changed_idea_is_shown_before_it_is_written(studio):
+async def test_an_unsettled_direction_keeps_talking(studio):
+    talk = _talking()
+    ollama = _FakeOllama(["SETTLED: no\nDIRECTION:", "SAY: 雨、いいですね。でも…\nASIDE: 濡れたくないな"])
+    await vt.chat(_FakeDb(), ollama, talk, "雨はどう？")
+    assert talk["phase"] == "direction" and talk["board"] == []
+    assert [r.get("kind") for r in talk["chat"]] == [None, None, "aside"]
+    # Her side of it: the writers' notes, not a timetable.
+    assert "WRITERS' NOTES" in ollama.calls[1]["prompt"] and "TIMETABLE" not in ollama.calls[1]["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_settling_the_direction_drafts_the_timetable(studio):
     talk = _talking()
     ollama = _FakeOllama([
-        "SAY: じゃあ雨で！\nPICK: shift\nSTORY: 雨が降り出す\nBEATS: She looks up / Rain falls\nWRITE: yes",
+        "SETTLED: yes\nDIRECTION: 寝起きの可愛さを、ゆっくり見せる",
+        WRITE_REPLIES[1],
+        "SAY: じゃあ最初の2秒から\nPITCH: ゆっくり目を開ける | ぱっと起きる",
     ])
-    await vt.chat(_FakeDb(), ollama, talk, "雨にして")
-    idea = talk["ideas"][0]
-    assert idea["beats"] == ["She looks up", "Rain falls"] and idea["revised"] == 1
-    assert talk["prompts"] == []
-    assert talk["chat"][-1]["kind"] == "revised"
+    await vt.chat(_FakeDb(), ollama, talk, "それでいこう")
+    assert talk["phase"] == "timeline"
+    assert talk["direction"] == "寝起きの可愛さを、ゆっくり見せる"
+    assert [s["title"] for s in talk["board"]] == ["wakes", "smiles"]
+    assert [r.get("kind") for r in talk["chat"]] == [None, "settled", None, "pitch"]
+    assert talk["chat"][-1]["options"] == ["ゆっくり目を開ける", "ぱっと起きる"]
+    # Now she talks over the timetable, with the direction in her brief.
+    assert "TIMETABLE" in ollama.calls[2]["prompt"]
+    assert "寝起きの可愛さを、ゆっくり見せる" in ollama.calls[2]["system"]
+    assert not talk.get("prompts")
 
 
 @pytest.mark.asyncio
-async def test_switching_to_another_idea_is_not_going_ahead(studio):
-    talk = _talking()
-    talk["ideas"].append({"kind": "cut", "label": "y", "title": "u", "story": "s", "beats": ["b"]})
-    await vt.chat(_FakeDb(), _FakeOllama(["SAY: じゃあ別の場所へ！\nPICK: cut\nWRITE: yes"]), talk, "もっと動き")
-    assert talk["chosen"] == "cut" and talk["prompts"] == []
-
-
-@pytest.mark.asyncio
-async def test_she_goes_ahead_when_told(studio):
-    talk = _talking()
+async def test_the_timetable_is_written_only_when_asked(studio):
+    talk = _on_timeline()
     ollama = _FakeOllama([
-        "SAY: いきましょう\nPICK: shift\nWRITE: yes",
-        *WRITE_REPLIES,
+        "no",
+        "SEGMENT 0:00-0:02 | wakes\nACTION: An anime girl with red twin tails wakes.\n"
+        "SEGMENT 0:02-0:05 | caught\nACTION: She notices the camera and blushes.",
+        # She thinks it is time; she does not decide that (2026-10-11).
+        "SAY: いいですね、書きましょうか\nWRITE: yes",
     ])
-    await vt.chat(_FakeDb(), ollama, talk, "これでいこう")
+    await vt.chat(_FakeDb(), ollama, talk, "最後はカメラに気づいて照れる感じに")
+    assert talk["board"][1]["title"] == "caught"
+    assert not talk.get("prompts")
+    assert [r.get("kind") for r in talk["chat"]] == [None, "board", None]
+
+    ollama.replies = ["yes", "NO CHANGE", *WRITE_REPLIES[:1], *WRITE_REPLIES[2:], "SAY: できました\nPITCH: a | b"]
+    await vt.chat(_FakeDb(), ollama, talk, "いいね、撮影文にして")
     assert talk["prompts"][-1]["prompt"].startswith("0:00 - 0:02 | wakes")
-    assert talk["chat"][-1]["kind"] == "written"
+    assert [r.get("kind") for r in talk["chat"][-3:]] == [None, "written", None]
+
+
+@pytest.mark.asyncio
+async def test_a_board_written_back_unchanged_is_not_announced(studio):
+    talk = _on_timeline()
+    same = "\n".join(f"SEGMENT 0:0{s['start']}-0:0{s['end']} | {s['title']}\nACTION: {s['action']}" for s in BOARD)
+    await vt.chat(_FakeDb(), _FakeOllama(["no", same, "SAY: うん"]), talk, "どう思う？")
+    assert "board" not in [r.get("kind") for r in talk["chat"]]
 
 
 @pytest.mark.asyncio
@@ -357,7 +398,8 @@ async def test_duet_lines_without_a_say_label_still_reach_the_chat(studio):
     talk = _talking()
     talk["partner_character"] = {**RIN, "character_id": RIN_ID, "name_ja": "緒方 りん"}
     ollama = _FakeOllama([
-        "A: (各務 みお) [shift]みたいに雨、どうかな<br>B:(緒方 りん) えー、走りたい！\nPICK: shift",
+        "SETTLED: no",
+        "A: (各務 みお) [shift]みたいに雨、どうかな<br>B:(緒方 りん) えー、走りたい！",
     ])
     await vt.chat(_FakeDb(), ollama, talk, "どれがいい？")
     said = [(r["name"], r["text"]) for r in talk["chat"] if r["role"] == "assistant"]
@@ -367,7 +409,7 @@ async def test_duet_lines_without_a_say_label_still_reach_the_chat(studio):
 @pytest.mark.asyncio
 async def test_a_trailing_slash_is_not_part_of_her_line(studio):
     talk = _talking()
-    await vt.chat(_FakeDb(), _FakeOllama(["SAY: すごく好みです。 /\nねえ、どうする？"]), talk, "どう？")
+    await vt.chat(_FakeDb(), _FakeOllama(["SETTLED: no", "SAY: すごく好みです。 /\nねえ、どうする？"]), talk, "どう？")
     said = [r["text"] for r in talk["chat"] if r["role"] == "assistant"]
     assert said == ["すごく好みです。\nねえ、どうする？"]
 
@@ -381,15 +423,16 @@ async def test_her_diary_is_not_brought_into_the_studio(studio):
         "memories": ["前回の撮影：雨の路地"],
         "bond": {"distance": "少し打ち解けてきた"},
     })
-    ollama = _FakeOllama(["SAY: 可愛らしく、ですね"])
+    ollama = _FakeOllama(["SETTLED: no", "SAY: 可愛らしく、ですね"])
     await vt.chat(_FakeDb(), ollama, talk, "どんな感じがいいかな")
-    system = ollama.calls[0]["system"]
+    system = ollama.calls[1]["system"]
     assert "木漏れ日" not in system and "雨の路地" not in system
     assert "少し打ち解けてきた" in system
 
 
 def test_instrument_lines_are_short():
     assert ve.parse_instruments("Theremin\nA girl with dark hair, wide eyes, and an apron.") == ["Theremin"]
+    assert ve.parse_instruments("[Instrument 1]\n[Instrument 2]\nInstrument 3\nCelesta") == ["Celesta"]
 
 
 def test_the_screen_view_carries_faces_and_cards():
@@ -423,7 +466,7 @@ def _client(monkeypatch, studio, replies, meta=None, sessions=None):
     return TestClient(app), app.state.ollama
 
 
-def test_create_chat_write_repitch_over_http(monkeypatch, studio):
+def test_create_chat_settle_write_over_http(monkeypatch, studio):
     client, ollama = _client(monkeypatch, studio, ["A pier.", "SAY: What shall we make of it?"])
     r = client.post("/api/muse/video/talks", json={"sha256": "pier", "character_id": MIO_ID, "locale": "en"})
     assert r.status_code == 200, r.text
@@ -434,20 +477,31 @@ def test_create_chat_write_repitch_over_http(monkeypatch, studio):
     r = client.post(f"/api/muse/video/talks/{tid}/chat", json={"message": "something sleepy"})
     assert [i["kind"] for i in r.json()["ideas"]] == list(ve.KINDS)
 
-    ollama.replies = ["SAY: The moment goes on, then.\nPICK: stay"]
+    ollama.replies = ["SETTLED: no", "SAY: Sleepy how?"]
     r = client.post(f"/api/muse/video/talks/{tid}/chat", json={"message": "the first one", "duration_s": 10})
-    assert r.status_code == 200 and r.json()["chosen"] == "stay" and r.json()["duration_s"] == 10
+    assert r.status_code == 200 and r.json()["phase"] == "direction" and r.json()["duration_s"] == 10
 
-    ollama.replies = list(WRITE_REPLIES)
-    r = client.post(f"/api/muse/video/talks/{tid}/write", json={"kind": "stay"})
+    # The button settles it as the talk stands.
+    ollama.replies = ["SETTLED: yes\nDIRECTION: Sleepy and slow.", WRITE_REPLIES[1], "SAY: From the top, then."]
+    r = client.post(f"/api/muse/video/talks/{tid}/settle")
     assert r.status_code == 200, r.text
-    # The talk was set to 10 s; the draft's 5 s of segments are shared out over it.
-    assert r.json()["prompts"][-1]["prompt"].startswith("0:00 - 0:05 | wakes")
+    assert r.json()["phase"] == "timeline" and r.json()["direction"] == "Sleepy and slow."
+    # Drafted for the 10 s the talk was set to.
+    assert r.json()["board"][-1]["end"] == 10
+
+    ollama.replies = [*WRITE_REPLIES[:1], *WRITE_REPLIES[2:]]
+    r = client.post(f"/api/muse/video/talks/{tid}/write", json={})
+    assert r.status_code == 200, r.text
+    assert r.json()["prompts"][-1]["prompt"].startswith("0:00 - 0:0")
     assert "stages" not in r.json()["prompts"][-1]  # kept on the record, not sent to the screen
+
+    r = client.post(f"/api/muse/video/talks/{tid}/phase", json={"phase": "direction"})
+    assert r.status_code == 200 and r.json()["phase"] == "direction"
+    assert r.json()["board"]  # kept until a new one is drafted
 
     ollama.replies = [*[_idea(k) for k in ve.KINDS], "SAY: New ones!"]
     r = client.post(f"/api/muse/video/talks/{tid}/repitch")
-    assert r.status_code == 200 and r.json()["chosen"] == ""
+    assert r.status_code == 200 and [i["kind"] for i in r.json()["ideas"]] == list(ve.KINDS)
 
 
 def test_unknown_actress_is_a_400(monkeypatch, studio):

@@ -398,28 +398,44 @@ MUSIC 1: ...
 MUSIC 2: ..."""
 
 
+# The timetable is what the director and the actress work on together. After
+# each exchange this stage writes it again with what was settled — the video
+# counterpart of the photo shoot's ledger writer. Asked to keep what was not
+# touched, and to take her suggestions only once the director took them.
+# Given "Actress: … / Showrunner: …", it once wrote in her suggestion and
+# dropped the director's own ask (Asahi, 2026-10-11): the director's line
+# now comes first, and hers is marked as what is being answered.
+_BOARD_SYSTEM = _STAGE_COMMON + """
+
+Your stage: keeping the timetable. The director and the actress are working the clip out segment by segment while looking at this timetable. You are given the timetable, what the director just said, and what the actress had said just before it. Write in what the director just asked for — a change to one moment, a new beat, a different ending, a different length of a segment. What the actress had said goes in only when the director's line says yes to it ("yes", "let's do that", picking her option); otherwise it is only there so that you understand what the director is answering. Change only that; every segment and every word nobody asked to change stays exactly as it is.
+
+Answer with the whole timetable in the same shape — SEGMENT lines with their ACTION — and nothing else. If nothing in the exchange changes the timetable, answer exactly: NO CHANGE"""
+
+
 def _segments(duration_s: int) -> int:
     """About two seconds a segment, with a beat at each end of a short clip."""
     return {5: 3, 10: 5, 15: 6}.get(duration_s, max(3, round(duration_s / 2)))
 
 
 def write_context(
-    *, still: str, people: list[dict[str, str]], idea: dict[str, Any],
-    duration_s: int, intent: str = "", persona: str = "",
+    *, still: str, people: list[dict[str, str]], idea: dict[str, Any] | None = None,
+    duration_s: int, intent: str = "", persona: str = "", direction: str = "",
 ) -> str:
     """What every stage is told about the clip, the absolute first."""
+    idea = idea or {}
     beats = "\n".join(f"- {b}" for b in idea.get("beats") or [])
     story = str(idea.get("story") or "").strip()
     return (
         # What the director asked for in the talk, in their own words. Without
         # it the writer had only the idea, and "make it cute" came back as a
         # ghost story (Asahi, 2026-10-11).
-        (f"What the director wants (absolute), in their words:\n{intent.strip()}\n\n" if intent.strip() else "")
+        (f"The direction the director and the actress agreed on (absolute):\n{direction.strip()}\n\n" if direction.strip() else "")
+        + (f"What the director wants (absolute), in their words:\n{intent.strip()}\n\n" if intent.strip() else "")
         + f"Length: {duration_s} seconds, in {_segments(duration_s)} segments.\n"
         f"Who is in it:\n{_who(people)}\n\n"
         + (persona.strip() + "\n\n" if persona.strip() else "")
-        + f"The picture (0:00):\n{still.strip()}\n\n"
-        + f"The idea, in order:\n{beats}"
+        + f"The picture (0:00):\n{still.strip()}"
+        + (f"\n\nThe idea, in order:\n{beats}" if beats else "")
         + (f"\n\nThe idea as the director and the actress put it:\n{story}" if story else "")
     )
 
@@ -464,8 +480,9 @@ _MUSIC_SYSTEM = (
     "You suggest the instrument for the score of a short video clip. The score "
     "should sound like the person in it: something from her work, what she "
     "likes, or the place she is in, so that hearing it tells you whose clip "
-    "this is. Answer with five instruments, one per line, the one that "
-    "belongs to her most first. Only the instrument names."
+    "this is. It has to be a musical instrument that can play the score — "
+    "her work's tools are not instruments. Answer with five instruments, one "
+    "per line, the one that belongs to her most first. Only the instrument names."
 )
 
 
@@ -475,6 +492,9 @@ def parse_instruments(raw: str) -> list[str]:
         name = re.sub(r"^\s*(?:[-*•]|\d+[.)])\s*", "", line).strip().strip("*").strip()
         # An instrument is a few words. Asked about an unnamed person it once
         # answered with a description of her ("A girl with dark hair, …").
+        # "[Instrument 3]": a template, when the clip it was given was empty.
+        if re.search(r"[\[\]<>{}]|^instrument\s*\d*$", name, re.IGNORECASE):
+            continue
         if name and len(name.split()) <= 4 and name.lower() not in {n.lower() for n in out}:
             out.append(name)
     return out
@@ -483,15 +503,20 @@ def parse_instruments(raw: str) -> list[str]:
 async def pick_instrument(
     ollama, *, people: list[dict[str, str]], idea: dict[str, Any],
     model: str | None, num_ctx: int | None, rng: random.Random | None = None,
+    clip: str = "",
 ) -> str:
-    """One instrument for this clip, or "" to let the writer choose."""
+    """One instrument for this clip, or "" to let the writer choose.
+
+    `clip` is the clip as the talk settled it (direction and timetable); without
+    it — the idea is empty once the talk works from a timetable — a photo of
+    nobody in the cast left this call nothing to go on, and no instrument came
+    back (two prompts of four, 2026-10-11)."""
     who = (
         f"Who is in it:\n{_who(people, hook='likes', ground=True)}\n\n" if people else ""
     )
-    prompt = (
-        f"{who}The clip: {idea.get('title') or ''}\n"
-        + "\n".join(f"- {b}" for b in idea.get("beats") or [])
-    )
+    prompt = f"{who}The clip:\n" + (clip or (
+        f"{idea.get('title') or ''}\n" + "\n".join(f"- {b}" for b in idea.get("beats") or [])
+    ))
     try:
         raw = await chain._call(
             ollama, system=_MUSIC_SYSTEM, prompt=prompt, model=model,
@@ -628,26 +653,20 @@ async def _stage(ollama, system: str, prompt: str, *, model, num_ctx) -> str:
         return ""
 
 
-async def write(
-    ollama, *, still: str, people: list[dict[str, str]], idea: dict[str, Any],
-    duration_s: int, model: str | None, num_ctx: int | None, locale: str = "ja",
-    rng: random.Random | None = None, intent: str = "", persona: str = "",
-) -> dict[str, Any]:
-    """The chosen idea as a time-step prompt, written in four stages.
-
-    The draft must come out (one retry); the later stages only improve it — a
-    stage that fails leaves the draft's version of its part in place, and what
-    each stage returned is kept in `stages` to read afterwards.
-    """
-    instrument = await pick_instrument(
-        ollama, people=people, idea=idea, model=model, num_ctx=num_ctx, rng=rng,
+def _write_failed(locale: str, raw: str) -> VideoError:
+    return VideoError(
+        "撮影文に清書できませんでした。もう一度押すか、別の案を選んでください。"
+        if str(locale or "").startswith("ja") else
+        "Could not write this idea as a prompt. Try again or pick another idea.",
+        raw=raw,
     )
-    context = write_context(
-        still=still, people=people, idea=idea, duration_s=duration_s, intent=intent,
-    )
-    stages: dict[str, str] = {}
 
-    # 1. draft — the segments. Without it there is nothing to improve.
+
+async def draft(
+    ollama, *, context: str, duration_s: int, model: str | None, num_ctx: int | None,
+    locale: str = "ja",
+) -> tuple[list[dict[str, Any]], str]:
+    """The segments and what happens in each. One retry; VideoError when none."""
     raw, problem, segments = "", "", []
     for _ in range(2):
         ask = context if not problem else (
@@ -657,26 +676,46 @@ async def write(
         raw = await _stage(ollama, _DRAFT_SYSTEM, ask, model=model, num_ctx=num_ctx)
         segments = parse_segments(raw)
         if segments:
-            break
+            _fit_times(segments, duration_s)
+            return segments, raw
         problem = "it was empty" if not raw.strip() else "it had no SEGMENT lines with an ACTION"
-    stages["draft"] = raw
-    if not segments:
-        logger.warning("[muse.video] draft failed (%s): %r", problem, (raw or "")[:500])
-        raise VideoError(
-            "撮影文に清書できませんでした。もう一度押すか、別の案を選んでください。"
-            if str(locale or "").startswith("ja") else
-            "Could not write this idea as a prompt. Try again or pick another idea.",
-            raw=raw,
-        )
-    _fit_times(segments, duration_s)
+    logger.warning("[muse.video] draft failed (%s): %r", problem, (raw or "")[:500])
+    raise _write_failed(locale, raw)
 
-    # 2. acting — her persona (fenced) reaches this stage only.
-    acting_ctx = write_context(
-        still=still, people=people, idea=idea, duration_s=duration_s,
-        intent=intent, persona=persona,
-    )
+
+async def keep_board(
+    ollama, *, context: str, segments: list[dict[str, Any]], exchange: str,
+    duration_s: int, model: str | None, num_ctx: int | None,
+) -> tuple[list[dict[str, Any]] | None, str]:
+    """The timetable after the latest exchange, or None when it did not change
+    (or the answer could not be read — the timetable is then left as it was)."""
     raw = await _stage(
-        ollama, _ACTING_SYSTEM, f"{acting_ctx}\n\nThe draft:\n{_segments_text(segments)}",
+        ollama, _BOARD_SYSTEM,
+        f"{context}\n\nThe timetable:\n{_segments_text(segments)}\n\nThe latest exchange:\n{exchange}",
+        model=model, num_ctx=num_ctx,
+    )
+    if re.search(r"\bNO CHANGE\b", raw or "", re.IGNORECASE) and not _SEGMENT_LINE.search(raw or ""):
+        return None, raw
+    new = parse_segments(raw)
+    if not new:
+        return None, raw
+    _fit_times(new, duration_s)
+    return new, raw
+
+
+async def polish(
+    ollama, *, segments: list[dict[str, Any]], context: str, acting_context: str,
+    duration_s: int, model: str | None, num_ctx: int | None, instrument: str = "",
+) -> dict[str, Any]:
+    """Acting, then camera and music, over a settled timetable. A stage that
+    fails leaves the timetable's version of its part in place."""
+    segments = [dict(s) for s in segments]
+    _fit_times(segments, duration_s)
+    stages: dict[str, str] = {}
+
+    # Acting — her persona (fenced) reaches this stage only.
+    raw = await _stage(
+        ollama, _ACTING_SYSTEM, f"{acting_context}\n\nThe draft:\n{_segments_text(segments)}",
         model=model, num_ctx=num_ctx,
     )
     stages["acting"] = raw
@@ -687,7 +726,7 @@ async def write(
             if new.get("title"):
                 seg["title"] = new["title"]
 
-    # 3 and 4 write only their own line, so they cannot drop the action.
+    # Camera and music write only their own line, so they cannot drop the action.
     listing = _segments_text(segments)
     raw = await _stage(
         ollama, _CAMERA_SYSTEM, f"{context}\n\nThe segments:\n{listing}",
@@ -709,7 +748,39 @@ async def write(
         if line:
             seg["music"] = line
 
-    return {
-        "prompt": layout(segments, duration_s=duration_s), "segments": len(segments),
-        "instrument": instrument, "stages": stages,
-    }
+    return {"prompt": layout(segments, duration_s=duration_s), "segments": len(segments), "stages": stages}
+
+
+async def write(
+    ollama, *, still: str, people: list[dict[str, str]], idea: dict[str, Any],
+    duration_s: int, model: str | None, num_ctx: int | None, locale: str = "ja",
+    rng: random.Random | None = None, intent: str = "", persona: str = "",
+    direction: str = "", segments: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """The prompt in four stages: draft (skipped when a timetable is given),
+    acting, camera, music. What each stage returned is kept in `stages`."""
+    clip = "\n".join(x for x in [direction.strip(), _segments_text(segments or [])] if x)
+    instrument = await pick_instrument(
+        ollama, people=people, idea=idea, model=model, num_ctx=num_ctx, rng=rng, clip=clip,
+    )
+    context = write_context(
+        still=still, people=people, idea=idea, duration_s=duration_s,
+        intent=intent, direction=direction,
+    )
+    stages: dict[str, str] = {}
+    if not segments:
+        segments, stages["draft"] = await draft(
+            ollama, context=context, duration_s=duration_s, model=model,
+            num_ctx=num_ctx, locale=locale,
+        )
+    acting_context = write_context(
+        still=still, people=people, idea=idea, duration_s=duration_s,
+        intent=intent, persona=persona, direction=direction,
+    )
+    out = await polish(
+        ollama, segments=segments, context=context, acting_context=acting_context,
+        duration_s=duration_s, model=model, num_ctx=num_ctx, instrument=instrument,
+    )
+    out["stages"] = {**stages, **out["stages"]}
+    out["instrument"] = instrument
+    return out

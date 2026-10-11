@@ -1886,8 +1886,7 @@
     "changeCast": "Change the cast or model",
     "ideas": "Ideas",
     "repitch": "Ask for other ideas",
-    "revised": "changed",
-    "write": "Write this one",
+    "write": "Write the prompt from this timetable",
     "writing": "Writing…",
     "prompt": "Prompt (Hailuo / MiniMax)",
     "copy": "Copy",
@@ -1907,6 +1906,20 @@
     "searching": "Searching…",
     "noHits": "Nothing found",
     "pitchAnyway": "Let them pitch anyway",
-    "waitingForWish": "Tell her in the talk what kind of video you want, and four ideas will be pitched to fit it."
+    "waitingForWish": "Tell her in the talk what kind of video you want, and four ideas will be pitched to fit it.",
+    "ideasAreMaterial": "The ideas are material for the talk: pick up whatever catches your eye.",
+    "step": {
+      "direction": "Direction",
+      "timeline": "Timetable",
+      "prompt": "Prompt"
+    },
+    "directionHint": "First, talk over what the video should be. Once the talk settles it, the timetable follows by itself; the button settles it as the talk stands.",
+    "settle": "Settle this and draft the timetable",
+    "settling": "Summing up the direction and drafting the timetable…",
+    "direction": "Direction",
+    "backToDirection": "Back to the direction",
+    "timetable": "Timetable",
+    "timetableHint": "Changes as you talk it over",
+    "lengthChanged": "Length is now {n} s; the times are shared out again when the prompt is written"
   }
 }
