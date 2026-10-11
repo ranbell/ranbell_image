@@ -434,6 +434,22 @@ async def test_a_plain_line_may_carry_a_spice_and_stage_directions_go(studio, mo
     assert said == ["えっ、笑うの？", "ふふ"]
 
 
+@pytest.mark.asyncio
+async def test_lines_after_the_one_line_fields_are_speech(studio):
+    talk = _talking()
+    talk["partner_character"] = {**RIN, "character_id": RIN_ID, "name_ja": "緒方 りん"}
+    await vt.chat(_FakeDb(), _FakeOllama([
+        "SETTLED: no",
+        "SAY: A: 決まりね。\nPITCH: 強く引かれる | 手が滑る\n無理やりだなぁ、もう……。\nASIDE: 緒方 りん)\n（重たいなぁ……。",
+    ]), talk, "どう？")
+    pitch = next(r for r in talk["chat"] if r.get("kind") == "pitch")
+    assert pitch["options"] == ["強く引かれる", "手が滑る"]
+    aside = next(r for r in talk["chat"] if r.get("kind") == "aside")
+    assert aside["text"] == "重たいなぁ……。"
+    said = " ".join(r["text"] for r in talk["chat"] if r["role"] == "assistant" and not r.get("kind"))
+    assert "無理やりだなぁ" in said
+
+
 def test_pitch_options_keep_their_inner_quotes():
     talk = _talking()
     vt._post_reply(talk, {"say": "どっち？", "pitch": "瞳に宿る感情を「驚き」にする | 「覚悟」にする"})

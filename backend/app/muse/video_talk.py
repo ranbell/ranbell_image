@@ -388,9 +388,15 @@ def parse_reply(raw: str) -> dict[str, str]:
         if m := _FIELD.match(line):
             field = m.group(1).lower()
             out[field] = m.group(2).strip()
-        elif field in ("aside", "pitch") and re.match(r"\s*[AB][:：]", line):
-            # "ASIDE: …\nB: 「よーし！…」" — the duet's next line, not the mutter.
-            out["say"] = f"{out.get('say', '')}\n{line.strip()}".strip()
+        elif field in ("aside", "pitch") and line.strip():
+            # ASIDE and PITCH are one line each. What follows is speech — the
+            # duet's next line, with or without its "B:" ("ASIDE: …\nB: よーし",
+            # "PITCH: a | b\n無理やりだなぁ"; the latter became part of a pitch
+            # button, 2026-10-12) — unless it is bracketed like a mutter.
+            if field == "aside" and re.match(r"\s*[(（]", line):
+                out["aside"] = f"{out.get('aside', '')}\n{line.strip()}".strip()
+            else:
+                out["say"] = f"{out.get('say', '')}\n{line.strip()}".strip()
         elif line.strip():
             out[field] = f"{out.get(field, '')}\n{line.strip()}".strip()
     out["write"] = "yes" if (out.get("write") or "").strip().lower().startswith("y") else ""
@@ -514,6 +520,9 @@ def _unwrap_aside(text: str) -> str:
     text = text.strip()
     if re.fullmatch(r"[(（].*[)）]", text, re.DOTALL) and not re.search(r"[)）].*[(（]", text[1:-1]):
         text = text[1:-1].strip()
+    # "（重たいなぁ……。" — opened and never closed.
+    if text[:1] in "(（" and not re.search(r"[)）]", text):
+        text = text[1:].strip()
     return text
 
 
@@ -528,6 +537,13 @@ def _post_reply(talk: dict[str, Any], reply: dict[str, str]) -> None:
         if m := re.match(r"^([AB])[:：]\s*", aside):
             who = partner if m.group(1) == "B" and _has_partner(talk) else lead
             aside = aside[m.end():]
+        # "東野 はづき)" — the opening bracket lost: a name, not a mutter.
+        names = {_name(c, ja=True).replace(" ", "") for c in (lead, partner) if c}
+        aside = "\n".join(
+            ln for ln in aside.split("\n")
+            if re.sub(r"[\s()（）]", "", ln) not in names
+        ).strip()
+        aside = _unwrap_aside(aside)
         # "(東野 はづき) ……" — her name in front, as on a script.
         if m := re.match(r"^[(（]([^)）]{1,20})[)）]\s*", aside):
             named = m.group(1).replace(" ", "")
