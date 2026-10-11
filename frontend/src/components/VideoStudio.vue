@@ -699,6 +699,10 @@ const waitingLabel = computed(() => ({
                     </div>
                     <p class="text-[11px] leading-relaxed text-gray-300">{{ seg.action }}</p>
                   </div>
+                  <!-- What the director said no to: kept for the whole clip -->
+                  <p v-if="talk.avoid" class="rounded-lg border border-rose-500/30 bg-rose-950/20 px-2.5 py-1 text-[11px] text-rose-100/90">
+                    🚫 {{ t('video.avoid') }}: {{ talk.avoid }}
+                  </p>
                   <p v-if="board.length && board[board.length - 1].end !== seconds" class="text-[10px] text-amber-300/80">
                     {{ t('video.lengthChanged', { n: seconds }) }}
                   </p>

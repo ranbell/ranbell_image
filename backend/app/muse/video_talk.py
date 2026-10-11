@@ -469,6 +469,26 @@ def _spice_line(key: str) -> str:
     return f"\n\nTHIS TIME, ALSO: {text}" if text else ""
 
 
+# "わかりました。" once is her; at the head of reply after reply it reads like
+# a clerk taking orders (Akari, three replies of four, 2026-10-12). Dropped
+# only when her last reply opened the same way.
+_ACK = re.compile(
+    r"^([AB][:：]\s*)?[「…\s]*(わかりました|わかってます|わかっています|承知(いた)?しました|了解(です|しました)?)[。、！!…\s]*"
+)
+
+
+def _drop_repeated_ack(talk: dict[str, Any], say: str) -> str:
+    last = next(
+        (r["text"] for r in reversed(talk.get("chat") or [])
+         if r.get("role") == "assistant" and not r.get("kind") and r.get("text")),
+        "",
+    )
+    m = _ACK.match(say)
+    if not (m and _ACK.match(last)) or not say[m.end():].strip():
+        return say
+    return (m.group(1) or "") + say[m.end():]
+
+
 def _mutterer(talk: dict[str, Any], rng: random.Random | None = None) -> str:
     """In a duet, who mutters this time ("A" or "B"). Left to her, it was the
     lead every time (2026-10-12)."""
@@ -484,6 +504,7 @@ async def _reply(ollama, talk: dict[str, Any], line: str, *, spice: bool = False
     raw = await _call(ollama, talk, talk_system(talk), prompt)
     reply = parse_reply(raw)
     reply["say"] = identity.sanitize_muse_say(_clean(talk, reply.get("say") or ""), locale=_locale(talk))
+    reply["say"] = _drop_repeated_ack(talk, reply["say"])
     reply["aside"] = _clean(talk, reply.get("aside") or "").strip()
     if not reply["say"]:
         logger.warning("[muse.video] she said nothing: %r", (raw or "")[:300])
@@ -777,6 +798,7 @@ def _context(talk: dict[str, Any], *, persona: bool = False) -> str:
         still=talk.get("still", ""), people=talk.get("people") or [],
         duration_s=int(talk.get("duration_s") or 5), intent=intent_of(talk),
         direction=talk.get("direction", ""), persona=persona_of(talk) if persona else "",
+        avoid=talk.get("avoid", ""),
     )
 
 
@@ -849,10 +871,14 @@ async def _timeline_turn(ollama, talk: dict[str, Any], message: str) -> None:
         f"\n\nWhat the actress had said just before (it goes in only if the director "
         f"says yes to it):\n{her_last}" if her_last else ""
     )
-    board, _ = await ve.keep_board(
+    board, raw = await ve.keep_board(
         ollama, context=_context(talk), segments=talk["board"], exchange=exchange,
         duration_s=int(talk.get("duration_s") or 5), model=inputs["model"], num_ctx=inputs["num_ctx"],
+        avoid=talk.get("avoid", ""),
     )
+    avoid = ve.parse_avoid(raw)
+    if board is not None and avoid is not None and avoid != talk.get("avoid", ""):
+        talk["avoid"] = avoid
     if board and not _same_board(board, talk["board"]):
         talk["board"] = board
         _row(talk, "system", _say(talk, "🗒 時間割を書き直しました", "🗒 Updated the timetable"), kind="board")
@@ -941,7 +967,7 @@ async def _write(ollama, talk: dict[str, Any]) -> None:
             duration_s=int(talk.get("duration_s") or 5), model=inputs["model"],
             num_ctx=inputs["num_ctx"], locale=_locale(talk), intent=intent_of(talk),
             persona=persona_of(talk), direction=talk.get("direction", ""),
-            segments=talk["board"],
+            segments=talk["board"], avoid=talk.get("avoid", ""),
         )
     except ve.VideoError as exc:
         # What the model returned, kept on the record: the screen only says it failed.
@@ -990,6 +1016,7 @@ def view(talk: dict[str, Any]) -> dict[str, Any]:
         ],
         "phase": _phase(talk),
         "direction": talk.get("direction", ""),
+        "avoid": talk.get("avoid", ""),
         "board": [
             {k: s.get(k) for k in ("start", "end", "title", "action")}
             for s in talk.get("board") or []

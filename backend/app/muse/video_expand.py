@@ -438,11 +438,16 @@ MUSIC 2: ..."""
 # Asked to keep everything, it never moved a boundary, and four asks piled
 # into the last second of five (Akari, 2026-10-11): it may share the
 # seconds out again when a moment has grown.
+# The AVOID line: "no trembling" left the hands and came back in the knees
+# (Akari, twice on 2026-10-12) — a no is about the whole clip, so it is kept
+# as a line of its own and every polishing stage is told it.
 _BOARD_SYSTEM = _STAGE_COMMON + """
 
 Your stage: keeping the timetable. The director and the actress are working the clip out segment by segment while looking at this timetable. You are given the timetable, what the director just said, and what the actress had said just before it. Write in what the director just asked for — a change to one moment, a new beat, a different ending, a different length of a segment. What the actress had said goes in only when the director's line says yes to it ("yes", "let's do that", picking her option); otherwise it is only there so that you understand what the director is answering. When a moment now has more to do than its seconds can hold — "she gets used to it bit by bit" in a single second — give it more seconds by taking them from a moment that has less to do; the whole clip stays the same length. Change only that; every segment and every word nobody asked to change stays exactly as it is.
 
-Answer with the whole timetable in the same shape — SEGMENT lines with their ACTION — and nothing else. If nothing in the exchange changes the timetable, answer exactly: NO CHANGE"""
+The timetable ends with an AVOID line: what the director has said they do not want in the clip ("no trembling", "not sad"). Carry it over, and add to it when the director says no to something — that holds for every moment, not just the one being talked about. "none" when there is nothing.
+
+Answer with the whole timetable in the same shape — SEGMENT lines with their ACTION, then the AVOID line — and nothing else. If nothing in the exchange changes the timetable or the AVOID line, answer exactly: NO CHANGE"""
 
 
 def _segments(duration_s: int) -> int:
@@ -453,6 +458,7 @@ def _segments(duration_s: int) -> int:
 def write_context(
     *, still: str, people: list[dict[str, str]], idea: dict[str, Any] | None = None,
     duration_s: int, intent: str = "", persona: str = "", direction: str = "",
+    avoid: str = "",
 ) -> str:
     """What every stage is told about the clip, the absolute first."""
     idea = idea or {}
@@ -474,6 +480,8 @@ def write_context(
          if direction.strip() else "")
         + (f"What the director wants (absolute), in their words, oldest first — a later line wins "
            f"over an earlier one:\n{intent.strip()}\n\n" if intent.strip() else "")
+        + (f"What the director does not want anywhere in the clip (absolute) — not in the face, "
+           f"the body, the camera or the music:\n{avoid.strip()}\n\n" if avoid.strip() else "")
         + f"Length: {duration_s} seconds, in {_segments(duration_s)} segments.\n"
         f"Who is in it:\n{_who(people)}\n\n"
         + (persona.strip() + "\n\n" if persona.strip() else "")
@@ -597,6 +605,9 @@ def parse_segments(raw: str) -> list[dict[str, Any]]:
     for line in (raw or "").replace("**", "").replace("__", "").splitlines():
         line = _unmark(line).strip()
         if not line:
+            continue
+        if re.match(r"(AVOID|START|GAP)\s*[:：]", line, re.IGNORECASE):
+            field = ""  # lines of their own, not the last segment's action
             continue
         if m := _SEGMENT_LINE.match(line):
             a, b, c, d, title = m.groups()
@@ -726,15 +737,29 @@ async def draft(
     raise _write_failed(locale, raw)
 
 
+_AVOID_LINE = re.compile(r"^\s*\**\s*AVOID\s*\**\s*[:：]\s*\**\s*(.*?)\s*$", re.IGNORECASE | re.MULTILINE)
+
+
+def parse_avoid(raw: str) -> str | None:
+    """The AVOID line's text ("" for none), or None when there is no such line."""
+    m = _AVOID_LINE.search(raw or "")
+    if not m:
+        return None
+    text = m.group(1).strip().strip("*").strip()
+    return "" if re.fullmatch(r"(none|nothing|なし|-)?\.?", text, re.IGNORECASE) else text
+
+
 async def keep_board(
     ollama, *, context: str, segments: list[dict[str, Any]], exchange: str,
-    duration_s: int, model: str | None, num_ctx: int | None,
+    duration_s: int, model: str | None, num_ctx: int | None, avoid: str = "",
 ) -> tuple[list[dict[str, Any]] | None, str]:
     """The timetable after the latest exchange, or None when it did not change
-    (or the answer could not be read — the timetable is then left as it was)."""
+    (or the answer could not be read — the timetable is then left as it was).
+    The AVOID line is in `raw`; read it with `parse_avoid`."""
     raw = await _stage(
         ollama, _BOARD_SYSTEM,
-        f"{context}\n\nThe timetable:\n{_segments_text(segments)}\n\nThe latest exchange:\n{exchange}",
+        f"{context}\n\nThe timetable:\n{_segments_text(segments)}\nAVOID: {avoid or 'none'}"
+        f"\n\nThe latest exchange:\n{exchange}",
         model=model, num_ctx=num_ctx,
     )
     if re.search(r"\bNO CHANGE\b", raw or "", re.IGNORECASE) and not _SEGMENT_LINE.search(raw or ""):
@@ -798,7 +823,7 @@ async def write(
     ollama, *, still: str, people: list[dict[str, str]], idea: dict[str, Any],
     duration_s: int, model: str | None, num_ctx: int | None, locale: str = "ja",
     rng: random.Random | None = None, intent: str = "", persona: str = "",
-    direction: str = "", segments: list[dict[str, Any]] | None = None,
+    direction: str = "", segments: list[dict[str, Any]] | None = None, avoid: str = "",
 ) -> dict[str, Any]:
     """The prompt in four stages: draft (skipped when a timetable is given),
     acting, camera, music. What each stage returned is kept in `stages`."""
@@ -808,7 +833,7 @@ async def write(
     )
     context = write_context(
         still=still, people=people, idea=idea, duration_s=duration_s,
-        intent=intent, direction=direction,
+        intent=intent, direction=direction, avoid=avoid,
     )
     stages: dict[str, str] = {}
     if not segments:
@@ -818,7 +843,7 @@ async def write(
         )
     acting_context = write_context(
         still=still, people=people, idea=idea, duration_s=duration_s,
-        intent=intent, persona=persona, direction=direction,
+        intent=intent, persona=persona, direction=direction, avoid=avoid,
     )
     out = await polish(
         ollama, segments=segments, context=context, acting_context=acting_context,

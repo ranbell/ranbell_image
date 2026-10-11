@@ -1920,6 +1920,7 @@
     "backToDirection": "Back to the direction",
     "timetable": "Timetable",
     "timetableHint": "Changes as you talk it over",
-    "lengthChanged": "Length is now {n} s; the times are shared out again when the prompt is written"
+    "lengthChanged": "Length is now {n} s; the times are shared out again when the prompt is written",
+    "avoid": "Kept out"
   }
 }

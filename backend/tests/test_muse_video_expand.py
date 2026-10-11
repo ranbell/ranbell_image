@@ -480,6 +480,34 @@ async def test_mutters_are_marked_in_the_history_and_the_partner_gets_a_turn(stu
     assert (aside["name"], aside["text"]) == ("緒方 りん", "重たいなぁ")
 
 
+@pytest.mark.asyncio
+async def test_a_no_is_kept_for_the_whole_clip_and_reaches_the_polish(studio):
+    talk = _on_timeline()
+    await vt.chat(_FakeDb(), _FakeOllama([
+        "no",
+        "SEGMENT 0:00-0:02 | wakes\nACTION: She wakes.\nSEGMENT 0:02-0:05 | smiles\nACTION: She smiles.\n"
+        "**AVOID:** trembling anywhere",
+        "SAY: 震えは無しで",
+    ]), talk, "震えの表現はいらない")
+    assert talk["avoid"] == "trembling anywhere"
+    assert talk["board"][-1]["action"] == "She smiles."  # not swallowed into the action
+    assert "does not want anywhere in the clip (absolute)" in vt._context(talk)
+    assert "trembling anywhere" in vt._context(talk)
+    assert ve.parse_avoid("SEGMENT 0:00-0:05 | x\nACTION: y\nAVOID: none") == ""
+    assert ve.parse_avoid("SEGMENT 0:00-0:05 | x\nACTION: y") is None
+
+
+@pytest.mark.asyncio
+async def test_an_acknowledgement_twice_running_is_dropped(studio):
+    talk = _talking()
+    talk["chat"] = [{"role": "assistant", "name": "各務 みお", "text": "わかりました。では指先から。"}]
+    await vt.chat(_FakeDb(), _FakeOllama(["SETTLED: no", "SAY: ……わかりました。震えは削ります。"]), talk, "震えはいらない")
+    assert talk["chat"][-1]["text"] == "震えは削ります。"
+    talk["chat"].append({"role": "assistant", "name": "各務 みお", "text": "笑顔、ですか。"})
+    await vt.chat(_FakeDb(), _FakeOllama(["SETTLED: no", "SAY: わかりました。そうします。"]), talk, "笑顔で")
+    assert talk["chat"][-1]["text"] == "わかりました。そうします。"  # once is her
+
+
 def test_pitch_options_keep_their_inner_quotes():
     talk = _talking()
     vt._post_reply(talk, {"say": "どっち？", "pitch": "瞳に宿る感情を「驚き」にする | 「覚悟」にする"})

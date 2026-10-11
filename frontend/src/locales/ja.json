@@ -1920,6 +1920,7 @@
     "backToDirection": "方針の相談に戻る",
     "timetable": "時間割",
     "timetableHint": "会話で直すと書き換わります",
-    "lengthChanged": "長さを {n} 秒に変えました。撮影文にするとき時間を割り直します"
+    "lengthChanged": "長さを {n} 秒に変えました。撮影文にするとき時間を割り直します",
+    "avoid": "入れないもの"
   }
 }
