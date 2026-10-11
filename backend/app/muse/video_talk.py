@@ -560,6 +560,10 @@ def _post_reply(talk: dict[str, Any], reply: dict[str, str]) -> None:
             if re.sub(r"[\s()（）]", "", ln) not in names
         ).strip()
         aside = _unwrap_aside(aside)
+        # 「……髪、変な方向に跳ねてないかな。」 — quoted inside the brackets
+        # the screen draws anyway (2026-10-12).
+        if m := _QUOTED_LINE.match(aside):
+            aside = m.group(1) + m.group(2)
         # "(東野 はづき) ……" — her name in front, as on a script; once
         # misspelt ("(東野 はづキ)"), so any short bracketed tag goes.
         if m := re.match(r"^[(（]([^)）。、！？…]{1,12})[)）]\s*(?=\S)", aside):

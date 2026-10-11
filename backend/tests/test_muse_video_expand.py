@@ -547,6 +547,7 @@ async def test_her_aside_loses_the_brackets_and_names_written_in(studio):
         ("(緒方 りん) 腕が痛い", "緒方 りん", "腕が痛い"),
         ("（ちょっと照れる）", "各務 みお", "ちょっと照れる"),
         ("(東野 はづキ) ……膝すりむかないかな", "各務 みお", "……膝すりむかないかな"),
+        ("（B: 「よーし、仕留めてやるんだから。」）", "緒方 りん", "よーし、仕留めてやるんだから。"),
     ]:
         talk["chat"] = []
         await vt.chat(_FakeDb(), _FakeOllama(["SETTLED: no", f"SAY: A: うん\nASIDE: {aside}"]), talk, "どう？")
