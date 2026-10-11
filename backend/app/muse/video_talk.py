@@ -367,6 +367,7 @@ _NAME_AFTER_PREFIX = re.compile(r"^([AB]:\s*)[(（][^)）]{1,20}[)）]\s*", re.M
 # "…入っちゃいそう。B: 待って" — or straight after the full stop.
 _INLINE_SPEAKER = re.compile(r"(?:[ \t　]+|(?<=[。！？!?…」』）)]))(?=[AB][:：])")
 # "**ASIDE:** ふふ" — the bold can close after the colon.
+_QUOTED_LINE = re.compile(r"^((?:[AB][:：]\s*)?)「([^「」]*)」\s*$")
 _FIELD = re.compile(r"^\s*\**\s*(SAY|ASIDE|PITCH|WRITE)\s*\**\s*[:：]\s*\**\s*(.*)$", re.IGNORECASE)
 
 
@@ -381,6 +382,9 @@ def parse_reply(raw: str) -> dict[str, str]:
         if m := _FIELD.match(line):
             field = m.group(1).lower()
             out[field] = m.group(2).strip()
+        elif field in ("aside", "pitch") and re.match(r"\s*[AB][:：]", line):
+            # "ASIDE: …\nB: 「よーし！…」" — the duet's next line, not the mutter.
+            out["say"] = f"{out.get('say', '')}\n{line.strip()}".strip()
         elif line.strip():
             out[field] = f"{out.get(field, '')}\n{line.strip()}".strip()
     out["write"] = "yes" if (out.get("write") or "").strip().lower().startswith("y") else ""
@@ -399,7 +403,12 @@ def _clean(talk: dict[str, Any], text: str) -> str:
     text = re.sub(r"[ \t　]+/[ \t　]*$", "", text, flags=re.MULTILINE)
     if _has_partner(talk):
         text = _INLINE_SPEAKER.sub("\n", text)
-    return _NAME_AFTER_PREFIX.sub(r"\1", text)
+    text = _NAME_AFTER_PREFIX.sub(r"\1", text)
+    # 「……クスッと、ですか。」 — a whole line quoted, as in a script (2026-10-12).
+    return "\n".join(
+        (m.group(1) + m.group(2)) if (m := _QUOTED_LINE.match(ln)) else ln
+        for ln in text.split("\n")
+    )
 
 
 async def _call(ollama, talk: dict[str, Any], system: str, prompt: str) -> str:
@@ -563,30 +572,6 @@ async def asks_to_write(ollama, talk: dict[str, Any], message: str) -> bool:
     ))
     return bool(re.match(r"\W*yes\b", raw or "", re.IGNORECASE))
 
-
-# ── The clerk: does the timetable talk change the direction? ────────────────
-#
-# The polishing stages read the direction as absolute. "No trembling" was
-# taken out of the timetable but the direction still opened on "her trembling
-# hand", and the prompt put the trembling back three times (Akari, 2026-10-11).
-
-_REDIRECT_SYSTEM = """You keep the notes of a talk between a director (the Showrunner) and an actress who are planning a short video together. The direction of the clip was settled earlier; now they are working out the timing, and the Showrunner has just said something. Does it change anything the direction says — take something out of it, replace it, or change what the clip is about or how it feels? A change to the timing or to one small moment does not, unless the direction itself names that moment.
-
-If it does, answer with the direction written again with that change, in {lang}, as a plain note about the clip in nobody's voice, keeping everything else it said. If it does not, answer exactly: NO CHANGE"""
-
-
-async def redirect(ollama, talk: dict[str, Any], message: str) -> str:
-    """The direction rewritten for the Showrunner's latest line, or ""."""
-    direction = (talk.get("direction") or "").strip()
-    if not direction:
-        return ""
-    raw = (await _call(ollama, talk, _REDIRECT_SYSTEM.format(lang="Japanese" if _ja(talk) else "English"), (
-        f"THE DIRECTION:\n{direction}\n\nTHE SHOWRUNNER JUST SAID:\n{message}"
-    ))).strip()
-    if not raw or re.search(r"\bNO CHANGE\b", raw, re.IGNORECASE):
-        return ""
-    raw = re.sub(r"^\s*\**\s*DIRECTION\s*\**\s*[:：]\s*\**\s*", "", raw, flags=re.IGNORECASE).strip()
-    return "" if raw == direction else raw
 
 # ── The moves ────────────────────────────────────────────────────────────────
 async def create(
@@ -799,13 +784,6 @@ async def _timeline_turn(ollama, talk: dict[str, Any], message: str) -> None:
     if board and not _same_board(board, talk["board"]):
         talk["board"] = board
         _row(talk, "system", _say(talk, "🗒 時間割を書き直しました", "🗒 Updated the timetable"), kind="board")
-        # Only when something was asked for: a line that changed nothing
-        # cannot have changed the direction either.
-        if direction := await redirect(ollama, talk, message):
-            talk["direction"] = direction
-            _row(talk, "system", _say(
-                talk, f"🎯 方針も書き直しました：{direction}", f"🎯 Updated the direction: {direction}",
-            ), kind="redirected")
     if not wants_write:
         _post_reply(talk, await _reply(ollama, talk, message))
         return

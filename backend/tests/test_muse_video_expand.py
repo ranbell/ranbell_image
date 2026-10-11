@@ -372,7 +372,6 @@ async def test_the_timetable_is_written_only_when_asked(studio):
         "no",
         "SEGMENT 0:00-0:02 | wakes\nACTION: An anime girl with red twin tails wakes.\n"
         "SEGMENT 0:02-0:05 | caught\nACTION: She notices the camera and blushes.",
-        "NO CHANGE",  # the direction stands
         # She thinks it is time; she does not decide that (2026-10-11).
         "SAY: いいですね、書きましょうか\nWRITE: yes",
     ])
@@ -387,21 +386,31 @@ async def test_the_timetable_is_written_only_when_asked(studio):
     assert [r.get("kind") for r in talk["chat"][-3:]] == [None, "written", None]
 
 
+def test_the_later_words_outrank_the_settled_direction():
+    ctx = ve.write_context(
+        still="A rink.", people=[], duration_s=5, direction="震える手から始める",
+        intent="- 両手を引かれて滑り出す\n- 震えの表現はいらない",
+    )
+    # Absolute, the direction outranked "no trembling" (Akari, 2026-10-11).
+    assert "(absolute)" not in ctx.split("What the director wants")[0]
+    assert "later words or the timetable say otherwise, those win" in ctx
+    assert "a later line wins over an earlier one" in ctx
+
+
 @pytest.mark.asyncio
-async def test_a_line_that_undoes_the_direction_rewrites_it(studio):
-    talk = _on_timeline()
-    talk["direction"] = "震える手から始める"
+async def test_quoted_lines_and_a_duet_line_after_the_aside(studio):
+    talk = _talking()
+    talk["partner_character"] = {**RIN, "character_id": RIN_ID, "name_ja": "緒方 りん"}
     await vt.chat(_FakeDb(), _FakeOllama([
-        "no",
-        "SEGMENT 0:00-0:01 | grip\nACTION: She holds the barrier.\n"
-        "SEGMENT 0:01-0:05 | glide\nACTION: Bit by bit she gets used to the ice.",
-        "**DIRECTION:** 手すりから、少しずつ慣れて滑り出す",
-        "SAY: 震えは無しで",
-    ]), talk, "震えはいらない。徐々に慣れて前に進む感じ")
-    assert talk["direction"] == "手すりから、少しずつ慣れて滑り出す"
-    assert [r.get("kind") for r in talk["chat"]] == [None, "board", "redirected", None]
-    # The polish reads the new direction, not the old one.
-    assert "少しずつ慣れて" in vt._context(talk)
+        "SETTLED: no",
+        "SAY: A: 「……勢いよく、ね。」\nASIDE: 脚がまだプルプル\nB: 「よーし！いくよ！」\nPITCH: 速く | もっと速く",
+    ]), talk, "もっと勢いよく")
+    said = [(r["name"], r["text"], r.get("kind")) for r in talk["chat"] if r["role"] == "assistant" and r.get("kind") != "pitch"]
+    assert said == [
+        ("各務 みお", "……勢いよく、ね。", None),
+        ("緒方 りん", "よーし！いくよ！", None),
+        ("各務 みお", "脚がまだプルプル", "aside"),
+    ]
 
 
 def test_pitch_options_keep_their_inner_quotes():

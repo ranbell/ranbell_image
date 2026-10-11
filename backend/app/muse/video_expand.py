@@ -459,8 +459,18 @@ def write_context(
         # What the director asked for in the talk, in their own words. Without
         # it the writer had only the idea, and "make it cute" came back as a
         # ghost story (Asahi, 2026-10-11).
-        (f"The direction the director and the actress agreed on (absolute):\n{direction.strip()}\n\n" if direction.strip() else "")
-        + (f"What the director wants (absolute), in their words:\n{intent.strip()}\n\n" if intent.strip() else "")
+        #
+        # The direction is what they settled first; the talk goes on after it.
+        # Marked absolute, the settled "her trembling hand" outranked the
+        # later "no trembling" and the prompt trembled (Akari, 2026-10-11).
+        # A clerk asked to keep the direction up to date said "changed" to
+        # 15 lines of 15, picks included (2026-10-12) — so the order of
+        # precedence is said instead.
+        (f"The direction the director and the actress settled first — the whole idea. Where the "
+         f"director's later words or the timetable say otherwise, those win:\n{direction.strip()}\n\n"
+         if direction.strip() else "")
+        + (f"What the director wants (absolute), in their words, oldest first — a later line wins "
+           f"over an earlier one:\n{intent.strip()}\n\n" if intent.strip() else "")
         + f"Length: {duration_s} seconds, in {_segments(duration_s)} segments.\n"
         f"Who is in it:\n{_who(people)}\n\n"
         + (persona.strip() + "\n\n" if persona.strip() else "")
