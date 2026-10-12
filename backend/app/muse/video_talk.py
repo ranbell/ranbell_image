@@ -166,7 +166,9 @@ _PHASE_DIRECTION = (
     "Right now you are settling the direction: what this clip is about and how it should "
     "feel. Talk it through until the Showrunner settles it. The writers' notes below are "
     "material for you — when they fit, bring one or two of them in your own words, or "
-    "bring your own idea instead. Do not go into second-by-second detail yet; that comes "
+    "bring your own idea instead. How it is shot is part of it too — a quiet camera, one "
+    "shot that keeps moving round them, or cutting between angles. Do not go into "
+    "second-by-second detail yet; that comes "
     "once the direction is settled."
 )
 _PHASE_TIMELINE = (
@@ -174,7 +176,8 @@ _PHASE_TIMELINE = (
     "Now the two of you are working through the timetable below, moment by moment, while "
     "looking at it. Most of what you say is about the moments on it — what happens at that "
     "second, how the face changes, how it ends — but not every line has to be: it is a talk, "
-    "not a meeting. Suggest one change at a time. "
+    "not a meeting. The camera is part of it too — whether it circles round them, follows, "
+    "rises or closes in is yours and the Showrunner's to talk about. Suggest one change at a time. "
     "The timetable is kept by someone else: it changes only when the Showrunner asks for "
     "something or says yes to it."
 )
@@ -321,6 +324,7 @@ def _notes_block(talk: dict[str, Any]) -> str:
 def _board_text(talk: dict[str, Any]) -> str:
     return "\n".join(
         f"{ve._clock(s['start'])}-{ve._clock(s['end'])} {s.get('title', '')}: {s['action']}"
+        + (f" [camera: {s['camera']}]" if s.get("camera") else "")
         for s in talk.get("board") or []
     )
 
@@ -621,8 +625,9 @@ def model_inputs(cfg: dict[str, Any], locale: str, model: str = "") -> dict[str,
 
 _SETTLE_SYSTEM = """You keep the notes of a talk between a director (the Showrunner) and an actress who are planning a short video together. Read the talk. Has the Showrunner settled the direction — what the clip is about and how it should feel — so that the two of them can go on to work out the timing? Taking up one of the actress's suggestions counts. Asking a question, or still weighing options, does not.
 
-Answer in two lines and nothing else:
+Answer in three lines and nothing else:
 SETTLED: yes or no
+STYLE: how it is to be shot — calm (one shot, a quiet camera), flow (one shot, the camera moving round them all the time) or cuts (cut between two or three angles). Take what the talk said; when it said nothing, the one that suits the clip.
 DIRECTION: when yes, the settled direction in two or three sentences in {lang}, keeping the Showrunner's own words where they gave them. What the Showrunner wants is the heart of the clip and comes first; what was added on top of it comes after, as how it is done. Write it as a plain note about the clip, in nobody's voice — not as the actress or the Showrunner talking. When no, leave it empty."""
 
 _FORCE_SETTLE = (
@@ -644,10 +649,15 @@ async def settle_direction(ollama, talk: dict[str, Any], *, force: bool = False)
         + (_FORCE_SETTLE if force else "")
     )
     raw = await _call(ollama, talk, system, prompt)
+    style = re.search(r"STYLE\s*\**\s*[:：]\s*\**\s*(calm|flow|cuts)", raw or "", re.IGNORECASE)
     settled = re.search(r"SETTLED\s*[:：]\s*(\w+)", raw or "", re.IGNORECASE)
     direction = re.search(r"DIRECTION\s*[:：]\s*(.+)", raw or "", re.IGNORECASE | re.DOTALL)
     text = (direction.group(1).strip() if direction else "").strip()
     if (settled and settled.group(1).lower().startswith("y")) or force:
+        # A style the Showrunner picked on screen stands.
+        if style and talk.get("style_by") != "user":
+            talk["style"] = style.group(1).lower()
+        text = re.split(r"\n\s*\**\s*STYLE\s*[:：]", text, flags=re.IGNORECASE)[0].strip()
         return text or intent_of(talk)
     return ""
 
@@ -798,8 +808,24 @@ def _context(talk: dict[str, Any], *, persona: bool = False) -> str:
         still=talk.get("still", ""), people=talk.get("people") or [],
         duration_s=int(talk.get("duration_s") or 5), intent=intent_of(talk),
         direction=talk.get("direction", ""), persona=persona_of(talk) if persona else "",
-        avoid=talk.get("avoid", ""),
+        avoid=talk.get("avoid", ""), style=style_of(talk),
     )
+
+
+def style_of(talk: dict[str, Any]) -> str:
+    """How the clip is shot; talks from before styles were quiet ones."""
+    return talk.get("style") if talk.get("style") in ve.STYLES else "calm"
+
+
+async def set_style(db, talk: dict[str, Any], style: str) -> dict[str, Any]:
+    """The Showrunner's pick on screen. The timetable stays; the polish follows it."""
+    if style not in ve.STYLES:
+        raise VideoTalkError(f"unknown style: {style}")
+    talk["style"], talk["style_by"] = style, "user"
+    names = {"calm": ("じっくり", "Quiet"), "flow": ("回り込み", "Moving"), "cuts": ("カット割り", "Cuts")}[style]
+    _row(talk, "system", _say(talk, f"🎥 撮り方：{names[0]}", f"🎥 Shot as: {names[1]}"), kind="style")
+    await video_db.save(db, talk)
+    return talk
 
 
 async def _start_timeline(ollama, talk: dict[str, Any], direction: str) -> None:
@@ -855,7 +881,11 @@ async def _direction_turn(ollama, talk: dict[str, Any], message: str) -> None:
 
 def _same_board(a: list[dict[str, Any]], b: list[dict[str, Any]]) -> bool:
     def key(segs):
-        return [(s.get("start"), s.get("end"), " ".join(str(s.get("action") or "").split())) for s in segs]
+        return [
+            (s.get("start"), s.get("end"), " ".join(str(s.get("action") or "").split()),
+             " ".join(str(s.get("camera") or "").split()))
+            for s in segs
+        ]
     return key(a) == key(b)
 
 
@@ -967,7 +997,7 @@ async def _write(ollama, talk: dict[str, Any]) -> None:
             duration_s=int(talk.get("duration_s") or 5), model=inputs["model"],
             num_ctx=inputs["num_ctx"], locale=_locale(talk), intent=intent_of(talk),
             persona=persona_of(talk), direction=talk.get("direction", ""),
-            segments=talk["board"], avoid=talk.get("avoid", ""),
+            segments=talk["board"], avoid=talk.get("avoid", ""), style=style_of(talk),
         )
     except ve.VideoError as exc:
         # What the model returned, kept on the record: the screen only says it failed.
@@ -1017,8 +1047,9 @@ def view(talk: dict[str, Any]) -> dict[str, Any]:
         "phase": _phase(talk),
         "direction": talk.get("direction", ""),
         "avoid": talk.get("avoid", ""),
+        "style": style_of(talk),
         "board": [
-            {k: s.get(k) for k in ("start", "end", "title", "action")}
+            {k: s.get(k) for k in ("start", "end", "title", "action", "camera")}
             for s in talk.get("board") or []
         ],
         "prompts": [

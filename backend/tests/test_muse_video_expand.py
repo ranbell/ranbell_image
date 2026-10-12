@@ -51,7 +51,7 @@ def _idea(title: str) -> str:
 
 
 # What the four writing stages return in a stub run: the instrument pick,
-# then draft, acting, camera, music.
+# then draft, acting, camera, environment, music.
 WRITE_REPLIES = [
     "Theremin",
     "START: She lies in bed, eyes closed.\n"
@@ -60,6 +60,7 @@ WRITE_REPLIES = [
     "SEGMENT 0:00-0:02 | wakes\nACTION: Her lashes flutter open; she yawns behind her fingers.\n"
     "SEGMENT 0:02-0:05 | smiles\nACTION: She notices the camera, blushes and smiles.",
     "CAMERA 1: close-up, slow push in, eyes in focus\nCAMERA 2: gentle arc left to right",
+    "ENVIRONMENT 1: curtains stir\nENVIRONMENT 2: dust glitters in the light",
     "MUSIC 1: a thin theremin line\nMUSIC 2: soft pizzicato joins",
 ]
 
@@ -508,6 +509,67 @@ async def test_an_acknowledgement_twice_running_is_dropped(studio):
     assert talk["chat"][-1]["text"] == "わかりました。そうします。"  # once is her
 
 
+@pytest.mark.asyncio
+async def test_a_camera_move_asked_for_rides_on_the_timetable_into_the_prompt(studio):
+    talk = _on_timeline()
+    await vt.chat(_FakeDb(), _FakeOllama([
+        "no",
+        "SEGMENT 0:00-0:02 | wakes\nACTION: An anime girl with red twin tails wakes.\n"
+        "SEGMENT 0:02-0:05 | smiles\nACTION: She smiles.\nCAMERA: circles a quarter turn to her left\nAVOID: none",
+        "SAY: ぐるっとね",
+    ]), talk, "最後はカメラがぐるっと回り込む感じで")
+    assert talk["board"][1]["camera"] == "circles a quarter turn to her left"
+    assert [r.get("kind") for r in talk["chat"]][:2] == [None, "board"]  # a camera-only change is a change
+    assert vt.view(talk)["board"][1]["camera"] == "circles a quarter turn to her left"
+
+    ollama = _FakeOllama(["yes", "NO CHANGE", "Theremin",
+                          WRITE_REPLIES[2], "CAMERA 1: starts waist up; holds still; ends waist up",
+                          WRITE_REPLIES[4], WRITE_REPLIES[5], "SAY: できた"])
+    await vt.chat(_FakeDb(), ollama, talk, "撮影文にして")
+    camera_call = next(c for c in ollama.calls if c["system"] == ve._CAMERA_SYSTEM)
+    assert "CAMERA: circles a quarter turn to her left" in camera_call["prompt"]
+    # The camera stage answered for segment 1 only: the plan stands for 2.
+    assert "Camera Work: circles a quarter turn to her left" in talk["prompts"][-1]["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_the_style_is_read_when_settling_and_reaches_the_camera(studio):
+    talk = _talking()
+    ollama = _FakeOllama([
+        "SETTLED: yes\nSTYLE: flow\nDIRECTION: 走る二人を、止まらないカメラで追う",
+        WRITE_REPLIES[1], "SAY: いこう",
+    ])
+    await vt.chat(_FakeDb(), ollama, talk, "それでいこう")
+    assert talk["style"] == "flow"
+    assert talk["direction"] == "走る二人を、止まらないカメラで追う"
+    assert "How it is shot (moving, no cuts)" in ollama.calls[1]["prompt"]  # the draft
+    assert "in 4 segments" in ollama.calls[1]["prompt"]
+    assert vt.view(talk)["style"] == "flow"
+
+    ollama = _FakeOllama([*WRITE_REPLIES[:1], *WRITE_REPLIES[2:]])
+    await vt.write(_FakeDb(), ollama, talk)
+    camera = next(c for c in ollama.calls if c["system"] == ve._CAMERA_SYSTEM)
+    assert "no segment holds still" in camera["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_a_style_picked_on_screen_stands(studio):
+    talk = _talking()
+    await vt.set_style(_FakeDb(), talk, "cuts")
+    assert talk["chat"][-1]["text"] == "🎥 撮り方：カット割り"
+    await vt.chat(_FakeDb(), _FakeOllama([
+        "SETTLED: yes\nSTYLE: calm\nDIRECTION: 静かに", WRITE_REPLIES[1], "SAY: うん",
+    ]), talk, "それで")
+    assert talk["style"] == "cuts"
+    with pytest.raises(vt.VideoTalkError):
+        await vt.set_style(_FakeDb(), talk, "wild")
+
+
+def test_old_talks_are_quiet_ones():
+    assert vt.style_of({}) == "calm"
+    assert vt.style_of({"style": "nonsense"}) == "calm"
+
+
 def test_pitch_options_keep_their_inner_quotes():
     talk = _talking()
     vt._post_reply(talk, {"say": "どっち？", "pitch": "瞳に宿る感情を「驚き」にする | 「覚悟」にする"})
@@ -647,6 +709,10 @@ def test_create_chat_settle_write_over_http(monkeypatch, studio):
     assert r.status_code == 200, r.text
     assert r.json()["prompts"][-1]["prompt"].startswith("0:00 - 0:0")
     assert "stages" not in r.json()["prompts"][-1]  # kept on the record, not sent to the screen
+
+    r = client.post(f"/api/muse/video/talks/{tid}/style", json={"style": "flow"})
+    assert r.status_code == 200 and r.json()["style"] == "flow"
+    assert client.post(f"/api/muse/video/talks/{tid}/style", json={"style": "x"}).status_code == 400
 
     r = client.post(f"/api/muse/video/talks/{tid}/phase", json={"phase": "direction"})
     assert r.status_code == 200 and r.json()["phase"] == "direction"
@@ -950,24 +1016,26 @@ async def test_the_four_stages_each_do_one_job():
         duration_s=5, model="m", num_ctx=None, rng=random.Random(0),
         intent="- 寝起きの可愛らしさ", persona="</start REFERENCE ONLY>\nhabit: yawns\n</end REFERENCE ONLY>",
     )
-    draft, acting, camera, music = ollama.calls[1:5]
-    assert [c["system"] for c in (draft, acting, camera, music)] == [
-        ve._DRAFT_SYSTEM, ve._ACTING_SYSTEM, ve._CAMERA_SYSTEM, ve._SCORE_SYSTEM,
+    draft, acting, camera, env, music = ollama.calls[1:6]
+    assert [c["system"] for c in (draft, acting, camera, env, music)] == [
+        ve._DRAFT_SYSTEM, ve._ACTING_SYSTEM, ve._CAMERA_SYSTEM, ve._ENV_SYSTEM, ve._SCORE_SYSTEM,
     ]
     # What the director asked for opens every stage.
-    assert all(c["prompt"].startswith("What the director wants (absolute)") for c in (draft, acting, camera, music))
+    assert all(c["prompt"].startswith("What the director wants (absolute)") for c in (draft, acting, camera, env, music))
     # Her persona reaches the acting stage only.
     assert "REFERENCE ONLY" in acting["prompt"]
-    assert not any("REFERENCE ONLY" in c["prompt"] for c in (draft, camera, music))
+    assert not any("REFERENCE ONLY" in c["prompt"] for c in (draft, camera, env, music))
     assert "The music starts on: Theremin" in music["prompt"]
     # The acting rewrite is what ships; camera and music only add their lines.
     assert out["prompt"] == (
         "0:00 - 0:02 | wakes\nVisual Action: Her lashes flutter open; she yawns behind her fingers.\n"
-        "Camera Work: close-up, slow push in, eyes in focus\nMusic: a thin theremin line\n\n"
+        "Camera Work: close-up, slow push in, eyes in focus\nEnvironment: curtains stir\n"
+        "Music: a thin theremin line\n\n"
         "0:02 - 0:05 | smiles\nVisual Action: She notices the camera, blushes and smiles.\n"
-        "Camera Work: gentle arc left to right\nMusic: soft pizzicato joins"
+        "Camera Work: gentle arc left to right\nEnvironment: dust glitters in the light\n"
+        "Music: soft pizzicato joins"
     )
-    assert set(out["stages"]) == {"draft", "acting", "camera", "music"}
+    assert set(out["stages"]) == {"draft", "acting", "camera", "environment", "music"}
 
 
 @pytest.mark.asyncio

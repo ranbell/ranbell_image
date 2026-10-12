@@ -380,6 +380,10 @@ _STAGE_COMMON = (
 # four times of four, the jump included (2026-10-12) — not kept. Nor was a
 # line explaining that a jump renders as a glitch: no change in four runs.
 # GAP has it say what must happen before the asked-for moment can.
+# The camera may circle, follow and rise in one flowing move, and a move the
+# talk planned rides on the timetable's CAMERA line: told "one movement" per
+# segment for continuity, it mostly held still or pushed in, where a render
+# the Showrunner liked circled her the whole time (2026-10-12).
 # A rendered clip jumped from the still at 0:00 and cut on every segment:
     # each stage had written each segment as a fresh shot (Akari, 2026-10-11).
     "The clip is one continuous shot that grows out of the photograph. At 0:00 it is the "
@@ -397,11 +401,14 @@ _DRAFT_SYSTEM = _STAGE_COMMON + """
 
 Your stage: the draft. The first segment starts from exactly what the photograph shows — where each person is, how far apart they are, what they hold, how they sit or stand. If what the director wants needs them somewhere else, closer together, or holding something they are not, the timetable gets there and shows it: someone across the room takes time to cross it, a hand has to reach before it holds. Or a segment cuts to it. Decide the segments and what happens in each — one feeling that grows across the whole clip toward what the director asked for, every segment moving it one step. Each segment shows the viewer something change that a camera can see. A segment with nothing new to show is not a segment. A cut only when the idea goes to another place or time; say so in that segment's action. Other stages will add the acting detail, the camera and the music — leave those to them.
 
+When the camera's movement is part of the idea — circling them, following a run, rising to show the place, sweeping round to the other side — add a CAMERA line to that segment saying how it moves. Otherwise leave the camera to a later stage.
+
 Answer in this shape and nothing else, every field on its own line:
 START: one or two sentences — where each person is in the photograph at 0:00, how far apart they are, which way they face, and what they are doing.
 GAP: what has to happen first, from START, before what the director asked for can happen — who has to move where, turn, or pick something up. "Nothing" when it can start at once.
 SEGMENT 0:00-0:01 | a few words naming what happens
 ACTION: two or three plain sentences — what happens and what she feels.
+CAMERA: only where the camera's movement matters; leave the line out otherwise.
 (the next segment the same way)
 In the first segment's action, say the style of the picture and how each person looks (hair, eyes, clothes)."""
 
@@ -413,11 +420,31 @@ Answer in the same shape as the draft — the SEGMENT lines exactly as given, ea
 
 _CAMERA_SYSTEM = _STAGE_COMMON + """
 
-Your stage: the camera and the light. You are given the segments. The camera starts where the photograph's camera is — its framing is in the description of the picture. For each segment write: where the camera starts (for the first segment, the photograph's framing; after that, exactly where the segment before ended), the one movement it makes and its speed (push in, pull back, pan, tilt, follow, or hold still), the framing it ends on, what stays in focus, and how the light sits or changes. The camera moves for a reason the viewer can feel — it follows the acting. A different framing with no movement between is a cut: only where the segment's action says it cuts. A camera that holds still ends on the framing it started on. Name each framing itself ("waist up, low angle") — the video model never sees the other segments, so "where the last one ended" means nothing to it. Do not rewrite the action.
+Your stage: the camera and the light. You are given the segments. The camera starts where the photograph's camera is — its framing is in the description of the picture. Where a segment already has a CAMERA line, that is the movement the director and the actress planned: keep it, and write it out in full. For each segment write: where the camera starts (for the first segment, the photograph's framing; after that, exactly where the segment before ended), how it moves and how fast — one movement, or several flowing together without a break (circling round her while closing in; rising as it pulls back), or holding still — the framing it ends on, what stays in focus, and how the light sits or changes. A camera that circles says which way and how far round (a quarter turn to her left), and what comes into view. The camera moves for a reason the viewer can feel — it follows the acting. A different framing with no movement between is a cut: only where the segment's action says it cuts. A camera that holds still ends on the framing it started on. Name each framing itself ("waist up, low angle") — the video model never sees the other segments, so "where the last one ended" means nothing to it. Do not rewrite the action.
 
 Answer with one line per segment, in order, and nothing else:
 CAMERA 1: starts …; moves …; ends …; focus …; light …
 CAMERA 2: starts …; moves …; ends …; focus …; light …"""
+
+# The world around them, one job of its own. The render the Showrunner liked
+# had an Environment line on every segment — leaves stirring, the moon
+# brightening, a gust — and ours had the place standing still.
+_ENV_SYSTEM = _STAGE_COMMON + """
+
+Your stage: the world around them. You are given the segments. For each one, write what moves around the people — air and wind in hair and cloth, light shifting, things in the background, steam, dust or particles — so the place feels alive and answers what happens. Keep to what the place in the picture has; nothing new arrives unless the action brings it. Do not rewrite the action.
+
+Answer with one line per segment, in order, and nothing else:
+ENVIRONMENT 1: ...
+ENVIRONMENT 2: ..."""
+
+_CAMERA_BY_STYLE = {
+    "calm": "This clip is shot quietly: the camera may hold still or drift.",
+    "flow": "This clip keeps the camera moving: no segment holds still, and each one's movement carries into the next.",
+    "cuts": "This clip cuts between angles: a segment whose action says it cuts starts on its new framing, and says how the cut is made; every other segment starts where the one before ended.",
+}
+_ACTING_BY_STYLE = {
+    "cuts": "Where a segment cuts to a new shot, say again how each person looks (hair, clothes) — the video model does not carry them across a cut.",
+}
 
 _SCORE_SYSTEM = _STAGE_COMMON + """
 
@@ -445,20 +472,50 @@ _BOARD_SYSTEM = _STAGE_COMMON + """
 
 Your stage: keeping the timetable. The director and the actress are working the clip out segment by segment while looking at this timetable. You are given the timetable, what the director just said, and what the actress had said just before it. Write in what the director just asked for — a change to one moment, a new beat, a different ending, a different length of a segment. What the actress had said goes in only when the director's line says yes to it ("yes", "let's do that", picking her option); otherwise it is only there so that you understand what the director is answering. When a moment now has more to do than its seconds can hold — "she gets used to it bit by bit" in a single second — give it more seconds by taking them from a moment that has less to do; the whole clip stays the same length. Change only that; every segment and every word nobody asked to change stays exactly as it is.
 
+A segment may have a CAMERA line — how the camera moves there. Write one in when the director asks for a camera movement or says yes to one ("circle round them here"); keep the ones there unless asked to change them.
+
 The timetable ends with an AVOID line: what the director has said they do not want in the clip ("no trembling", "not sad"). Carry it over, and add to it when the director says no to something — that holds for every moment, not just the one being talked about. "none" when there is nothing.
 
-Answer with the whole timetable in the same shape — SEGMENT lines with their ACTION, then the AVOID line — and nothing else. If nothing in the exchange changes the timetable or the AVOID line, answer exactly: NO CHANGE"""
+Answer with the whole timetable in the same shape — SEGMENT lines with their ACTION (and CAMERA where there is one), then the AVOID line — and nothing else. If nothing in the exchange changes the timetable or the AVOID line, answer exactly: NO CHANGE"""
 
 
-def _segments(duration_s: int) -> int:
-    """About two seconds a segment, with a beat at each end of a short clip."""
+# How the clip is shot. A render the Showrunner liked kept its camera moving
+# round her for all five seconds, where ours held still for three; and cutting
+# between angles had once broken the scene (2026-10-11/12). Which of the
+# three a clip gets is settled in the talk, and can be changed on screen.
+STYLES: dict[str, str] = {
+    "calm": (
+        "One continuous shot from the photograph, with a quiet camera: it may hold still, "
+        "drift or ease in, so that the face and the small movements carry the clip."
+    ),
+    "flow": (
+        "One continuous shot from the photograph, and the camera never stops: in every "
+        "segment it moves — closing in, circling round them, following, rising, sweeping "
+        "past — often two movements at once, each segment's movement flowing into the next. "
+        "Segments are uneven, a second or two each, changing with the action."
+    ),
+    "cuts": (
+        "Two or three shots. The first is the photograph and carries on from it; each new "
+        "shot opens a segment whose ACTION says it cuts, and how the eye is carried across — "
+        "a whip pan, the camera passing behind someone, a cut on a movement. Same place, same "
+        "people, same clothes in every shot; never a cut in the first second."
+    ),
+}
+STYLE_NAMES = {"calm": "quiet", "flow": "moving, no cuts", "cuts": "cut between angles"}
+
+
+def _segments(duration_s: int, style: str = "calm") -> int:
+    """About two seconds a segment, with a beat at each end of a short clip;
+    shorter beats when the camera keeps moving."""
+    if style == "flow":
+        return {5: 4, 10: 7, 15: 9}.get(duration_s, max(4, round(duration_s / 1.4)))
     return {5: 3, 10: 5, 15: 6}.get(duration_s, max(3, round(duration_s / 2)))
 
 
 def write_context(
     *, still: str, people: list[dict[str, str]], idea: dict[str, Any] | None = None,
     duration_s: int, intent: str = "", persona: str = "", direction: str = "",
-    avoid: str = "",
+    avoid: str = "", style: str = "calm",
 ) -> str:
     """What every stage is told about the clip, the absolute first."""
     idea = idea or {}
@@ -482,7 +539,8 @@ def write_context(
            f"over an earlier one:\n{intent.strip()}\n\n" if intent.strip() else "")
         + (f"What the director does not want anywhere in the clip (absolute) — not in the face, "
            f"the body, the camera or the music:\n{avoid.strip()}\n\n" if avoid.strip() else "")
-        + f"Length: {duration_s} seconds, in {_segments(duration_s)} segments.\n"
+        + f"How it is shot ({STYLE_NAMES.get(style, style)}): {STYLES.get(style, STYLES['calm'])}\n\n"
+        + f"Length: {duration_s} seconds, in {_segments(duration_s, style)} segments.\n"
         f"Who is in it:\n{_who(people)}\n\n"
         + (persona.strip() + "\n\n" if persona.strip() else "")
         + f"The picture (0:00):\n{still.strip()}"
@@ -658,13 +716,15 @@ def layout(segments: list[dict[str, Any]], *, duration_s: int) -> str:
         lines = [head, f"Visual Action: {s['action']}"]
         if s.get("camera"):
             lines.append(f"Camera Work: {s['camera']}")
+        if s.get("environment"):
+            lines.append(f"Environment: {s['environment']}")
         if s.get("music"):
             lines.append(f"Music: {s['music']}")
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks)
 
 
-_NUMBERED = re.compile(r"^\s*(CAMERA|MUSIC)\s*(\d+)?\s*[:：]\s*(.+)$", re.IGNORECASE)
+_NUMBERED = re.compile(r"^\s*(CAMERA|MUSIC|ENVIRONMENT)\s*(\d+)?\s*[:：]\s*(.+)$", re.IGNORECASE)
 
 
 def parse_numbered(raw: str, label: str, count: int) -> list[str]:
@@ -693,6 +753,7 @@ def parse_numbered(raw: str, label: str, count: int) -> list[str]:
 def _segments_text(segments: list[dict[str, Any]]) -> str:
     return "\n".join(
         f"SEGMENT {_clock(s['start'])}-{_clock(s['end'])} | {s.get('title', '')}\nACTION: {s['action']}"
+        + (f"\nCAMERA: {s['camera']}" if s.get("camera") else "")
         for s in segments
     )
 
@@ -774,16 +835,20 @@ async def keep_board(
 async def polish(
     ollama, *, segments: list[dict[str, Any]], context: str, acting_context: str,
     duration_s: int, model: str | None, num_ctx: int | None, instrument: str = "",
+    style: str = "calm",
 ) -> dict[str, Any]:
-    """Acting, then camera and music, over a settled timetable. A stage that
-    fails leaves the timetable's version of its part in place."""
+    """Acting, then camera, the world around them and music, over a settled
+    timetable. A stage that fails leaves the timetable's version of its part
+    in place."""
     segments = [dict(s) for s in segments]
     _fit_times(segments, duration_s)
     stages: dict[str, str] = {}
 
     # Acting — her persona (fenced) reaches this stage only.
+    acting_rule = _ACTING_BY_STYLE.get(style, "")
     raw = await _stage(
-        ollama, _ACTING_SYSTEM, f"{acting_context}\n\nThe draft:\n{_segments_text(segments)}",
+        ollama, _ACTING_SYSTEM,
+        f"{acting_context}\n\nThe draft:\n{_segments_text(segments)}" + (f"\n\n{acting_rule}" if acting_rule else ""),
         model=model, num_ctx=num_ctx,
     )
     stages["acting"] = raw
@@ -797,13 +862,23 @@ async def polish(
     # Camera and music write only their own line, so they cannot drop the action.
     listing = _segments_text(segments)
     raw = await _stage(
-        ollama, _CAMERA_SYSTEM, f"{context}\n\nThe segments:\n{listing}",
+        ollama, _CAMERA_SYSTEM,
+        f"{context}\n\nThe segments:\n{listing}\n\n{_CAMERA_BY_STYLE.get(style, _CAMERA_BY_STYLE['calm'])}",
         model=model, num_ctx=num_ctx,
     )
     stages["camera"] = raw
     for seg, line in zip(segments, parse_numbered(raw, "CAMERA", len(segments))):
         if line:
             seg["camera"] = line
+
+    raw = await _stage(
+        ollama, _ENV_SYSTEM, f"{context}\n\nThe segments:\n{listing}",
+        model=model, num_ctx=num_ctx,
+    )
+    stages["environment"] = raw
+    for seg, line in zip(segments, parse_numbered(raw, "ENVIRONMENT", len(segments))):
+        if line:
+            seg["environment"] = line
 
     raw = await _stage(
         ollama, _SCORE_SYSTEM,
@@ -824,6 +899,7 @@ async def write(
     duration_s: int, model: str | None, num_ctx: int | None, locale: str = "ja",
     rng: random.Random | None = None, intent: str = "", persona: str = "",
     direction: str = "", segments: list[dict[str, Any]] | None = None, avoid: str = "",
+    style: str = "calm",
 ) -> dict[str, Any]:
     """The prompt in four stages: draft (skipped when a timetable is given),
     acting, camera, music. What each stage returned is kept in `stages`."""
@@ -833,7 +909,7 @@ async def write(
     )
     context = write_context(
         still=still, people=people, idea=idea, duration_s=duration_s,
-        intent=intent, direction=direction, avoid=avoid,
+        intent=intent, direction=direction, avoid=avoid, style=style,
     )
     stages: dict[str, str] = {}
     if not segments:
@@ -843,11 +919,11 @@ async def write(
         )
     acting_context = write_context(
         still=still, people=people, idea=idea, duration_s=duration_s,
-        intent=intent, persona=persona, direction=direction, avoid=avoid,
+        intent=intent, persona=persona, direction=direction, avoid=avoid, style=style,
     )
     out = await polish(
         ollama, segments=segments, context=context, acting_context=acting_context,
-        duration_s=duration_s, model=model, num_ctx=num_ctx, instrument=instrument,
+        duration_s=duration_s, model=model, num_ctx=num_ctx, instrument=instrument, style=style,
     )
     out["stages"] = {**stages, **out["stages"]}
     out["instrument"] = instrument

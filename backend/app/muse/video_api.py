@@ -196,6 +196,19 @@ async def settle(talk_id: str, request: Request):
     return await _run(lambda: video_talk.settle(_db(request), _ollama(request), talk))
 
 
+class TalkStyle(BaseModel):
+    style: str
+
+
+@router.post("/talks/{talk_id}/style")
+async def style(talk_id: str, body: TalkStyle, request: Request):
+    """How the clip is shot: calm, flow or cuts."""
+    if body.style not in video_expand.STYLES:
+        raise HTTPException(400, "style must be calm, flow or cuts")
+    talk = await _talk(request, talk_id)
+    return await _run(lambda: video_talk.set_style(_db(request), talk, body.style))
+
+
 @router.post("/talks/{talk_id}/phase")
 async def phase(talk_id: str, body: TalkPhase, request: Request):
     """Back to the direction talk (the only way back; forward is `settle`)."""

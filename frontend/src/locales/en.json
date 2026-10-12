@@ -1921,6 +1921,15 @@
     "timetable": "Timetable",
     "timetableHint": "Changes as you talk it over",
     "lengthChanged": "Length is now {n} s; the times are shared out again when the prompt is written",
-    "avoid": "Kept out"
+    "avoid": "Kept out",
+    "style": {
+      "label": "Shot as",
+      "calm": "Quiet",
+      "flow": "Moving",
+      "cuts": "Cuts",
+      "calmHint": "One shot. A quiet camera; the face and small movements carry it",
+      "flowHint": "One shot. The camera never stops: closing in, circling, following, flowing on",
+      "cutsHint": "Two or three shots, joined by movement — a whip pan, passing behind someone"
+    }
   }
 }

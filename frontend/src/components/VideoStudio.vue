@@ -256,6 +256,19 @@ async function settleDirection() {
   })
 }
 
+// How it is shot: settled in the talk, changed here at any time.
+const STYLES = ['calm', 'flow', 'cuts']
+async function setStyle(style) {
+  if (!talk.value || talk.value.style === style) return
+  await run('style', async () => {
+    talk.value = await api(`/api/muse/video/talks/${talk.value.talk_id}/style`, {
+      method: 'POST',
+      body: JSON.stringify({ style }),
+    })
+    await scrollChat()
+  })
+}
+
 async function backToDirection() {
   await run('back', async () => {
     talk.value = await api(`/api/muse/video/talks/${talk.value.talk_id}/phase`, {
@@ -404,6 +417,7 @@ const waitingLabel = computed(() => ({
   repitch: t('video.thinking'),
   settle: t('video.settling'),
   back: '',
+  style: '',
 }[busy.value] || ''))
 </script>
 
@@ -628,6 +642,21 @@ const waitingLabel = computed(() => ({
                 </li>
               </ol>
 
+              <!-- How it is shot -->
+              <div class="flex flex-wrap items-center gap-1.5 text-[10px]">
+                <span class="text-gray-400">🎥 {{ t('video.style.label') }}</span>
+                <button
+                  v-for="st in STYLES"
+                  :key="st"
+                  type="button"
+                  class="rounded-full border px-2 py-0.5 disabled:opacity-40"
+                  :class="talk.style === st ? 'border-sky-400/70 bg-sky-950/40 text-sky-50' : 'border-white/10 text-gray-400 hover:text-gray-200'"
+                  :title="t(`video.style.${st}Hint`)"
+                  :disabled="!!busy"
+                  @click="setStyle(st)"
+                >{{ t(`video.style.${st}`) }}</button>
+              </div>
+
               <!-- 1. The direction: talked over, with the writers' notes as material -->
               <template v-if="phase === 'direction'">
                 <div class="space-y-2 rounded-xl border border-white/10 bg-gray-900/60 p-2.5">
@@ -698,6 +727,7 @@ const waitingLabel = computed(() => ({
                       <span class="truncate font-medium text-gray-100">{{ seg.title }}</span>
                     </div>
                     <p class="text-[11px] leading-relaxed text-gray-300">{{ seg.action }}</p>
+                    <p v-if="seg.camera" class="mt-0.5 text-[10px] leading-relaxed text-sky-200/80">🎥 {{ seg.camera }}</p>
                   </div>
                   <!-- What the director said no to: kept for the whole clip -->
                   <p v-if="talk.avoid" class="rounded-lg border border-rose-500/30 bg-rose-950/20 px-2.5 py-1 text-[11px] text-rose-100/90">
