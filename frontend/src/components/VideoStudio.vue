@@ -56,6 +56,7 @@ const setupOpen = ref(true)
 const busy = ref('')
 const input = ref('')
 const chatEl = ref(null)
+const chatInput = ref(null)
 const elapsed = ref(0)
 let timer = null
 let lastNonce = 0
@@ -243,10 +244,34 @@ async function loadShaTalks() {
 
 // Another video from the same picture: a clean talk with the same cast,
 // model and length — nothing carried over but the reading of the picture.
+// She does not open it (no model call): the screen switches at once and
+// waits for the Showrunner's first line.
 async function newVideo() {
+  if (!talk.value) return
   note.value = ''
+  input.value = ''
   promptIndex.value = -1
-  await startTalk()
+  await run('new', async () => {
+    talk.value = await api('/api/muse/video/talks', {
+      method: 'POST',
+      body: JSON.stringify({
+        sha256: sha.value,
+        character_id: leadId.value,
+        partner_id: partnerId.value,
+        duration_s: seconds.value,
+        short: '',
+        locale: isJa.value ? 'ja' : 'en',
+        model: model.value,
+        reuse_talk_id: talk.value.talk_id,
+        opener: false,
+      }),
+    })
+    setupOpen.value = false
+    await loadShaTalks()
+    await scrollChat()
+  })
+  await nextTick()
+  chatInput.value?.focus()
 }
 
 async function send() {
@@ -437,6 +462,7 @@ const waitingLabel = computed(() => ({
   settle: t('video.settling'),
   back: '',
   style: '',
+  new: '',
 }[busy.value] || ''))
 </script>
 
@@ -863,6 +889,7 @@ const waitingLabel = computed(() => ({
             <!-- Enter is a plain newline; sending is the button (kana conversion confirms with Enter). -->
             <div class="flex items-end gap-2 border-t border-white/10 p-3">
               <textarea
+                ref="chatInput"
                 v-model="input"
                 rows="2"
                 class="min-w-0 flex-1 resize-y rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-sm leading-relaxed text-gray-100 outline-none focus:border-amber-500"

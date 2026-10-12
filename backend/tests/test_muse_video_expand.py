@@ -581,6 +581,22 @@ async def test_settling_on_the_note_alone_reads_the_note(studio):
     assert talk["direction"] == "ベッドでスマホの通知に気づく"
 
 
+@pytest.mark.asyncio
+async def test_another_video_from_the_still_starts_blank_and_without_a_call(studio):
+    first = await vt.create(_FakeDb({}), _FakeOllama(["A pier.", "SAY: どうする？"]), sha="pier", character_id=MIO_ID, cfg=CFG)
+    ollama = _FakeOllama([])
+    talk = await vt.create(_FakeDb({}), ollama, sha="pier", character_id=MIO_ID, cfg=CFG, reuse=first, opener=False)
+    assert ollama.calls == []  # the reading is reused and she waits
+    assert [r.get("kind") for r in talk["chat"]] == ["new"]
+    assert talk["still"] == "A pier." and talk["talk_id"] != first["talk_id"]
+
+    # The first line is the wish: the writers pitch with it and she answers.
+    ollama.replies = [*[_idea(k) for k in ve.KINDS], "SAY: 夕暮れの桟橋、いいですね"]
+    await vt.chat(_FakeDb({}), ollama, talk, "夕暮れの桟橋で、静かに")
+    assert [i["kind"] for i in talk["ideas"]] == list(ve.KINDS)
+    assert talk["chat"][-1]["text"] == "夕暮れの桟橋、いいですね"
+
+
 def test_pitch_options_keep_their_inner_quotes():
     talk = _talking()
     vt._post_reply(talk, {"say": "どっち？", "pitch": "瞳に宿る感情を「驚き」にする | 「覚悟」にする"})

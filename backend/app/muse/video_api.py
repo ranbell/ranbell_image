@@ -21,6 +21,9 @@ class TalkCreate(BaseModel):
     # An earlier talk about the same picture: its reading is reused, so a
     # different actress can be called in without looking at the picture again.
     reuse_talk_id: str = ""
+    # False for "another video from this still": no opening line, the talk
+    # waits for the Showrunner's first one.
+    opener: bool = True
 
 
 class TalkChat(BaseModel):
@@ -157,12 +160,15 @@ async def create_talk(body: TalkCreate, request: Request):
         raise HTTPException(400, "duration_s must be 5, 10 or 15")
     reuse = await video_db.load(_db(request), body.reuse_talk_id) if body.reuse_talk_id else None
     cfg = await _cfg(request)
-    await make_room(request, video_talk.model_inputs(cfg, body.locale, body.model)["model"])
+    # Nothing to run when she waits and the reading is reused: no room to make.
+    quiet = not body.opener and bool(reuse and reuse.get("sha256") == body.sha256.strip() and reuse.get("still"))
+    if not quiet:
+        await make_room(request, video_talk.model_inputs(cfg, body.locale, body.model)["model"])
     return await _run(lambda: video_talk.create(
         _db(request), _ollama(request), sha=body.sha256.strip(),
         character_id=body.character_id.strip(), partner_id=body.partner_id.strip(),
         duration_s=body.duration_s, short=body.short, locale=body.locale,
-        cfg=cfg, reuse=reuse, model=body.model,
+        cfg=cfg, reuse=reuse, model=body.model, opener=body.opener,
     ))
 
 

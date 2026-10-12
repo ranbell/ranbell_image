@@ -689,12 +689,16 @@ async def create(
     db, ollama, *, sha: str, character_id: str, partner_id: str = "",
     duration_s: int = 5, short: str = "", locale: str = "ja",
     cfg: dict[str, Any] | None = None, reuse: dict[str, Any] | None = None,
-    model: str = "",
+    model: str = "", opener: bool = True,
 ) -> dict[str, Any]:
     """Bring a photograph to the table: look, and let her open the talk.
 
     `reuse` is an earlier talk about the same picture: its reading is kept, so
     calling a different actress in does not look at the picture again.
+    `opener=False` is "another video from this still": she has already seen
+    the picture, so the talk starts blank and waits for the Showrunner's first
+    line — no model call at all when the reading is reused. Starting one used
+    to run her opening line for 10–25 s behind the old talk still on screen.
     """
     inputs = model_inputs(cfg or {}, locale, model)
     talk: dict[str, Any] = {
@@ -755,7 +759,12 @@ async def create(
     inputs["character_id"] = character_id
     inputs["partner_preset"] = talk["partner_character"].get("character_id", "")
     await persona.load_memory(db, talk)
-    if talk.get("short"):
+    if not opener:
+        _row(talk, "system", _say(
+            talk, "🆕 新しい動画の相談です。どんな動画にしたいか話しかけてください",
+            "🆕 A new video from this still. Say what kind of video you want",
+        ), kind="new")
+    elif talk.get("short"):
         await _pitch(ollama, talk, why="open")
     else:
         await _ask_first(ollama, talk)
