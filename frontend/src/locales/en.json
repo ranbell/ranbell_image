@@ -1915,7 +1915,7 @@
     "step": {
       "direction": "Direction",
       "timeline": "Timetable",
-      "prompt": "Prompt"
+      "done": "Done"
     },
     "directionHint": "First, talk over what the video should be. Once the talk settles it, the timetable follows by itself; the button settles it as the talk stands.",
     "settle": "Settle this and draft the timetable",
@@ -1937,6 +1937,15 @@
     },
     "newVideo": "New video from this still",
     "newVideoHint": "A clean talk with the same cast (nothing carried over from this one)",
-    "thisPicture": "Talks on this still"
+    "thisPicture": "Talks on this still",
+    "stageHint": {
+      "direction": "Talk over what the video is and how it is shot. When it is settled, press “Settle this and draft the timetable”, or say “let's go with that”.",
+      "timeline": "Go through it from ▶ in order. Say what to change; when a segment is fine, press “✓ Next” or say “good”. You can write the prompt at any time.",
+      "walked": "Every segment has been gone through. “📝 Write the prompt from this timetable” finishes it.",
+      "done": "The prompt is written. Copy it to use it. To change something, press “✏️ Change” or just say so."
+    },
+    "decided": "Settled",
+    "nextSegment": "This one is fine — next ({n}/{total})",
+    "reopen": "Change"
   }
 }

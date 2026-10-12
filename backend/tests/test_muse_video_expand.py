@@ -597,6 +597,51 @@ async def test_another_video_from_the_still_starts_blank_and_without_a_call(stud
     assert talk["chat"][-1]["text"] == "夕暮れの桟橋、いいですね"
 
 
+@pytest.mark.asyncio
+async def test_the_timetable_is_gone_through_in_order(studio):
+    talk = _on_timeline()
+    assert vt.stage_of(talk) == "timeline" and vt._focus(talk) == 0
+    # A plain yes to the segment on the table moves on.
+    ollama = _FakeOllama(["no", "NO CHANGE", "SAY: じゃあ次、2秒からね"])
+    await vt.chat(_FakeDb(), ollama, talk, "いいね")
+    assert talk["focus"] == 1 and talk["checked"] == [0]
+    assert [r.get("kind") for r in talk["chat"]][-2:] == ["checked", None]
+    assert "→ NOW 0:02-0:05" in ollama.calls[2]["prompt"] and "✓ 0:00-0:02" in ollama.calls[2]["prompt"]
+    # A yes that takes in her suggestion for it rewrites the segment and moves on too.
+    await vt.chat(_FakeDb(), _FakeOllama([
+        "no",
+        "SEGMENT 0:00-0:02 | wakes\nACTION: She wakes slowly.\nSEGMENT 0:02-0:05 | smiles\nACTION: She smiles.",
+        "SAY: 次ね",
+    ]), talk, "いいよ")
+    assert talk["focus"] == 2 and talk["checked"] == [0, 1]
+    talk["focus"], talk["checked"] = 1, [0]
+    # A yes with a but is talk: no move.
+    await vt.chat(_FakeDb(), _FakeOllama(["no", "NO CHANGE", "SAY: うん"]), talk, "いいけど、もっと笑って")
+    assert talk["focus"] == 1
+    # The button moves on; past the last one she asks about writing.
+    ollama = _FakeOllama(["SAY: 全部見ましたね。撮影文にしますか？\nPITCH: する | まだ"])
+    await vt.next_segment(_FakeDb(), ollama, talk)
+    assert talk["focus"] == 2 and talk["checked"] == [0, 1] and vt._walked(talk)
+    assert "Every segment has now been gone through" in ollama.calls[0]["prompt"]
+    assert talk["chat"][-1].get("kind") != "pitch"
+
+
+@pytest.mark.asyncio
+async def test_writing_closes_the_talk_and_a_new_line_opens_it(studio):
+    talk = _on_timeline()
+    ollama = _FakeOllama(["yes", "NO CHANGE", *WRITE_REPLIES[:1], *WRITE_REPLIES[2:],
+                          "SAY: できました。お疲れさまでした\nPITCH: a | b"])
+    await vt.chat(_FakeDb(), ollama, talk, "撮影文にして")
+    assert vt.stage_of(talk) == "done" and vt.view(talk)["stage"] == "done"
+    assert "the work is finished" in ollama.calls[-1]["prompt"]
+    assert talk["chat"][-1].get("kind") != "pitch"  # nothing left to choose
+    await vt.chat(_FakeDb(), _FakeOllama(["no", "NO CHANGE", "SAY: どこを直します？"]), talk, "最後をもう少しゆっくり")
+    assert vt.stage_of(talk) == "timeline"
+    talk["done"] = True
+    await vt.reopen(_FakeDb(), talk)
+    assert vt.stage_of(talk) == "timeline" and talk["chat"][-1]["kind"] == "reopened"
+
+
 def test_pitch_options_keep_their_inner_quotes():
     talk = _talking()
     vt._post_reply(talk, {"say": "どっち？", "pitch": "瞳に宿る感情を「驚き」にする | 「覚悟」にする"})
@@ -740,6 +785,13 @@ def test_create_chat_settle_write_over_http(monkeypatch, studio):
     r = client.post(f"/api/muse/video/talks/{tid}/style", json={"style": "flow"})
     assert r.status_code == 200 and r.json()["style"] == "flow"
     assert client.post(f"/api/muse/video/talks/{tid}/style", json={"style": "x"}).status_code == 400
+
+    assert r.json()["stage"] in ("timeline", "done")
+    ollama.replies = ["SAY: 次ね"]
+    r = client.post(f"/api/muse/video/talks/{tid}/next")
+    assert r.status_code == 200 and r.json()["checked"] == [0] and r.json()["focus"] == 1
+    r = client.post(f"/api/muse/video/talks/{tid}/phase", json={"phase": "timeline"})
+    assert r.status_code == 200 and r.json()["stage"] == "timeline"
 
     r = client.post(f"/api/muse/video/talks/{tid}/phase", json={"phase": "direction"})
     assert r.status_code == 200 and r.json()["phase"] == "direction"

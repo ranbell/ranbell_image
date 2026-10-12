@@ -173,13 +173,14 @@ _PHASE_DIRECTION = (
 )
 _PHASE_TIMELINE = (
     "The direction is settled:\n{direction}\n\n"
-    "Now the two of you are working through the timetable below, moment by moment, while "
-    "looking at it. Most of what you say is about the moments on it — what happens at that "
-    "second, how the face changes, how it ends — but not every line has to be: it is a talk, "
-    "not a meeting. The camera is part of it too — whether it circles round them, follows, "
-    "rises or closes in is yours and the Showrunner's to talk about. Suggest one change at a time. "
-    "The timetable is kept by someone else: it changes only when the Showrunner asks for "
-    "something or says yes to it."
+    "Now the two of you go through the timetable below one segment at a time, in order — "
+    "the one marked NOW is on the table. Say what you think of it and ask whether it is "
+    "right or what to change; when the Showrunner is happy with it, they move on to the "
+    "next. When every segment has been gone through, ask whether to write the prompt now. "
+    "Not every line has to be about seconds: it is a talk, not a meeting. The camera is "
+    "part of it too — whether it circles round them, follows, rises or closes in. Suggest "
+    "one change at a time. The timetable is kept by someone else: it changes only when the "
+    "Showrunner asks for something or says yes to it."
 )
 _DUET = (
     "\nYou voice both {a} and {b}. Every SAY line starts with A: ({a}) or B: ({b}). "
@@ -230,6 +231,26 @@ def _voices(talk: dict[str, Any]) -> str:
 
 def _phase(talk: dict[str, Any]) -> str:
     return "timeline" if talk.get("phase") == "timeline" and talk.get("board") else "direction"
+
+
+# Where the talk is, for the screen: settling the direction, going through
+# the timetable, or done with a prompt written. The talk once had no end — she
+# offered the next tweak even after writing (2026-10-12) — so writing closes
+# it, and a new line from the Showrunner opens it again.
+def stage_of(talk: dict[str, Any]) -> str:
+    if _phase(talk) == "direction":
+        return "direction"
+    return "done" if talk.get("done") and talk.get("prompts") else "timeline"
+
+
+def _focus(talk: dict[str, Any]) -> int:
+    """The segment on the table; len(board) once every one is gone through."""
+    n = len(talk.get("board") or [])
+    return max(0, min(int(talk.get("focus") or 0), n))
+
+
+def _walked(talk: dict[str, Any]) -> bool:
+    return bool(talk.get("board")) and _focus(talk) >= len(talk["board"])
 
 
 def talk_system(talk: dict[str, Any]) -> str:
@@ -322,11 +343,16 @@ def _notes_block(talk: dict[str, Any]) -> str:
 
 
 def _board_text(talk: dict[str, Any]) -> str:
-    return "\n".join(
-        f"{ve._clock(s['start'])}-{ve._clock(s['end'])} {s.get('title', '')}: {s['action']}"
+    focus, checked = _focus(talk), set(talk.get("checked") or [])
+    rows = [
+        ("→ NOW " if i == focus else "✓ " if i in checked else "  ")
+        + f"{ve._clock(s['start'])}-{ve._clock(s['end'])} {s.get('title', '')}: {s['action']}"
         + (f" [camera: {s['camera']}]" if s.get("camera") else "")
-        for s in talk.get("board") or []
-    )
+        for i, s in enumerate(talk.get("board") or [])
+    ]
+    if talk.get("board") and _walked(talk):
+        rows.append("(Every segment has been gone through.)")
+    return "\n".join(rows)
 
 
 def _recent(talk: dict[str, Any], n: int = 10) -> str:
@@ -858,6 +884,7 @@ async def _start_timeline(ollama, talk: dict[str, Any], direction: str) -> None:
         talk["last_write_failure"] = {"at": time.time(), "idea": "board", "raw": (exc.raw or "")[:3000]}
         raise VideoTalkError(exc.message) from exc
     talk["phase"] = "timeline"
+    talk["focus"], talk["checked"], talk["done"] = 0, [], False
     _row(talk, "system", _say(
         talk, f"🎯 方針が決まりました：{direction}\n🗒 時間割を作りました",
         f"🎯 Direction settled: {direction}\n🗒 Drafted the timetable",
@@ -892,7 +919,7 @@ async def _direction_turn(ollama, talk: dict[str, Any], message: str) -> None:
     await _start_timeline(ollama, talk, direction)
     _post_reply(talk, await _reply(ollama, talk, (
         f"{message}\n(The direction is settled and the timetable is on the screen now. "
-        "Say so in your own way, and bring up the first moment you would work on.)"
+        "Say so in your own way, and bring up the first segment, the one marked NOW.)"
     )))
 
 
@@ -926,19 +953,93 @@ async def _timeline_turn(ollama, talk: dict[str, Any], message: str) -> None:
     avoid = ve.parse_avoid(raw)
     if board is not None and avoid is not None and avoid != talk.get("avoid", ""):
         talk["avoid"] = avoid
-    if board and not _same_board(board, talk["board"]):
+    changed = bool(board) and not _same_board(board, talk["board"])
+    if changed:
         talk["board"] = board
+        # Re-timed segments can change in number: keep the walk inside it.
+        talk["checked"] = [i for i in talk.get("checked") or [] if i < len(board)]
+        talk["focus"] = _focus(talk)
         _row(talk, "system", _say(talk, "🗒 時間割を書き直しました", "🗒 Updated the timetable"), kind="board")
-    if not wants_write:
-        _post_reply(talk, await _reply(ollama, talk, message, spice=True))
+    if wants_write:
+        await _write(ollama, talk)
+        _post_reply(talk, await _closing(ollama, talk, message))
         return
-    await _write(ollama, talk)
-    reply = await _reply(ollama, talk, (
-        f"{message}\n(The prompt has just been written from this timetable and is on the "
-        "screen. Say so briefly in your own way.)"
-    ))
-    reply["pitch"] = ""  # nothing left to choose on this one
+    if talk.get("done"):
+        talk["done"] = False  # a new line after the prompt opens the talk again
+    elif _approves(message) and not _walked(talk):
+        # "いいね" to the segment on the table: on to the next — also when it
+        # took in her suggestion for it. Held back on a change, the screen's ▶
+        # stayed on the first segment while she moved on to the third (Mio,
+        # 2026-10-13).
+        _advance(talk)
+    _post_reply(talk, await _reply(ollama, talk, message, spice=True))
+
+
+# A short yes to the segment on the table: "いいね", "次", "OK". Anything
+# longer, or with a but in it, is talk — the button moves on as well.
+_YES = re.compile(r"^\s*(いいね|いいよ|いい感じ|いいと思う|いいです|ok|オッケー|おっけー|次|つぎ|大丈夫|問題ない|それで|うん|はい|good|next|fine)", re.IGNORECASE)
+_BUT = re.compile(r"けど|でも|ただ|もう少し|もっと|変え|直|but|change", re.IGNORECASE)
+
+
+def _approves(message: str) -> bool:
+    m = message.strip()
+    return len(m) <= 15 and bool(_YES.match(m)) and not _BUT.search(m)
+
+
+def _advance(talk: dict[str, Any]) -> None:
+    focus = _focus(talk)
+    board = talk.get("board") or []
+    if focus < len(board):
+        talk["checked"] = sorted(set(talk.get("checked") or []) | {focus})
+        talk["focus"] = focus + 1
+        seg = board[focus]
+        _row(talk, "system", _say(
+            talk, f"✓ {ve._clock(seg['start'])}–{ve._clock(seg['end'])} を確認しました",
+            f"✓ {ve._clock(seg['start'])}–{ve._clock(seg['end'])} checked",
+        ), kind="checked")
+
+
+async def next_segment(db, ollama, talk: dict[str, Any]) -> dict[str, Any]:
+    """The button: the segment on the table is fine; on to the next one."""
+    if _phase(talk) != "timeline":
+        raise VideoTalkError(_say(talk, "まず方針を決めてください", "Settle the direction first"))
+    _advance(talk)
+    note = (
+        "(The Showrunner is happy with the last segment. Every segment has now been gone "
+        "through: ask, briefly and in your own way, whether to write the prompt now.)"
+        if _walked(talk) else
+        "(The Showrunner is happy with the last segment and moves on. Bring up the one marked "
+        "NOW: what you think of it, and whether it is right.)"
+    )
+    reply = await _reply(ollama, talk, note)
+    if _walked(talk):
+        reply["pitch"] = ""
     _post_reply(talk, reply)
+    await video_db.save(db, talk)
+    return talk
+
+
+async def _closing(ollama, talk: dict[str, Any], message: str) -> dict[str, str]:
+    """Her last line once the prompt is written: the work is done. After
+    writing she kept offering the next change ("次は0:02から…"), so the talk
+    never seemed to end (three talks of four, 2026-10-12)."""
+    reply = await _reply(ollama, talk, (
+        f"{message}\n(The prompt has just been written and is on the screen — the work is "
+        "finished. Close it in a line or two, in your own way. Do not suggest changes and do "
+        "not ask anything.)"
+    ))
+    reply["pitch"] = ""
+    return reply
+
+
+async def reopen(db, talk: dict[str, Any]) -> dict[str, Any]:
+    """The 直す button after a prompt: back to the timetable."""
+    if _phase(talk) != "timeline":
+        raise VideoTalkError(_say(talk, "時間割がまだありません", "There is no timetable yet"))
+    talk["done"] = False
+    _row(talk, "system", _say(talk, "✏️ 時間割の相談に戻りました", "✏️ Back to the timetable"), kind="reopened")
+    await video_db.save(db, talk)
+    return talk
 
 
 async def settle(db, ollama, talk: dict[str, Any]) -> dict[str, Any]:
@@ -952,7 +1053,7 @@ async def settle(db, ollama, talk: dict[str, Any]) -> dict[str, Any]:
     await _start_timeline(ollama, talk, direction)
     _post_reply(talk, await _reply(ollama, talk, (
         "(The Showrunner settled the direction and the timetable is on the screen now. "
-        "Say so in your own way, and bring up the first moment you would work on.)"
+        "Say so in your own way, and bring up the first segment, the one marked NOW.)"
     )))
     await video_db.save(db, talk)
     return talk
@@ -1028,6 +1129,7 @@ async def _write(ollama, talk: dict[str, Any]) -> None:
         # What each writing stage returned, to read when a prompt disappoints.
         "stages": {k: str(v)[:4000] for k, v in (out.get("stages") or {}).items()},
     })
+    talk["done"] = True
     _row(talk, "system", _say(talk, "📝 撮影文にしました", "📝 Wrote the prompt"), kind="written")
 
 
@@ -1062,6 +1164,9 @@ def view(talk: dict[str, Any]) -> dict[str, Any]:
             for i in talk.get("ideas") or []
         ],
         "phase": _phase(talk),
+        "stage": stage_of(talk),
+        "focus": _focus(talk),
+        "checked": list(talk.get("checked") or []),
         "direction": talk.get("direction", ""),
         "avoid": talk.get("avoid", ""),
         "style": style_of(talk),

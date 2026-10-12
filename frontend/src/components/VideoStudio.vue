@@ -88,6 +88,11 @@ const partner = computed(() => byId.value[partnerId.value] || null)
 const fromShoot = computed(() => !!source.value.session_id)
 const ideas = computed(() => talk.value?.ideas || [])
 const phase = computed(() => talk.value?.phase || 'direction')
+// direction → timeline → done (a prompt written closes the talk)
+const stage = computed(() => talk.value?.stage || phase.value)
+const focus = computed(() => talk.value?.focus ?? 0)
+const checked = computed(() => new Set(talk.value?.checked || []))
+const walked = computed(() => board.value.length > 0 && focus.value >= board.value.length)
 const board = computed(() => talk.value?.board || [])
 // Only the latest choice is live; older ones are what was asked then.
 const livePitch = computed(() => {
@@ -321,6 +326,25 @@ async function backToDirection() {
     })
     await scrollChat()
   })
+}
+
+async function nextSegment() {
+  await run('reply', async () => {
+    talk.value = await api(`/api/muse/video/talks/${talk.value.talk_id}/next`, { method: 'POST' })
+    await scrollChat()
+  })
+}
+
+async function reopenTimeline() {
+  await run('back', async () => {
+    talk.value = await api(`/api/muse/video/talks/${talk.value.talk_id}/phase`, {
+      method: 'POST',
+      body: JSON.stringify({ phase: 'timeline' }),
+    })
+    await scrollChat()
+  })
+  await nextTick()
+  chatInput.value?.focus()
 }
 
 async function writePrompt() {
@@ -692,22 +716,29 @@ const waitingLabel = computed(() => ({
                 >{{ shaTalks.length - ti }}. {{ row.chosen_title || '—' }}<template v-if="row.prompts_count"> · 📝{{ row.prompts_count }}</template></button>
               </div>
 
-              <!-- Where the talk is: direction, then the timetable, then the prompt -->
-              <ol class="flex items-center gap-1.5 text-[10px]">
-                <li
-                  v-for="(step, si) in ['direction', 'timeline', 'prompt']"
-                  :key="step"
-                  class="flex items-center gap-1.5"
-                >
-                  <span v-if="si" class="text-gray-600">→</span>
-                  <span
-                    class="rounded-full border px-2 py-0.5"
-                    :class="(step === 'prompt' ? prompts.length && phase === 'timeline' : phase === step)
-                      ? 'border-amber-400/70 bg-amber-950/40 text-amber-50'
-                      : 'border-white/10 text-gray-500'"
-                  >{{ si + 1 }} {{ t(`video.step.${step}`) }}</span>
-                </li>
-              </ol>
+              <!-- Where the talk is, and what moves it on -->
+              <div class="space-y-1 rounded-xl border border-white/10 bg-gray-900/60 p-2.5">
+                <ol class="flex items-center gap-1.5 text-[11px]">
+                  <li
+                    v-for="(step, si) in ['direction', 'timeline', 'done']"
+                    :key="step"
+                    class="flex items-center gap-1.5"
+                  >
+                    <span v-if="si" class="text-gray-600">→</span>
+                    <span
+                      class="rounded-full border px-2.5 py-0.5"
+                      :class="stage === step
+                        ? 'border-amber-400/80 bg-amber-900/50 font-medium text-amber-50'
+                        : ['direction', 'timeline', 'done'].indexOf(stage) > si
+                          ? 'border-emerald-500/40 text-emerald-200/80'
+                          : 'border-white/10 text-gray-500'"
+                    >{{ ['direction', 'timeline', 'done'].indexOf(stage) > si ? '✓' : si + 1 }} {{ t(`video.step.${step}`) }}</span>
+                  </li>
+                </ol>
+                <p class="text-[11px] leading-relaxed text-gray-300">
+                  {{ stage === 'timeline' && walked ? t('video.stageHint.walked') : t(`video.stageHint.${stage}`) }}
+                </p>
+              </div>
 
               <!-- How it is shot -->
               <div class="flex flex-wrap items-center gap-1.5 text-[10px]">
@@ -726,15 +757,6 @@ const waitingLabel = computed(() => ({
 
               <!-- 1. The direction: talked over, with the writers' notes as material -->
               <template v-if="phase === 'direction'">
-                <div class="space-y-2 rounded-xl border border-white/10 bg-gray-900/60 p-2.5">
-                  <p class="text-[11px] leading-relaxed text-gray-300">{{ t('video.directionHint') }}</p>
-                  <button
-                    type="button"
-                    class="rounded-full border border-amber-500/50 bg-amber-950/40 px-3 py-1 text-[11px] text-amber-100 hover:bg-amber-900/60 disabled:opacity-40"
-                    :disabled="!!busy || (!ideas.length && !talk.short)"
-                    @click="settleDirection"
-                  >🎯 {{ t('video.settle') }}</button>
-                </div>
 
                 <div class="flex items-center justify-between">
                   <h3 class="text-xs font-medium text-amber-100">{{ t('video.ideas') }}</h3>
@@ -768,7 +790,7 @@ const waitingLabel = computed(() => ({
               <template v-else>
                 <div class="space-y-1 rounded-xl border border-amber-500/30 bg-amber-950/20 p-2.5">
                   <div class="flex items-center justify-between gap-2">
-                    <span class="text-[11px] font-medium text-amber-100">🎯 {{ t('video.direction') }}</span>
+                    <span class="text-[11px] font-medium text-amber-100">🎯 {{ t('video.decided') }}</span>
                     <button
                       type="button"
                       class="text-[10px] text-gray-400 underline hover:text-gray-200 disabled:opacity-40"
@@ -777,6 +799,11 @@ const waitingLabel = computed(() => ({
                     >{{ t('video.backToDirection') }}</button>
                   </div>
                   <p class="whitespace-pre-wrap text-[11px] leading-relaxed text-amber-50/90">{{ talk.direction }}</p>
+                  <p class="text-[10px] text-amber-200/70">
+                    🎥 {{ t(`video.style.${talk.style || 'calm'}`) }} · ⏱ {{ seconds }}s
+                  </p>
+                  <!-- What the director said no to: kept for the whole clip -->
+                  <p v-if="talk.avoid" class="text-[11px] text-rose-200/90">🚫 {{ t('video.avoid') }}: {{ talk.avoid }}</p>
                 </div>
 
                 <div class="space-y-1.5">
@@ -787,30 +814,25 @@ const waitingLabel = computed(() => ({
                   <div
                     v-for="(seg, gi) in board"
                     :key="gi"
-                    class="rounded-lg border border-white/10 bg-black/30 px-2.5 py-1.5"
+                    class="rounded-lg border px-2.5 py-1.5"
+                    :class="stage === 'timeline' && gi === focus
+                      ? 'border-amber-400/80 bg-amber-950/30 ring-1 ring-amber-400/40'
+                      : checked.has(gi) ? 'border-emerald-500/30 bg-black/30' : 'border-white/10 bg-black/30'"
                   >
                     <div class="flex items-baseline gap-2 text-[11px]">
+                      <span v-if="checked.has(gi)" class="shrink-0 text-emerald-300">✓</span>
+                      <span v-else-if="stage === 'timeline' && gi === focus" class="shrink-0 text-amber-300">▶</span>
                       <span class="shrink-0 font-mono text-amber-300/90">{{ clock(seg.start) }}–{{ clock(seg.end) }}</span>
                       <span class="truncate font-medium text-gray-100">{{ seg.title }}</span>
                     </div>
                     <p class="text-[11px] leading-relaxed text-gray-300">{{ seg.action }}</p>
                     <p v-if="seg.camera" class="mt-0.5 text-[10px] leading-relaxed text-sky-200/80">🎥 {{ seg.camera }}</p>
                   </div>
-                  <!-- What the director said no to: kept for the whole clip -->
-                  <p v-if="talk.avoid" class="rounded-lg border border-rose-500/30 bg-rose-950/20 px-2.5 py-1 text-[11px] text-rose-100/90">
-                    🚫 {{ t('video.avoid') }}: {{ talk.avoid }}
-                  </p>
                   <p v-if="board.length && board[board.length - 1].end !== seconds" class="text-[10px] text-amber-300/80">
                     {{ t('video.lengthChanged', { n: seconds }) }}
                   </p>
                 </div>
 
-                <button
-                  type="button"
-                  class="self-start rounded-full border border-amber-500/60 bg-amber-900/40 px-3 py-1 text-[11px] font-medium text-amber-50 hover:bg-amber-800/60 disabled:opacity-40"
-                  :disabled="!!busy || !board.length"
-                  @click="writePrompt"
-                >📝 {{ busy === 'write' ? t('video.writing') : t('video.write') }}</button>
               </template>
 
               <div v-if="latestPrompt" class="space-y-1.5 rounded-xl border border-amber-500/40 bg-black/40 p-2.5">
@@ -885,6 +907,54 @@ const waitingLabel = computed(() => ({
                 <span>{{ waitingLabel }}</span>
                 <span class="font-mono text-[10px] text-pink-400/60">{{ clock(elapsed) }}</span>
               </div>
+            </div>
+            <!-- What moves the talk on from here, by stage -->
+            <div v-if="talk && !setupOpen" class="flex flex-wrap items-center gap-2 border-t border-white/10 px-3 pt-2.5">
+              <template v-if="stage === 'direction'">
+                <button
+                  type="button"
+                  class="rounded-full border border-amber-500/60 bg-amber-900/40 px-3 py-1 text-[11px] font-medium text-amber-50 hover:bg-amber-800/60 disabled:opacity-40"
+                  :disabled="!!busy || (!ideas.length && !talk.short)"
+                  @click="settleDirection"
+                >🎯 {{ t('video.settle') }}</button>
+              </template>
+              <template v-else-if="stage === 'timeline'">
+                <button
+                  v-if="!walked"
+                  type="button"
+                  class="rounded-full border border-emerald-500/60 bg-emerald-950/40 px-3 py-1 text-[11px] text-emerald-50 hover:bg-emerald-900/60 disabled:opacity-40"
+                  :disabled="!!busy"
+                  @click="nextSegment"
+                >✓ {{ t('video.nextSegment', { n: focus + 1, total: board.length }) }}</button>
+                <button
+                  type="button"
+                  class="rounded-full border px-3 py-1 text-[11px] disabled:opacity-40"
+                  :class="walked
+                    ? 'border-amber-400/80 bg-amber-800/60 font-medium text-amber-50 hover:bg-amber-700/60'
+                    : 'border-amber-500/40 text-amber-100/80 hover:bg-amber-900/40'"
+                  :disabled="!!busy || !board.length"
+                  @click="writePrompt"
+                >📝 {{ busy === 'write' ? t('video.writing') : t('video.write') }}</button>
+              </template>
+              <template v-else>
+                <button
+                  type="button"
+                  class="rounded-full border border-amber-400/80 bg-amber-800/60 px-3 py-1 text-[11px] font-medium text-amber-50 hover:bg-amber-700/60"
+                  @click="copyPrompt(latestPrompt?.prompt)"
+                >📋 {{ t('video.copy') }}</button>
+                <button
+                  type="button"
+                  class="rounded-full border border-white/15 px-3 py-1 text-[11px] text-gray-200 hover:bg-white/5 disabled:opacity-40"
+                  :disabled="!!busy"
+                  @click="reopenTimeline"
+                >✏️ {{ t('video.reopen') }}</button>
+                <button
+                  type="button"
+                  class="rounded-full border border-emerald-500/50 bg-emerald-950/40 px-3 py-1 text-[11px] text-emerald-100 hover:bg-emerald-900/60 disabled:opacity-40"
+                  :disabled="!!busy"
+                  @click="newVideo"
+                >＋ {{ t('video.newVideo') }}</button>
+              </template>
             </div>
             <!-- Enter is a plain newline; sending is the button (kana conversion confirms with Enter). -->
             <div class="flex items-end gap-2 border-t border-white/10 p-3">

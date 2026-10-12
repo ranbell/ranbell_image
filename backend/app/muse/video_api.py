@@ -217,11 +217,21 @@ async def style(talk_id: str, body: TalkStyle, request: Request):
 
 @router.post("/talks/{talk_id}/phase")
 async def phase(talk_id: str, body: TalkPhase, request: Request):
-    """Back to the direction talk (the only way back; forward is `settle`)."""
-    if body.phase != "direction":
-        raise HTTPException(400, "phase can only go back to direction")
+    """Back to the direction talk, or from a finished prompt back to the
+    timetable. Forward is `settle`, `next` and `write`."""
     talk = await _talk(request, talk_id)
-    return await _run(lambda: video_talk.back_to_direction(_db(request), talk))
+    if body.phase == "direction":
+        return await _run(lambda: video_talk.back_to_direction(_db(request), talk))
+    if body.phase == "timeline":
+        return await _run(lambda: video_talk.reopen(_db(request), talk))
+    raise HTTPException(400, "phase can only go back to direction or timeline")
+
+
+@router.post("/talks/{talk_id}/next")
+async def next_segment(talk_id: str, request: Request):
+    """The segment on the table is fine: on to the next one."""
+    talk = await _talk(request, talk_id)
+    return await _run(lambda: video_talk.next_segment(_db(request), _ollama(request), talk))
 
 
 @router.post("/talks/{talk_id}/repitch")
