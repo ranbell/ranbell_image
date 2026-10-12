@@ -183,7 +183,7 @@ async function openStill(newSha) {
     leadId.value = source.value.character_id || ''
     partnerId.value = source.value.partner_character_id || ''
     model.value = defaultModel(source.value)
-    shaTalks.value = (await api(`/api/muse/video/talks?sha256=${newSha}&limit=10`)).talks || []
+    shaTalks.value = (await api(`/api/muse/video/talks?sha256=${newSha}&limit=20`)).talks || []
     // Coming back to a picture already talked over: pick the talk up again.
     if (shaTalks.value.length) await openTalk(shaTalks.value[0].talk_id)
   } catch (err) {
@@ -203,6 +203,7 @@ async function openTalk(id, atPrompt = -1) {
   setupOpen.value = false
   showRecent.value = false
   await scrollChat()
+  await loadShaTalks()
 }
 
 async function startTalk() {
@@ -225,9 +226,27 @@ async function startTalk() {
       }),
     })
     setupOpen.value = false
-    shaTalks.value = [{ talk_id: talk.value.talk_id }, ...shaTalks.value]
+    await loadShaTalks()
     await scrollChat()
   })
+}
+
+// The talks about this picture, newest first, to move between them.
+async function loadShaTalks() {
+  if (!sha.value) return
+  try {
+    shaTalks.value = (await api(`/api/muse/video/talks?sha256=${sha.value}&limit=20`)).talks || []
+  } catch (err) {
+    console.error('[video] talks for this picture failed', err)
+  }
+}
+
+// Another video from the same picture: a clean talk with the same cast,
+// model and length — nothing carried over but the reading of the picture.
+async function newVideo() {
+  note.value = ''
+  promptIndex.value = -1
+  await startTalk()
 }
 
 async function send() {
@@ -620,9 +639,31 @@ const waitingLabel = computed(() => ({
                 <span v-if="talk.model" class="max-w-[12rem] truncate text-[10px] text-gray-500" :title="talk.model">· {{ talk.model }}</span>
                 <button
                   type="button"
-                  class="ml-auto text-[11px] text-gray-400 underline hover:text-gray-200"
+                  class="ml-auto rounded-full border border-emerald-500/50 bg-emerald-950/40 px-2.5 py-0.5 text-[11px] text-emerald-100 hover:bg-emerald-900/60 disabled:opacity-40"
+                  :disabled="!!busy"
+                  :title="t('video.newVideoHint')"
+                  @click="newVideo"
+                >＋ {{ t('video.newVideo') }}</button>
+                <button
+                  type="button"
+                  class="text-[11px] text-gray-400 underline hover:text-gray-200"
                   @click="setupOpen = true"
                 >{{ t('video.changeCast') }}</button>
+              </div>
+
+              <!-- The other talks about this picture -->
+              <div v-if="shaTalks.length > 1" class="flex flex-wrap items-center gap-1 text-[10px]">
+                <span class="text-gray-500">{{ t('video.thisPicture') }}</span>
+                <button
+                  v-for="(row, ti) in shaTalks"
+                  :key="row.talk_id"
+                  type="button"
+                  class="max-w-[11rem] truncate rounded border px-1.5 py-0.5 disabled:opacity-40"
+                  :class="row.talk_id === talk.talk_id ? 'border-amber-400/70 text-amber-50' : 'border-white/10 text-gray-400 hover:text-gray-200'"
+                  :title="`${row.chosen_title || '—'} · ${when(row.updated_at)}`"
+                  :disabled="!!busy || row.talk_id === talk.talk_id"
+                  @click="openTalk(row.talk_id)"
+                >{{ shaTalks.length - ti }}. {{ row.chosen_title || '—' }}<template v-if="row.prompts_count"> · 📝{{ row.prompts_count }}</template></button>
               </div>
 
               <!-- Where the talk is: direction, then the timetable, then the prompt -->

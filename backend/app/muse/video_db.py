@@ -71,6 +71,25 @@ async def all_talks(db) -> list[dict[str, Any]]:
     return rows
 
 
+async def talked_shas(db, *, written: bool = False) -> set[str]:
+    """The pictures with a video talk — or, `written`, with a prompt written —
+    for the gallery's "has a video" filter."""
+    shas: set[str] = set()
+    offset = None
+    while True:
+        points, offset = await db._qc.scroll(
+            collection_name=MUSE_VIDEO_COLLECTION, limit=_PAGE, offset=offset,
+            with_payload=["sha256", "prompts_count"],
+        )
+        for p in points:
+            row = p.payload or {}
+            if row.get("sha256") and (not written or (row.get("prompts_count") or 0) > 0):
+                shas.add(str(row["sha256"]))
+        if offset is None or not points:
+            break
+    return shas
+
+
 async def delete(db, talk_id: str) -> None:
     await db._qc.delete(
         collection_name=MUSE_VIDEO_COLLECTION,

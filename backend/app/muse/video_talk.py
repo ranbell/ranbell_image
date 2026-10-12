@@ -643,8 +643,13 @@ async def settle_direction(ollama, talk: dict[str, Any], *, force: bool = False)
     with her prank and leaves on an equal footing, and the timetable opened on
     the prank and reached the bite at 8 s of 10 (Kanade, 2026-10-11)."""
     system = _SETTLE_SYSTEM.format(lang="Japanese" if _ja(talk) else "English")
+    # The note typed at the start is the Showrunner's first wish. Left out,
+    # a talk settled on the note alone came back with no direction, and the
+    # note's bullet ("- ベッドで…") became it (2026-10-12).
+    note = (talk.get("short") or "").strip()
     prompt = (
-        f"THE WRITERS' NOTES:\n{_notes_block(talk)}\n\n"
+        (f"THE SHOWRUNNER'S NOTE, written before the talk:\n{note}\n\n" if note else "")
+        + f"THE WRITERS' NOTES:\n{_notes_block(talk)}\n\n"
         f"THE TALK:\n{_recent(talk, 16) or '(none)'}"
         + (_FORCE_SETTLE if force else "")
     )
@@ -658,7 +663,10 @@ async def settle_direction(ollama, talk: dict[str, Any], *, force: bool = False)
         if style and talk.get("style_by") != "user":
             talk["style"] = style.group(1).lower()
         text = re.split(r"\n\s*\**\s*STYLE\s*[:：]", text, flags=re.IGNORECASE)[0].strip()
-        return text or intent_of(talk)
+        if not text:
+            # The Showrunner's own words, as a note rather than a list.
+            text = " ".join(ln.lstrip("- ").strip() for ln in intent_of(talk).splitlines() if ln.strip())
+        return text
     return ""
 
 

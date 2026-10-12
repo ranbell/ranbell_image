@@ -618,7 +618,11 @@
       "tagClickToReset": "クリックでフィルター解除",
       "dateSeek": "時系列",
       "dateSeekError": "期間取得失敗",
-      "dateSeekRetry": "再試行"
+      "dateSeekRetry": "再試行",
+      "video_talk": "相談あり",
+      "video_talkHint": "動画スタジオで相談した画像",
+      "video_prompt": "撮影文あり",
+      "video_promptHint": "動画の撮影文まで作った画像"
     },
     "similar": {
       "color": "🎨 カラー類似:",
@@ -1930,6 +1934,9 @@
       "calmHint": "ワンショット。カメラは静かに、表情と小さな動きで見せる",
       "flowHint": "ワンショット。カメラは止まらず、寄る・回り込む・追うを流れるようにつなぐ",
       "cutsHint": "2〜3ショット。ウィップパンや人の陰を通すなど、動きでつないで角度を変える"
-    }
+    },
+    "newVideo": "この写真で新しい動画",
+    "newVideoHint": "同じ顔ぶれで、まっさらな相談を始めます（前の方針や時間割は持ち込みません）",
+    "thisPicture": "この写真の相談"
   }
 }

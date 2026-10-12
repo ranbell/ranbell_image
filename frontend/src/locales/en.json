@@ -618,7 +618,11 @@
       "tagClickToReset": "Click to remove filter",
       "dateSeek": "Timeline",
       "dateSeekError": "Date range unavailable",
-      "dateSeekRetry": "Retry"
+      "dateSeekRetry": "Retry",
+      "video_talk": "Talked",
+      "video_talkHint": "Pictures talked over in the video studio",
+      "video_prompt": "Prompt written",
+      "video_promptHint": "Pictures with a video prompt written"
     },
     "similar": {
       "color": "🎨 Color similar:",
@@ -1930,6 +1934,9 @@
       "calmHint": "One shot. A quiet camera; the face and small movements carry it",
       "flowHint": "One shot. The camera never stops: closing in, circling, following, flowing on",
       "cutsHint": "Two or three shots, joined by movement — a whip pan, passing behind someone"
-    }
+    },
+    "newVideo": "New video from this still",
+    "newVideoHint": "A clean talk with the same cast (nothing carried over from this one)",
+    "thisPicture": "Talks on this still"
   }
 }

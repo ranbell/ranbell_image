@@ -189,6 +189,7 @@ const searchMode = ref('semantic')   // 'keyword' | 'semantic'
 const activeModels = ref([])        // selected model names (OR logic)
 const modelFilteredTagSet = ref(null) // Set<string> | null — tags in model-only filtered results
 const starFilter = ref(null)        // null | 1..5 — ≥N stars filter
+const videoFilter = ref(null)       // null | 'talk' | 'prompt' — made into a video in the studio
 const categoryFilter = ref('all')   // 'all' | 'AI' | 'NR'
 // Muse board sketches are registered in the library but hidden here by
 // default — six 512px throwaways per run would otherwise bury everything.
@@ -1474,7 +1475,7 @@ function onGraphCanvasHover(e) {
 
 // ── Computed ──────────────────────────────────────────────────────────────────
 const activeTags = computed(() => Object.entries(tagsFilter.value).filter(e => e[1] === 'include').map(e => e[0]))
-const isSearchMode = computed(() => !!searchQuery.value || !!Object.keys(tagsFilter.value).length || !!similarSource.value || !!activeModels.value.length || colorPickActive.value || !!starFilter.value || categoryFilter.value !== 'all' || alignMinFilter.value !== null || !!activeCharacter.value)
+const isSearchMode = computed(() => !!searchQuery.value || !!Object.keys(tagsFilter.value).length || !!similarSource.value || !!activeModels.value.length || colorPickActive.value || !!starFilter.value || !!videoFilter.value || categoryFilter.value !== 'all' || alignMinFilter.value !== null || !!activeCharacter.value)
 const effectiveQuery = computed(() => searchQuery.value || activeTags.value[0] || '')
 const selectedCount = computed(() => selectedIds.value.size)
 
@@ -1516,6 +1517,7 @@ async function fetchImages(reset = false) {
       if (activeModels.value.length) params.set('models', activeModels.value.join(','))
       if (activeCharacter.value) params.set('character_id', activeCharacter.value)
       if (starFilter.value) params.set('star_min', starFilter.value)
+      if (videoFilter.value) params.set('video', videoFilter.value)
       if (categoryFilter.value !== 'all') params.set('category', categoryFilter.value)
       if (showDrafts.value) params.set('include_drafts', 'true')
       if (alignMinFilter.value !== null) params.set('align_min', alignMinFilter.value)
@@ -2205,6 +2207,7 @@ function clearFilter() {
   activeModels.value = []
   activeCharacter.value = null
   starFilter.value = null
+  videoFilter.value = null
   categoryFilter.value = 'all'
   alignMinFilter.value = null
   showSuggestions.value = false
@@ -3205,6 +3208,18 @@ onUnmounted(() => {
             :class="starFilter === n ? 'text-yellow-400 bg-yellow-400/10 border border-yellow-600/50' : 'text-gray-600 hover:text-yellow-400/60 border border-transparent'">★{{ n }}+</button>
           <button v-if="starFilter" @click="starFilter = null; fetchImages(true)"
             class="text-gray-500 hover:text-gray-300 ml-0.5 leading-none">✕</button>
+        </div>
+
+        <div class="w-px h-3 bg-gray-700 flex-shrink-0"></div>
+
+        <!-- Made into a video in the studio -->
+        <div class="flex items-center gap-1 flex-shrink-0">
+          <span class="text-gray-500 mr-0.5">🎬:</span>
+          <button v-for="v in ['talk', 'prompt']" :key="v"
+            @click="videoFilter = videoFilter === v ? null : v; fetchImages(true)"
+            :title="$t(`header.filter.video_${v}Hint`)"
+            :class="videoFilter === v ? 'bg-emerald-800 text-emerald-100 border-emerald-600' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 border-gray-700'"
+            class="px-2 py-0.5 rounded-full border transition-colors">{{ $t(`header.filter.video_${v}`) }}</button>
         </div>
 
         <div class="w-px h-3 bg-gray-700 flex-shrink-0"></div>

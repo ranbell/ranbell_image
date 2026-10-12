@@ -570,6 +570,17 @@ def test_old_talks_are_quiet_ones():
     assert vt.style_of({"style": "nonsense"}) == "calm"
 
 
+@pytest.mark.asyncio
+async def test_settling_on_the_note_alone_reads_the_note(studio):
+    talk = _talking()
+    talk["short"] = "ベッドでスマホの通知に気づく"
+    ollama = _FakeOllama(["SETTLED: yes\nSTYLE: calm\nDIRECTION:", WRITE_REPLIES[1], "SAY: では"])
+    await vt.settle(_FakeDb(), ollama, talk)
+    assert "THE SHOWRUNNER'S NOTE, written before the talk:\nベッドでスマホの通知に気づく" in ollama.calls[0]["prompt"]
+    # Nothing written back: the note itself, without a list's bullet.
+    assert talk["direction"] == "ベッドでスマホの通知に気づく"
+
+
 def test_pitch_options_keep_their_inner_quotes():
     talk = _talking()
     vt._post_reply(talk, {"say": "どっち？", "pitch": "瞳に宿る感情を「驚き」にする | 「覚悟」にする"})
@@ -1080,3 +1091,63 @@ def test_persona_goes_only_to_who_is_in_the_picture():
     assert "presses one headphone cup" in vt.persona_of(talk)
     talk["people_ids"] = []  # a photograph of someone else
     assert vt.persona_of(talk) == ""
+
+
+# ── The gallery's "made into a video" filter ─────────────────────────────────
+
+class _Scrolls:
+    """Qdrant scroll over talks, one page."""
+
+    def __init__(self, rows):
+        self.rows = rows
+
+    async def scroll(self, **kwargs):
+        from types import SimpleNamespace
+        return [SimpleNamespace(payload=r) for r in self.rows], None
+
+
+@pytest.mark.asyncio
+async def test_talked_pictures_and_written_ones():
+    from types import SimpleNamespace
+
+    from backend.app.muse import video_db
+    db = SimpleNamespace(_qc=_Scrolls([
+        {"sha256": "a", "prompts_count": 0}, {"sha256": "b", "prompts_count": 2},
+        {"sha256": "b", "prompts_count": 0}, {"prompts_count": 1},
+    ]))
+    assert await video_db.talked_shas(db) == {"a", "b"}
+    assert await video_db.talked_shas(db, written=True) == {"b"}
+
+
+def test_the_gallery_filters_to_pictures_with_a_video(monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from backend.app.api import images
+    from backend.app.muse import video_db
+
+    seen = {}
+
+    class Db:
+        async def get_aligned_sha256s(self, m):
+            return {"b", "c"}
+
+        async def scroll_filtered_page(self, **kw):
+            seen.update(kw)
+            return [{"sha256": s} for s in sorted(kw["sha256_ids"])], None, len(kw["sha256_ids"])
+
+    async def talked(db, *, written=False):
+        return {"b"} if written else {"a", "b"}
+
+    monkeypatch.setattr(video_db, "talked_shas", talked)
+    app = FastAPI()
+    app.include_router(images.router)
+    app.state.db = Db()
+    client = TestClient(app)
+    r = client.get("/api/images", params={"video": "talk"})
+    assert [d["sha256"] for d in r.json()["images"]] == ["a", "b"]
+    # It composes with the other filters that narrow by picture.
+    r = client.get("/api/images", params={"video": "talk", "align_min": 0.7})
+    assert [d["sha256"] for d in r.json()["images"]] == ["b"]
+    r = client.get("/api/images", params={"video": "prompt", "align_min": 0.7})
+    assert r.json()["images"] == [{"sha256": "b"}]
