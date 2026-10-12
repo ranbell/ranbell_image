@@ -871,6 +871,12 @@ class ComfyUIClient:
         Never while anything is queued or running. `/free` is acted on between
         jobs, seconds later, so this waits until the free memory actually moves
         (or `wait_s` passes). Returns whether it moved.
+
+        VRAM only: `unload_models` moves the models off the card to RAM and
+        ComfyUI's cache keeps them there. `free_memory` also resets that cache,
+        so the next render read the models from disk again — about 40 GB each
+        time on the server (2026-10-13). With `--highvram` or `--gpu-only` the
+        offload device is the card itself, and this frees nothing.
         """
         base = settings.comfyui_url
         try:
@@ -879,7 +885,7 @@ class ComfyUIClient:
                 return False
             before = await self._vram_free()
             r = await self._http.post(
-                f"{base}/free", json={"unload_models": True, "free_memory": True}, timeout=5.0,
+                f"{base}/free", json={"unload_models": True}, timeout=5.0,
             )
             r.raise_for_status()
         except Exception as exc:

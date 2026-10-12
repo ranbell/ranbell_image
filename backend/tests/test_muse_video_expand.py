@@ -877,12 +877,16 @@ async def test_comfy_frees_and_waits_until_the_memory_moves(monkeypatch):
             return httpx.Response(200, json={"queue_running": [], "queue_pending": []})
         if path == "/free":
             state["freed"] = True
+            state["body"] = json.loads(request.content)
             return httpx.Response(200)
         if state["freed"]:
             state["free"] = 14 << 30  # takes effect on the next look
         return httpx.Response(200, json={"devices": [{"vram_free": state["free"]}]})
 
     assert await _comfy(handler).free_vram(wait_s=5) is True
+    # Off the card only: free_memory would drop ComfyUI's RAM cache too, and
+    # the next render reloads ~40 GB from disk.
+    assert state["body"] == {"unload_models": True}
 
 
 class _Room:
