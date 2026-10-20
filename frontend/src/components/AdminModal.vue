@@ -45,6 +45,35 @@ const vlmModelLacksVision = computed(() =>
   !!adminConfig.value?.vlm_model &&
   !ollamaVisionModels.value.includes(adminConfig.value.vlm_model)
 )
+// External OpenAI-compatible server (Inspire / Refine). The saved API key is
+// never sent to the browser; typing one replaces it, the clear button removes it.
+const externalModels = ref([])
+const externalTest = ref(null)   // { ok, base_url, models, error } | null
+const externalTesting = ref(false)
+const externalKeyClear = ref(false)
+
+async function testExternalServer() {
+  externalTesting.value = true
+  externalTest.value = null
+  try {
+    const r = await fetch('/api/admin/openai/models', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        base_url: adminConfig.value?.openai_base_url || '',
+        api_key: adminConfig.value?.openai_api_key || '',
+      }),
+    })
+    const data = r.ok ? await r.json() : { ok: false, error: await r.text() }
+    externalTest.value = data
+    if (data.ok) externalModels.value = data.models || []
+  } catch (e) {
+    externalTest.value = { ok: false, error: String(e) }
+  } finally {
+    externalTesting.value = false
+  }
+}
+
 const showAdvanced = ref(false)
 const adminStats = ref(null)
 const adminConfig = ref(null)
@@ -178,13 +207,15 @@ async function saveAdminConfig() {
   adminLoading.value = 'config'
   adminError.value = ''
   try {
-    const { source_images_dir, generated_images_dir, thumbnails_dir, ...body } = adminConfig.value
+    const { source_images_dir, generated_images_dir, thumbnails_dir, openai_api_key_set, ...body } = adminConfig.value
+    if (externalKeyClear.value) body.openai_api_key_clear = true
     const r = await fetch('/api/admin/config', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
     if (r.ok) {
+      externalKeyClear.value = false
       adminConfig.value = await r.json()
       adminSuccess.value = t('admin.saveSuccess')
       setTimeout(() => { adminSuccess.value = '' }, 3000)
@@ -1540,6 +1571,81 @@ watch(() => props.jobs?.find(j => j.title === 'backup')?.state, (state) => {
                   class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
                 <p class="text-[10px] text-gray-600 mt-1">{{ $t('admin.config.numCtxHint') }}</p>
               </div>
+            </div>
+
+            <div class="bg-gray-800 rounded-xl p-4 space-y-4">
+              <div>
+                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">{{ $t('admin.external.title') }}</p>
+                <p class="text-[10px] text-gray-600 mt-1">{{ $t('admin.external.hint') }}</p>
+              </div>
+              <div>
+                <label class="text-xs text-gray-500 block mb-1">{{ $t('admin.external.url') }}</label>
+                <div class="flex gap-2">
+                  <input v-model="adminConfig.openai_base_url" type="text" placeholder="http://192.168.0.10:8000/v1"
+                    class="flex-1 min-w-0 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
+                  <button @click="testExternalServer" :disabled="externalTesting || !adminConfig.openai_base_url"
+                    class="px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-xs text-gray-200 whitespace-nowrap">
+                    {{ externalTesting ? $t('admin.external.testing') : $t('admin.external.test') }}
+                  </button>
+                </div>
+                <p v-if="externalTest?.ok" class="mt-1 text-[11px] text-green-400">
+                  ✓ {{ $t('admin.external.testOk', { n: externalTest.models.length, url: externalTest.base_url }) }}
+                </p>
+                <p v-else-if="externalTest" class="mt-1 text-[11px] text-red-400 break-all">
+                  ✗ {{ $t('admin.external.testFailed') }}: {{ externalTest.error }}
+                </p>
+              </div>
+              <div>
+                <label class="text-xs text-gray-500 block mb-1">{{ $t('admin.external.apiKey') }}</label>
+                <div class="flex gap-2 items-center">
+                  <input v-model="adminConfig.openai_api_key" type="password" autocomplete="off"
+                    :placeholder="adminConfig.openai_api_key_set && !externalKeyClear ? $t('admin.external.apiKeySaved') : $t('admin.external.apiKeyNone')"
+                    class="flex-1 min-w-0 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
+                  <button v-if="adminConfig.openai_api_key_set && !externalKeyClear"
+                    @click="externalKeyClear = true; adminConfig.openai_api_key = ''"
+                    class="px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-xs text-gray-300 whitespace-nowrap">
+                    {{ $t('admin.external.apiKeyClear') }}
+                  </button>
+                </div>
+              </div>
+              <datalist id="external-models">
+                <option v-for="m in externalModels" :key="m" :value="m" />
+              </datalist>
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="text-xs text-gray-500 block mb-1">{{ $t('admin.external.model') }}</label>
+                  <input v-model="adminConfig.openai_model" type="text" list="external-models"
+                    class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
+                </div>
+                <div>
+                  <label class="text-xs text-gray-500 block mb-1">{{ $t('admin.external.vlmModel') }}</label>
+                  <input v-model="adminConfig.openai_vlm_model" type="text" list="external-models"
+                    :placeholder="$t('admin.external.vlmModelFallback')"
+                    class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
+                </div>
+                <div>
+                  <label class="text-xs text-gray-500 block mb-1">{{ $t('admin.external.useForInspire') }}</label>
+                  <select v-model="adminConfig.inspire_llm_backend"
+                    class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-purple-500">
+                    <option value="ollama">Ollama</option>
+                    <option value="openai">{{ $t('admin.external.backendExternal') }}</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="text-xs text-gray-500 block mb-1">{{ $t('admin.external.useForRefine') }}</label>
+                  <select v-model="adminConfig.refine_llm_backend"
+                    class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-purple-500">
+                    <option value="ollama">Ollama</option>
+                    <option value="openai">{{ $t('admin.external.backendExternal') }}</option>
+                  </select>
+                </div>
+              </div>
+              <p v-if="(adminConfig.inspire_llm_backend === 'openai' || adminConfig.refine_llm_backend === 'openai')
+                       && (!adminConfig.openai_base_url || !(adminConfig.openai_model || adminConfig.openai_vlm_model))"
+                class="text-[11px] text-amber-400">
+                ⚠ {{ $t('admin.external.incomplete') }}
+              </p>
+              <p class="text-[10px] text-gray-600">{{ $t('admin.external.embedNote') }}</p>
             </div>
 
             <div class="bg-gray-800 rounded-xl p-4 space-y-4">

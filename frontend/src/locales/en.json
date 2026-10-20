@@ -898,6 +898,27 @@
       "frozenset": "Frozenset Classification (Phase A)",
       "frozensetDesc": "Disable to delegate all tags to VLM. For debugging classification accuracy."
     },
+    "external": {
+      "title": "External LLM server (OpenAI-compatible)",
+      "hint": "Run Inspire and Refine text generation and image reading on an external server instead of Ollama (Lemonade, llama.cpp server, vLLM, LM Studio, ...).",
+      "url": "Server URL (/v1 optional)",
+      "test": "Test connection",
+      "testing": "Checking...",
+      "testOk": "Found {n} models ({url})",
+      "testFailed": "Cannot connect",
+      "apiKey": "API key",
+      "apiKeySaved": "Saved (type only to change it)",
+      "apiKeyNone": "Leave empty if not needed",
+      "apiKeyClear": "Remove",
+      "model": "Model",
+      "vlmModel": "Image-reading model",
+      "vlmModelFallback": "Empty = same as model",
+      "useForInspire": "Use for Inspire",
+      "useForRefine": "Use for Refine",
+      "backendExternal": "External server",
+      "incomplete": "The external server is selected but its URL or model is empty. Runs will fail with an error until it is filled in.",
+      "embedNote": "Embeddings (the vectors behind similarity search) are always made by Ollama, so Ollama is still required. num_ctx is taken from the server's own settings."
+    },
     "gpuPriority": {
       "title": "GPU Priority Control",
       "autoPause": "Auto-pause background GPU processing during generation/prompt",

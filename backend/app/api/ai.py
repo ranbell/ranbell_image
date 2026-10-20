@@ -969,7 +969,7 @@ async def refine_prompt(body: RefineRequest, request: Request):
     from ..jobs.runners import run_refine_prompt
     spooler = request.app.state.spooler
     db = request.app.state.db
-    ollama = request.app.state.ollama
+    ollama = request.app.state.ollama.for_feature("refine")
     comfy = request.app.state.comfy
 
     token_queue: asyncio.Queue = asyncio.Queue()

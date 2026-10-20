@@ -33,6 +33,14 @@ _defaults = {
     # ConfigBody but not here, so every save read back empty.
     "cluster_common_tags": [],
     "ollama_num_ctx":          16384,
+    # External OpenAI-compatible server. Inspire and Refine each choose
+    # "ollama" or "openai"; embeddings always stay on Ollama.
+    "openai_base_url":     "",
+    "openai_api_key":      "",
+    "openai_model":        "",
+    "openai_vlm_model":    "",
+    "inspire_llm_backend": "ollama",
+    "refine_llm_backend":  "ollama",
     # Muse's defaults (2026-09-13). The Showrunner: "empty the llm and image model
     # too, so they are chosen before running. If a default is set in the admin
     # screen, it should be possible to start from that default." **Empty means the

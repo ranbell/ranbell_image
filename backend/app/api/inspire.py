@@ -297,7 +297,7 @@ async def morph(body: MorphRequest, request: Request):
 async def anomaly(body: AnomalyRequest, request: Request):
     """Inject statistically rare tags (via Ollama) and re-search."""
     db = request.app.state.db
-    ollama = request.app.state.ollama
+    ollama = request.app.state.ollama.for_feature("inspire")
     if not body.sha256s:
         raise HTTPException(400, "Select an image")
 
@@ -1583,7 +1583,7 @@ async def expand_theme(body: ExpandThemeRequest, request: Request):
     from ..jobs.runners import run_expand_theme
     spooler = request.app.state.spooler
     db      = request.app.state.db
-    ollama  = request.app.state.ollama
+    ollama  = request.app.state.ollama.for_feature("inspire")
 
     event_queue: asyncio.Queue = asyncio.Queue()
     job_id = spooler.submit(
@@ -1618,7 +1618,7 @@ async def inversion(body: InversionRequest, request: Request):
     from ..jobs.runners import run_inversion
     spooler = request.app.state.spooler
     db = request.app.state.db
-    ollama = request.app.state.ollama
+    ollama = request.app.state.ollama.for_feature("inspire")
 
     event_queue: asyncio.Queue = asyncio.Queue()
     job_id = spooler.submit(
@@ -1733,7 +1733,7 @@ async def brainstorm(body: BrainstormRequest, request: Request):
     from ..jobs.runners import run_brainstorm
     spooler = request.app.state.spooler
     db = request.app.state.db
-    ollama = request.app.state.ollama
+    ollama = request.app.state.ollama.for_feature("inspire")
 
     event_queue: asyncio.Queue = asyncio.Queue()
     job_id = spooler.submit(

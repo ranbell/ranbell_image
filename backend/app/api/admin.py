@@ -35,6 +35,16 @@ class ConfigBody(BaseModel):
     cluster_common_tags: list[str] | None = None
     prompt_removal_tags: list[str] | None = None
     ollama_num_ctx: Annotated[int, Field(ge=512)] | None = None
+    # External OpenAI-compatible server (Inspire / Refine)
+    openai_base_url: str | None = None
+    # Never sent back to the browser, so an empty value means "unchanged";
+    # `openai_api_key_clear` removes a saved key.
+    openai_api_key: str | None = None
+    openai_api_key_clear: bool | None = None
+    openai_model: str | None = None
+    openai_vlm_model: str | None = None
+    inspire_llm_backend: Literal["ollama", "openai"] | None = None
+    refine_llm_backend: Literal["ollama", "openai"] | None = None
     # Muse's defaults (empty means the screen asks to choose)
     muse_model: str | None = None
     muse_workflow: str | None = None
@@ -64,14 +74,21 @@ class ConfigBody(BaseModel):
     muse_block_nsfw: bool | None = None
 
 
+def _config_for_browser(cfg: dict) -> dict:
+    out = dict(cfg)
+    out["source_images_dir"] = str(settings.source_images_dir)
+    out["generated_images_dir"] = str(settings.generated_images_dir)
+    out["thumbnails_dir"] = str(settings.thumbnails_dir)
+    # The key stays on the server; the screen only learns whether one is saved.
+    out["openai_api_key_set"] = bool(out.get("openai_api_key"))
+    out["openai_api_key"] = ""
+    return out
+
+
 @router.get("/config")
 async def get_config(request: Request):
     db = request.app.state.db
-    cfg = await get_runtime_config(db)
-    cfg["source_images_dir"] = str(settings.source_images_dir)
-    cfg["generated_images_dir"] = str(settings.generated_images_dir)
-    cfg["thumbnails_dir"] = str(settings.thumbnails_dir)
-    return cfg
+    return _config_for_browser(await get_runtime_config(db))
 
 
 async def _probe_embedding_width(ollama, model: str) -> int | None:
@@ -89,6 +106,10 @@ async def update_config(body: ConfigBody, request: Request):
     db = request.app.state.db
     existing = await db.get_config()
     updates = body.model_dump(exclude_none=True)
+    if not updates.get("openai_api_key"):
+        updates.pop("openai_api_key", None)
+    if updates.pop("openai_api_key_clear", False):
+        updates["openai_api_key"] = ""
 
     # Changing the embedding model is the one ordinary setting that can put the
     # collection and the vectors in it out of step. Check before saving, because
@@ -132,12 +153,10 @@ async def update_config(body: ConfigBody, request: Request):
     await db.put_config(existing)
     invalidate_cache()
 
-    # Hot-apply LLM URL without restart
-    llm_keys = {"ollama_url", "vlm_model"}
-    if llm_keys & updates.keys():
-        from ..ai.llm import apply_llm_runtime_config
-        from ..runtime_config import get_runtime_config as _grc
-        apply_llm_runtime_config(request.app.state.ollama, await _grc(db))
+    # Hot-apply LLM connection settings without restart
+    from ..ai.llm import LLM_RUNTIME_KEYS, apply_llm_runtime_config
+    if LLM_RUNTIME_KEYS & updates.keys():
+        apply_llm_runtime_config(request.app.state.ollama, await get_runtime_config(db))
 
     spooler = request.app.state.spooler
 
@@ -156,13 +175,36 @@ async def update_config(body: ConfigBody, request: Request):
             existing.get("disk_fault_pct", 90),
         )
 
-    cfg = await get_runtime_config(db)
-    cfg["source_images_dir"] = str(settings.source_images_dir)
-    cfg["generated_images_dir"] = str(settings.generated_images_dir)
-    cfg["thumbnails_dir"] = str(settings.thumbnails_dir)
+    cfg = _config_for_browser(await get_runtime_config(db))
     if warning:
         cfg["warning"] = warning
     return cfg
+
+
+class OpenAIModelsBody(BaseModel):
+    base_url: str = ""
+    # Empty → use the saved key.
+    api_key: str = ""
+
+
+@router.post("/openai/models")
+async def openai_models(body: OpenAIModelsBody, request: Request):
+    """Connection test for the external server: list its models.
+
+    Takes the URL from the form, so it can be tried before saving.
+    """
+    url = body.base_url.strip()
+    if not url:
+        raise HTTPException(400, "base_url is required")
+    cfg = await get_runtime_config(request.app.state.db)
+    api_key = body.api_key or cfg.get("openai_api_key") or ""
+    from ..ai.openai_compat import normalize_base_url
+    external = request.app.state.ollama.external
+    try:
+        models = await external.list_models(url, api_key=api_key)
+    except Exception as exc:
+        return {"ok": False, "base_url": normalize_base_url(url), "models": [], "error": str(exc) or type(exc).__name__}
+    return {"ok": True, "base_url": normalize_base_url(url), "models": models}
 
 
 # ── Schema ────────────────────────────────────────────────────────────────────

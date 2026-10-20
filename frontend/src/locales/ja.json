@@ -898,6 +898,27 @@
       "frozenset": "Frozenset 分類（Phase A）",
       "frozensetDesc": "OFF にすると全タグを VLM に委ねる。分類精度の比較・デバッグ用"
     },
+    "external": {
+      "title": "外部 LLM サーバ（OpenAI 互換）",
+      "hint": "インスピレーションと錬成の文章生成・画像読み取りを、Ollama の代わりに外部サーバで行えます（Lemonade / llama.cpp server / vLLM / LM Studio など）。",
+      "url": "サーバ URL（/v1 は省略可）",
+      "test": "接続テスト",
+      "testing": "確認中...",
+      "testOk": "{n} 個のモデルが見つかりました（{url}）",
+      "testFailed": "接続できません",
+      "apiKey": "API キー",
+      "apiKeySaved": "保存済み（変更するときだけ入力）",
+      "apiKeyNone": "不要なら空のまま",
+      "apiKeyClear": "削除",
+      "model": "モデル",
+      "vlmModel": "画像を読むモデル",
+      "vlmModelFallback": "空なら左と同じ",
+      "useForInspire": "インスピレーションで使う",
+      "useForRefine": "錬成で使う",
+      "backendExternal": "外部サーバ",
+      "incomplete": "外部サーバを選んでいますが、URL かモデルが空です。このままだと実行時にエラーになります。",
+      "embedNote": "埋め込み（類似検索のベクトル）は常に Ollama で作ります。外部サーバに切り替えても Ollama は必要です。num_ctx はサーバ側の設定が使われます。"
+    },
     "gpuPriority": {
       "title": "GPU 優先制御",
       "autoPause": "生成/プロンプト時にバックグラウンド GPU 処理を自動ポーズ",
