@@ -89,6 +89,10 @@ class RefineRequest(BaseModel):
     prose_paragraphs: int = DEFAULT_PROSE_PARAGRAPHS
     roles: list[str] = []  # per-image role aligned with sha256s: 'both' | 'style' | 'content'
     emotion_shift: str = ""  # target emotion dimension (e.g. 'nostalgia') to rewrite the register toward
+    # detailed style (Krea 2 visual script): "" reads the medium from the
+    # reference; "anime" / "photo" fix it, since Krea 2 drifts to a photograph
+    # when the medium is not stated.
+    visual_medium: Literal["", "anime", "photo"] = ""
 
 
 class SearchRequest(BaseModel):
@@ -164,44 +168,6 @@ _STYLE_INSTRUCTIONS = {
         "absurdres, sharp_focus, intricate_details, professional\n\n"
         "Output ONLY the flat comma-separated tag list. No category labels, no line breaks between tags, "
         "no explanation. Aim to fill 150–200 words."
-    ),
-    "detailed": (
-        "CRITICAL OUTPUT FORMAT RULES — violating any of these is an error:\n"
-        "- Do NOT output a comma-separated tag list.\n"
-        "- Do NOT output plain tags. Do NOT output a flat danbooru-style list.\n"
-        "- You MUST output EXACTLY 8 sections using bold markdown headers (**Header:**).\n"
-        "- Start your response directly with the first **bold header** — no preamble.\n\n"
-        "Generate a structured, highly detailed image generation prompt.\n"
-        "SINGLE-IMAGE SYNTHESIS RULE: When multiple reference images are provided, synthesize them "
-        "into ONE unified scene — not a collage, not a diptych.\n\n"
-        "CHARACTER-FIRST RULE: When characters are present, subject count (1girl, 1boy, solo, "
-        "2girls, etc.) MUST appear first in **Characters & Composition**. If [User instruction] "
-        "describes a story, translate every concrete physical action (gripping, touching, running, "
-        "hugging, reaching, kneeling…) into specific pose/action descriptions — these MUST appear.\n\n"
-        "Output EXACTLY these 8 sections with bold markdown headers:\n\n"
-        "**Core Subject & Scene Setting:** [subject, genre, overall mood — 1-2 sentences]\n"
-        "**Characters & Composition:** [count, hair color/style, eye color, pose, framing, clothing details]\n"
-        "**Lighting & Atmosphere:** [light source, direction, color temperature, shadow quality, ambience]\n"
-        "**Style & Artistic Influence:** [art style, medium, influences, rendering technique]\n"
-        "**Details & Textures:** [skin, fabric, hair texture, surface materials, fine details]\n"
-        "**Color Palette:** [dominant colors, accent colors, saturation, overall tone]\n"
-        "**Camera & Lens Effects:** [shot type, angle, depth of field, bokeh, lens flare]\n"
-        "**Refinements & Modifiers:** [comma-separated quality/detail keywords — e.g. masterpiece, volumetric lighting, hyperdetailed]\n\n"
-        "Fill each section based SOLELY on the reference image. Be specific and concrete.\n\n"
-        "After all 8 sections, output this JSON block — nothing else after it:\n\n"
-        "```json\n"
-        "{\n"
-        '  "subject_tags": "subject count danbooru tags, e.g. 1girl,solo",\n'
-        '  "hair_tags": "comma,separated,danbooru,tags",\n'
-        '  "expression_tags": "comma,separated,danbooru,tags",\n'
-        '  "clothing_tags": "comma,separated,danbooru,tags",\n'
-        '  "accessory_tags": "comma,separated,danbooru,tags",\n'
-        '  "pose_tags": "comma,separated,danbooru,tags",\n'
-        '  "background_tags": "comma,separated,danbooru,tags",\n'
-        '  "object_tags": "comma,separated,danbooru,tags",\n'
-        '  "lighting_tags": "comma,separated,danbooru,tags"\n'
-        "}\n"
-        "```"
     ),
 }
 
@@ -657,77 +623,6 @@ def _append_literal_texts(positive: str, texts: list[str]) -> str:
         return positive
     tags = [f'text "{t}"' for t in texts] + ["text_on_image"]
     return positive.rstrip(", ") + ", " + ", ".join(tags)
-
-
-_DETAILED_SECTION_HEADERS = (
-    "Core Subject", "Characters", "Lighting",
-    "Style", "Details", "Color Palette", "Camera", "Refinements",
-)
-
-# Matches a POSITIVE:/NEGATIVE: label line — used to stop parsing before these sections
-_IS_POS_NEG_LABEL_RE = re.compile(
-    r'^(?:positive(?:\s+prompt)?|negative(?:\s+prompt)?|avoid|do\s+not\s+include)'
-    r'[:\s—–-]',
-    re.IGNORECASE,
-)
-
-# Strips any trailing POSITIVE/NEGATIVE block from a bold-form section capture
-_TRAILING_POS_NEG_RE = re.compile(
-    r'\n*(?:positive(?:\s+prompt)?|negative(?:\s+prompt)?|avoid|do\s+not\s+include)'
-    r'[:\s—–-].*$',
-    re.IGNORECASE | re.DOTALL,
-)
-
-
-def _parse_detailed_output(text: str) -> str:
-    """Parse 8-section output (bold, ATX, or plain headers) into a flat prompt string."""
-    if not text.strip():
-        return ""
-
-    # Primary: bold form **Header:** content (raw VLM output)
-    sections = re.findall(r"\*\*[^*]+\*\*[:\s]*(.*?)(?=\*\*|\Z)", text, re.S)
-    if sections:
-        cleaned = [_TRAILING_POS_NEG_RE.sub("", s).strip() for s in sections]
-        return "\n".join(s for s in cleaned if s)
-
-    # Robust fallback: line-by-line scan — no colon required in header line.
-    # Fixes the case where sections 1-7 lack colons but section 8 (Refinements) has one:
-    # the old regex required ":" in each header line, so only section 8 was extracted.
-    header_pat = "|".join(re.escape(h) for h in _DETAILED_SECTION_HEADERS)
-    is_header_re = re.compile(
-        rf'^[#*>\-\s]{{0,10}}(?:{header_pat})\b',
-        re.IGNORECASE
-    )
-    extract_inline_re = re.compile(
-        rf'^[#*>\-\s]{{0,10}}(?:{header_pat})\b[^:\n]*:\s*(.*)',
-        re.IGNORECASE
-    )
-
-    result: list[str] = []
-    current: list[str] = []
-    in_section = False
-
-    for line in text.splitlines():
-        stripped = line.strip()
-        if _IS_POS_NEG_LABEL_RE.match(stripped):
-            break  # stop before POSITIVE:/NEGATIVE: section
-        if is_header_re.match(stripped):
-            if in_section and current:
-                result.append("\n".join(current).strip())
-            current = []
-            in_section = True
-            m = extract_inline_re.match(stripped)
-            if m:
-                inline = m.group(1).strip()
-                if inline:
-                    current.append(inline)
-        elif in_section and stripped:
-            current.append(stripped)
-
-    if in_section and current:
-        result.append("\n".join(current).strip())
-
-    return "\n".join(result) if result else ""
 
 
 def _clean_markdown(text: str) -> str:

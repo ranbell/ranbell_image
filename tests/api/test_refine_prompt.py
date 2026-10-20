@@ -1,12 +1,11 @@
 """Tests for the alchemy/refine prompt pipeline.
 
 Covers:
-  - _build_vlm_prompt(): style × instruction_framing combinations (danbooru/detailed)
+  - _build_vlm_prompt(): instruction_framing combinations (danbooru)
   - _build_natural_tags_prompt() / _build_natural_prose_prompt(): natural style two-pass builders
   - _check_natural_prose(): prose-vs-tag-list heuristic
   - _extract_literal_texts(): regex extraction
   - _append_literal_texts(): prompt append
-  - _parse_detailed_output(): bold and plain-header fallback
   - _translate_instruction(): mock Ollama
   - _translate_and_classify(): mock Ollama + JSON parsing
   - Full pipeline VLM prompt verification: instruction_mode × prompt_style
@@ -29,14 +28,13 @@ from app.api.ai import (
     _check_natural_prose,
     _extract_literal_texts,
     _append_literal_texts,
-    _parse_detailed_output,
     _remove_forced_tags,
     _translate_and_classify,
     _translate_instruction,
 )
 
 
-# ── _build_vlm_prompt (danbooru / detailed) ───────────────────────────────────
+# ── _build_vlm_prompt (danbooru) ────────────────────────────────────────────
 
 class TestBuildVlmPrompt:
     CONTEXT = "[Image 1 — influence weight: 100%]\nPrompt: 1girl, blue hair"
@@ -71,21 +69,6 @@ class TestBuildVlmPrompt:
             with_negative=False, instruction_framing=False,
         )
         assert _STYLE_INSTRUCTIONS["danbooru"][:40] in prompt
-
-    def test_detailed_style_included(self):
-        prompt = _build_vlm_prompt(
-            self.CONTEXT, "", "detailed",
-            with_negative=False, instruction_framing=False,
-        )
-        assert "Core Subject" in prompt
-        assert "Refinements" in prompt
-
-    def test_detailed_style_forbids_tag_list(self):
-        prompt = _build_vlm_prompt(
-            self.CONTEXT, "", "detailed",
-            with_negative=False, instruction_framing=False,
-        )
-        assert "Do NOT output a comma-separated tag list" in prompt
 
     def test_with_negative_adds_sections(self):
         prompt = _build_vlm_prompt(
@@ -275,139 +258,6 @@ class TestAppendLiteralTexts:
         assert result == "1girl, blue hair"
 
 
-# ── _parse_detailed_output ────────────────────────────────────────────────────
-
-DETAILED_BOLD = """\
-**Core Subject & Scene Setting:** An ethereal anime girl in starry setting.
-**Characters & Composition:** 1girl, solo, long blue hair, portrait composition.
-**Lighting & Atmosphere:** Soft moonlight, cool blue tones, mystical ambience.
-**Style & Artistic Influence:** High-detail anime illustration, digital art.
-**Details & Textures:** Porcelain skin, silky hair, constellation accessories.
-**Color Palette:** Deep blues, purples, silver highlights.
-**Camera & Lens Effects:** Close-up, shallow depth of field, bokeh background.
-**Refinements & Modifiers:** masterpiece, best_quality, ultra-detailed, 8k"""
-
-DETAILED_PLAIN = """\
-Core Subject & Scene Setting: An ethereal anime girl in starry setting.
-Characters & Composition: 1girl, solo, long blue hair, portrait composition.
-Lighting & Atmosphere: Soft moonlight, cool blue tones, mystical ambience.
-Style & Artistic Influence: High-detail anime illustration, digital art.
-Details & Textures: Porcelain skin, silky hair, constellation accessories.
-Color Palette: Deep blues, purples, silver highlights.
-Camera & Lens Effects: Close-up, shallow depth of field, bokeh background.
-Refinements & Modifiers: masterpiece, best_quality, ultra-detailed, 8k"""
-
-# Gemini-identified bug: sections 1-7 without colon, section 8 with colon
-# The old fallback regex required ":" in each header, so only Refinements was extracted.
-DETAILED_NO_COLON = """\
-Core Subject & Scene Setting
-An ethereal anime girl in starry setting.
-Characters & Composition
-1girl, solo, long blue hair, portrait composition.
-Lighting & Atmosphere
-Soft moonlight, cool blue tones, mystical ambience.
-Style & Artistic Influence
-High-detail anime illustration, digital art.
-Details & Textures
-Porcelain skin, silky hair, constellation accessories.
-Color Palette
-Deep blues, purples, silver highlights.
-Camera & Lens Effects
-Close-up, shallow depth of field, bokeh background.
-Refinements & Modifiers: masterpiece, best_quality, ultra-detailed, 8k"""
-
-DETAILED_ATX = """\
-### Core Subject & Scene Setting
-An ethereal anime girl in starry setting.
-### Characters & Composition
-1girl, solo, long blue hair, portrait composition.
-### Refinements & Modifiers
-masterpiece, best_quality, ultra-detailed, 8k"""
-
-# VLM outputs all 8 sections in bold form AND then appends a POSITIVE: block
-DETAILED_WITH_APPENDED_POSITIVE = """\
-**Core Subject & Scene Setting:** An ethereal anime girl in starry setting.
-**Characters & Composition:** 1girl, solo, long blue hair, portrait composition.
-**Lighting & Atmosphere:** Soft moonlight, cool blue tones, mystical ambience.
-**Style & Artistic Influence:** High-detail anime illustration, digital art.
-**Details & Textures:** Porcelain skin, silky hair, constellation accessories.
-**Color Palette:** Deep blues, purples, silver highlights.
-**Camera & Lens Effects:** Close-up, shallow depth of field, bokeh background.
-**Refinements & Modifiers:** masterpiece, best_quality, ultra-detailed, 8k
-
-POSITIVE:
-1girl, blue_hair, masterpiece"""
-
-# VLM outputs bold sections AND appends both POSITIVE: and NEGATIVE: blocks
-DETAILED_WITH_APPENDED_POS_NEG = """\
-**Core Subject & Scene Setting:** An ethereal anime girl in starry setting.
-**Refinements & Modifiers:** masterpiece, best_quality
-
-POSITIVE:
-1girl, blue_hair
-
-NEGATIVE:
-lowres, bad_anatomy"""
-
-
-class TestParseDetailedOutput:
-    def test_bold_headers_parsed(self):
-        result = _parse_detailed_output(DETAILED_BOLD)
-        assert "An ethereal anime girl" in result
-        assert "masterpiece" in result
-        assert "**" not in result
-
-    def test_bold_returns_8_sections(self):
-        result = _parse_detailed_output(DETAILED_BOLD)
-        lines = [l for l in result.splitlines() if l.strip()]
-        assert len(lines) == 8
-
-    def test_plain_headers_fallback(self):
-        result = _parse_detailed_output(DETAILED_PLAIN)
-        assert result != ""
-        assert "An ethereal anime girl" in result
-        assert "masterpiece" in result
-
-    def test_empty_string_returns_empty(self):
-        result = _parse_detailed_output("")
-        assert result == ""
-
-    def test_tag_only_output_returns_empty(self):
-        result = _parse_detailed_output("1girl, blue hair, masterpiece, best_quality")
-        assert result == ""
-
-    def test_no_colon_headers_fallback(self):
-        """Bug repro: sections 1-7 without colon, section 8 with colon — all must be extracted."""
-        result = _parse_detailed_output(DETAILED_NO_COLON)
-        assert result != ""
-        assert "An ethereal anime girl" in result
-        assert "1girl" in result          # section 2 — would be missing with old regex
-        assert "masterpiece" in result    # section 8
-
-    def test_atx_headers_fallback(self):
-        """ATX-style (### Header) handled by line-by-line fallback."""
-        result = _parse_detailed_output(DETAILED_ATX)
-        assert "An ethereal anime girl" in result
-        assert "1girl" in result
-        assert "masterpiece" in result
-
-    def test_strips_appended_positive_section(self):
-        """Spurious POSITIVE: block appended after bold sections must not contaminate output."""
-        result = _parse_detailed_output(DETAILED_WITH_APPENDED_POSITIVE)
-        assert "An ethereal anime girl" in result
-        assert "masterpiece" in result
-        assert "POSITIVE" not in result
-
-    def test_strips_appended_pos_neg_sections(self):
-        """Both POSITIVE: and NEGATIVE: blocks appended after bold sections must be stripped."""
-        result = _parse_detailed_output(DETAILED_WITH_APPENDED_POS_NEG)
-        assert "An ethereal anime girl" in result
-        assert "masterpiece" in result
-        assert "POSITIVE" not in result
-        assert "NEGATIVE" not in result
-        assert "lowres" not in result
-
-
 # ── _remove_forced_tags ───────────────────────────────────────────────────────
 
 class TestRemoveForcedTags:
@@ -428,8 +278,8 @@ class TestRemoveForcedTags:
         # prose line is left because break fires after first non-empty line
         assert "masterpiece of art under the sky." in result
 
-    def test_detailed_style_all_lines(self):
-        """detailed style: forbidden tags in any section line must be removed."""
+    def test_all_lines_removes_from_every_line(self):
+        """all_lines: forbidden tags in any line must be removed."""
         prompt = (
             "An ethereal anime girl in starry setting.\n"
             "1girl, solo, long blue hair, portrait composition.\n"
@@ -548,7 +398,8 @@ DUMMY_CONTEXT = "[Image 1 — influence weight: 100%]\nPrompt: 1girl, blue hair\
 class TestVlmPromptCombinations:
     """Verify the correct vlm_prompt is built for every mode × style combination.
     Tests _build_vlm_prompt() with the pre-processed instruction to simulate
-    what run_refine_prompt() does. Covers danbooru/detailed (single VLM call styles);
+    what run_refine_prompt() does. Covers danbooru (the single VLM call style; detailed
+    is the two-step Krea 2 script, covered in backend/tests/test_scene_sheet.py);
     natural style's two-pass builders are covered by TestBuildNaturalTagsPrompt /
     TestBuildNaturalProsePrompt above.
     """
@@ -556,7 +407,7 @@ class TestVlmPromptCombinations:
     INSTRUCTION_JP = "'Ranbell Image' というテキストを上部に表示して、油絵風にして"
     INSTRUCTION_EN_TRANSLATED = "add text 'Ranbell Image' at top, oil painting style"
 
-    @pytest.mark.parametrize("style", ["danbooru", "detailed"])
+    @pytest.mark.parametrize("style", ["danbooru"])
     def test_none_mode_passes_raw_instruction(self, style):
         """mode=none: instruction sent to VLM unchanged, no framing."""
         prompt = _build_vlm_prompt(
@@ -566,7 +417,7 @@ class TestVlmPromptCombinations:
         assert self.INSTRUCTION_JP in prompt
         assert "PROMPT ENGINEERING DIRECTIVE" not in prompt
 
-    @pytest.mark.parametrize("style", ["danbooru", "detailed"])
+    @pytest.mark.parametrize("style", ["danbooru"])
     def test_basic_mode_removes_literal_before_vlm(self, style):
         """mode=basic: literal text extracted BEFORE VLM call.
         VLM receives: cleaned NL instruction + framing, NOT the literal text part."""
@@ -583,7 +434,7 @@ class TestVlmPromptCombinations:
         # Framing must be applied
         assert "PROMPT ENGINEERING DIRECTIVE" in prompt
 
-    @pytest.mark.parametrize("style", ["danbooru", "detailed"])
+    @pytest.mark.parametrize("style", ["danbooru"])
     def test_enhanced_mode_removes_literal_before_vlm(self, style):
         """mode=enhanced: simulate LLM classification output.
         VLM receives: nl_instruction only + framing."""
@@ -596,7 +447,7 @@ class TestVlmPromptCombinations:
         assert "oil painting" in prompt
         assert "PROMPT ENGINEERING DIRECTIVE" in prompt
 
-    @pytest.mark.parametrize("style", ["danbooru", "detailed"])
+    @pytest.mark.parametrize("style", ["danbooru"])
     def test_style_instructions_present_in_prompt(self, style):
         """Style directive is always included in the VLM prompt."""
         prompt = _build_vlm_prompt(
@@ -606,21 +457,8 @@ class TestVlmPromptCombinations:
         # Key phrase unique to each style
         style_marker = {
             "danbooru": "80–120 comma-separated English tags",
-            "detailed": "Core Subject",
         }[style]
         assert style_marker in prompt
-
-    def test_detailed_style_contains_all_8_headers(self):
-        """detailed style instruction must list all 8 section headers."""
-        prompt = _build_vlm_prompt(
-            DUMMY_CONTEXT, "", "detailed",
-            with_negative=False, instruction_framing=False,
-        )
-        for header in [
-            "Core Subject", "Characters", "Lighting",
-            "Style", "Details", "Color Palette", "Camera", "Refinements",
-        ]:
-            assert header in prompt, f"Missing section header: {header}"
 
     def test_basic_mode_literal_injected_into_positive(self):
         """End-to-end: literal extracted → not in VLM prompt → appended to positive."""

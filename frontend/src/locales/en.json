@@ -494,7 +494,8 @@
       "refiningDescription": "Refining description...",
       "generatingPrompt": "Generating prompt...",
       "parsingOutput": "Parsing output...",
-      "queuingGeneration": "Queuing generation job..."
+      "queuingGeneration": "Queuing generation job...",
+      "readingScene": "Reading the scene from the reference..."
     },
     "positiveNodePlaceholder": "e.g. 6",
     "negativeNodePlaceholder": "e.g. 7",
@@ -503,7 +504,7 @@
     "styleNaturalLabel": "Natural Language",
     "styleDanbooruLabel": "Danbooru Tags",
     "styleDetailedLabel": "Detailed",
-    "styleDetailedDesc": "8-section structured",
+    "styleDetailedDesc": "Krea2 visual script",
     "instructionModeLabel": "Instruction mode",
     "instructionModeNone": "None",
     "instructionModeBasic": "Basic",
@@ -538,7 +539,14 @@
     "ollamaOfflineTitle": "Cannot connect to Ollama",
     "ollamaOfflineHint": "VLM-based prompt generation is unavailable. AI Refine will not work until Ollama reconnects.",
     "ollamaOfflineDirectHint": "Direct Prompt mode is still available — send a prompt from Invoke or the image detail panel to bypass the VLM.",
-    "comfyOfflineHint": "ComfyUI is unreachable — jobs will queue in the spooler and execute when it reconnects."
+    "comfyOfflineHint": "ComfyUI is unreachable — jobs will queue in the spooler and execute when it reconnects.",
+    "notUsedByKrea": "Not used by the detailed style (Krea2): it reads the picture itself, not WD14 tags",
+    "visualMediumLabel": "Medium",
+    "visualMedium_auto": "From reference",
+    "visualMedium_anime": "Anime",
+    "visualMedium_photo": "Photo",
+    "visualMediumDesc": "Krea2 drifts toward a photograph unless the medium is stated. Fix it here if reading it from the reference gets it wrong",
+    "negPromptKrea": "Krea2 does not use a negative prompt, so the detailed style writes none"
   },
   "toast": {
     "pipelineStarted": "AI processing started.",

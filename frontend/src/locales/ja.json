@@ -494,7 +494,8 @@
       "refiningDescription": "説明文を再生成中...",
       "generatingPrompt": "プロンプトを生成中...",
       "parsingOutput": "出力を整形中...",
-      "queuingGeneration": "生成ジョブをキューに追加中..."
+      "queuingGeneration": "生成ジョブをキューに追加中...",
+      "readingScene": "参照画像から場面を読み取り中..."
     },
     "positiveNodePlaceholder": "例: 6",
     "negativeNodePlaceholder": "例: 7",
@@ -503,7 +504,7 @@
     "styleNaturalLabel": "自然文",
     "styleDanbooruLabel": "Danbooruタグ",
     "styleDetailedLabel": "詳細構造",
-    "styleDetailedDesc": "8セクション形式",
+    "styleDetailedDesc": "Krea2 ビジュアルスクリプト",
     "instructionModeLabel": "指示モード",
     "instructionModeNone": "なし",
     "instructionModeBasic": "基本",
@@ -538,7 +539,14 @@
     "ollamaOfflineTitle": "Ollama に接続できません",
     "ollamaOfflineHint": "VLM によるプロンプト錬成が利用できません。Ollama が再接続されるまで AI 錬成は実行できません。",
     "ollamaOfflineDirectHint": "ダイレクトプロンプトモードは引き続き使用できます — Invoke またはサムネイル詳細からプロンプトを送信してください。",
-    "comfyOfflineHint": "ComfyUI に接続できません — ジョブはスプーラーに蓄積され、再接続後に実行されます。"
+    "comfyOfflineHint": "ComfyUI に接続できません — ジョブはスプーラーに蓄積され、再接続後に実行されます。",
+    "notUsedByKrea": "詳細構造（Krea2）では使いません。WD14 タグではなく画像そのものから読み取ります",
+    "visualMediumLabel": "画風",
+    "visualMedium_auto": "参照から判定",
+    "visualMedium_anime": "アニメ",
+    "visualMedium_photo": "実写",
+    "visualMediumDesc": "Krea2 は画風を書かないと実写寄りになります。参照から判定が外れるときは固定してください",
+    "negPromptKrea": "Krea2 はネガティブを使わないので、詳細構造では作りません"
   },
   "toast": {
     "pipelineStarted": "AI処理を開始しました。",

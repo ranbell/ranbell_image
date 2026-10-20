@@ -475,6 +475,10 @@ const refineStyle = ref('natural')           // 'natural' | 'danbooru' | 'detail
 const refineInstructionMode = ref('basic')   // 'none' | 'basic' | 'enhanced'
 const refineNegative = ref(false)
 const refineSuppressConflict = ref(false)
+// detailed = the Krea 2 visual script: it reads the picture, not WD14 tags,
+// writes no negative, and needs the medium stated (Krea 2 drifts to a photo).
+const refineKrea = computed(() => refineStyle.value === 'detailed')
+const refineVisualMedium = ref('')   // '' = from the reference | 'anime' | 'photo'
 const refineAutoSubmit = ref(false)
 const refineBatchCount = ref(1)
 const refineWorkflow = ref('')
@@ -527,17 +531,19 @@ const refinePhaseCode = ref('')
 const refineTotalSteps = computed(() => {
   let n = 2  // 画像ロード + 後処理
   if (refineInstructionMode.value === 'enhanced') n++  // enhanced のみ LLM ステップあり
-  if (refineSuppressConflict.value) n++
-  n += refineStyle.value === 'natural' ? 2 : 1
+  if (refineSuppressConflict.value && !refineKrea.value) n++
+  n += refineStyle.value === 'danbooru' ? 1 : 2
   return n
 })
 
 const refineCurrentStep = computed(() => {
   const order = ['loadingImages']
   if (refineInstructionMode.value === 'enhanced') order.push('translatingInstruction')
-  if (refineSuppressConflict.value) order.push('analyzingConflicts')
+  if (refineSuppressConflict.value && !refineKrea.value) order.push('analyzingConflicts')
   if (refineStyle.value === 'natural') {
     order.push('writingTags', 'writingDescription')
+  } else if (refineKrea.value) {
+    order.push('readingScene', 'writingDescription')
   } else {
     order.push('generatingPrompt')
   }
@@ -2578,6 +2584,7 @@ async function runRefine() {
       prompt_style: refineStyle.value,
       negative_prompt: refineNegative.value,
       suppress_conflict_tags: refineSuppressConflict.value,
+      visual_medium: refineKrea.value ? refineVisualMedium.value : '',
       wd14_common_ratio: refineCommonRatio.value,
       wd14_unique_count: refineUniqueCount.value,
       divergence: refineDivergence.value,
@@ -3945,13 +3952,14 @@ onUnmounted(() => {
                         <span>{{ $t('refine.tempLow') }}</span><span>{{ $t('refine.tempHigh') }}</span>
                       </div>
                     </div>
-                    <div>
+                    <div :class="refineKrea ? 'opacity-50' : ''">
                       <label class="text-xs text-gray-500 flex justify-between mb-1.5">
                         <span :title="$t('refine.divergenceTitle')">⚗️ {{ $t('refine.divergence') }}</span>
                         <span class="text-teal-400 font-mono">{{ Math.round(refineDivergence * 100) }}%</span>
                       </label>
                       <input v-model.number="refineDivergence" type="range" min="0" max="1" step="0.05"
-                        :disabled="refining || refineDirectPrompt !== null" class="w-full accent-teal-500 disabled:opacity-50" />
+                        :disabled="refining || refineDirectPrompt !== null || refineKrea" class="w-full accent-teal-500 disabled:opacity-50" />
+                      <p v-if="refineKrea" class="text-[10px] text-gray-500 mt-1">{{ $t('refine.notUsedByKrea') }}</p>
                       <div class="flex justify-between text-xs text-gray-600 mt-0.5">
                         <span>{{ $t('refine.divergenceLow') }}</span><span>{{ $t('refine.divergenceHigh') }}</span>
                       </div>
@@ -4017,15 +4025,16 @@ onUnmounted(() => {
                       </p>
                     </div>
                     <!-- WD14 tag decomposition settings -->
-                    <div class="border-t border-gray-700/50 pt-3 space-y-3">
+                    <div class="border-t border-gray-700/50 pt-3 space-y-3" :class="refineKrea ? 'opacity-50' : ''">
                       <p class="text-xs text-gray-500 font-semibold uppercase tracking-wide">{{ $t('refine.wd14Settings') }}</p>
+                      <p v-if="refineKrea" class="text-[10px] text-gray-500 -mt-2">{{ $t('refine.notUsedByKrea') }}</p>
                       <div>
                         <label class="text-xs text-gray-500 flex justify-between mb-1.5">
                           <span>{{ $t('refine.wd14CommonRatio') }}</span>
                           <span class="text-purple-400 font-mono">{{ Math.round(refineCommonRatio * 100) }}%</span>
                         </label>
                         <input v-model.number="refineCommonRatio" type="range" min="0" max="1" step="0.1"
-                          :disabled="refining || refineDirectPrompt !== null"
+                          :disabled="refining || refineDirectPrompt !== null || refineKrea"
                           class="w-full accent-purple-500 disabled:opacity-50" />
                         <div class="flex justify-between text-xs text-gray-600 mt-0.5">
                           <span>{{ $t('refine.wd14CommonRatioLow') }}</span><span>{{ $t('refine.wd14CommonRatioHigh') }}</span>
@@ -4037,7 +4046,7 @@ onUnmounted(() => {
                           <span class="text-purple-400 font-mono">{{ refineUniqueCount }}</span>
                         </label>
                         <input v-model.number="refineUniqueCount" type="range" min="5" max="40" step="5"
-                          :disabled="refining || refineDirectPrompt !== null"
+                          :disabled="refining || refineDirectPrompt !== null || refineKrea"
                           class="w-full accent-purple-500 disabled:opacity-50" />
                         <div class="flex justify-between text-xs text-gray-600 mt-0.5">
                           <span>5</span><span>40</span>
@@ -4080,6 +4089,20 @@ onUnmounted(() => {
                       </button>
                     </div>
 
+                    <!-- Krea 2 visual script: the medium decides drawn vs photographed -->
+                    <div v-if="refineKrea">
+                      <p class="text-xs text-gray-400 mb-2">{{ $t('refine.visualMediumLabel') }}</p>
+                      <div class="grid grid-cols-3 gap-2">
+                        <button v-for="m in ['', 'anime', 'photo']" :key="m || 'auto'"
+                          @click="refineVisualMedium = m" :disabled="refining"
+                          :class="refineVisualMedium === m ? 'bg-purple-900/60 border-purple-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'"
+                          class="py-1.5 px-2 border rounded-lg text-xs font-medium transition-colors disabled:opacity-50 text-center">
+                          {{ $t('refine.visualMedium_' + (m || 'auto')) }}
+                        </button>
+                      </div>
+                      <p class="text-[10px] text-gray-600 mt-1.5">{{ $t('refine.visualMediumDesc') }}</p>
+                    </div>
+
                     <!-- Instruction mode: none / basic / enhanced -->
                     <div>
                       <p class="text-xs text-gray-400 mb-2">{{ $t('refine.instructionModeLabel') }}</p>
@@ -4103,12 +4126,12 @@ onUnmounted(() => {
                       <p class="text-[10px] text-gray-600 mt-1.5">{{ $t('refine.instructionModeDesc_' + refineInstructionMode) }}</p>
                     </div>
                     <div class="flex items-center justify-between"
-                      :class="refineDirectPrompt !== null ? 'opacity-50 pointer-events-none' : ''">
+                      :class="refineDirectPrompt !== null || refineKrea ? 'opacity-50 pointer-events-none' : ''">
                       <div>
                         <p class="text-xs text-gray-300">{{ $t('refine.negPrompt') }}</p>
-                        <p class="text-xs text-gray-600 mt-0.5">{{ refineDirectPrompt !== null ? $t('refine.negPromptFromInversion') : $t('refine.negPromptDesc') }}</p>
+                        <p class="text-xs text-gray-600 mt-0.5">{{ refineDirectPrompt !== null ? $t('refine.negPromptFromInversion') : refineKrea ? $t('refine.negPromptKrea') : $t('refine.negPromptDesc') }}</p>
                       </div>
-                      <button @click="refineNegative = !refineNegative" :disabled="refining || refineDirectPrompt !== null"
+                      <button @click="refineNegative = !refineNegative" :disabled="refining || refineDirectPrompt !== null || refineKrea"
                         :class="refineNegative ? 'bg-purple-600' : 'bg-gray-700'"
                         class="relative w-10 h-5 rounded-full transition-colors disabled:opacity-50 flex-shrink-0 ml-4">
                         <span :class="refineNegative ? 'translate-x-5' : 'translate-x-0.5'"
@@ -4116,12 +4139,12 @@ onUnmounted(() => {
                       </button>
                     </div>
                     <!-- Conflict tag suppression -->
-                    <div class="flex items-center justify-between">
+                    <div class="flex items-center justify-between" :class="refineKrea ? 'opacity-50 pointer-events-none' : ''">
                       <div>
                         <p class="text-xs text-gray-300">{{ $t('refine.suppressConflictTags') }}</p>
                         <p class="text-xs text-gray-600 mt-0.5">{{ $t('refine.suppressConflictTagsDesc') }}</p>
                       </div>
-                      <button @click="refineSuppressConflict = !refineSuppressConflict" :disabled="refining"
+                      <button @click="refineSuppressConflict = !refineSuppressConflict" :disabled="refining || refineKrea"
                         :class="refineSuppressConflict ? 'bg-amber-600' : 'bg-gray-700'"
                         class="relative w-10 h-5 rounded-full transition-colors disabled:opacity-50 flex-shrink-0 ml-4">
                         <span :class="refineSuppressConflict ? 'translate-x-5' : 'translate-x-0.5'"

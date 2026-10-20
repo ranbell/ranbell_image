@@ -1581,7 +1581,7 @@ watch(() => props.jobs?.find(j => j.title === 'backup')?.state, (state) => {
               <div>
                 <label class="text-xs text-gray-500 block mb-1">{{ $t('admin.external.url') }}</label>
                 <div class="flex gap-2">
-                  <input v-model="adminConfig.external_llm_url" type="text" placeholder="http://192.168.0.10:8000/v1"
+                  <input v-model="adminConfig.external_llm_url" type="text" placeholder="http://localhost:8000/v1"
                     class="flex-1 min-w-0 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
                   <button @click="testExternalServer" :disabled="externalTesting || !adminConfig.external_llm_url"
                     class="px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-xs text-gray-200 whitespace-nowrap">

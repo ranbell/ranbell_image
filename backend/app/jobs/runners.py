@@ -1155,11 +1155,10 @@ async def run_refine_prompt(
         _translate_and_classify,
         _extract_literal_texts,
         _append_literal_texts,
-        _parse_detailed_output,
         _sample_mutation_tags,
         _REFINE_CAT_FIELDS,
     )
-    from ..api.inspire import _parse_json_from_llm, _split_tags
+    from ..api.inspire import _parse_json_from_llm
     from ..ai.tile_image import create_tile_image
     from ..prompt.visual_spec import clamp_prose_paragraphs
     from ..runtime_config import get_runtime_config
@@ -1252,8 +1251,12 @@ async def run_refine_prompt(
             )
 
     # 3b. conflict tag suppression: identify WD14 tags that contradict user instruction
+    # The detailed style (Krea 2 visual script) reads the picture, not WD14
+    # tags, so the WD14-based steps below are skipped for it.
+    krea_script = body.prompt_style == "detailed"
+
     conflict_tags: set[str] = set()
-    if body.suppress_conflict_tags and nl_instruction:
+    if body.suppress_conflict_tags and nl_instruction and not krea_script:
         all_source_tags = [t for doc, _ in raw_docs for t in doc.get("wd14_tags", [])]
         if all_source_tags:
             _phase("analyzingConflicts", 0.08, "Analyzing tag conflicts...")
@@ -1326,7 +1329,7 @@ async def run_refine_prompt(
             context += "\n".join(lines)
 
     mutation_tags: list[str] = []
-    if divergence > 0:
+    if divergence > 0 and not krea_script:
         _phase("mutatingTags", 0.14, "Sampling mutation tags...")
         mutation_tags = await _sample_mutation_tags(db, ollama, wd14_analysis, divergence)
         if mutation_tags:
@@ -1347,15 +1350,20 @@ async def run_refine_prompt(
         phase_end: float = 1.0,
         expected_tokens: int = 200,
         phase_text: str = "",
+        as_think: bool = False,
     ) -> str:
-        """Run one VLM call (with images), forwarding tokens to token_queue."""
+        """Run one VLM call (with images), forwarding tokens to token_queue.
+
+        ``as_think`` shows the answer in the thinking pane instead of the
+        prompt pane — for an intermediate step whose output is not the prompt.
+        """
         tokens: list[str] = []
         async for event in ollama.generate_vlm_stream(
             prompt, images_for_vlm, model=cfg["vlm_model"], options=options
         ):
             if _abort.is_set():
                 raise JobCancelled()
-            _put(event)
+            _put({**event, "type": "think"} if as_think and event["type"] == "token" else event)
             if event["type"] == "token":
                 tokens.append(event["text"])
                 n = len(tokens)
@@ -1470,6 +1478,55 @@ async def run_refine_prompt(
                 if _all_must:
                     _v_story = _correct_prose_wd14_conflicts(_v_story, _all_must)
                 fanout_stories.append((f"{tags_positive}\n\n{_v_story}", _vt))
+        elif krea_script:
+            # Step 1: the picture → a scene sheet (shown as thinking).
+            from ..prompt import scene_sheet
+            medium = scene_sheet.MEDIUM_CHOICES.get(body.visual_medium, "")
+            sheet_notes: list[str] = []
+            if body.emotion_shift:
+                sheet_notes.append(
+                    f"Shift the mood, lighting and colour toward: {body.emotion_shift}. "
+                    "Keep the people, poses and composition."
+                )
+            ic = body.inspire_context if isinstance(body.inspire_context, dict) else {}
+            if ic.get("change_targets") or ic.get("axes"):
+                targets = ic.get("change_targets") or ic.get("axes") or []
+                sheet_notes.append(f"Inspire asked to change: {', '.join(str(t) for t in targets)}")
+            if divergence > 0:
+                # Transmute samples WD14 vocabulary, which this style does not use.
+                _put({"type": "think", "text": "[divergence is not used by the detailed style]\n"})
+            _phase("readingScene", 0.20, "Reading the scene...")
+            sheet_raw = await _stream_vlm(
+                scene_sheet.sheet_prompt(
+                    instruction=nl_instruction, notes=sheet_notes,
+                    literal_texts=literal_texts, medium=medium,
+                    reference_count=len(image_bytes_list),
+                ),
+                0.20, 0.55, 400, "Reading the scene...", as_think=True,
+            )
+            sheet_data = _parse_json_from_llm(sheet_raw)
+            if not sheet_data.get("subjects") and not sheet_data.get("setting"):
+                # Not a usable sheet. Writing from it would invent the scene, so stop
+                # here and say why rather than hand Krea 2 a guess.
+                raise RuntimeError("The scene sheet could not be read from the model's answer")
+            sheet = scene_sheet.normalize_sheet(sheet_data, medium=medium, literal_texts=literal_texts)
+
+            # Step 2: the sheet → the visual script.
+            _phase("writingDescription", 0.55, "Writing the visual script...")
+            script_raw = await _stream_text(
+                scene_sheet.script_prompt(sheet, instruction=nl_instruction),
+                0.55, 0.90, 500, "Writing the visual script...",
+            )
+            positive, repairs = scene_sheet.finish_script(script_raw, sheet)
+            for note in repairs:
+                logger.warning("[refine] visual script: %s", note)
+                _put({"type": "think", "text": f"\n[check] {note}"})
+            # Krea 2 workflows zero the negative out; nothing would read one.
+            negative = ""
+            if body.negative_prompt:
+                _put({"type": "think", "text": "\n[the detailed style writes no negative prompt]"})
+            context_story = positive
+            prose_missing = len(positive.split()) < 60
         else:
             vlm_prompt = _build_vlm_prompt(
                 context, nl_instruction, body.prompt_style, body.negative_prompt,
@@ -1479,51 +1536,18 @@ async def run_refine_prompt(
             raw_text = await _stream_vlm(vlm_prompt, 0.20, 0.90, 150, "VLM generating...")
             prose_missing = False
 
-            if body.prompt_style == "detailed":
-                # Split off trailing per-category JSON block before parsing 8 sections
-                _cb = raw_text.rfind("```json")
-                if _cb >= 0:
-                    _sections_text = raw_text[:_cb].strip()
-                    _cat_json = _parse_json_from_llm(raw_text[_cb:])
-                    for _f in _REFINE_CAT_FIELDS:
-                        _v = _cat_json.get(_f, "")
-                        cat_tags[_f] = _split_tags(_v) if _v else []
-                else:
-                    _sections_text = raw_text
-
-                # Parse 8-section format BEFORE _clean_markdown strips ** bold markers
-                if body.negative_prompt:
-                    # Extract 8 sections from full raw text — do NOT split on POSITIVE: first,
-                    # as that would discard everything before the POSITIVE: label.
-                    parsed = _parse_detailed_output(_sections_text)
-                    if parsed:
-                        positive = _clean_markdown(parsed)
-                    else:
-                        # Fallback: no 8-section structure found — use POSITIVE: block directly
-                        positive_raw, _ = _parse_positive_negative(_sections_text)
-                        positive = _clean_markdown(positive_raw)
-                    neg_m = re.search(r"NEGATIVE:\s*(.*?)$", _sections_text, re.S | re.I)
-                    negative = _clean_markdown(neg_m.group(1).strip()) if neg_m else ""
-                else:
-                    _raw_stripped = _strip_stray_negative(_sections_text)
-                    parsed = _parse_detailed_output(_raw_stripped)
-                    positive = _clean_markdown(parsed if parsed else _raw_stripped)
-                    negative = ""
-            elif body.negative_prompt:
+            if body.negative_prompt:
                 positive_raw, negative_raw = _parse_positive_negative(raw_text)
                 positive = _clean_markdown(positive_raw)
                 negative = _clean_markdown(negative_raw)
             else:
                 positive = _clean_markdown(_strip_stray_negative(raw_text))
                 negative = ""
-            # Subject-count safety net for danbooru/detailed (natural already does this).
+            # Subject-count safety net (natural already does this).
             positive = _ensure_subject_anchor(positive, raw_docs)
-            # WD14 post-processing for danbooru/detailed (mirrors natural branch)
-            if body.prompt_style == "danbooru" and divergence <= 0.5:
+            if divergence <= 0.5:
                 positive = _inject_wd14_must_tags(positive, wd14_analysis)
             if _all_must:
-                if body.prompt_style == "detailed":
-                    positive = _correct_prose_wd14_conflicts(positive, _all_must)
                 cat_tags = _enforce_wd14_on_cat_tags(cat_tags, _all_must)
     except JobCancelled:
         _put({"type": "cancelled"})
@@ -1540,15 +1564,21 @@ async def run_refine_prompt(
     # 5. post-process: forced-tag removal + literal directive injection
     _phase("parsingOutput", 0.90, "Parsing output...")
     removal_tags = {t.lower().replace(' ', '_') for t in cfg.get("prompt_removal_tags", [])}
-    positive, removed_tags = _remove_forced_tags(
-        positive,
-        removal_tags,
-        all_lines=(body.prompt_style in ("detailed", "danbooru")),
-    )
+    if krea_script:
+        # Sentences, not a tag list: removing comma-separated tags would cut
+        # words out of them. Quality words are kept out by the writer, and
+        # visible text was woven in as a quoted sentence by finish_script.
+        removed_tags = []
+    else:
+        positive, removed_tags = _remove_forced_tags(
+            positive,
+            removal_tags,
+            all_lines=(body.prompt_style == "danbooru"),
+        )
 
-    # 5b. append literal text render tags (text "X") to end of positive prompt
-    if literal_texts:
-        positive = _append_literal_texts(positive, literal_texts)
+        # 5b. append literal text render tags (text "X") to end of positive prompt
+        if literal_texts:
+            positive = _append_literal_texts(positive, literal_texts)
 
     # 5c. process fan-out variants with the same post-processing as the main prompt
     variants: list[dict] = []
