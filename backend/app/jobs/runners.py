@@ -1233,7 +1233,9 @@ async def run_refine_prompt(
 
     # 3. build VLM prompt
     cfg = await get_runtime_config(db)
-    options = {"temperature": body.temperature, "num_ctx": body.num_ctx}
+    options = {"num_ctx": body.num_ctx}
+    if body.temperature is not None:
+        options["temperature"] = body.temperature
 
     # 3a. instruction pre-processing: separate literals from NL
     # LLM/VLM understands Japanese directly — translation is unnecessary overhead.

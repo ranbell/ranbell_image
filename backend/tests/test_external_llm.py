@@ -151,12 +151,12 @@ async def test_half_filled_setting_fails_loudly():
     gw, ollama = _gateway(
         lambda r: httpx.Response(500), external_llm_model="m", inspire_llm_backend="openai",
     )
-    with pytest.raises(RuntimeError, match="External LLM server URL is not set"):
+    with pytest.raises(RuntimeError, match="its URL is empty"):
         await gw.for_feature("inspire").generate_text("p")
     gw, ollama = _gateway(
         lambda r: httpx.Response(500), external_llm_url="http://ext", inspire_llm_backend="openai",
     )
-    with pytest.raises(RuntimeError, match="no model is set"):
+    with pytest.raises(RuntimeError, match="its model is empty"):
         await gw.for_feature("inspire").generate_text("p")
     assert ollama.calls == []
 
@@ -250,3 +250,64 @@ async def test_saving_settings_deletes_the_removed_providers_keys():
     assert sorted(db.deleted) == ["openai_base_url", "openai_model"]
     assert "openai_model" not in db.doc and "openai_base_url" not in db.doc
     assert db.doc["umap_computed_at"] == 1.0 and db.doc["external_llm_model"] == "m"
+
+
+@pytest.mark.asyncio
+async def test_a_blank_setting_names_everything_missing_and_both_ways_out():
+    # The state the settings rename left behind: switched to the external
+    # server, URL and model both empty.
+    gw, ollama = _gateway(lambda r: httpx.Response(500), inspire_llm_backend="openai")
+    with pytest.raises(RuntimeError) as err:
+        async for _ in gw.for_feature("inspire").generate_text_stream("p"):
+            pass
+    msg = str(err.value)
+    assert "URL and model are empty" in msg
+    assert "switch inspire back to Ollama" in msg
+    assert ollama.calls == []
+
+
+def test_llama_server_arguments_give_the_sampling():
+    from backend.app.ai.openai_compat import _parse_llama_args
+    assert _parse_llama_args("--temp 1.0 --top-p 0.95 --top-k 64 --parallel 1") == {
+        "temperature": 1.0, "top_p": 0.95, "top_k": 64,
+    }
+    assert _parse_llama_args("") == {}
+
+
+@pytest.mark.asyncio
+async def test_lemonade_reports_the_loaded_models_sampling():
+    def handler(request):
+        if request.url.path == "/api/v1/health":
+            return httpx.Response(200, json={"all_models_loaded": [
+                {"model_name": "other", "recipe_options": {"llamacpp_args": "--temp 0.2"}},
+                {"model_name": "m", "recipe_options": {"llamacpp_args": "--temp 1.0 --top-k 64"}},
+            ]})
+        if request.url.path == "/api/v1/models":
+            return httpx.Response(200, json={"data": [{"id": "m", "context_length": 16429}]})
+        return httpx.Response(404)
+
+    gw, _ = _gateway(
+        handler, external_llm_url="http://lemonade:13305/api/v1", external_llm_model="m",
+        refine_llm_backend="openai",
+    )
+    route = (await gw.routes())["refine"]
+    assert route["sampling"] == {"temperature": 1.0, "top_k": 64}
+
+
+@pytest.mark.asyncio
+async def test_a_server_that_hides_its_sampling_gives_nothing():
+    # The Lemonade web app answers /props with HTML; that is not a default.
+    def handler(request):
+        if request.url.path == "/props":
+            return httpx.Response(200, text="<!doctype html>", headers={"content-type": "text/html"})
+        return httpx.Response(404)
+
+    gw, _ = _gateway(handler, external_llm_url="http://ext", external_llm_model="m",
+                     refine_llm_backend="openai")
+    assert await gw.external.sampling_defaults("m") == {}
+
+
+def test_no_temperature_means_none_is_sent():
+    from backend.app.ai.openai_compat import OpenAICompatClient
+    p = OpenAICompatClient._payload([], "m", {"num_ctx": 16384}, None, None, stream=True)
+    assert "temperature" not in p

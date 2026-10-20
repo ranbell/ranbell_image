@@ -440,6 +440,19 @@ let refineAbortController = null
 
 // ── Refine settings ────────────────────────────────────────────────────────────
 const refineTemp = ref(0.7)
+// On an external server the temperature starts as "the server's default":
+// nothing is sent, so the server samples as it was started (Lemonade runs
+// Gemma 4 with --temp 1.0), and the slider shows that value when the server
+// tells it. Moving the slider sends that value instead.
+const refineTempOverride = ref(false)
+const refineServerTemp = computed(() => {
+  const t = refineRoute.value?.sampling?.temperature
+  return typeof t === 'number' ? t : null
+})
+const refineTempIsServerDefault = computed(() => refineExternal.value && !refineTempOverride.value)
+watch([refineTempIsServerDefault, refineServerTemp], ([useDefault, t]) => {
+  if (useDefault && t !== null) refineTemp.value = t
+}, { immediate: true })
 const refineDivergence = ref(0)        // 0.0〜1.0: Transmute (mutate style away from references)
 const refineMutationTags = ref([])     // mutation tags sampled by the backend
 const refineVariationCount = ref(1)    // natural style: prose pass fan-out (1〜3)
@@ -2579,7 +2592,7 @@ async function runRefine() {
       weights: orderedShas.map(s => normalizedPct(s) / 100),
       instruction: refineInstruction.value,
       instruction_mode: refineInstructionMode.value,
-      temperature: refineTemp.value,
+      temperature: refineTempIsServerDefault.value ? null : refineTemp.value,
       num_ctx: refineNumCtx.value,
       prompt_style: refineStyle.value,
       negative_prompt: refineNegative.value,
@@ -3944,10 +3957,22 @@ onUnmounted(() => {
                     <div>
                       <label class="text-xs text-gray-500 flex justify-between mb-1.5">
                         <span>{{ $t('refine.temperature') }}</span>
-                        <span class="text-purple-400 font-mono">{{ refineTemp.toFixed(1) }}</span>
+                        <span class="font-mono flex items-center gap-1.5">
+                          <template v-if="refineTempIsServerDefault">
+                            <span class="text-sky-400">{{ refineServerTemp !== null ? refineServerTemp.toFixed(1) : '—' }}</span>
+                            <span class="text-[9px] text-sky-500/80 font-sans">{{ $t('refine.tempServerDefault') }}</span>
+                          </template>
+                          <template v-else>
+                            <span class="text-purple-400">{{ refineTemp.toFixed(1) }}</span>
+                            <button v-if="refineExternal" @click="refineTempOverride = false" :disabled="refining"
+                              class="text-[9px] text-gray-500 hover:text-gray-300 font-sans underline">{{ $t('refine.tempResetToServer') }}</button>
+                          </template>
+                        </span>
                       </label>
                       <input v-model.number="refineTemp" type="range" min="0.0" max="1.5" step="0.1"
+                        @input="refineTempOverride = true"
                         :disabled="refining || refineDirectPrompt !== null" class="w-full accent-purple-500 disabled:opacity-50" />
+                      <p v-if="refineTempIsServerDefault && refineServerTemp === null" class="text-[10px] text-gray-500 mt-1">{{ $t('refine.tempServerUnknown') }}</p>
                       <div class="flex justify-between text-xs text-gray-600 mt-0.5">
                         <span>{{ $t('refine.tempLow') }}</span><span>{{ $t('refine.tempHigh') }}</span>
                       </div>

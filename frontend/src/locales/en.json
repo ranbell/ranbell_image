@@ -546,7 +546,10 @@
     "visualMedium_anime": "Anime",
     "visualMedium_photo": "Photo",
     "visualMediumDesc": "Krea2 drifts toward a photograph unless the medium is stated. Fix it here if reading it from the reference gets it wrong",
-    "negPromptKrea": "Krea2 does not use a negative prompt, so the detailed style writes none"
+    "negPromptKrea": "Krea2 does not use a negative prompt, so the detailed style writes none",
+    "tempServerDefault": "server default",
+    "tempResetToServer": "reset to default",
+    "tempServerUnknown": "The server did not say its default; none is sent, so the server's own default applies. Moving the slider sends that value"
   },
   "toast": {
     "pipelineStarted": "AI processing started.",

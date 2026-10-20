@@ -57,6 +57,27 @@ def normalize_base_url(url: str) -> str:
     return base
 
 
+_LLAMA_SAMPLING_FLAGS = {
+    "--temp": "temperature", "--temperature": "temperature",
+    "--top-p": "top_p", "--top-k": "top_k", "--min-p": "min_p",
+}
+
+
+def _parse_llama_args(args: str) -> dict:
+    """``--temp 1.0 --top-p 0.95 --top-k 64`` → {"temperature": 1.0, ...}."""
+    out: dict = {}
+    tokens = args.split()
+    for flag, value in zip(tokens, tokens[1:]):
+        key = _LLAMA_SAMPLING_FLAGS.get(flag)
+        if not key:
+            continue
+        try:
+            out[key] = int(value) if key == "top_k" else float(value)
+        except ValueError:
+            continue
+    return out
+
+
 def _image_data_url(data: bytes) -> str:
     if data[:8] == b"\x89PNG\r\n\x1a\n":
         mime = "image/png"
@@ -75,6 +96,7 @@ class OpenAICompatClient:
         self.base_url = normalize_base_url(base_url)
         self.api_key = api_key or ""
         self._context_cache: dict[tuple[str, str], tuple[float, int | None]] = {}
+        self._sampling_cache: dict[tuple[str, str], tuple[float, dict]] = {}
 
     def configure(self, *, base_url: str | None = None, api_key: str | None = None) -> None:
         if base_url is not None:
@@ -347,6 +369,47 @@ class OpenAICompatClient:
             logger.debug("[openai] context window of %s unknown: %s", model, exc)
         self._context_cache[key] = (now, value)
         return value
+
+    async def sampling_defaults(self, model: str) -> dict:
+        """The sampling the server applies to ``model`` when a request sends none.
+
+        Not part of the OpenAI API, so it is read where servers expose it:
+        Lemonade lists each loaded model's llama-server arguments in
+        ``/api/v1/health`` (``--temp 1.0 --top-p 0.95 --top-k 64``), and a bare
+        llama.cpp server answers ``/props``. Anything else gives {} — Refine
+        then sends no temperature, so the server's own default still applies.
+        Cached for a minute, like the context window.
+        """
+        if not (self.base_url and model):
+            return {}
+        now = time.monotonic()
+        key = (self.base_url, model)
+        hit = self._sampling_cache.get(key)
+        if hit and now - hit[0] < 60.0:
+            return dict(hit[1])
+        root = re.sub(r"(/api)?/v\d+$", "", self.base_url)
+        found: dict = {}
+        try:
+            r = await self._client.get(f"{root}/api/v1/health", headers=self._headers(), timeout=3.0)
+            if r.status_code == 200 and "json" in r.headers.get("content-type", ""):
+                for m in r.json().get("all_models_loaded") or []:
+                    if m.get("model_name") == model:
+                        args = (m.get("recipe_options") or {}).get("llamacpp_args") or ""
+                        if not args:
+                            args = " ".join(str(a) for a in m.get("launch_command") or [])
+                        found = _parse_llama_args(args)
+                        break
+            if not found:
+                r = await self._client.get(f"{root}/props", headers=self._headers(), timeout=3.0)
+                if r.status_code == 200 and "json" in r.headers.get("content-type", ""):
+                    gen = r.json().get("default_generation_settings") or {}
+                    params = gen.get("params") or gen
+                    found = {k: params[k] for k in ("temperature", "top_p", "top_k", "min_p")
+                             if isinstance(params.get(k), (int, float))}
+        except Exception as exc:
+            logger.debug("[openai] sampling defaults of %s unknown: %s", model, exc)
+        self._sampling_cache[key] = (now, found)
+        return dict(found)
 
     async def list_models(self, url: str | None = None, api_key: str | None = None) -> list[str]:
         """Model ids from ``/models``. Raises on a connection or HTTP error so

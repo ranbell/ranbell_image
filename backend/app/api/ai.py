@@ -66,7 +66,9 @@ class RefineRequest(BaseModel):
     weights: list[float] = []
     instruction: str = ""
     instruction_mode: Literal["none", "basic", "enhanced"] = "basic"
-    temperature: float = 0.7
+    # None sends no temperature, so the model's own default applies (Gemma
+    # wants 1.0; an external server says what it was started with).
+    temperature: float | None = 0.7
     num_ctx: int = 16384
     prompt_style: Literal["natural", "danbooru", "detailed"] = "natural"
     negative_prompt: bool = False

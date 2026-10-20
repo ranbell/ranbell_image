@@ -59,11 +59,21 @@ class ExternalLlm:
         return getattr(self._gateway, name)
 
     def _model(self, *, vision: bool) -> str:
+        """The model to call, after checking the setting is complete.
+
+        Everything missing is named at once, with both ways out: naming only
+        the model left an empty URL to be found on the next try (2026-10-21).
+        """
         model = self._vision_model if vision else self._text_model
-        if not model:
+        missing = [name for name, value in (
+            ("URL", self._client.base_url), ("model", model),
+        ) if not value]
+        if missing:
             raise RuntimeError(
-                f"{self.feature}: no model is set for the external LLM server "
-                "(Admin → External LLM server)"
+                f"{self.feature} is set to the external LLM server, but its "
+                f"{' and '.join(missing)} {'is' if len(missing) == 1 else 'are'} empty. "
+                "Fill them in at Admin → Settings → External LLM server, "
+                f"or switch {self.feature} back to Ollama there."
             )
         return model
 
@@ -185,6 +195,8 @@ class LlmGateway:
                 "model": model,
                 "vision_model": vision_model,
                 "context": context,
+                # What the server samples with when a request sends nothing.
+                "sampling": await self._external.sampling_defaults(model),
                 "vision_context": (
                     context if vision_model == model
                     else await self._external.context_window(vision_model)

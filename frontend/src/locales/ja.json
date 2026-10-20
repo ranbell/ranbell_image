@@ -546,7 +546,10 @@
     "visualMedium_anime": "アニメ",
     "visualMedium_photo": "実写",
     "visualMediumDesc": "Krea2 は画風を書かないと実写寄りになります。参照から判定が外れるときは固定してください",
-    "negPromptKrea": "Krea2 はネガティブを使わないので、詳細構造では作りません"
+    "negPromptKrea": "Krea2 はネガティブを使わないので、詳細構造では作りません",
+    "tempServerDefault": "サーバ既定",
+    "tempResetToServer": "既定に戻す",
+    "tempServerUnknown": "サーバの既定値は読み取れませんでしたが、送らないのでサーバ側の既定が使われます。動かすとその値を送ります"
   },
   "toast": {
     "pipelineStarted": "AI処理を開始しました。",

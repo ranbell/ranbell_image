@@ -96,7 +96,11 @@ _defaults = {
 
 # Saved by settings that no longer exist; removed from the config at startup
 # and whenever the settings are saved.
-LEGACY_KEYS = ("llm_provider", "openai_base_url", "openai_api_key", "openai_model")
+LEGACY_KEYS = (
+    "llm_provider", "openai_base_url", "openai_api_key", "openai_model",
+    # the first external-server build (e5de99b) also saved this one
+    "openai_vlm_model",
+)
 
 _cache: RuntimeConfigCache | None = None
 
