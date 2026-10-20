@@ -89,8 +89,8 @@ async def test_routed_feature_uses_external_model_and_keeps_embeddings_on_ollama
         return httpx.Response(200, json={"choices": [{"message": {"content": "hi"}}]})
 
     gw, ollama = _gateway(
-        handler, openai_base_url="http://ext", openai_api_key="k",
-        openai_model="text-m", openai_vlm_model="vision-m", inspire_llm_backend="openai",
+        handler, external_llm_url="http://ext", external_llm_api_key="k",
+        external_llm_model="text-m", external_llm_vlm_model="vision-m", inspire_llm_backend="openai",
     )
     ins = gw.for_feature("inspire")
     assert isinstance(ins, ExternalLlm)
@@ -124,7 +124,7 @@ async def test_stream_splits_reasoning_and_reports_length():
     )
     gw, _ = _gateway(
         lambda r: httpx.Response(200, text=text, headers={"content-type": "text/event-stream"}),
-        openai_base_url="http://ext", openai_model="m", refine_llm_backend="openai",
+        external_llm_url="http://ext", external_llm_model="m", refine_llm_backend="openai",
     )
     events = [e async for e in gw.for_feature("refine").generate_text_stream("p", with_done=True)]
     assert {"type": "think", "text": "thinking..."} in events
@@ -140,7 +140,7 @@ async def test_stream_recovers_answer_left_in_reasoning():
     )
     gw, _ = _gateway(
         lambda r: httpx.Response(200, text=text),
-        openai_base_url="http://ext", openai_model="m", refine_llm_backend="openai",
+        external_llm_url="http://ext", external_llm_model="m", refine_llm_backend="openai",
     )
     tokens = [e["text"] async for e in gw.for_feature("refine").generate_text_stream("p") if e["type"] == "token"]
     assert tokens == ["only thoughts"]
@@ -149,13 +149,104 @@ async def test_stream_recovers_answer_left_in_reasoning():
 @pytest.mark.asyncio
 async def test_half_filled_setting_fails_loudly():
     gw, ollama = _gateway(
-        lambda r: httpx.Response(500), openai_model="m", inspire_llm_backend="openai",
+        lambda r: httpx.Response(500), external_llm_model="m", inspire_llm_backend="openai",
     )
     with pytest.raises(RuntimeError, match="External LLM server URL is not set"):
         await gw.for_feature("inspire").generate_text("p")
     gw, ollama = _gateway(
-        lambda r: httpx.Response(500), openai_base_url="http://ext", inspire_llm_backend="openai",
+        lambda r: httpx.Response(500), external_llm_url="http://ext", inspire_llm_backend="openai",
     )
     with pytest.raises(RuntimeError, match="no model is set"):
         await gw.for_feature("inspire").generate_text("p")
     assert ollama.calls == []
+
+
+@pytest.mark.asyncio
+async def test_an_unreachable_server_is_named_in_the_error():
+    def refuse(request):
+        raise httpx.ConnectError("All connection attempts failed", request=request)
+
+    gw, _ = _gateway(
+        refuse, external_llm_url="http://stale:8080/v1", external_llm_model="m",
+        inspire_llm_backend="openai",
+    )
+    ins = gw.for_feature("inspire")
+    with pytest.raises(RuntimeError, match=r"http://stale:8080/v1 is unreachable"):
+        await ins.generate_text("p")
+    with pytest.raises(RuntimeError, match=r"http://stale:8080/v1 is unreachable"):
+        async for _ in ins.generate_text_stream("p"):
+            pass
+
+
+def test_the_removed_providers_settings_are_not_read():
+    # v0.4.0 removed an OpenAI provider that saved these names; their values
+    # are still in configs and must not come back as the external server.
+    gw, _ = _gateway(
+        lambda r: httpx.Response(500),
+        openai_base_url="http://host.docker.internal:8080/v1", openai_model="bonsai",
+        openai_api_key="old", inspire_llm_backend="openai",
+    )
+    assert gw.external.base_url == ""
+    assert gw.external.api_key == ""
+    assert gw.external_text_model == ""
+
+
+@pytest.mark.asyncio
+async def test_routes_report_the_servers_fixed_window():
+    def handler(request):
+        assert request.url.path == "/v1/models"
+        return httpx.Response(200, json={"data": [
+            {"id": "text-m", "context_length": 131072},
+            {"id": "vision-m", "context_length": 16429},
+        ]})
+
+    gw, _ = _gateway(
+        handler, external_llm_url="http://ext", external_llm_model="text-m",
+        external_llm_vlm_model="vision-m", refine_llm_backend="openai",
+    )
+    routes = await gw.routes()
+    assert routes["inspire"] == {"backend": "ollama"}
+    assert routes["refine"]["backend"] == "openai"
+    assert routes["refine"]["context"] == 131072
+    assert routes["refine"]["vision_context"] == 16429
+
+
+@pytest.mark.asyncio
+async def test_a_server_that_does_not_say_its_window_gives_none():
+    gw, _ = _gateway(
+        lambda r: httpx.Response(200, json={"data": [{"id": "m"}]}),
+        external_llm_url="http://ext", external_llm_model="m", refine_llm_backend="openai",
+    )
+    assert (await gw.routes())["refine"]["context"] is None
+
+
+@pytest.mark.asyncio
+async def test_saving_settings_deletes_the_removed_providers_keys():
+    from types import SimpleNamespace
+
+    from backend.app.api import admin
+
+    class FakeDB:
+        def __init__(self):
+            self.doc = {"openai_model": "bonsai", "openai_base_url": "http://old",
+                        "umap_computed_at": 1.0, "vlm_model": "g"}
+            self.deleted: list[str] = []
+
+        async def get_config(self):
+            return dict(self.doc)
+
+        async def put_config(self, data):
+            self.doc.update(data)  # merges, like set_payload
+
+        async def delete_config_keys(self, keys):
+            self.deleted += keys
+            for k in keys:
+                self.doc.pop(k, None)
+
+    db = FakeDB()
+    gw, _ = _gateway(lambda r: httpx.Response(500))
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(db=db, ollama=gw, spooler=None)))
+    await admin.update_config(admin.ConfigBody(external_llm_model="m"), request)
+    assert sorted(db.deleted) == ["openai_base_url", "openai_model"]
+    assert "openai_model" not in db.doc and "openai_base_url" not in db.doc
+    assert db.doc["umap_computed_at"] == 1.0 and db.doc["external_llm_model"] == "m"

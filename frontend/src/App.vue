@@ -421,6 +421,12 @@ function onThumbMouseEnter(event, sha) {
   }
 }
 const showRefine = ref(false)
+// Where Refine's LLM calls go (Admin → External LLM server). On an external
+// server num_ctx is fixed when the model is loaded, so the picker is replaced
+// by the server's own window; temperature is still sent.
+const refineRoute = computed(() => aiStatus.value?.llm_routes?.refine || { backend: 'ollama' })
+const refineExternal = computed(() => refineRoute.value.backend === 'openai')
+watch(showRefine, open => { if (open) fetchAiStatus() })
 const refineOverlayMousedownOnBg = ref(false)
 const refineInstruction = ref('')
 const showInstructionModal = ref(false)
@@ -3914,9 +3920,13 @@ onUnmounted(() => {
                   :class="refineDirectPrompt !== null ? 'border-gray-800/40 opacity-50' : 'border-gray-800'">
                   <summary class="px-4 py-3 bg-gray-800/40 text-xs font-semibold text-gray-400 uppercase tracking-wide cursor-pointer list-none flex items-center justify-between hover:bg-gray-800/70 transition-colors">
                     <span class="flex items-center gap-2">
-                      {{ $t('refine.ollamaControl') }}
+                      <template v-if="refineExternal">
+                        {{ $t('refine.externalControl') }}
+                        <span class="text-[9px] text-sky-400 normal-case font-normal font-mono">{{ refineRoute.model || refineRoute.vision_model }}</span>
+                      </template>
+                      <template v-else>{{ $t('refine.ollamaControl') }}</template>
                       <span v-if="refineDirectPrompt !== null" class="text-[9px] text-cyan-600 normal-case font-normal">{{ $t('refine.directSkipping') }}</span>
-                      <span v-else-if="ollamaOffline" class="text-[9px] text-amber-500 normal-case font-normal flex items-center gap-1">
+                      <span v-else-if="ollamaOffline && !refineExternal" class="text-[9px] text-amber-500 normal-case font-normal flex items-center gap-1">
                         <span class="w-1 h-1 rounded-full bg-amber-500 animate-pulse inline-block"></span>
                         {{ $t('refine.ollamaOfflineBadge') }}
                       </span>
@@ -3988,14 +3998,23 @@ onUnmounted(() => {
                         <span>{{ $t('refine.proseLengthLong') }}</span>
                       </div>
                     </div>
-                    <div>
+                    <div :class="refineExternal ? 'opacity-50' : ''">
                       <label class="text-xs text-gray-500 block mb-1">{{ $t('refine.numCtx') }}</label>
-                      <select v-model.number="refineNumCtx" :disabled="refining || refineDirectPrompt !== null"
+                      <select v-model.number="refineNumCtx" :disabled="refining || refineDirectPrompt !== null || refineExternal"
                         class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none focus:border-purple-500 disabled:opacity-50">
                         <option :value="8192">8,192</option>
                         <option :value="16384">{{ $t('refine.numCtxRecommended') }}</option>
                         <option :value="32768">32,768</option>
                       </select>
+                      <p v-if="refineExternal" class="mt-1 text-[10px] text-gray-500">
+                        <template v-if="refineRoute.context">
+                          {{ $t('refine.numCtxServer', { n: refineRoute.context.toLocaleString() }) }}
+                          <template v-if="refineRoute.vision_context && refineRoute.vision_context !== refineRoute.context">
+                            / {{ $t('refine.numCtxServerVision', { n: refineRoute.vision_context.toLocaleString() }) }}
+                          </template>
+                        </template>
+                        <template v-else>{{ $t('refine.numCtxServerUnknown') }}</template>
+                      </p>
                     </div>
                     <!-- WD14 tag decomposition settings -->
                     <div class="border-t border-gray-700/50 pt-3 space-y-3">

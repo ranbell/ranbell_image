@@ -34,13 +34,16 @@ _defaults = {
     "cluster_common_tags": [],
     "ollama_num_ctx":          16384,
     # External OpenAI-compatible server. Inspire and Refine each choose
-    # "ollama" or "openai"; embeddings always stay on Ollama.
-    "openai_base_url":     "",
-    "openai_api_key":      "",
-    "openai_model":        "",
-    "openai_vlm_model":    "",
-    "inspire_llm_backend": "ollama",
-    "refine_llm_backend":  "ollama",
+    # "ollama" or "openai"; embeddings always stay on Ollama. Not named
+    # `openai_*`: a provider removed in v0.4.0 used those names, and its
+    # values (`bonsai`, host.docker.internal:8080) were still in saved configs.
+    # Those are removed at startup (LEGACY_KEYS).
+    "external_llm_url":       "",
+    "external_llm_api_key":   "",
+    "external_llm_model":     "",
+    "external_llm_vlm_model": "",
+    "inspire_llm_backend":    "ollama",
+    "refine_llm_backend":     "ollama",
     # Muse's defaults (2026-09-13). The Showrunner: "empty the llm and image model
     # too, so they are chosen before running. If a default is set in the admin
     # screen, it should be possible to start from that default." **Empty means the
@@ -90,6 +93,10 @@ _defaults = {
     "semantic_search_limit":    100,
     "muse_block_nsfw":          True,
 }
+
+# Saved by settings that no longer exist; removed from the config at startup
+# and whenever the settings are saved.
+LEGACY_KEYS = ("llm_provider", "openai_base_url", "openai_api_key", "openai_model")
 
 _cache: RuntimeConfigCache | None = None
 

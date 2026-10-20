@@ -31,7 +31,7 @@ LLM_BACKEND_KEYS = {
 # Config keys that change the live gateway when saved from Admin.
 LLM_RUNTIME_KEYS = frozenset({
     "ollama_url", "vlm_model",
-    "openai_base_url", "openai_api_key", "openai_model", "openai_vlm_model",
+    "external_llm_url", "external_llm_api_key", "external_llm_model", "external_llm_vlm_model",
     *LLM_BACKEND_KEYS.values(),
 })
 
@@ -135,11 +135,11 @@ class LlmGateway:
 
     def configure_external(self, cfg: dict) -> None:
         self._external.configure(
-            base_url=cfg.get("openai_base_url") or "",
-            api_key=cfg.get("openai_api_key") or "",
+            base_url=cfg.get("external_llm_url") or "",
+            api_key=cfg.get("external_llm_api_key") or "",
         )
-        text_model = str(cfg.get("openai_model") or "")
-        vision_model = str(cfg.get("openai_vlm_model") or "")
+        text_model = str(cfg.get("external_llm_model") or "")
+        vision_model = str(cfg.get("external_llm_vlm_model") or "")
         # One model set → it serves both kinds of call.
         self.external_text_model = text_model or vision_model
         self.external_vision_model = vision_model or text_model
@@ -164,6 +164,33 @@ class LlmGateway:
         if self._backends.get(feature) == "openai":
             return ExternalLlm(self, feature)
         return self
+
+    async def routes(self) -> dict[str, dict]:
+        """Where each switchable feature's calls go, for the screen.
+
+        ``context`` is the external server's fixed window for the model (None
+        when it does not say, or on Ollama, where ``num_ctx`` is per request).
+        """
+        out: dict[str, dict] = {}
+        for feature in LLM_BACKEND_KEYS:
+            if self._backends.get(feature) != "openai":
+                out[feature] = {"backend": "ollama"}
+                continue
+            model = self.external_text_model
+            vision_model = self.external_vision_model
+            context = await self._external.context_window(model)
+            out[feature] = {
+                "backend": "openai",
+                "url": self._external.base_url,
+                "model": model,
+                "vision_model": vision_model,
+                "context": context,
+                "vision_context": (
+                    context if vision_model == model
+                    else await self._external.context_window(vision_model)
+                ),
+            }
+        return out
 
     # ── Embeddings ─────────────────────────────────────────────────────────────
 

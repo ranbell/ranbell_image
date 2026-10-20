@@ -1136,6 +1136,7 @@ async def ai_status(request: Request):
     pipeline_info = embed_jobs[0] if embed_jobs else {"running": False}
     return {
         "ollama_ok": await ollama.health(),
+        "llm_routes": await ollama.routes(),
         "vector_count": vector_count,
         "vector_sync_needed": False,
         "pipeline": pipeline_info,

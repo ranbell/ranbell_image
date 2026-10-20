@@ -3000,6 +3000,14 @@ class QdrantDBClient:
                 points=qm.PointIdsList(points=[CONFIG_POINT_ID]),
             )
 
+    async def delete_config_keys(self, keys: list[str]) -> None:
+        """Remove named keys from the config document, leaving the rest."""
+        await self._qc.delete_payload(
+            collection_name=CONFIG_COLLECTION,
+            keys=keys,
+            points=qm.PointIdsList(points=[CONFIG_POINT_ID]),
+        )
+
     # ── Invoke / Genesis ──────────────────────────────────────────────────────────
 
     async def set_genesis_payload(self, sha256: str, genesis: dict) -> None:

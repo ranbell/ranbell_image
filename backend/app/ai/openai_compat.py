@@ -28,9 +28,11 @@ unloading before a render.
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import logging
 import re
+import time
 from typing import AsyncGenerator
 
 import httpx
@@ -72,6 +74,7 @@ class OpenAICompatClient:
         self._client = httpx.AsyncClient(timeout=settings.ollama_timeout_sec)
         self.base_url = normalize_base_url(base_url)
         self.api_key = api_key or ""
+        self._context_cache: dict[tuple[str, str], tuple[float, int | None]] = {}
 
     def configure(self, *, base_url: str | None = None, api_key: str | None = None) -> None:
         if base_url is not None:
@@ -165,9 +168,18 @@ class OpenAICompatClient:
                 text = thinking
         return text
 
+    @staticmethod
+    def _unreachable(url: str, exc: Exception) -> RuntimeError:
+        # httpx says only "All connection attempts failed"; without the URL a
+        # stale saved address looks the same as a server that is down.
+        return RuntimeError(f"External LLM server {url} is unreachable: {exc}")
+
     async def _complete(self, payload: dict) -> str:
         url = f"{self._require_url()}/chat/completions"
-        r = await self._client.post(url, json=payload, headers=self._headers())
+        try:
+            r = await self._client.post(url, json=payload, headers=self._headers())
+        except httpx.TransportError as exc:
+            raise self._unreachable(self.base_url, exc) from exc
         if r.is_error:
             self._raise_with_body(r.status_code, r.url, r.content)
         return self._extract_text(r.json(), model=payload["model"])
@@ -196,10 +208,14 @@ class OpenAICompatClient:
                     thinking_parts.append(ev["text"])
             return events
 
-        async with self._client.stream(
-            "POST", url, json=payload, headers=self._headers(),
-            timeout=settings.ollama_timeout_sec,
-        ) as resp:
+        async with contextlib.AsyncExitStack() as stack:
+            try:
+                resp = await stack.enter_async_context(self._client.stream(
+                    "POST", url, json=payload, headers=self._headers(),
+                    timeout=settings.ollama_timeout_sec,
+                ))
+            except httpx.TransportError as exc:
+                raise self._unreachable(self.base_url, exc) from exc
             if resp.is_error:
                 self._raise_with_body(resp.status_code, resp.url, await resp.aread())
             async for line in resp.aiter_lines():
@@ -301,6 +317,36 @@ class OpenAICompatClient:
             yield ev
 
     # ── Models ─────────────────────────────────────────────────────────────────
+
+    async def context_window(self, model: str) -> int | None:
+        """The context window the server runs ``model`` with, when it says.
+
+        Unlike Ollama's ``num_ctx`` this cannot be set per request: llama.cpp
+        fixes it when the model is loaded (Lemonade starts llama-server with
+        ``--ctx-size``). Lemonade reports it in ``/models`` as
+        ``context_length``; a server that does not gives None. Cached for a
+        minute, since the screen asks on every status refresh.
+        """
+        if not (self.base_url and model):
+            return None
+        now = time.monotonic()
+        key = (self.base_url, model)
+        hit = self._context_cache.get(key)
+        if hit and now - hit[0] < 60.0:
+            return hit[1]
+        value: int | None = None
+        try:
+            r = await self._client.get(f"{self.base_url}/models", headers=self._headers(), timeout=3.0)
+            r.raise_for_status()
+            for m in r.json().get("data") or []:
+                if m.get("id") == model:
+                    raw = m.get("context_length") or m.get("max_model_len")
+                    value = int(raw) if raw else None
+                    break
+        except Exception as exc:
+            logger.debug("[openai] context window of %s unknown: %s", model, exc)
+        self._context_cache[key] = (now, value)
+        return value
 
     async def list_models(self, url: str | None = None, api_key: str | None = None) -> list[str]:
         """Model ids from ``/models``. Raises on a connection or HTTP error so

@@ -193,8 +193,18 @@ async def lifespan(app: FastAPI):
     await spooler.start()
 
     # On startup: apply pause settings saved in the DB to the spooler
-    from .runtime_config import _defaults as _rc_defaults
+    from .runtime_config import _defaults as _rc_defaults, LEGACY_KEYS as _rc_legacy_keys
     _saved_cfg = await db.get_config()
+    # Left behind by the LLM provider removed in v0.4.0. Nothing reads them, but
+    # the same names would surface again if a setting were ever called that,
+    # as `bonsai` did in the external-server form (2026-10-20).
+    _legacy = [k for k in _rc_legacy_keys if k in _saved_cfg]
+    if _legacy:
+        try:
+            await db.delete_config_keys(_legacy)
+            logger.info("Removed leftover config keys: %s", ", ".join(_legacy))
+        except Exception as exc:
+            logger.warning("Could not remove leftover config keys %s: %s", _legacy, exc)
     apply_llm_runtime_config(ollama, {**_rc_defaults, **_saved_cfg})
     # Topology-aware defaults — overridden by any value the user has saved in the DB.
     _default_pause_lanes = list(_rc_defaults["auto_pause_lanes"])  # ["embed", "eval"]

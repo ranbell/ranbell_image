@@ -60,8 +60,8 @@ async function testExternalServer() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        base_url: adminConfig.value?.openai_base_url || '',
-        api_key: adminConfig.value?.openai_api_key || '',
+        base_url: adminConfig.value?.external_llm_url || '',
+        api_key: adminConfig.value?.external_llm_api_key || '',
       }),
     })
     const data = r.ok ? await r.json() : { ok: false, error: await r.text() }
@@ -207,8 +207,8 @@ async function saveAdminConfig() {
   adminLoading.value = 'config'
   adminError.value = ''
   try {
-    const { source_images_dir, generated_images_dir, thumbnails_dir, openai_api_key_set, ...body } = adminConfig.value
-    if (externalKeyClear.value) body.openai_api_key_clear = true
+    const { source_images_dir, generated_images_dir, thumbnails_dir, external_llm_api_key_set, ...body } = adminConfig.value
+    if (externalKeyClear.value) body.external_llm_api_key_clear = true
     const r = await fetch('/api/admin/config', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -1581,9 +1581,9 @@ watch(() => props.jobs?.find(j => j.title === 'backup')?.state, (state) => {
               <div>
                 <label class="text-xs text-gray-500 block mb-1">{{ $t('admin.external.url') }}</label>
                 <div class="flex gap-2">
-                  <input v-model="adminConfig.openai_base_url" type="text" placeholder="http://192.168.0.10:8000/v1"
+                  <input v-model="adminConfig.external_llm_url" type="text" placeholder="http://192.168.0.10:8000/v1"
                     class="flex-1 min-w-0 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
-                  <button @click="testExternalServer" :disabled="externalTesting || !adminConfig.openai_base_url"
+                  <button @click="testExternalServer" :disabled="externalTesting || !adminConfig.external_llm_url"
                     class="px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-xs text-gray-200 whitespace-nowrap">
                     {{ externalTesting ? $t('admin.external.testing') : $t('admin.external.test') }}
                   </button>
@@ -1598,11 +1598,11 @@ watch(() => props.jobs?.find(j => j.title === 'backup')?.state, (state) => {
               <div>
                 <label class="text-xs text-gray-500 block mb-1">{{ $t('admin.external.apiKey') }}</label>
                 <div class="flex gap-2 items-center">
-                  <input v-model="adminConfig.openai_api_key" type="password" autocomplete="off"
-                    :placeholder="adminConfig.openai_api_key_set && !externalKeyClear ? $t('admin.external.apiKeySaved') : $t('admin.external.apiKeyNone')"
+                  <input v-model="adminConfig.external_llm_api_key" type="password" autocomplete="off"
+                    :placeholder="adminConfig.external_llm_api_key_set && !externalKeyClear ? $t('admin.external.apiKeySaved') : $t('admin.external.apiKeyNone')"
                     class="flex-1 min-w-0 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
-                  <button v-if="adminConfig.openai_api_key_set && !externalKeyClear"
-                    @click="externalKeyClear = true; adminConfig.openai_api_key = ''"
+                  <button v-if="adminConfig.external_llm_api_key_set && !externalKeyClear"
+                    @click="externalKeyClear = true; adminConfig.external_llm_api_key = ''"
                     class="px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-xs text-gray-300 whitespace-nowrap">
                     {{ $t('admin.external.apiKeyClear') }}
                   </button>
@@ -1614,12 +1614,12 @@ watch(() => props.jobs?.find(j => j.title === 'backup')?.state, (state) => {
               <div class="grid grid-cols-2 gap-3">
                 <div>
                   <label class="text-xs text-gray-500 block mb-1">{{ $t('admin.external.model') }}</label>
-                  <input v-model="adminConfig.openai_model" type="text" list="external-models"
+                  <input v-model="adminConfig.external_llm_model" type="text" list="external-models"
                     class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
                 </div>
                 <div>
                   <label class="text-xs text-gray-500 block mb-1">{{ $t('admin.external.vlmModel') }}</label>
-                  <input v-model="adminConfig.openai_vlm_model" type="text" list="external-models"
+                  <input v-model="adminConfig.external_llm_vlm_model" type="text" list="external-models"
                     :placeholder="$t('admin.external.vlmModelFallback')"
                     class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
                 </div>
@@ -1641,7 +1641,7 @@ watch(() => props.jobs?.find(j => j.title === 'backup')?.state, (state) => {
                 </div>
               </div>
               <p v-if="(adminConfig.inspire_llm_backend === 'openai' || adminConfig.refine_llm_backend === 'openai')
-                       && (!adminConfig.openai_base_url || !(adminConfig.openai_model || adminConfig.openai_vlm_model))"
+                       && (!adminConfig.external_llm_url || !(adminConfig.external_llm_model || adminConfig.external_llm_vlm_model))"
                 class="text-[11px] text-amber-400">
                 ⚠ {{ $t('admin.external.incomplete') }}
               </p>
