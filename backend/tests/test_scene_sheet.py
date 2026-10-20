@@ -196,3 +196,36 @@ async def test_the_detailed_style_runs_sheet_then_script(tmp_path):
     assert "drinking_straw" not in llm.vlm_prompts[0] + llm.text_prompts[0]
     assert llm.embeds == 0
     assert "make it night" in llm.vlm_prompts[0]
+
+
+def test_the_length_follows_the_paragraph_slider():
+    sheet = ss.normalize_sheet({"medium": "anime illustration",
+                                "subjects": [_girl(str(i)) for i in range(5)]})
+    assert "exactly 7 paragraphs" in ss.script_prompt(sheet, paragraphs=7)
+    assert "exactly 3 paragraphs" in ss.script_prompt(sheet, paragraphs=1)  # clamped
+    assert "about half of the paragraphs" in ss.script_prompt(sheet, paragraphs=6)
+
+
+def test_detail_boxes_reach_the_writer():
+    sheet = ss.normalize_sheet({
+        "medium": "anime illustration", "layers": "ice shards in front, mountains behind",
+        "effects": "snow flurries and light rays",
+        "subjects": [_girl("lead") | {"details": "fur trim on the boots"}],
+    })
+    p = ss.script_prompt(sheet)
+    assert "ice shards in front" in p and "snow flurries" in p and "fur trim" in p
+
+
+def test_an_explained_empty_box_is_empty():
+    sheet = ss.normalize_sheet({"subjects": [_girl("lead")],
+                                "props": "None (all notable props are held by subjects)"})
+    assert sheet["props"] == ""
+    # A real value that merely starts like one is kept.
+    sheet = ss.normalize_sheet({"subjects": [_girl("lead")], "props": "Nonelike banner"})
+    assert sheet["props"] == "Nonelike banner"
+
+
+def test_a_capitalised_medium_opening_gets_its_article_too():
+    sheet = ss.normalize_sheet({"medium": "anime illustration", "subjects": [_girl("lead")]})
+    script, _ = ss.finish_script("Anime illustration of a girl.", sheet)
+    assert script == "An anime illustration of a girl."

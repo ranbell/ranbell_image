@@ -4018,7 +4018,7 @@ onUnmounted(() => {
                         </button>
                       </div>
                     </div>
-                    <div v-if="refineStyle === 'natural'">
+                    <div v-if="refineStyle === 'natural' || refineKrea">
                       <label class="text-xs text-gray-500 flex justify-between mb-1.5" :title="$t('refine.proseLengthTip')">
                         <span>{{ $t('refine.proseLength') }}</span>
                         <span class="text-purple-400 font-mono">{{ refineProseParagraphs }}{{ $t('refine.proseLengthUnit') }}</span>

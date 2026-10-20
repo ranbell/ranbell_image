@@ -33,6 +33,8 @@ from __future__ import annotations
 import json
 import re
 
+from .visual_spec import DEFAULT_PROSE_PARAGRAPHS, clamp_prose_paragraphs
+
 # Fixed media the screen can choose. Empty means "read it from the reference".
 MEDIUM_CHOICES = {
     "anime": "anime illustration",
@@ -45,11 +47,11 @@ _NUMBER_WORDS = {
 }
 
 _SHEET_FIELDS = (
-    "medium", "rendering", "subject_count", "subjects", "setting", "props",
-    "lighting", "camera", "palette_mood", "text_in_image",
+    "medium", "rendering", "subject_count", "subjects", "setting", "layers", "props",
+    "effects", "lighting", "camera", "palette_mood", "text_in_image",
 )
 _SUBJECT_FIELDS = (
-    "who", "position", "appearance", "outfit", "expression", "pose_action", "holding",
+    "who", "position", "appearance", "outfit", "details", "expression", "pose_action", "holding",
 )
 
 
@@ -93,7 +95,9 @@ def sheet_prompt(
         "- Describe what is visible. If you are unsure of a detail, leave it out rather "
         "than guess. Look at each face separately: eyes open or closed, mouth open or "
         "closed. Look at each pair of hands: what is in them.",
-        "- A box with nothing to say stays an empty string.",
+        "- Be generous with concrete, visible detail: the writer can only describe what "
+        "you put here, and a long, dense description is what the image model draws best "
+        "from. A box with nothing to say stays an empty string.",
         "",
         refs.rstrip("\n"),
         "Fill in this JSON and output only the JSON:",
@@ -107,13 +111,17 @@ def sheet_prompt(
         '      "position": "where in the frame: center front, back left, ...",',
         '      "appearance": "hair colour, length and style; eye colour; face; build",',
         '      "outfit": "clothing and accessories, with materials and colours",',
+        '      "details": "small visible things on this person: hair ornaments, jewelry, '
+        'straps, stitching, fur, fabric texture, how light catches them",',
         '      "expression": "this person\'s face: eyes open or closed, mouth, feeling",',
         '      "pose_action": "what the body is doing, as a verb phrase",',
         '      "holding": "objects in this person\'s hands and which hand"',
         '    }',
         '  ],',
         '  "setting": "where the scene is, described concretely",',
-        '  "props": "objects nobody holds, each with its place",',
+        '  "layers": "what is in the foreground, the middle ground and the background",',
+        '  "props": "objects nobody holds, each with its place — never one already in someone\'s hands",',
+        '  "effects": "particles, weather, light rays, reflections, motion in the air",',
         '  "lighting": "light sources, direction, colour, highlights and shadows",',
         '  "camera": "shot size, angle, framing, depth of field",',
         '  "palette_mood": "dominant colours and the feeling of the picture",',
@@ -145,14 +153,17 @@ def _text(value) -> str:
     if isinstance(value, dict):
         return "; ".join(f"{k}: {_text(v)}" for k, v in value.items() if _text(v))
     text = str(value).strip()
-    return "" if text.lower().strip(" .") in _EMPTY_WORDS else text
+    # Also "None (all props are held)" — an empty box with an explanation.
+    head = re.split(r"[\s(.,;:—-]", text.lower(), maxsplit=1)[0]
+    return "" if text.lower().strip(" .") in _EMPTY_WORDS or head in _EMPTY_WORDS else text
 
 
 def normalize_sheet(data: dict, *, medium: str = "", literal_texts: list[str] | None = None) -> dict:
     """Keep the known boxes, as plain strings, and make the count and the
     medium agree with what the screen and the subject list say."""
     sheet: dict = {k: "" for k in _SHEET_FIELDS}
-    for key in ("medium", "rendering", "setting", "props", "lighting", "camera", "palette_mood"):
+    for key in ("medium", "rendering", "setting", "layers", "props", "effects",
+                "lighting", "camera", "palette_mood"):
         sheet[key] = _text(data.get(key))
     subjects = []
     for entry in data.get("subjects") or []:
@@ -175,7 +186,9 @@ def normalize_sheet(data: dict, *, medium: str = "", literal_texts: list[str] | 
     return sheet
 
 
-def script_prompt(sheet: dict, *, instruction: str = "") -> str:
+def script_prompt(
+    sheet: dict, *, instruction: str = "", paragraphs: int = DEFAULT_PROSE_PARAGRAPHS,
+) -> str:
     """Step 2: what the writer is asked to turn the sheet into."""
     n = sheet.get("subject_count") or 0
     count_line = (
@@ -198,8 +211,15 @@ def script_prompt(sheet: dict, *, instruction: str = "") -> str:
         "what they are doing and what they hold, in their own sentences. Use real verbs "
         "for actions.",
         "- Write it the way a good caption describes a picture: flowing, specific "
-        "sentences, not the sheet read out box by box. A box that is empty is simply "
-        "not mentioned.",
+        "sentences, not the sheet read out box by box. Turn the sheet's comma-separated "
+        "labels into natural noun phrases rather than copying them. A box that is empty "
+        "is simply not mentioned.",
+        "- Use every box of the sheet; nothing in it is filler. Each person's \"details\" "
+        "box is where the picture gets its richness, so write all of it out for that person.",
+        "- An object in someone's hands is written once, with that person. Repeating it "
+        "elsewhere makes the image model draw a second one.",
+        "- Spend the length on what can be seen: materials and textures, how the light "
+        "falls on each surface, what sits in front of and behind whom.",
         "- Then the setting and where the props are, then the lighting, then the camera "
         "and composition, then the rendering style and colour mood.",
         "- Use only what the sheet says. Do not add people, objects or actions; an extra "
@@ -208,12 +228,35 @@ def script_prompt(sheet: dict, *, instruction: str = "") -> str:
         "no lists. Leave out words like masterpiece, best quality, 8k — they describe "
         "nothing visible.",
         "- Write visible text in double quotes, exactly as in the sheet.",
-        "- Three to five paragraphs. Output only the prompt.",
+        f"- {_length_line(paragraphs, n)} Output only the prompt.",
     ]
     if instruction:
         lines += ["", "[User instruction — already applied in the sheet; keep it]", instruction]
     lines += ["", "[Scene sheet]", json.dumps(sheet, ensure_ascii=False, indent=2)]
     return "\n".join(lines)
+
+
+# Sentences per paragraph. Higher than the natural style's: those sentences
+# carry inline tags, these carry only description, and at 2-4 sentences the
+# writer dropped most of the sheet's details to fit (381 words at 5
+# paragraphs for five people).
+_SCRIPT_SENTENCES = {3: "6-8", 4: "5-7", 5: "4-6", 6: "4-6", 7: "3-5"}
+
+
+def _length_line(paragraphs: int, people: int) -> str:
+    """How long, and where the length goes: people first, since they are
+    what goes wrong when squeezed."""
+    n = clamp_prose_paragraphs(paragraphs)
+    room = (
+        "Give the people about half of the paragraphs" if people >= 2 and n >= 5 else
+        "Give the person at least two paragraphs" if people == 1 and n >= 5 else
+        "Keep the people in the first paragraphs"
+    )
+    return (
+        f"Write exactly {n} paragraphs of {_SCRIPT_SENTENCES.get(n, '4-6')} full sentences each. "
+        f"{room}; the rest go to the setting and its layers, effects and light, then "
+        "camera, composition and rendering."
+    )
 
 
 _PAREN_TAGS_RE = re.compile(r"\s*\(([^()]*_[^()]*)\)")
@@ -240,12 +283,12 @@ def finish_script(text: str, sheet: dict) -> tuple[str, list[str]]:
     notes: list[str] = []
     script = clean_script(text)
     medium = sheet.get("medium") or ""
-    if script[:1].islower():
-        # "anime illustration of five girls…" — the article fell off.
-        if medium and script.lower().startswith(medium.lower()):
-            script = ("An " if medium[:1].lower() in "aeiou" else "A ") + script
-        else:
-            script = script[:1].upper() + script[1:]
+    if medium and script.lower().startswith(medium.lower()):
+        # "anime illustration of five girls…" / "Anime illustration of…" —
+        # the article fell off.
+        script = ("An " if medium[:1].lower() in "aeiou" else "A ") + script[:1].lower() + script[1:]
+    elif script[:1].islower():
+        script = script[:1].upper() + script[1:]
     head = script[:300].lower()
     core = [w for w in re.findall(r"[a-z]+", medium.lower()) if len(w) > 2]
     if medium and core and not any(w in head for w in core):

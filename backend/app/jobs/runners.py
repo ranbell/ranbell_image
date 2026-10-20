@@ -1515,9 +1515,10 @@ async def run_refine_prompt(
 
             # Step 2: the sheet → the visual script.
             _phase("writingDescription", 0.55, "Writing the visual script...")
+            _script_n = clamp_prose_paragraphs(getattr(body, "prose_paragraphs", 5))
             script_raw = await _stream_text(
-                scene_sheet.script_prompt(sheet, instruction=nl_instruction),
-                0.55, 0.90, 500, "Writing the visual script...",
+                scene_sheet.script_prompt(sheet, instruction=nl_instruction, paragraphs=_script_n),
+                0.55, 0.90, 300 + _script_n * 110, "Writing the visual script...",
             )
             positive, repairs = scene_sheet.finish_script(script_raw, sheet)
             for note in repairs:
@@ -1528,7 +1529,7 @@ async def run_refine_prompt(
             if body.negative_prompt:
                 _put({"type": "think", "text": "\n[the detailed style writes no negative prompt]"})
             context_story = positive
-            prose_missing = len(positive.split()) < 60
+            prose_missing = len(positive.split()) < 25 * _script_n
         else:
             vlm_prompt = _build_vlm_prompt(
                 context, nl_instruction, body.prompt_style, body.negative_prompt,
