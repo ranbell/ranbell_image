@@ -8,6 +8,7 @@ import AnalyzerModal from './components/AnalyzerModal.vue'
 import AdminModal from './components/AdminModal.vue'
 import InspirePanel from './components/InspirePanel.vue'
 import InvokePanel from './components/InvokePanel.vue'
+import SceneSheetEditor from './components/refine/SceneSheetEditor.vue'
 import MusePanel from './components/MusePanel.vue'
 import VideoStudio from './components/VideoStudio.vue'
 import CharacterGallery from './components/CharacterGallery.vue'
@@ -492,6 +493,41 @@ const refineSuppressConflict = ref(false)
 // writes no negative, and needs the medium stated (Krea 2 drifts to a photo).
 const refineKrea = computed(() => refineStyle.value === 'detailed')
 const refineVisualMedium = ref('')   // '' = from the reference | 'anime' | 'photo'
+// Several references: 'merge' fuses their people into one cast, 'coexist'
+// keeps every person from every image (the Showrunner, 2026-10-21).
+const refineCombineMode = ref('merge')
+// The world: 'blend' restates the references; 'fuse' draws WD14 tags as
+// ingredients that transform the scene, with the divergence dial as chaos.
+const refineWorldMode = ref('blend')
+const refineChaosOn = computed(() => !refineKrea.value || refineWorldMode.value === 'fuse')
+// The scene sheet the detailed style wrote from, editable on screen. Each
+// version the server returns is kept so a retake can be undone.
+const refineSheet = ref(null)
+const refineSheetHistory = ref([])
+const refineSheetLocked = ref([])
+const refineSheetInstruction = ref('')
+// 'read' = read the picture, 'rewrite' = write again from the edited sheet,
+// 'retake' = apply a spoken retake to the sheet first
+const refineSheetMode = ref('read')
+let _refineSheetRun = null
+function rewriteFromSheet() {
+  _refineSheetRun = { sheet: refineSheet.value }
+  refineSheetMode.value = 'rewrite'
+  runRefine()
+}
+function retakeSheet() {
+  if (!refineSheetInstruction.value.trim()) return
+  _refineSheetRun = {
+    sheet: refineSheet.value,
+    sheet_instruction: refineSheetInstruction.value,
+    locked: refineSheetLocked.value,
+  }
+  refineSheetMode.value = 'retake'
+  runRefine()
+}
+function undoSheet() {
+  if (refineSheetHistory.value.length) refineSheet.value = refineSheetHistory.value.pop()
+}
 const refineAutoSubmit = ref(false)
 const refineBatchCount = ref(1)
 const refineWorkflow = ref('')
@@ -545,7 +581,9 @@ const refineTotalSteps = computed(() => {
   let n = 2  // 画像ロード + 後処理
   if (refineInstructionMode.value === 'enhanced') n++  // enhanced のみ LLM ステップあり
   if (refineSuppressConflict.value && !refineKrea.value) n++
-  n += refineStyle.value === 'danbooru' ? 1 : 2
+  n += refineStyle.value === 'danbooru' ? 1
+    : refineKrea.value && refineSheetMode.value === 'rewrite' ? 1
+    : refineKrea.value && refineSheetMode.value === 'read' && refineWorldMode.value === 'fuse' ? 3 : 2
   return n
 })
 
@@ -556,7 +594,10 @@ const refineCurrentStep = computed(() => {
   if (refineStyle.value === 'natural') {
     order.push('writingTags', 'writingDescription')
   } else if (refineKrea.value) {
-    order.push('readingScene', 'writingDescription')
+    if (refineSheetMode.value === 'read') order.push('readingScene')
+    if (refineSheetMode.value === 'read' && refineWorldMode.value === 'fuse') order.push('fusingWorlds')
+    if (refineSheetMode.value === 'retake') order.push('patchingScene')
+    order.push('writingDescription')
   } else {
     order.push('generatingPrompt')
   }
@@ -2584,6 +2625,16 @@ async function runRefine() {
   refineWd14Analysis.value = null
   refineMutationTags.value = []
   refineVariants.value = []
+  const sheetRun = _refineSheetRun
+  _refineSheetRun = null
+  if (!sheetRun) {
+    // A fresh reading: the old sheet, its versions and its locks belong to
+    // another picture.
+    refineSheetMode.value = 'read'
+    refineSheet.value = null
+    refineSheetHistory.value = []
+    refineSheetLocked.value = []
+  }
 
   try {
     const orderedShas = [...selectedIds.value].slice(0, 6)
@@ -2598,6 +2649,9 @@ async function runRefine() {
       negative_prompt: refineNegative.value,
       suppress_conflict_tags: refineSuppressConflict.value,
       visual_medium: refineKrea.value ? refineVisualMedium.value : '',
+      combine_mode: refineCombineMode.value,
+      world_mode: refineWorldMode.value,
+      ...(refineKrea.value && sheetRun ? sheetRun : {}),
       wd14_common_ratio: refineCommonRatio.value,
       wd14_unique_count: refineUniqueCount.value,
       divergence: refineDivergence.value,
@@ -2686,6 +2740,11 @@ function handleRefineEvent(evt) {
       refineWd14Analysis.value = evt.wd14_analysis || null
       refineMutationTags.value = evt.mutation_tags || []
       refineVariants.value = evt.variants || []
+      if (evt.sheet) {
+        if (refineSheet.value) refineSheetHistory.value.push(refineSheet.value)
+        refineSheet.value = evt.sheet
+        refineSheetInstruction.value = ''
+      }
       refineHairTags.value = evt.hair_tags || []
       refineSubjectTags.value = evt.subject_tags || []
       refineClothingTags.value = evt.clothing_tags || []
@@ -3977,14 +4036,14 @@ onUnmounted(() => {
                         <span>{{ $t('refine.tempLow') }}</span><span>{{ $t('refine.tempHigh') }}</span>
                       </div>
                     </div>
-                    <div :class="refineKrea ? 'opacity-50' : ''">
+                    <div :class="refineChaosOn ? '' : 'opacity-50'">
                       <label class="text-xs text-gray-500 flex justify-between mb-1.5">
-                        <span :title="$t('refine.divergenceTitle')">⚗️ {{ $t('refine.divergence') }}</span>
+                        <span :title="$t('refine.divergenceTitle')">⚗️ {{ refineKrea ? $t('refine.chaos') : $t('refine.divergence') }}</span>
                         <span class="text-teal-400 font-mono">{{ Math.round(refineDivergence * 100) }}%</span>
                       </label>
                       <input v-model.number="refineDivergence" type="range" min="0" max="1" step="0.05"
-                        :disabled="refining || refineDirectPrompt !== null || refineKrea" class="w-full accent-teal-500 disabled:opacity-50" />
-                      <p v-if="refineKrea" class="text-[10px] text-gray-500 mt-1">{{ $t('refine.notUsedByKrea') }}</p>
+                        :disabled="refining || refineDirectPrompt !== null || !refineChaosOn" class="w-full accent-teal-500 disabled:opacity-50" />
+                      <p v-if="refineKrea" class="text-[10px] text-gray-500 mt-1">{{ refineChaosOn ? $t('refine.chaosDesc') : $t('refine.chaosOff') }}</p>
                       <div class="flex justify-between text-xs text-gray-600 mt-0.5">
                         <span>{{ $t('refine.divergenceLow') }}</span><span>{{ $t('refine.divergenceHigh') }}</span>
                       </div>
@@ -4126,6 +4185,34 @@ onUnmounted(() => {
                         </button>
                       </div>
                       <p class="text-[10px] text-gray-600 mt-1.5">{{ $t('refine.visualMediumDesc') }}</p>
+                    </div>
+
+                    <!-- The world: restate the references, or fuse them with WD14 ingredients -->
+                    <div v-if="refineKrea">
+                      <p class="text-xs text-gray-400 mb-2">{{ $t('refine.worldLabel') }}</p>
+                      <div class="grid grid-cols-2 gap-2">
+                        <button v-for="m in ['blend', 'fuse']" :key="m"
+                          @click="refineWorldMode = m" :disabled="refining"
+                          :class="refineWorldMode === m ? 'bg-teal-900/60 border-teal-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'"
+                          class="py-1.5 px-2 border rounded-lg text-xs font-medium transition-colors disabled:opacity-50 text-left">
+                          <div class="font-semibold">{{ $t('refine.world_' + m) }}</div>
+                          <div class="text-gray-500 font-normal mt-0.5 text-[10px]">{{ $t('refine.world_' + m + 'Desc') }}</div>
+                        </button>
+                      </div>
+                    </div>
+
+                    <!-- Several references: fuse the people, or keep them all -->
+                    <div v-if="refineKrea && selectedCount >= 2">
+                      <p class="text-xs text-gray-400 mb-2">{{ $t('refine.combineLabel') }}</p>
+                      <div class="grid grid-cols-2 gap-2">
+                        <button v-for="m in ['merge', 'coexist']" :key="m"
+                          @click="refineCombineMode = m" :disabled="refining"
+                          :class="refineCombineMode === m ? 'bg-purple-900/60 border-purple-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'"
+                          class="py-1.5 px-2 border rounded-lg text-xs font-medium transition-colors disabled:opacity-50 text-left">
+                          <div class="font-semibold">{{ $t('refine.combine_' + m) }}</div>
+                          <div class="text-gray-500 font-normal mt-0.5 text-[10px]">{{ $t('refine.combine_' + m + 'Desc') }}</div>
+                        </button>
+                      </div>
                     </div>
 
                     <!-- Instruction mode: none / basic / enhanced -->
@@ -4279,6 +4366,37 @@ onUnmounted(() => {
                   </button>
                   <div v-show="thinkOpen" class="px-4 py-3 bg-gray-950/80 max-h-40 overflow-y-auto">
                     <p class="text-xs text-gray-500 font-mono whitespace-pre-wrap leading-relaxed">{{ thinkText }}</p>
+                  </div>
+                </div>
+
+                <!-- Scene sheet (detailed style): edit it, rewrite from it, or say it again -->
+                <div v-if="refineKrea && refineSheet" class="border border-sky-900/40 rounded-xl overflow-hidden">
+                  <div class="flex items-center justify-between px-4 py-2.5 bg-sky-900/20">
+                    <span class="text-xs text-sky-300">🗺 {{ $t('refine.sheet.title') }}</span>
+                    <button v-if="refineSheetHistory.length" @click="undoSheet" :disabled="refining"
+                      class="text-[11px] text-gray-400 hover:text-gray-200 disabled:opacity-40">
+                      ↶ {{ $t('refine.sheet.undo') }}
+                    </button>
+                  </div>
+                  <div class="p-3 space-y-3 max-h-[28rem] overflow-y-auto">
+                    <SceneSheetEditor v-model="refineSheet" v-model:locked="refineSheetLocked" :disabled="refining" />
+                  </div>
+                  <div class="p-3 border-t border-sky-900/30 space-y-2">
+                    <button @click="rewriteFromSheet" :disabled="refining"
+                      class="w-full py-1.5 rounded-lg bg-sky-800/60 border border-sky-600/50 text-xs text-sky-100 hover:bg-sky-700/60 disabled:opacity-50">
+                      ✍️ {{ $t('refine.sheet.rewrite') }}
+                    </button>
+                    <div class="flex gap-2">
+                      <input v-model="refineSheetInstruction" :disabled="refining"
+                        @keydown.enter.exact.prevent="retakeSheet"
+                        :placeholder="$t('refine.sheet.retakePlaceholder')"
+                        class="flex-1 min-w-0 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-sky-500" />
+                      <button @click="retakeSheet" :disabled="refining || !refineSheetInstruction.trim()"
+                        class="px-3 py-1.5 rounded-lg bg-gray-800 border border-gray-700 text-xs text-gray-200 hover:border-sky-500 disabled:opacity-40 whitespace-nowrap">
+                        💬 {{ $t('refine.sheet.retake') }}
+                      </button>
+                    </div>
+                    <p class="text-[10px] text-gray-600">{{ $t('refine.sheet.hint') }}</p>
                   </div>
                 </div>
 

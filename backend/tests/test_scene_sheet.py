@@ -134,8 +134,9 @@ class _DB:
         self.path = path
 
     async def get(self, sha):
-        return {"path": str(self.path), "wd14_tags": ["2girls", "solo", "drinking_straw"],
-                "wd14_tags_scores": [0.9, 0.8, 0.5]}
+        return {"path": str(self.path),
+                "wd14_tags": ["2girls", "solo", "drinking_straw", "night_sky", "lens_flare"],
+                "wd14_tags_scores": [0.9, 0.8, 0.5, 0.7, 0.6]}
 
     async def get_config(self):
         return {}
@@ -229,3 +230,228 @@ def test_a_capitalised_medium_opening_gets_its_article_too():
     sheet = ss.normalize_sheet({"medium": "anime illustration", "subjects": [_girl("lead")]})
     script, _ = ss.finish_script("Anime illustration of a girl.", sheet)
     assert script == "An anime illustration of a girl."
+
+
+# ── Editing the sheet and saying it again ────────────────────────────────────
+
+def _stage():
+    return ss.normalize_sheet({
+        "medium": "anime illustration", "lighting": "purple spotlights",
+        "setting": "an indoor concert stage",
+        "subjects": [_girl("lead"), _girl("right", holding="a golden hoop"), _girl("left")],
+    })
+
+
+def test_a_patch_changes_only_what_it_names():
+    sheet, changed, refused = ss.apply_patch(_stage(), {
+        "set": {"setting": "an outdoor stage at night", "lighting": "moonlight and lanterns",
+                "rating": "safe"},
+        "subjects": [{"index": 1, "set": {"holding": "a tambourine in the right hand", "mood": "x"}}],
+    })
+    assert sheet["setting"] == "an outdoor stage at night"
+    assert sheet["subjects"][1]["holding"] == "a tambourine in the right hand"
+    assert sheet["subjects"][0] == _stage()["subjects"][0]
+    assert sheet["camera"] == _stage()["camera"]
+    assert "rating" not in sheet and "mood" not in sheet["subjects"][1]
+    assert len(changed) == 3 and refused == []
+
+
+def test_locked_boxes_and_people_are_refused():
+    sheet, changed, refused = ss.apply_patch(_stage(), {
+        "set": {"lighting": "daylight"},
+        "subjects": [{"index": 0, "set": {"outfit": "a raincoat"}}],
+        "remove_subjects": [0],
+    }, locked=["lighting", "subjects.0"])
+    assert sheet == _stage()
+    assert changed == []
+    assert set(refused) == {"lighting", "subjects.0.outfit", "subjects.0 (remove)"}
+
+
+def test_adding_and_removing_people_moves_the_count():
+    sheet, changed, _ = ss.apply_patch(_stage(), {
+        "remove_subjects": [2],
+        "add_subjects": [_girl("drummer"), _girl("bassist")],
+    })
+    assert sheet["subject_count"] == 4
+    assert [s["who"] for s in sheet["subjects"]] == ["lead", "right", "drummer", "bassist"]
+    assert any("removed" in c for c in changed)
+
+
+def test_the_patch_prompt_names_the_locks_and_the_indexes():
+    p = ss.patch_prompt(_stage(), "夜の屋外ステージにして", locked=["subjects.0", "camera"])
+    assert "subjects.0, camera" in p
+    assert '"index": 1' in p
+    assert "夜の屋外ステージにして" in p
+
+
+class _RetakeLLM(_LLM):
+    """Answers a patch request with a patch, anything else with a script."""
+
+    def __init__(self, patch):
+        super().__init__()
+        self.patch = patch
+
+    async def generate_text_stream(self, prompt, **kw):
+        self.text_prompts.append(prompt)
+        if "Turn the request into a patch" in prompt:
+            yield {"type": "token", "text": json.dumps(self.patch)}
+        else:
+            yield {"type": "token", "text": "An anime illustration of three girls on a stage at night."}
+
+
+async def _run(body, llm, tmp_path):
+    from PIL import Image
+
+    from backend.app import runtime_config
+    from backend.app.jobs.runners import run_refine_prompt
+
+    runtime_config._cache = None
+    img = tmp_path / "ref.png"
+    Image.new("RGB", (64, 64), (200, 50, 200)).save(img)
+    q = asyncio.Queue()
+    try:
+        await run_refine_prompt(_Reporter(), _Cancel(), body_dict={"sha256s": ["a"],
+                                "prompt_style": "detailed", **body}, db=_DB(img), ollama=llm,
+                                spooler=None, comfy=None, token_queue=q)
+    except RuntimeError:
+        pass
+    events = []
+    while not q.empty():
+        events.append(q.get_nowait())
+    return [e for e in events if e]
+
+
+@pytest.mark.asyncio
+async def test_an_edited_sheet_is_not_read_again(tmp_path):
+    llm = _RetakeLLM({})
+    events = await _run({"sheet": _stage()}, llm, tmp_path)
+    done = next(e for e in events if e["type"] == "done")
+    assert llm.vlm_prompts == []
+    assert len(llm.text_prompts) == 1
+    assert done["sheet"]["subject_count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_a_retake_patches_the_sheet_and_respects_the_locks(tmp_path):
+    llm = _RetakeLLM({"set": {"setting": "an outdoor stage at night", "lighting": "moonlight"},
+                      "subjects": [{"index": 0, "set": {"outfit": "a raincoat"}}]})
+    events = await _run({"sheet": _stage(), "sheet_instruction": "夜の屋外にして",
+                         "locked": ["subjects.0"]}, llm, tmp_path)
+    done = next(e for e in events if e["type"] == "done")
+    assert done["sheet"]["setting"] == "an outdoor stage at night"
+    assert done["sheet"]["subjects"][0]["outfit"] == _stage()["subjects"][0]["outfit"]
+    thinking = "".join(e["text"] for e in events if e["type"] == "think")
+    assert "[changed] setting" in thinking and "[locked, not changed] subjects.0.outfit" in thinking
+    # one call for the patch, one for the script, none for the picture
+    assert len(llm.text_prompts) == 2 and llm.vlm_prompts == []
+    # the patch never reaches the prompt pane
+    assert not any(e["type"] == "token" and '"set"' in e["text"] for e in events)
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_retake_stops_instead_of_writing_the_old_sheet(tmp_path):
+    llm = _RetakeLLM({})
+    events = await _run({"sheet": _stage(), "sheet_instruction": "夜にして"}, llm, tmp_path)
+    assert not any(e["type"] == "done" for e in events)
+    assert any(e["type"] == "error" and "retake" in e["message"] for e in events)
+
+
+def test_merging_or_keeping_the_people_of_several_references():
+    merge = ss.sheet_prompt(reference_count=2, combine="merge")
+    coexist = ss.sheet_prompt(reference_count=2, combine="coexist")
+    assert "ONE person who combines" in merge and "sum" not in merge.split("Fuse")[1][:200]
+    assert "sum of the images' people" in coexist and "which image they come from" in coexist
+    single = ss.sheet_prompt(reference_count=1, combine="coexist")
+    assert "Fuse" not in single and "Keep every main person" not in single
+
+
+# ── Fusing worlds ────────────────────────────────────────────────────────────
+
+import random as _random
+
+
+def test_ingredients_skip_counts_ratings_and_noise_and_grow_with_chaos():
+    pools = {"the first image": ["1girl", "general", "snow", "ice_crystal", "feathers", "watermark"],
+             "the second image": ["bookshelf", "candle", "ink_bottle", "library"]}
+    skip = {"1girl", "watermark"}
+    low = ss.pick_ingredients(pools, 0.0, skip=skip, rng=_random.Random(1))
+    high = ss.pick_ingredients(pools, 1.0, skip=skip, rng=_random.Random(1))
+    assert all(len(w) == 2 for w in low.values())
+    # ice_crystal and ink_bottle are unknown to the catalog, so they do not pass
+    assert sorted(high["the first image"]) == ["feathers", "snow"]
+    assert sorted(high["the second image"]) == ["bookshelf", "candle", "library"]
+    assert not ({"1girl", "general", "watermark"} & {w for ws in high.values() for w in ws})
+
+
+def test_the_fuse_prompt_asks_for_transformation_not_addition():
+    p = ss.fuse_prompt(_stage(), {"the first image": ["snow"], "another world": ["clockwork"]},
+                       0.9, locked=["camera"])
+    assert "Fusion is not addition" in p
+    assert "from the first image: snow" in p and "from another world: clockwork" in p
+    assert "worlds collide" in p
+    assert "camera" in p.split("Locked by the user")[1]
+
+
+def test_a_fusion_keeps_who_people_are_and_how_many():
+    fused, changed, refused = ss.apply_fusion(_stage(), {
+        "set": {"setting": "a concert stage grown from ice"},
+        "subjects": [{"index": 0, "set": {"appearance": "a robot", "outfit": "a frost-woven dress"}}],
+        "add_subjects": [_girl("stranger")], "remove_subjects": [1],
+    }, locked=["lighting"])
+    assert fused["subject_count"] == 3
+    assert fused["subjects"][0]["appearance"] == _stage()["subjects"][0]["appearance"]
+    assert fused["subjects"][0]["outfit"] == "a frost-woven dress"
+    assert fused["setting"] == "a concert stage grown from ice"
+    # identity is held by design and not reported as the user's lock
+    assert refused == []
+
+
+class _FuseLLM(_LLM):
+    async def generate_text_stream(self, prompt, **kw):
+        self.text_prompts.append(prompt)
+        if "Fuse them into the scene" in prompt:
+            yield {"type": "token", "text": json.dumps(
+                {"set": {"setting": "a stage frozen into a glacier"}})}
+        else:
+            yield {"type": "token", "text": "An anime illustration of five girls on a frozen stage."}
+
+
+@pytest.mark.asyncio
+async def test_fuse_mode_draws_wd14_ingredients_into_the_sheet(tmp_path):
+    llm = _FuseLLM()
+    events = await _run({"world_mode": "fuse", "divergence": 0.5}, llm, tmp_path)
+    done = next(e for e in events if e["type"] == "done")
+    thinking = "".join(e["text"] for e in events if e["type"] == "think")
+    assert "[ingredients from the first image]" in thinking
+    assert done["sheet"]["setting"] == "a stage frozen into a glacier"
+    assert done["mutation_tags"] and "2girls" not in done["mutation_tags"]
+    fuse_prompt = next(p for p in llm.text_prompts if "Fuse them into the scene" in p)
+    assert "night sky" in fuse_prompt  # a WD14 world tag, in plain words
+    assert "drinking straw" not in fuse_prompt  # an action tag cannot change a world
+
+
+@pytest.mark.asyncio
+async def test_blend_mode_uses_no_wd14(tmp_path):
+    llm = _FuseLLM()
+    events = await _run({"world_mode": "blend", "divergence": 0.5}, llm, tmp_path)
+    assert not any("Fuse them" in p for p in llm.text_prompts)
+    assert any(e["type"] == "think" and "only when worlds are fused" in e["text"] for e in events)
+
+
+def test_world_tags_lead_and_pose_words_are_left_out():
+    ranked = ss.world_tags(["hand_on_own_hip", "sneakers", "looking_at_viewer",
+                            "blurry_background", "library", "snow", "smile", "lens_flare"])
+    assert ranked[:3] == ["library", "snow", "lens_flare"]
+    assert "sneakers" in ranked  # clothing fills in, last
+    assert not {"hand_on_own_hip", "looking_at_viewer", "blurry_background", "smile"} & set(ranked)
+
+
+def test_unused_ingredients_are_found():
+    sheet = ss.normalize_sheet({"subjects": [_girl("lead")], "setting": "a library made of ice"})
+    assert ss.unused_ingredients(sheet, {"a": ["library", "ice crystal", "night sky"]}) == ["night sky"]
+
+
+def test_only_tags_the_catalog_knows_become_ingredients():
+    ranked = ss.world_tags(["library", "green_eyes", "plugsuit", "some_unknown_word", "moon",
+                            "depth_of_field", "jacket"])
+    assert ranked == ["library", "moon", "jacket"]

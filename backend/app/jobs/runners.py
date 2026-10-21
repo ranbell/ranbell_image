@@ -834,6 +834,7 @@ async def run_generation(
                 source_images=source_images,
                 inspire_context=InspireContext(**inspire_raw) if inspire_raw else None,
                 seed=creation_meta.get("seed"),
+                scene_sheet=creation_meta.get("scene_sheet"),
             )
             await db.set_payload(sha256, {"creation_record": record.model_dump()})
         except Exception as exc:
@@ -1381,15 +1382,17 @@ async def run_refine_prompt(
         expected_tokens: int = 200,
         phase_text: str = "",
         options_override: dict | None = None,
+        as_think: bool = False,
     ) -> str:
-        """Run a text-only LLM call (no images), forwarding tokens to token_queue."""
+        """Run a text-only LLM call (no images), forwarding tokens to token_queue.
+        ``as_think`` as in ``_stream_vlm``."""
         tokens: list[str] = []
         async for event in ollama.generate_text_stream(
             prompt, model=cfg["vlm_model"], options=options_override or options
         ):
             if _abort.is_set():
                 raise JobCancelled()
-            _put(event)
+            _put({**event, "type": "think"} if as_think and event["type"] == "token" else event)
             if event["type"] == "token":
                 tokens.append(event["text"])
                 n = len(tokens)
@@ -1400,6 +1403,7 @@ async def run_refine_prompt(
 
     # 4. Ollama call(s) → token_queue
     context_story = ""
+    scene_sheet_out: dict | None = None  # detailed style: the sheet the script came from
     cat_tags: dict[str, list[str]] = {f: [] for f in _REFINE_CAT_FIELDS}
     _all_must = _build_all_must(wd14_analysis)
 
@@ -1494,24 +1498,95 @@ async def run_refine_prompt(
             if ic.get("change_targets") or ic.get("axes"):
                 targets = ic.get("change_targets") or ic.get("axes") or []
                 sheet_notes.append(f"Inspire asked to change: {', '.join(str(t) for t in targets)}")
-            if divergence > 0:
-                # Transmute samples WD14 vocabulary, which this style does not use.
-                _put({"type": "think", "text": "[divergence is not used by the detailed style]\n"})
-            _phase("readingScene", 0.20, "Reading the scene...")
-            sheet_raw = await _stream_vlm(
-                scene_sheet.sheet_prompt(
-                    instruction=nl_instruction, notes=sheet_notes,
-                    literal_texts=literal_texts, medium=medium,
-                    reference_count=len(image_bytes_list),
-                ),
-                0.20, 0.55, 400, "Reading the scene...", as_think=True,
-            )
-            sheet_data = _parse_json_from_llm(sheet_raw)
-            if not sheet_data.get("subjects") and not sheet_data.get("setting"):
-                # Not a usable sheet. Writing from it would invent the scene, so stop
-                # here and say why rather than hand Krea 2 a guess.
-                raise RuntimeError("The scene sheet could not be read from the model's answer")
-            sheet = scene_sheet.normalize_sheet(sheet_data, medium=medium, literal_texts=literal_texts)
+            if divergence > 0 and body.world_mode != "fuse":
+                # In this style the dial is the chaos of a fusion.
+                _put({"type": "think", "text": "[chaos is used only when worlds are fused]\n"})
+            if body.sheet:
+                # Edited on screen: the picture is not read again. The sheet's
+                # own medium stands — the user may have changed it there.
+                sheet = scene_sheet.normalize_sheet(body.sheet, literal_texts=literal_texts)
+            else:
+                _phase("readingScene", 0.20, "Reading the scene...")
+                sheet_raw = await _stream_vlm(
+                    scene_sheet.sheet_prompt(
+                        instruction=nl_instruction, notes=sheet_notes,
+                        literal_texts=literal_texts, medium=medium,
+                        reference_count=len(image_bytes_list),
+                        combine=body.combine_mode,
+                    ),
+                    0.20, 0.55, 400, "Reading the scene...", as_think=True,
+                )
+                sheet_data = _parse_json_from_llm(sheet_raw)
+                if not sheet_data.get("subjects") and not sheet_data.get("setting"):
+                    # Not a usable sheet. Writing from it would invent the scene, so stop
+                    # here and say why rather than hand Krea 2 a guess.
+                    raise RuntimeError("The scene sheet could not be read from the model's answer")
+                sheet = scene_sheet.normalize_sheet(sheet_data, medium=medium, literal_texts=literal_texts)
+
+                if body.world_mode == "fuse":
+                    # WD14 as ingredients: each reference's distinctive tags, and
+                    # foreign vocabulary when there is only one world to draw on.
+                    pools: dict[str, list[str]] = {}
+                    ordinals = ("the first image", "the second image", "the third image",
+                                "the fourth image", "the fifth image", "the sixth image")
+                    for n_ref, (key, info) in enumerate(
+                        sorted((wd14_analysis.get("unique_by_image") or {}).items(),
+                               key=lambda kv: int(kv[0]))
+                    ):
+                        pools[ordinals[min(n_ref, 5)]] = list(info.get("must") or []) + list(info.get("ref") or [])
+                    # Similar references share a world; an outsider gives the fusion
+                    # something to collide with.
+                    if len(pools) < 2 or divergence >= 0.34:
+                        foreign = await _sample_mutation_tags(db, ollama, wd14_analysis, max(divergence, 0.3))
+                        if foreign:
+                            pools["another world"] = foreign
+                    skip = set(_PERSON_COUNT_TAGS) | {
+                        str(t).strip().lower().replace(" ", "_") for t in cfg.get("graph_noise_tags", [])
+                    }
+                    ingredients = scene_sheet.pick_ingredients(pools, divergence, skip=skip)
+                    if not ingredients:
+                        _put({"type": "think", "text": "\n[no WD14 tags to fuse — written as read]"})
+                    else:
+                        mutation_tags = [w for words in ingredients.values() for w in words]
+                        for source, words in ingredients.items():
+                            _put({"type": "think", "text": f"\n[ingredients from {source}] {', '.join(words)}"})
+                        _phase("fusingWorlds", 0.40, "Fusing the worlds...")
+                        fuse_raw = await _stream_text(
+                            scene_sheet.fuse_prompt(sheet, ingredients, divergence, body.locked),
+                            0.40, 0.55, 300, "Fusing the worlds...", as_think=True,
+                        )
+                        fusion = _parse_json_from_llm(fuse_raw)
+                        if not fusion:
+                            raise RuntimeError("The fusion could not be read as a change to the scene")
+                        sheet, changed, refused = scene_sheet.apply_fusion(sheet, fusion, body.locked)
+                        for line in changed:
+                            _put({"type": "think", "text": f"\n[fused] {line}"})
+                        for word in scene_sheet.unused_ingredients(sheet, ingredients):
+                            _put({"type": "think", "text": f"\n[ingredient not used] {word}"})
+                        for path in refused:
+                            _put({"type": "think", "text": f"\n[locked, not changed] {path}"})
+
+            if body.sheet_instruction.strip():
+                # A spoken retake becomes a patch: only the boxes it names change.
+                _phase("patchingScene", 0.25, "Applying the retake to the scene...")
+                patch_raw = await _stream_text(
+                    scene_sheet.patch_prompt(sheet, body.sheet_instruction, body.locked),
+                    0.25, 0.55, 200, "Applying the retake to the scene...",
+                    as_think=True,
+                )
+                patch = _parse_json_from_llm(patch_raw)
+                if not patch:
+                    # Writing from the old sheet would look like the retake was
+                    # taken and ignored.
+                    raise RuntimeError("The retake could not be read as a change to the scene")
+                sheet, changed, refused = scene_sheet.apply_patch(sheet, patch, body.locked)
+                for line in changed:
+                    _put({"type": "think", "text": f"\n[changed] {line}"})
+                for path in refused:
+                    _put({"type": "think", "text": f"\n[locked, not changed] {path}"})
+                if not changed:
+                    _put({"type": "think", "text": "\n[the retake changed nothing in the scene]"})
+            scene_sheet_out = sheet
 
             # Step 2: the sheet → the visual script.
             _phase("writingDescription", 0.55, "Writing the visual script...")
@@ -1612,6 +1687,7 @@ async def run_refine_prompt(
         "divergence": divergence,
         "mutation_tags": mutation_tags,
         "variants": variants,
+        "sheet": scene_sheet_out,
         **cat_tags,
     })
 
@@ -1623,7 +1699,8 @@ async def run_refine_prompt(
     elif body.auto_submit:
         try:
             _phase("queuingGeneration", 0.97, "Queuing generation job...")
-            gen_job_id = _submit_gen_direct(spooler, comfy, db, body, positive, negative, seed=seed_for_gen)
+            gen_job_id = _submit_gen_direct(spooler, comfy, db, body, positive, negative,
+                                            seed=seed_for_gen, scene_sheet=scene_sheet_out)
             _put({"type": "comfy_job_id", "job_id": gen_job_id})
         except Exception as exc:
             logger.error("Refine auto-submit failed: %s", exc)
@@ -1640,7 +1717,8 @@ async def run_refine_prompt(
     _put(None)
 
 
-def _submit_gen_direct(spooler, comfy, db, body, positive: str, negative: str, seed: int | None = None) -> str:
+def _submit_gen_direct(spooler, comfy, db, body, positive: str, negative: str, seed: int | None = None,
+                       scene_sheet: dict | None = None) -> str:
     """Submit a ComfyUI job to the GENERATION lane and return its job_id (no request object needed)."""
     from ..spooler.models import JobLane
     return spooler.submit(
@@ -1681,6 +1759,7 @@ def _submit_gen_direct(spooler, comfy, db, body, positive: str, negative: str, s
             "prompt_style": body.prompt_style,
             "temperature": body.temperature,
             "num_ctx": body.num_ctx,
+            "scene_sheet": scene_sheet,
             "workflow_name": body.workflow_name,
             "batch_count": body.batch_count,
             "positive_prompt": positive,

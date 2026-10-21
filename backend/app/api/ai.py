@@ -95,6 +95,20 @@ class RefineRequest(BaseModel):
     # reference; "anime" / "photo" fix it, since Krea 2 drifts to a photograph
     # when the medium is not stated.
     visual_medium: Literal["", "anime", "photo"] = ""
+    # The scene sheet as edited on screen. With it the picture is not read
+    # again — only the script is written (and the medium is the sheet's own).
+    sheet: dict | None = None
+    # A spoken retake ("make it night"): turned into a patch on `sheet`.
+    sheet_instruction: str = ""
+    # Boxes the user locked: "lighting", "subjects.2" (a whole person), ...
+    locked: list[str] = []
+    # Several references in the detailed style: "merge" fuses their people into
+    # one cast, "coexist" keeps every person from every image.
+    combine_mode: Literal["merge", "coexist"] = "merge"
+    # Detailed style: "blend" restates the references; "fuse" draws WD14 tags
+    # (each reference's distinctive ones, or foreign vocabulary for a single
+    # one) as ingredients that transform the scene. `divergence` is the chaos.
+    world_mode: Literal["blend", "fuse"] = "blend"
 
 
 class SearchRequest(BaseModel):

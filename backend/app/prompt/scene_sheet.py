@@ -62,8 +62,14 @@ def sheet_prompt(
     literal_texts: list[str] | None = None,
     medium: str = "",
     reference_count: int = 1,
+    combine: str = "merge",
 ) -> str:
-    """Step 1: what the vision model is asked to fill in."""
+    """Step 1: what the vision model is asked to fill in.
+
+    ``combine`` decides what happens to the people when several references
+    are tiled together (the Showrunner, 2026-10-21): "merge" fuses them into
+    one cast, "coexist" keeps every one of them, side by side.
+    """
     medium_line = (
         f'The medium is fixed by the user: "{medium}". Write exactly that in "medium".'
         if medium else
@@ -71,11 +77,34 @@ def sheet_prompt(
         '"anime illustration", a camera picture is a "photograph"; name others plainly '
         '("3D render", "oil painting", "watercolor painting").'
     )
-    refs = (
-        "The reference is a tile of several images. Treat them as one mood board and "
-        "describe ONE scene that combines them — not a collage, not side-by-side panels.\n"
-        if reference_count > 1 else ""
-    )
+    refs = ""
+    if reference_count > 1:
+        refs = (
+            "The reference is a tile of several images, in reading order (left to right, "
+            "top to bottom). Describe ONE scene made from them — not a collage, not "
+            "side-by-side panels.\n"
+        )
+        if combine == "coexist":
+            refs += (
+                "Keep every main person from every image: they all appear together in "
+                "this one scene, each with their own looks and outfit, so the count is the "
+                "sum of the images' people. In each \"who\", say which image they come from "
+                "(first image, second image, ...). Place them so they share the space "
+                "naturally.\n"
+            )
+        else:
+            refs += (
+                "Fuse the people: the user chose to merge the characters, so the main "
+                "person of each image becomes ONE person who combines their most striking "
+                "features (hair from one, outfit from another, and so on). If each image "
+                "shows one person, \"subjects\" has exactly ONE entry — one entry per "
+                "image is the wrong answer here, even when the people look different. Say "
+                "in that entry's \"takes_from\" which features came from which image. "
+                "The outfit is ONE outfit a person could actually wear: pick pieces that go "
+                "together, or carry one image's colour or pattern into the other's garment. "
+                "Both outfits worn on top of each other is not a merge. "
+                "Setting, light and mood are blended the same way.\n"
+            )
     lines = [
         "You are preparing a scene sheet that another writer will turn into a prompt for "
         "the Krea 2 image model. Look at the reference image and fill in the JSON below.",
@@ -115,7 +144,9 @@ def sheet_prompt(
         'straps, stitching, fur, fabric texture, how light catches them",',
         '      "expression": "this person\'s face: eyes open or closed, mouth, feeling",',
         '      "pose_action": "what the body is doing, as a verb phrase",',
-        '      "holding": "objects in this person\'s hands and which hand"',
+        '      "holding": "objects in this person\'s hands and which hand"'
+        + (',\n      "takes_from": "which features come from which image"'
+           if reference_count > 1 and combine != "coexist" else ""),
         '    }',
         '  ],',
         '  "setting": "where the scene is, described concretely",',
@@ -184,6 +215,145 @@ def normalize_sheet(data: dict, *, medium: str = "", literal_texts: list[str] | 
         sheet["medium"] = medium
     sheet["medium"] = clean_script(sheet["medium"]) or "illustration"
     return sheet
+
+
+# ── Saying it again: a Japanese line edits the sheet, not the prose ─────────
+#
+# The Showrunner picks ① the sheet editor and ⑨ a spoken retake as the first
+# step of the creativity plan (2026-10-21). A retake used to mean writing the
+# whole prompt again, so things nobody mentioned moved too. Here the line
+# becomes a patch on the sheet — only the boxes it names change — and the
+# script is written again from the patched sheet.
+
+_SCENE_BOXES = ("medium", "rendering", "setting", "layers", "props", "effects",
+                "lighting", "camera", "palette_mood")
+
+
+def patch_prompt(sheet: dict, instruction: str, locked: list[str] | None = None) -> str:
+    """What the text model is asked: turn the line into a patch."""
+    locked = list(locked or [])
+    indexed = dict(sheet)
+    indexed["subjects"] = [{"index": i, **s} for i, s in enumerate(sheet.get("subjects") or [])]
+    lines = [
+        "Below is the scene sheet for a picture, and a request to change it. "
+        "Turn the request into a patch on the sheet.",
+        "",
+        "Why only a patch: every box that changes changes the picture. A box the "
+        "request does not ask about must stay exactly as it is, or something nobody "
+        "asked for moves.",
+        "- Change only what the request asks for, and whatever must change with it "
+        "for the scene to stay consistent (night outdoors also changes the lighting).",
+        "- Write new values the way the sheet is written: plain English phrases, "
+        "concrete and visible.",
+        "- People are addressed by their \"index\". To add a person, give a full entry "
+        "in \"add_subjects\"; to remove one, put the index in \"remove_subjects\".",
+    ]
+    if locked:
+        lines.append(
+            "- These are locked by the user and must not appear in the patch: "
+            + ", ".join(locked) + " (\"subjects.N\" is the whole person N)."
+        )
+    lines += [
+        "",
+        "Output only JSON in this shape, leaving out any part you do not need:",
+        "{",
+        '  "set": {"<scene box>": "<new value>"},',
+        '  "subjects": [{"index": 0, "set": {"<person box>": "<new value>"}}],',
+        '  "add_subjects": [{"who": "", "position": "", "appearance": "", "outfit": "", '
+        '"details": "", "expression": "", "pose_action": "", "holding": ""}],',
+        '  "remove_subjects": [0]',
+        "}",
+        "",
+        "[Request]",
+        instruction,
+        "",
+        "[Scene sheet]",
+        json.dumps(indexed, ensure_ascii=False, indent=2),
+    ]
+    return "\n".join(lines)
+
+
+def _short(text: str, n: int = 60) -> str:
+    text = text or "—"
+    return text if len(text) <= n else text[: n - 1] + "…"
+
+
+def apply_patch(
+    sheet: dict, patch: dict, locked: list[str] | None = None,
+) -> tuple[dict, list[str], list[str]]:
+    """Apply a patch. Returns the new sheet, what changed (readable lines),
+    and what was refused because it was locked.
+
+    Indexes in the patch refer to the sheet as it was, so person edits go
+    first, then removals, then additions. Unknown boxes are ignored.
+    """
+    locked_set = set(locked or [])
+    changed: list[str] = []
+    refused: list[str] = []
+    out = {k: (list(v) if isinstance(v, list) else v) for k, v in sheet.items()}
+    subjects = [dict(s) for s in sheet.get("subjects") or []]
+
+    for key, value in ((patch.get("set") or {}) if isinstance(patch.get("set"), dict) else {}).items():
+        if key not in _SCENE_BOXES and key != "text_in_image":
+            continue
+        if key in locked_set:
+            refused.append(key)
+            continue
+        if key == "text_in_image":
+            new = [t for t in (_text(x) for x in (value if isinstance(value, list) else [value])) if t]
+            if new != list(out.get("text_in_image") or []):
+                changed.append(f"text_in_image: {out.get('text_in_image')} → {new}")
+                out["text_in_image"] = new
+            continue
+        new = _text(value)
+        if new != (out.get(key) or ""):
+            changed.append(f"{key}: {_short(out.get(key))} → {_short(new)}")
+            out[key] = new
+
+    for entry in patch.get("subjects") or []:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            i = int(entry.get("index"))
+        except (TypeError, ValueError):
+            continue
+        if not 0 <= i < len(subjects):
+            continue
+        for key, value in (entry.get("set") or {}).items():
+            if key not in _SUBJECT_FIELDS:
+                continue
+            if f"subjects.{i}" in locked_set or f"subjects.{i}.{key}" in locked_set:
+                refused.append(f"subjects.{i}.{key}")
+                continue
+            new = _text(value)
+            if new != subjects[i].get(key, ""):
+                changed.append(f"person {i + 1} {key}: {_short(subjects[i].get(key))} → {_short(new)}")
+                subjects[i][key] = new
+
+    removals = set()
+    for raw in patch.get("remove_subjects") or []:
+        try:
+            i = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if not 0 <= i < len(subjects):
+            continue
+        if f"subjects.{i}" in locked_set:
+            refused.append(f"subjects.{i} (remove)")
+            continue
+        removals.add(i)
+    for i in sorted(removals, reverse=True):
+        changed.append(f"person {i + 1} removed: {_short(subjects[i].get('who'))}")
+        del subjects[i]
+
+    for entry in patch.get("add_subjects") or []:
+        if isinstance(entry, dict):
+            subjects.append({k: _text(entry.get(k)) for k in _SUBJECT_FIELDS})
+            changed.append(f"person added: {_short(subjects[-1].get('who'))}")
+
+    out["subjects"] = subjects
+    # Through normalize again: the count follows the list, empties are dropped.
+    return normalize_sheet(out, medium=out.get("medium") or ""), changed, refused
 
 
 def script_prompt(
@@ -306,3 +476,176 @@ def finish_script(text: str, sheet: dict) -> tuple[str, list[str]]:
             script += f'\n\nThe words "{t}" appear in the image.'
             notes.append(f'text "{t}" was missing — added')
     return script, notes
+
+
+# ── Fusing worlds: WD14 tags as ingredients, not as description ─────────────
+#
+# The Showrunner (2026-10-21): mixing two pictures' atmosphere is not adding
+# them up, and the Krea 2 style — having dropped WD14 — reads as especially
+# monotonous. Read faithfully, a sheet only restates its references. So in
+# "fuse" mode each reference's distinctive WD14 tags (the ones no other
+# reference shares) become ingredients that must *transform* the scene, and
+# a single reference gets foreign tags from the vocabulary as the other world.
+# The chaos dial decides how many, and how hard the worlds collide.
+
+_RATING_TAGS = {"general", "sensitive", "questionable", "explicit", "safe", "nsfw"}
+
+# Person boxes a fusion must not touch: who they are and how they look.
+_IDENTITY_BOXES = ("who", "appearance", "expression", "position")
+
+
+# Which WD14 tags can change a world. Measured on two Moss pictures of one
+# girl each: their distinctive tags were "hand on own hip", "sneakers",
+# "looking at viewer", "blurry background" — pose and framing words that gave
+# the fusion nothing to work with, and the scene came back unchanged. Places,
+# weather, light effects and things go first; clothing fills in; expression,
+# action, hair and framing words are left out.
+#
+# Only tags whose axis the catalog knows get through. An unknown tag can be
+# anything — the outsider sample from the vocabulary once brought a sexual
+# one — and this is a whitelist on purpose, so no list of what to keep out
+# has to live in the code. Good unknown words (ice, water, bird) are lost to
+# that; safe beats rich here.
+_WORLD_AXES = ("location", "time_weather", "visual", "always_fixed")
+_FILLER_AXES = ("clothing",)
+_POSE_WORDS = ("hand", "arm", "leg", "finger", "looking", "head_rest", "pose", "view",
+               "focus", "shot", "from_", "background", "lying", "sitting", "standing",
+               "pov", "profile", "tilt", "lean", "crossed", "spread", "own_",
+               "depth_of_field", "blurry")
+
+
+def world_tags(tags: list[str]) -> list[str]:
+    """The tags that can change a world, best first."""
+    from ..tags.catalog import get_tag_axis
+    world, filler = [], []
+    for tag in tags:
+        key = str(tag).strip().lower().replace(" ", "_")
+        # Eye colour is filed with things; it is the person, not the world.
+        if key.endswith("_eyes") or any(w in key for w in _POSE_WORDS):
+            continue
+        axis = get_tag_axis(key)
+        if axis in _WORLD_AXES:
+            world.append(tag)
+        elif axis in _FILLER_AXES:
+            filler.append(tag)
+    return world + filler
+
+
+def unused_ingredients(sheet: dict, ingredients: dict[str, list[str]]) -> list[str]:
+    """Ingredients whose words appear nowhere in the fused sheet."""
+    text = json.dumps(sheet, ensure_ascii=False).lower()
+    out = []
+    for words in ingredients.values():
+        for w in words:
+            core = [p for p in re.findall(r"[a-z]+", w.lower()) if len(p) > 2]
+            if core and not any(p in text for p in core):
+                out.append(w)
+    return out
+
+
+def pick_ingredients(
+    pools: dict[str, list[str]], chaos: float, *, skip: set[str] | frozenset = frozenset(),
+    rng=None,
+) -> dict[str, list[str]]:
+    """Draw ingredients from each source's tag pool, in plain words.
+
+    Random on purpose: the same two pictures should not fuse the same way
+    every run. More chaos, more ingredients per source (2 → 8).
+    """
+    import random
+    rng = rng or random
+    k = 2 + round(max(0.0, min(1.0, chaos)) * 6)
+    out: dict[str, list[str]] = {}
+    for source, tags in pools.items():
+        clean = []
+        ranked = world_tags(list(tags))
+        for tag in ranked:
+            word = str(tag).strip().lower()
+            if not word or word in _RATING_TAGS or word in skip or word.replace(" ", "_") in skip:
+                continue
+            word = word.replace("_", " ")
+            if word not in clean:
+                clean.append(word)
+        if clean:
+            # Random within the best twice-k, so the world tags lead and runs differ.
+            head = clean[: max(k * 2, k)]
+            out[source] = rng.sample(head, min(k, len(head)))
+    return out
+
+
+def _chaos_line(chaos: float) -> str:
+    if chaos < 0.34:
+        return ("Chaos is low: the other world seeps in at the edges — materials, light and "
+                "small things change, the scene still reads as one familiar place.")
+    if chaos < 0.67:
+        return ("Chaos is medium: the worlds are interwoven — the setting itself is built from "
+                "both, and the strangeness is visible at first glance.")
+    return ("Chaos is high: the worlds collide — scale, physics and seasons may break, but it "
+            "is still ONE picture, described concretely, not a collage.")
+
+
+def fuse_prompt(
+    sheet: dict, ingredients: dict[str, list[str]], chaos: float,
+    locked: list[str] | None = None,
+) -> str:
+    """What the text model is asked: fuse the ingredients into the scene, as a patch."""
+    locked = list(locked or [])
+    indexed = dict(sheet)
+    indexed["subjects"] = [{"index": i, **s} for i, s in enumerate(sheet.get("subjects") or [])]
+    lines = [
+        "Below is the scene sheet for a picture, and ingredients from other worlds. "
+        "Fuse them into the scene and return the result as a patch on the sheet.",
+        "",
+        "Why: a picture that only restates its references is monotonous. Fusion is not "
+        "addition — an ingredient placed beside the scene as one more object is the "
+        "dull answer. Each ingredient must transform something already there:",
+        "- what a surface or the architecture is made of",
+        "- the weather, the air, the light source or its colour",
+        "- the material, pattern or texture of a garment, or what someone holds",
+        "- the props and the layers of the scene",
+        "One ingredient may take the place of an element of the other world. The result "
+        "is one world where both are true at once.",
+        f"- {_chaos_line(chaos)}",
+        "- Use every ingredient. Write new values as plain English phrases, concrete and "
+        "visible, in the sheet's own style.",
+        "- The people stay who they are: do not change their who, appearance, expression "
+        "or position, and do not add or remove anyone. Their outfit and what they hold "
+        "may change.",
+    ]
+    if locked:
+        lines.append("- Locked by the user, must not appear in the patch: " + ", ".join(locked)
+                     + " (\"subjects.N\" is the whole person N).")
+    lines += [
+        "",
+        "Output only JSON in this shape, leaving out any part you do not need:",
+        "{",
+        '  "set": {"<scene box>": "<new value>"},',
+        '  "subjects": [{"index": 0, "set": {"<person box>": "<new value>"}}]',
+        "}",
+        "",
+        "[Ingredients]",
+    ]
+    for source, words in ingredients.items():
+        lines.append(f"- from {source}: {', '.join(words)}")
+    lines += ["", "[Scene sheet]", json.dumps(indexed, ensure_ascii=False, indent=2)]
+    return "\n".join(lines)
+
+
+def apply_fusion(
+    sheet: dict, patch: dict, locked: list[str] | None = None,
+) -> tuple[dict, list[str], list[str]]:
+    """apply_patch with the people's identity held: no one added or removed,
+    and who / appearance / expression / position kept."""
+    patch = {k: v for k, v in (patch or {}).items() if k in ("set", "subjects")}
+    held = list(locked or []) + [
+        f"subjects.{i}.{box}"
+        for i in range(len(sheet.get("subjects") or []))
+        for box in _IDENTITY_BOXES
+    ]
+    new, changed, refused = apply_patch(sheet, patch, held)
+    # Holding identity is the design, not the user's lock; only report theirs.
+    user_locked = set(locked or [])
+    refused = [r for r in refused
+               if r in user_locked or r.split(".")[0] != "subjects"
+               or ".".join(r.split(".")[:2]) in user_locked]
+    return new, changed, refused
