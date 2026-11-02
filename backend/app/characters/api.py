@@ -179,7 +179,7 @@ async def erase_character_memory(request: Request, body: EraseMemoryRequest | No
     opts = body or EraseMemoryRequest()
     # Muse owns sessions/lounge/handpost; imported here rather than at module
     # scope since this is the only characters/ endpoint that needs them.
-    from ..muse import handpost_db, lounge_db, memories_db, session_db
+    from ..muse import handpost_db, lounge_db, memories_db, session_db, video_db
 
     if opts.dry_run:
         plan = await presets_db.plan_memory_erase(db)
@@ -188,6 +188,7 @@ async def erase_character_memory(request: Request, body: EraseMemoryRequest | No
             **plan,
             "sessions": await session_db.count_all(db),
             "lounge_threads": await lounge_db.count_all(db),
+            "video_talks": await video_db.count_all(db),
             "handpost_pages": await handpost_db.count_generated_pages(db),
             "compat_vectors": await compat_mod.count_all(db),
             "muse_memories": True,
@@ -199,6 +200,7 @@ async def erase_character_memory(request: Request, body: EraseMemoryRequest | No
             "characters": await presets_db.erase_all_memory_fields(db),
             "sessions": await session_db.delete_all(db),
             "lounge_threads": await lounge_db.delete_all(db),
+            "video_talks": await video_db.delete_all(db),
             "handpost_pages": await handpost_db.purge_generated_pages(db),
             "compat_vectors": await compat_mod.delete_all(db),
             "muse_memories": True,

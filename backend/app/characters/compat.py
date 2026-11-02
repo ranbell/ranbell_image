@@ -14,6 +14,8 @@ from typing import Any
 
 from qdrant_client import models as qm
 
+from ..spooler.models import JobCancelled
+
 from ..db.qdrant_client import (
     CHARACTER_COMPAT_COLLECTION,
     CHARACTER_PRESETS_COLLECTION,
@@ -169,11 +171,16 @@ async def run_character_compat_embed(
     from . import presets as presets_db
 
     reporter.indeterminate()
+    cancel.raise_if_set()
     preset = await presets_db.get_preset(db, character_id)
     if preset is None:
         return {"status": "skipped", "reason": "character not found"}
     try:
         vectors = await embed_character(ollama, preset)
+        # Called off while the embed was running: do not write it back.
+        cancel.raise_if_set()
+    except JobCancelled:
+        raise
     except Exception as exc:
         logger.warning("[compat] embed failed for %s: %s", character_id, exc)
         return {"status": "failed", "reason": str(exc)}

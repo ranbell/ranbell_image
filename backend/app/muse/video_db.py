@@ -1,0 +1,112 @@
+"""Qdrant storage for video studio talks (payload-only, no vectors)."""
+from __future__ import annotations
+
+import time
+from typing import Any
+
+from qdrant_client import models as qm
+
+from ..db.qdrant_client import MUSE_VIDEO_COLLECTION
+
+# What the talk list needs; the chat and the ideas stay out of it.
+_LIST_FIELDS = [
+    "talk_id", "sha256", "created_at", "updated_at", "character", "partner_character",
+    "chosen_title", "prompts_count",
+]
+_PAGE = 256
+
+
+async def save(db, talk: dict[str, Any]) -> dict[str, Any]:
+    talk["updated_at"] = time.time()
+    # The list shows what the talk settled on, else what was last written.
+    talk["chosen_title"] = (
+        (talk.get("direction") or "").strip().splitlines()[0][:60]
+        if (talk.get("direction") or "").strip()
+        else next((p.get("title", "") for p in reversed(talk.get("prompts") or [])), "")
+    )
+    talk["prompts_count"] = len(talk.get("prompts") or [])
+    await db._qc.upsert(
+        collection_name=MUSE_VIDEO_COLLECTION,
+        points=[qm.PointStruct(id=talk["talk_id"], vector={}, payload=talk)],
+    )
+    return talk
+
+
+async def load(db, talk_id: str) -> dict[str, Any] | None:
+    points = await db._qc.retrieve(
+        collection_name=MUSE_VIDEO_COLLECTION, ids=[talk_id], with_payload=True,
+    )
+    return dict(points[0].payload or {}) if points else None
+
+
+async def list_recent(db, *, limit: int = 30) -> list[dict[str, Any]]:
+    """Newest first. Scroll has no order, so read the light fields and sort."""
+    rows: list[dict[str, Any]] = []
+    offset = None
+    while True:
+        points, offset = await db._qc.scroll(
+            collection_name=MUSE_VIDEO_COLLECTION, limit=_PAGE, offset=offset,
+            with_payload=_LIST_FIELDS,
+        )
+        rows.extend(dict(p.payload or {}) for p in points)
+        if offset is None or not points:
+            break
+    rows.sort(key=lambda r: r.get("updated_at") or r.get("created_at") or 0.0, reverse=True)
+    return rows[:max(1, int(limit))]
+
+
+async def all_talks(db) -> list[dict[str, Any]]:
+    """Every talk in full, for the studio's text search (a personal archive —
+    hundreds of talks at most, so reading them whole beats keeping an index)."""
+    rows: list[dict[str, Any]] = []
+    offset = None
+    while True:
+        points, offset = await db._qc.scroll(
+            collection_name=MUSE_VIDEO_COLLECTION, limit=_PAGE, offset=offset,
+            with_payload=True,
+        )
+        rows.extend(dict(p.payload or {}) for p in points)
+        if offset is None or not points:
+            break
+    return rows
+
+
+async def talked_shas(db, *, written: bool = False) -> set[str]:
+    """The pictures with a video talk — or, `written`, with a prompt written —
+    for the gallery's "has a video" filter."""
+    shas: set[str] = set()
+    offset = None
+    while True:
+        points, offset = await db._qc.scroll(
+            collection_name=MUSE_VIDEO_COLLECTION, limit=_PAGE, offset=offset,
+            with_payload=["sha256", "prompts_count"],
+        )
+        for p in points:
+            row = p.payload or {}
+            if row.get("sha256") and (not written or (row.get("prompts_count") or 0) > 0):
+                shas.add(str(row["sha256"]))
+        if offset is None or not points:
+            break
+    return shas
+
+
+async def delete(db, talk_id: str) -> None:
+    await db._qc.delete(
+        collection_name=MUSE_VIDEO_COLLECTION,
+        points_selector=qm.PointIdsList(points=[talk_id]),
+    )
+
+
+async def count_all(db) -> int:
+    return (await db._qc.count(collection_name=MUSE_VIDEO_COLLECTION, exact=True)).count
+
+
+async def delete_all(db) -> int:
+    """Part of the "erase memory" admin action, with the Muse sessions."""
+    n = await count_all(db)
+    if n:
+        await db._qc.delete(
+            collection_name=MUSE_VIDEO_COLLECTION,
+            points_selector=qm.FilterSelector(filter=qm.Filter()),
+        )
+    return n

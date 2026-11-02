@@ -297,7 +297,7 @@ async def morph(body: MorphRequest, request: Request):
 async def anomaly(body: AnomalyRequest, request: Request):
     """Inject statistically rare tags (via Ollama) and re-search."""
     db = request.app.state.db
-    ollama = request.app.state.ollama
+    ollama = request.app.state.ollama.for_feature("inspire")
     if not body.sha256s:
         raise HTTPException(400, "Select an image")
 
@@ -1401,7 +1401,9 @@ async def _inversion_stream(body: InversionRequest, db, ollama, cfg) -> AsyncGen
         )
     except Exception as e:
         logger.error("Step2 inversion error: %s", e, exc_info=True)
-        yield _sse({"type": "error", "message": "反転タグ生成中にエラーが発生しました"})
+        # The reason goes to the screen too: "an error occurred" alone left a
+        # half-filled external-server setting looking like a crash (2026-10-21).
+        yield _sse({"type": "error", "message": f"反転タグ生成中にエラーが発生しました: {e}"})
         return
     yield _sse({"type": "step2_result", "new_tags": new_tags, "neutralizer_tags": neutralizer_tags,
                 "new_tags_by_axis": new_tags_by_axis, "step2_raw_by_axis": step2_raw_by_axis})
@@ -1583,7 +1585,7 @@ async def expand_theme(body: ExpandThemeRequest, request: Request):
     from ..jobs.runners import run_expand_theme
     spooler = request.app.state.spooler
     db      = request.app.state.db
-    ollama  = request.app.state.ollama
+    ollama  = request.app.state.ollama.for_feature("inspire")
 
     event_queue: asyncio.Queue = asyncio.Queue()
     job_id = spooler.submit(
@@ -1618,7 +1620,7 @@ async def inversion(body: InversionRequest, request: Request):
     from ..jobs.runners import run_inversion
     spooler = request.app.state.spooler
     db = request.app.state.db
-    ollama = request.app.state.ollama
+    ollama = request.app.state.ollama.for_feature("inspire")
 
     event_queue: asyncio.Queue = asyncio.Queue()
     job_id = spooler.submit(
@@ -1721,7 +1723,7 @@ async def _brainstorm_stream(
             yield _sse(event)
     except Exception as exc:
         logger.error("Brainstorm stream error: %s", exc, exc_info=True)
-        yield _sse({"type": "error", "message": "ブレストの生成中にエラーが発生しました"})
+        yield _sse({"type": "error", "message": f"ブレストの生成中にエラーが発生しました: {exc}"})
         return
 
     yield _sse({"type": "done"})
@@ -1733,7 +1735,7 @@ async def brainstorm(body: BrainstormRequest, request: Request):
     from ..jobs.runners import run_brainstorm
     spooler = request.app.state.spooler
     db = request.app.state.db
-    ollama = request.app.state.ollama
+    ollama = request.app.state.ollama.for_feature("inspire")
 
     event_queue: asyncio.Queue = asyncio.Queue()
     job_id = spooler.submit(

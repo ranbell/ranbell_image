@@ -39,7 +39,7 @@ from typing import Any
 from ..characters import compat as compat_mod
 from ..characters import presets as presets_db
 from ..runtime_config import get_runtime_config
-from ..spooler.models import JobLane
+from ..spooler.models import JobCancelled, JobLane
 from . import chain, crew, diary as diary_mod, events, identity, runner
 from . import memories_db, notebook as notebook_mod
 from . import session_db, vitality
@@ -504,7 +504,9 @@ def _downscale(raw: bytes) -> bytes:
 
     from PIL import Image
 
-    with Image.open(BytesIO(raw)) as img:
+    from ..scanner.walk import PIL_FORMATS
+
+    with Image.open(BytesIO(raw), formats=PIL_FORMATS) as img:
         img = img.convert("RGB")
         img.thumbnail((_VLM_LONG_EDGE, _VLM_LONG_EDGE), Image.LANCZOS)
         buf = BytesIO()
@@ -1840,10 +1842,13 @@ async def run_generate_lounge_share_job(
         "秘密の日記の本音は書かない。"
     )
     try:
+        cancel.raise_if_set()
         raw = await chain._call(
             ollama, system=system, prompt=ask,
             model=model, images=None, num_ctx=num_ctx, think=False,
         )
+    except JobCancelled:
+        raise   # a cancel is not a failure
     except Exception as exc:
         logger.warning("[muse] lounge share failed: %s", exc)
         return {"status": "failed", "reason": str(exc)}
@@ -2008,8 +2013,11 @@ async def run_generate_outing_job(
     choices = lounge_mod.outing_choices(12, avoid=last_time)
 
     # **First stage — they discuss where to go.** Personality bites once, here.
-    plan_ja, planned_talk = "", ""
+    # All three start here, so every way out of the try below leaves them bound
+    # — `picked` used to be set in the body and again in the handler.
+    plan_ja, planned_talk, picked = "", "", ""
     try:
+        cancel.raise_if_set()
         planned_talk = await chain._call(
             ollama,
             system=crew.outing_plan_prompt(
@@ -2019,15 +2027,15 @@ async def run_generate_outing_job(
             prompt="相談をお願いします。",
             model=model, images=None, num_ctx=num_ctx, think=False,
         )
-        picked = ""
         for line in planned_talk.splitlines():
             head = line.strip().upper()
             if head.startswith("PLAN_JA"):
                 plan_ja = line.split(":", 1)[-1].split("：", 1)[-1].strip()
             elif head.startswith("PLAN_PICK"):
                 picked = line.split(":", 1)[-1].split("：", 1)[-1].strip()
+    except JobCancelled:
+        raise   # a cancel is not a failure
     except Exception:
-        picked = ""
         logger.warning("[muse] the planning turn failed; falling back to a topic",
                        exc_info=True)
 
@@ -2043,6 +2051,7 @@ async def run_generate_outing_job(
         hint = next((h for n, h in choices if n == picked), "")
     _report(reporter, 0.5, "お出かけの話を書いています", key="outingWriting")
     try:
+        cancel.raise_if_set()
         raw = await chain._call(
             ollama,
             system=crew.outing_prompt(
@@ -2052,6 +2061,8 @@ async def run_generate_outing_job(
             prompt="書き込みをお願いします。",
             model=model, images=None, num_ctx=num_ctx, think=False,
         )
+    except JobCancelled:
+        raise   # a cancel is not a failure
     except Exception as exc:
         logger.warning("[muse] outing generation failed: %s", exc)
         return {"status": "failed", "reason": str(exc)}
@@ -2198,10 +2209,13 @@ async def run_generate_lounge_reactions_job(
     )
     ask = "親友のリアクションを書いて。REACTOR_1_*（と必要なら REACTOR_2_*）。"
     try:
+        cancel.raise_if_set()
         raw = await chain._call(
             ollama, system=system, prompt=ask,
             model=model, images=None, num_ctx=num_ctx, think=False,
         )
+    except JobCancelled:
+        raise   # a cancel is not a failure
     except Exception as exc:
         logger.warning("[muse] lounge reactions failed: %s", exc)
         return {"status": "failed", "reason": str(exc)}
@@ -2314,10 +2328,13 @@ async def run_generate_lounge_pitch_job(
         director_highlights=_director_highlights(session),
     )
     try:
+        cancel.raise_if_set()
         raw = await chain._call(
             ollama, system=system, prompt="提案を書いて。TEXT_JA / TEXT_EN だけ。",
             model=model, images=None, num_ctx=num_ctx, think=False,
         )
+    except JobCancelled:
+        raise   # a cancel is not a failure
     except Exception as exc:
         logger.warning("[muse] lounge pitch failed: %s", exc)
         return {"status": "failed", "reason": str(exc)}
@@ -2374,11 +2391,14 @@ async def run_generate_handpost_habit_job(
         muse_name=name_ja,
     )
     try:
+        cancel.raise_if_set()
         raw = await chain._call(
             ollama, system=system,
             prompt="手帖の一文を書いて。TITLE_JA / TITLE_EN / BODY_JA / BODY_EN。",
             model=model, images=None, num_ctx=num_ctx, think=False,
         )
+    except JobCancelled:
+        raise   # a cancel is not a failure
     except Exception as exc:
         logger.warning("[muse] handpost habit failed: %s", exc)
         return {"status": "failed", "reason": str(exc)}

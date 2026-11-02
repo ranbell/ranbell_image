@@ -1,5 +1,6 @@
 import io
 from PIL import Image
+from ..scanner.walk import PIL_FORMATS
 
 
 def _compute_grid(n: int) -> tuple[int, int]:
@@ -25,7 +26,7 @@ def create_tile_image(image_bytes_list: list[bytes], max_size: int = 1008) -> by
 
     for i, img_bytes in enumerate(image_bytes_list[: cols * rows]):
         try:
-            img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+            img = Image.open(io.BytesIO(img_bytes), formats=PIL_FORMATS).convert("RGB")
         except Exception:
             continue
 

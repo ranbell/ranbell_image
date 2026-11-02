@@ -17,6 +17,8 @@ import numpy as np
 from PIL import Image
 from sklearn.cluster import KMeans
 
+from ..scanner.walk import PIL_FORMATS
+
 logger = logging.getLogger(__name__)
 
 _N_CLUSTERS = 5
@@ -67,7 +69,7 @@ def extract_color_palette(image_path: Path) -> dict:
     Returns {} on any failure so callers can skip gracefully.
     """
     try:
-        img = Image.open(image_path).convert("RGB").resize((100, 100), Image.LANCZOS)
+        img = Image.open(image_path, formats=PIL_FORMATS).convert("RGB").resize((100, 100), Image.LANCZOS)
     except Exception as exc:
         logger.warning("color_extractor: cannot open %s — %s", image_path, exc)
         return {}

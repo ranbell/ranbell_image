@@ -75,6 +75,34 @@ def _comprehension_names(fn: ast.AST) -> set[str]:
     return out
 
 
+def _shadowed_by_lambda(fn: ast.AST) -> set[int]:
+    """Reads that a `lambda`'s own parameter answers, not the function's variable.
+
+    Same reasoning as `_comprehension_names`: the name inside the brackets is not
+    the outside's business. `_clean()` in `video_talk.py` is the live case — a
+    `lambda m: …` handed to `re.sub`, in a function that also walruses `m` further
+    down. The parameter shadows it, so reading it there is never unbound.
+    """
+    out: set[int] = set()
+
+    def walk(node: ast.AST, shadowed: frozenset[str]) -> None:
+        if isinstance(node, ast.Lambda):
+            # Defaults are evaluated in the enclosing scope; only the body sees
+            # the parameters.
+            for d in node.args.defaults + [d for d in node.args.kw_defaults if d]:
+                walk(d, shadowed)
+            walk(node.body, shadowed | _arg_names(node))
+            return
+        if (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
+                and node.id in shadowed):
+            out.add(id(node))
+        for child in ast.iter_child_nodes(node):
+            walk(child, shadowed)
+
+    walk(fn, frozenset())
+    return out
+
+
 def _arg_names(fn) -> set[str]:
     a = fn.args
     names = {x.arg for x in a.posonlyargs + a.args + a.kwonlyargs}
@@ -97,6 +125,7 @@ def unbound_reads(path: Path) -> list[str]:
         maybe = stored - sure - _comprehension_names(fn)
         if not maybe:
             continue
+        shadowed = _shadowed_by_lambda(fn)
         for st in fn.body:
             if isinstance(st, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 continue
@@ -105,6 +134,8 @@ def unbound_reads(path: Path) -> list[str]:
                 if not (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)):
                     continue
                 if node.id not in maybe or node.id in before:
+                    continue
+                if id(node) in shadowed:
                     continue
                 # If the statement binds it itself (a loop variable, say), skip it
                 if any(isinstance(m, ast.Name) and m.id == node.id
@@ -147,3 +178,28 @@ def test_the_scan_catches_the_shape_it_is_meant_to_catch(tmp_path):
         encoding="utf-8",
     )
     assert unbound_reads(good) == []
+
+
+def test_a_lambda_parameter_is_not_the_functions_variable(tmp_path):
+    """`_clean()` in `video_talk.py`, which the scan used to call unbound."""
+    src = tmp_path / "lam.py"
+    src.write_text(
+        "def clean(text):\n"
+        "    text = sub(lambda m: m.group(1), text)\n"
+        "    return [(m.group(1)) if (m := match(ln)) else ln for ln in text]\n",
+        encoding="utf-8",
+    )
+    assert unbound_reads(src) == []
+
+
+def test_it_still_bites_through_a_lambda(tmp_path):
+    """Only the parameter is shadowed — a different name is still the outside's."""
+    src = tmp_path / "lam_bad.py"
+    src.write_text(
+        "def clean(text):\n"
+        "    if text:\n"
+        "        floor = walk()\n"
+        "    return sub(lambda m: m.group(floor), text)\n",
+        encoding="utf-8",
+    )
+    assert any("floor" in h for h in unbound_reads(src))

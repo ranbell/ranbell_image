@@ -2,6 +2,8 @@ import asyncio
 import copy
 import json
 import logging
+import re
+import time
 import uuid
 from pathlib import Path
 from typing import AsyncGenerator
@@ -106,10 +108,68 @@ def rejection_message(response) -> str:
         return f"ComfyUI refused the graph: {head} — {said}"[:600]
     return f"ComfyUI refused the graph ({status}): {head or said or 'no reason given'}"[:600]
 
+
+_NODE_ID_DETAIL_RE = re.compile(r"#([^'\"\s]+)")
+
+# Enough for a chain of uninstalled nodes; a bound so a server that keeps
+# naming nodes we cannot drop never loops.
+_MAX_FLOATING_DROPS = 16
+
+
+def floating_missing_node(response, workflow: dict) -> str | None:
+    """The node to drop when ComfyUI refused the graph over a node type it
+    does not have, and nothing in the graph reads that node.
+
+    **Floating nodes are ignored (2026-10-20).** ComfyUI only runs what feeds
+    an output, and checks inputs only on those nodes — but it checks that
+    *every* node's type is installed. A node nothing reads changes nothing in
+    the render, so a missing type there should not stop it. The case that
+    found it: `API_Krea2_JANK2.json` takes its prompt from a WAS
+    `Text Multiline`; `patch_workflow` writes the prompt straight into the
+    `CLIPTextEncode` and cuts that wire, and the server no longer had WAS
+    installed, so the whole graph was refused over a node that was not used.
+
+    A missing node that *is* read is a real problem and is left to fail.
+    """
+    try:
+        data = response.json()
+    except Exception:
+        return None
+    err = data.get("error") if isinstance(data, dict) else None
+    if not isinstance(err, dict):
+        return None
+    message = str(err.get("message") or "")
+    # Current builds say `missing_node_type`; older ones `invalid_prompt` with
+    # "Cannot execute because node X does not exist."
+    if err.get("type") != "missing_node_type" and "does not exist" not in message:
+        return None
+    extra = err.get("extra_info") if isinstance(err.get("extra_info"), dict) else {}
+    node_id = str(extra.get("node_id") or "")
+    if not node_id:
+        m = _NODE_ID_DETAIL_RE.search(str(err.get("details") or ""))
+        node_id = m.group(1) if m else ""
+    if node_id not in workflow:
+        return None
+    for nid, node in workflow.items():
+        if nid == node_id or not isinstance(node, dict):
+            continue
+        for value in (node.get("inputs") or {}).values():
+            if isinstance(value, list) and value and str(value[0]) == node_id:
+                return None
+    return node_id
+
+
 class ComfyUIClient:
     def __init__(self) -> None:
         self._http = httpx.AsyncClient(timeout=60.0)
         self.client_id = str(uuid.uuid4())
+        # Called just before every graph is queued (wired in main.py to unload
+        # Ollama). Every render reaches ComfyUI through `queue_prompt` — Muse,
+        # Inspire, Invoke, Refine — so this is the one seam that sees them all.
+        # Muse's own `unload_vlm` drops only its session's model; a video studio
+        # talk on another model stayed resident and a render ran out of memory
+        # (2026-10-11).
+        self.before_queue = None
 
     async def is_available(self) -> bool:
         try:
@@ -138,6 +198,9 @@ class ComfyUIClient:
     _LATENT_NODE_TYPES = {
         "EmptyLatentImage",
         "EmptySD3LatentImage",
+        # MOSS-Image's graph (OpenMOSS example workflow). Missing, its batch and
+        # canvas went unread and unwritten.
+        "EmptyFlux2LatentImage",
         "EmptyLatentImageLarge",
         "EmptyHunyuanLatentVideo",
         "EmptyMochiLatentVideo",
@@ -720,13 +783,31 @@ class ComfyUIClient:
         # `prompt_id`, so `stream_progress` can only take it as "whatever this client
         # is waiting for right now". **Separate the clientIds and that assumption
         # becomes true.**
+        if self.before_queue is not None:
+            try:
+                await asyncio.wait_for(self.before_queue(), 60.0)
+            except Exception as exc:
+                # A render is never held back for this; it is only made safer.
+                logger.warning("before_queue failed: %s", exc)
         body: dict = {"prompt": workflow, "client_id": client_id or self.client_id}
         if preview:
             body["extra_data"] = {"preview_method": "auto"}
-        r = await self._http.post(f"{settings.comfyui_url}/prompt", json=body)
-        if r.status_code >= 400:
-            raise RuntimeError(rejection_message(r))
-        return r.json()["prompt_id"]
+        for _ in range(_MAX_FLOATING_DROPS + 1):
+            r = await self._http.post(f"{settings.comfyui_url}/prompt", json=body)
+            if r.status_code < 400:
+                return r.json()["prompt_id"]
+            dropped = floating_missing_node(r, body["prompt"])
+            if dropped is None:
+                break
+            # Dropping one can leave its own inputs floating; the next refusal
+            # names them in turn.
+            logger.warning(
+                "[comfy] node %s (%s) is not installed and nothing reads it — "
+                "sending the graph without it",
+                dropped, body["prompt"][dropped].get("class_type"),
+            )
+            body["prompt"] = {k: v for k, v in body["prompt"].items() if k != dropped}
+        raise RuntimeError(rejection_message(r))
 
     @staticmethod
     def new_client_id() -> str:
@@ -837,6 +918,57 @@ class ComfyUIClient:
         except Exception as exc:
             logger.error("ComfyUI WebSocket error: %s", exc)
             yield {"type": "error", "message": str(exc)}
+
+    async def _vram_free(self) -> int | None:
+        r = await self._http.get(f"{settings.comfyui_url}/system_stats", timeout=3.0)
+        r.raise_for_status()
+        devices = (r.json() or {}).get("devices") or []
+        return int(devices[0].get("vram_free") or 0) if devices else None
+
+    async def free_vram(self, *, wait_s: float = 20.0) -> bool:
+        """Drop ComfyUI's resident models so an LLM can have the card.
+
+        The other direction of `ollama.unload()` before a render. ComfyUI keeps
+        a checkpoint resident after it renders; an LLM loaded after that gets
+        the scraps — gemma4 26B came up with 0.3 GiB of 16.4 on the GPU and ran
+        on the CPU, four ideas taking 80–210 s instead of 20 (2026-10-10/11).
+        (`torch_vram_total` read 0.06 GiB meanwhile: under cudaMallocAsync it
+        does not show what is held, so it is not consulted.)
+
+        Never while anything is queued or running. `/free` is acted on between
+        jobs, seconds later, so this waits until the free memory actually moves
+        (or `wait_s` passes). Returns whether it moved.
+
+        VRAM only: `unload_models` moves the models off the card to RAM and
+        ComfyUI's cache keeps them there. `free_memory` also resets that cache,
+        so the next render read the models from disk again — about 40 GB each
+        time on the server (2026-10-13). With `--highvram` or `--gpu-only` the
+        offload device is the card itself, and this frees nothing.
+        """
+        base = settings.comfyui_url
+        try:
+            q = (await self._http.get(f"{base}/queue", timeout=3.0)).json()
+            if q.get("queue_running") or q.get("queue_pending"):
+                return False
+            before = await self._vram_free()
+            r = await self._http.post(
+                f"{base}/free", json={"unload_models": True}, timeout=5.0,
+            )
+            r.raise_for_status()
+        except Exception as exc:
+            logger.info("ComfyUI free skipped: %s", exc)
+            return False
+        deadline = time.monotonic() + wait_s
+        while time.monotonic() < deadline:
+            await asyncio.sleep(1.0)
+            try:
+                now = await self._vram_free()
+            except Exception:
+                return False
+            if before is not None and now is not None and now > before + (1 << 30):
+                logger.info("ComfyUI freed %.1f GiB", (now - before) / (1 << 30))
+                return True
+        return False
 
     async def interrupt(self) -> None:
         """Send an interrupt signal to the currently running job (assumes concurrency=1)."""

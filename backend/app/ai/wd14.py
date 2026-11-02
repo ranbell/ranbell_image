@@ -3,6 +3,7 @@ import logging
 from pathlib import Path
 import numpy as np
 from PIL import Image
+from ..scanner.walk import PIL_FORMATS
 from ..config import settings
 
 logger = logging.getLogger(__name__)
@@ -124,7 +125,7 @@ def _load_model(model_dir: str) -> None:
 def _predict_sync(image_path: Path, threshold: float, model_dir: str) -> list[str]:
     _load_model(model_dir)
 
-    with Image.open(image_path) as img:
+    with Image.open(image_path, formats=PIL_FORMATS) as img:
         img = img.convert("RGB").resize((MODEL_INPUT_SIZE, MODEL_INPUT_SIZE), Image.BICUBIC)
 
     arr = np.array(img, dtype=np.float32)
@@ -146,7 +147,7 @@ def _predict_sync_scored(
 ) -> list[tuple[str, float]]:
     _load_model(model_dir)
 
-    with Image.open(image_path) as img:
+    with Image.open(image_path, formats=PIL_FORMATS) as img:
         img = img.convert("RGB").resize((MODEL_INPUT_SIZE, MODEL_INPUT_SIZE), Image.BICUBIC)
 
     arr = np.array(img, dtype=np.float32)
@@ -192,7 +193,7 @@ def _predict_sync_typed(
 ) -> list[tuple[str, float, int]]:
     _load_model(model_dir)
 
-    with Image.open(image_path) as img:
+    with Image.open(image_path, formats=PIL_FORMATS) as img:
         img = img.convert("RGB").resize((MODEL_INPUT_SIZE, MODEL_INPUT_SIZE), Image.BICUBIC)
 
     arr = np.array(img, dtype=np.float32)

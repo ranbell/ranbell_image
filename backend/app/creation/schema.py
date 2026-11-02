@@ -49,3 +49,12 @@ class CreationRecord(BaseModel):
     cfg: float | None = None
     width: int | None = None
     height: int | None = None
+    # Detailed style (Krea 2): the scene sheet the prompt was written from,
+    # so a later run can start from it (edit it, or breed from rated images).
+    scene_sheet: dict | None = None
+    # MOSS-Image style: "caption" / "layout" / "tags" ("" for other styles).
+    moss_format: str = ""
+    # Detailed style: the references' top WD14 tags were handed to the sheet reader.
+    wd14_hints: bool = False
+    # Detailed style: how far the sheet was staged ("read" / "move" / "restage").
+    staging: str = ""

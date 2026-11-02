@@ -3,9 +3,11 @@ import hashlib
 import json
 import logging
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
+from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -66,9 +68,11 @@ class RefineRequest(BaseModel):
     weights: list[float] = []
     instruction: str = ""
     instruction_mode: Literal["none", "basic", "enhanced"] = "basic"
-    temperature: float = 0.7
+    # None sends no temperature, so the model's own default applies (Gemma
+    # wants 1.0; an external server says what it was started with).
+    temperature: float | None = 0.7
     num_ctx: int = 16384
-    prompt_style: Literal["natural", "danbooru", "detailed"] = "natural"
+    prompt_style: Literal["natural", "danbooru", "detailed", "moss"] = "natural"
     negative_prompt: bool = False
     auto_submit: bool = False
     workflow_name: str = ""
@@ -89,6 +93,46 @@ class RefineRequest(BaseModel):
     prose_paragraphs: int = DEFAULT_PROSE_PARAGRAPHS
     roles: list[str] = []  # per-image role aligned with sha256s: 'both' | 'style' | 'content'
     emotion_shift: str = ""  # target emotion dimension (e.g. 'nostalgia') to rewrite the register toward
+    # detailed style (Krea 2 visual script): "" reads the medium from the
+    # reference; "anime" / "photo" fix it, since Krea 2 drifts to a photograph
+    # when the medium is not stated.
+    visual_medium: Literal["", "anime", "photo"] = ""
+    # The scene sheet as edited on screen. With it the picture is not read
+    # again — only the script is written (and the medium is the sheet's own).
+    sheet: dict | None = None
+    # A spoken retake ("make it night"): turned into a patch on `sheet`.
+    sheet_instruction: str = ""
+    # Boxes the user locked: "lighting", "subjects.2" (a whole person), ...
+    locked: list[str] = []
+    # Boxes the sheet check found absent from the last picture. Named here, the
+    # script calls them out instead of letting them take their ordinary turn —
+    # being written once was already not enough for them.
+    emphasise: list[str] = []
+    # Several references in the detailed style: "merge" fuses their people into
+    # one cast, "coexist" keeps every person from every image.
+    combine_mode: Literal["merge", "coexist"] = "merge"
+    # Detailed style: "blend" restates the references; "fuse" draws WD14 tags
+    # (each reference's distinctive ones, or foreign vocabulary for a single
+    # one) as ingredients that transform the scene. `divergence` is the chaos.
+    world_mode: Literal["blend", "fuse"] = "blend"
+    # Detailed style (and MOSS caption/layout): hand the references' top WD14
+    # tags to the sheet reader as a recommendation of what is distinctive. A
+    # sheet read without them came out plain. How many follows the WD14
+    # settings (wd14_common_ratio, wd14_unique_count).
+    wd14_hints: bool = False
+    # Hints under this WD14 confidence are removed in code before the reader
+    # sees them — a misread tag never becomes a "hint". Stored tags start at
+    # the tagger's own threshold (0.35); the misreads live just above it.
+    wd14_hint_min_score: float = 0.5
+    # Detailed style (and MOSS caption/layout): how far the sheet is staged
+    # after it is read. "read" leaves it as read; "move" keeps the reference's
+    # action and place but makes it an instant with a reason, body and motion;
+    # "restage" gives the same people and place a different, larger action.
+    staging: Literal["read", "move", "restage"] = "move"
+    # MOSS-Image style: which of its three prompt kinds to write. "caption" and
+    # "layout" are written from the scene sheet (all the detailed-style fields
+    # above apply), "tags" from the danbooru call put in MOSS-Image's order.
+    moss_format: Literal["caption", "layout", "tags"] = "caption"
 
 
 class SearchRequest(BaseModel):
@@ -164,44 +208,6 @@ _STYLE_INSTRUCTIONS = {
         "absurdres, sharp_focus, intricate_details, professional\n\n"
         "Output ONLY the flat comma-separated tag list. No category labels, no line breaks between tags, "
         "no explanation. Aim to fill 150–200 words."
-    ),
-    "detailed": (
-        "CRITICAL OUTPUT FORMAT RULES — violating any of these is an error:\n"
-        "- Do NOT output a comma-separated tag list.\n"
-        "- Do NOT output plain tags. Do NOT output a flat danbooru-style list.\n"
-        "- You MUST output EXACTLY 8 sections using bold markdown headers (**Header:**).\n"
-        "- Start your response directly with the first **bold header** — no preamble.\n\n"
-        "Generate a structured, highly detailed image generation prompt.\n"
-        "SINGLE-IMAGE SYNTHESIS RULE: When multiple reference images are provided, synthesize them "
-        "into ONE unified scene — not a collage, not a diptych.\n\n"
-        "CHARACTER-FIRST RULE: When characters are present, subject count (1girl, 1boy, solo, "
-        "2girls, etc.) MUST appear first in **Characters & Composition**. If [User instruction] "
-        "describes a story, translate every concrete physical action (gripping, touching, running, "
-        "hugging, reaching, kneeling…) into specific pose/action descriptions — these MUST appear.\n\n"
-        "Output EXACTLY these 8 sections with bold markdown headers:\n\n"
-        "**Core Subject & Scene Setting:** [subject, genre, overall mood — 1-2 sentences]\n"
-        "**Characters & Composition:** [count, hair color/style, eye color, pose, framing, clothing details]\n"
-        "**Lighting & Atmosphere:** [light source, direction, color temperature, shadow quality, ambience]\n"
-        "**Style & Artistic Influence:** [art style, medium, influences, rendering technique]\n"
-        "**Details & Textures:** [skin, fabric, hair texture, surface materials, fine details]\n"
-        "**Color Palette:** [dominant colors, accent colors, saturation, overall tone]\n"
-        "**Camera & Lens Effects:** [shot type, angle, depth of field, bokeh, lens flare]\n"
-        "**Refinements & Modifiers:** [comma-separated quality/detail keywords — e.g. masterpiece, volumetric lighting, hyperdetailed]\n\n"
-        "Fill each section based SOLELY on the reference image. Be specific and concrete.\n\n"
-        "After all 8 sections, output this JSON block — nothing else after it:\n\n"
-        "```json\n"
-        "{\n"
-        '  "subject_tags": "subject count danbooru tags, e.g. 1girl,solo",\n'
-        '  "hair_tags": "comma,separated,danbooru,tags",\n'
-        '  "expression_tags": "comma,separated,danbooru,tags",\n'
-        '  "clothing_tags": "comma,separated,danbooru,tags",\n'
-        '  "accessory_tags": "comma,separated,danbooru,tags",\n'
-        '  "pose_tags": "comma,separated,danbooru,tags",\n'
-        '  "background_tags": "comma,separated,danbooru,tags",\n'
-        '  "object_tags": "comma,separated,danbooru,tags",\n'
-        '  "lighting_tags": "comma,separated,danbooru,tags"\n'
-        "}\n"
-        "```"
     ),
 }
 
@@ -659,77 +665,6 @@ def _append_literal_texts(positive: str, texts: list[str]) -> str:
     return positive.rstrip(", ") + ", " + ", ".join(tags)
 
 
-_DETAILED_SECTION_HEADERS = (
-    "Core Subject", "Characters", "Lighting",
-    "Style", "Details", "Color Palette", "Camera", "Refinements",
-)
-
-# Matches a POSITIVE:/NEGATIVE: label line — used to stop parsing before these sections
-_IS_POS_NEG_LABEL_RE = re.compile(
-    r'^(?:positive(?:\s+prompt)?|negative(?:\s+prompt)?|avoid|do\s+not\s+include)'
-    r'[:\s—–-]',
-    re.IGNORECASE,
-)
-
-# Strips any trailing POSITIVE/NEGATIVE block from a bold-form section capture
-_TRAILING_POS_NEG_RE = re.compile(
-    r'\n*(?:positive(?:\s+prompt)?|negative(?:\s+prompt)?|avoid|do\s+not\s+include)'
-    r'[:\s—–-].*$',
-    re.IGNORECASE | re.DOTALL,
-)
-
-
-def _parse_detailed_output(text: str) -> str:
-    """Parse 8-section output (bold, ATX, or plain headers) into a flat prompt string."""
-    if not text.strip():
-        return ""
-
-    # Primary: bold form **Header:** content (raw VLM output)
-    sections = re.findall(r"\*\*[^*]+\*\*[:\s]*(.*?)(?=\*\*|\Z)", text, re.S)
-    if sections:
-        cleaned = [_TRAILING_POS_NEG_RE.sub("", s).strip() for s in sections]
-        return "\n".join(s for s in cleaned if s)
-
-    # Robust fallback: line-by-line scan — no colon required in header line.
-    # Fixes the case where sections 1-7 lack colons but section 8 (Refinements) has one:
-    # the old regex required ":" in each header line, so only section 8 was extracted.
-    header_pat = "|".join(re.escape(h) for h in _DETAILED_SECTION_HEADERS)
-    is_header_re = re.compile(
-        rf'^[#*>\-\s]{{0,10}}(?:{header_pat})\b',
-        re.IGNORECASE
-    )
-    extract_inline_re = re.compile(
-        rf'^[#*>\-\s]{{0,10}}(?:{header_pat})\b[^:\n]*:\s*(.*)',
-        re.IGNORECASE
-    )
-
-    result: list[str] = []
-    current: list[str] = []
-    in_section = False
-
-    for line in text.splitlines():
-        stripped = line.strip()
-        if _IS_POS_NEG_LABEL_RE.match(stripped):
-            break  # stop before POSITIVE:/NEGATIVE: section
-        if is_header_re.match(stripped):
-            if in_section and current:
-                result.append("\n".join(current).strip())
-            current = []
-            in_section = True
-            m = extract_inline_re.match(stripped)
-            if m:
-                inline = m.group(1).strip()
-                if inline:
-                    current.append(inline)
-        elif in_section and stripped:
-            current.append(stripped)
-
-    if in_section and current:
-        result.append("\n".join(current).strip())
-
-    return "\n".join(result) if result else ""
-
-
 def _clean_markdown(text: str) -> str:
     """Strip markdown formatting and spurious label lines, but preserve negative sections."""
     # Remove markdown bold/italic (**, *, __, _)
@@ -963,26 +898,110 @@ async def reset_ai_analysis(body: PipelineRequest, request: Request):
     return {"reset": count}
 
 
+#: A finished job's token queue is kept this long, so a browser that reloads
+#: after the run ended still reads the backlog and gets its prompt back.
+_REFINE_QUEUE_KEEP_SECONDS = 600.0
+
+
+def _reap_refine_queues(request: Request) -> int:
+    """Drop token queues whose job ended a while ago and nobody came back for.
+
+    The queue is no longer popped when a reader goes away — that is what lets a
+    reload rejoin — so something has to collect the ones nobody rejoins. No
+    extra bookkeeping: the spooler already knows when each job finished.
+    """
+    queues: dict = request.app.state.refine_token_queues
+    if not queues:
+        return 0
+    spooler = request.app.state.spooler
+    try:
+        rows = {j["id"]: j for j in spooler.snapshot()}
+    except Exception:
+        return 0
+    now = time.time()
+    dead = []
+    for job_id in list(queues):
+        row = rows.get(job_id)
+        if row is None:
+            # Gone from the history deque entirely: nothing can rejoin it.
+            dead.append(job_id)
+            continue
+        if row.get("state") not in ("succeeded", "failed", "cancelled"):
+            continue
+        ended = row.get("finished_at") or 0
+        if ended and (now - ended) > _REFINE_QUEUE_KEEP_SECONDS:
+            dead.append(job_id)
+    for job_id in dead:
+        queues.pop(job_id, None)
+    if dead:
+        logger.info("[refine] reaped %d token queue(s) nobody came back for", len(dead))
+    return len(dead)
+
+
 @router.post("/refine")
 async def refine_prompt(body: RefineRequest, request: Request):
-    """Submit a job to the PROMPT lane and return its job_id. Tokens are streamed via /refine/{job_id}/stream."""
+    """Submit a job to the PROMPT lane and return its job_id. Tokens are streamed via /refine/{job_id}/stream.
+
+    The job carries a `group_id`: one forging run is a work package, and the
+    render it queues later carries the same label (the Showrunner, 2026-11-02:
+    "something like a forging run should be registered as one work package").
+    The label is metadata and
+    nothing more — no job waits on another, because a parent job blocking on a
+    child would hold its lane for the whole render and starve the rest.
+    """
     from ..jobs.runners import run_refine_prompt
     spooler = request.app.state.spooler
     db = request.app.state.db
-    ollama = request.app.state.ollama
+    ollama = request.app.state.ollama.for_feature("refine")
     comfy = request.app.state.comfy
 
+    _reap_refine_queues(request)
+    group_id = f"refine:{uuid4().hex[:8]}"
     token_queue: asyncio.Queue = asyncio.Queue()
     job_id = spooler.submit(
         JobLane.PROMPT,
         "prompt_refine",
         run_refine_prompt,
-        meta={"prompt_style": body.prompt_style, "sha256s": body.sha256s[:6]},
+        meta={"prompt_style": body.prompt_style, "sha256s": body.sha256s[:6],
+              "group_id": group_id},
         body_dict=body.model_dump(),
         db=db,
         ollama=ollama,
         spooler=spooler,
         comfy=comfy,
+        token_queue=token_queue,
+        group_id=group_id,
+    )
+    request.app.state.refine_token_queues[job_id] = token_queue
+    return {"job_id": job_id, "group_id": group_id, "status": "queued"}
+
+
+class DirectionsRequest(BaseModel):
+    """Directions for a Krea 2 scene sheet: one lens per call, each a patch."""
+    sheet: dict
+    kinds: list[Literal["light", "camera", "moment", "world"]] = ["light", "camera", "moment", "world"]
+    locked: list[str] = []
+    instruction: str = ""
+    # Titles already proposed, per lens: "go somewhere else" on a second try.
+    avoid: dict[str, list[str]] = {}
+    temperature: float | None = 0.7
+    num_ctx: int = 16384
+
+
+@router.post("/refine/directions")
+async def refine_directions(body: DirectionsRequest, request: Request):
+    """Submit a directions job to the PROMPT lane; stream it via /refine/{job_id}/stream."""
+    from ..jobs.runners import run_refine_directions
+    spooler = request.app.state.spooler
+    token_queue: asyncio.Queue = asyncio.Queue()
+    job_id = spooler.submit(
+        JobLane.PROMPT,
+        "prompt_refine_directions",
+        run_refine_directions,
+        meta={"kinds": body.kinds},
+        body_dict=body.model_dump(),
+        db=request.app.state.db,
+        ollama=request.app.state.ollama.for_feature("refine"),
         token_queue=token_queue,
     )
     request.app.state.refine_token_queues[job_id] = token_queue
@@ -992,15 +1011,22 @@ async def refine_prompt(body: RefineRequest, request: Request):
 @router.get("/refine/{job_id}/stream")
 async def refine_stream(job_id: str, request: Request):
     """Stream token output from a PROMPT lane job via SSE."""
+    _reap_refine_queues(request)
     token_queue: asyncio.Queue | None = request.app.state.refine_token_queues.get(job_id)
     if token_queue is None:
         raise HTTPException(404, f"Refine job {job_id!r} not found")
+    # A reload must be able to walk back in: the queue stays in the registry
+    # when this reader goes away, and the job is not cancelled by a dropped
+    # socket. Stopping it is the Cancel button's job (it cancels the whole
+    # work package through /api/jobs/groups/{group_id}/cancel).
     return queue_sse_response(
         request,
         token_queue,
         job_id=job_id,
         registry=request.app.state.refine_token_queues,
         encode="json",
+        cancel_on_disconnect=False,
+        keep_queue_on_disconnect=True,
     )
 
 
@@ -1136,6 +1162,7 @@ async def ai_status(request: Request):
     pipeline_info = embed_jobs[0] if embed_jobs else {"running": False}
     return {
         "ollama_ok": await ollama.health(),
+        "llm_routes": await ollama.routes(),
         "vector_count": vector_count,
         "vector_sync_needed": False,
         "pipeline": pipeline_info,

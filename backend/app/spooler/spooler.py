@@ -657,9 +657,21 @@ class JobSpooler:
                 result = await run_with_resource(
                     job, self._resources, self._lane_resource, _run
                 )
-                job.state = JobState.SUCCEEDED
-                job.result = result
-                job.progress = 1.0
+                if job._cancel_event.is_set():
+                    # **Cancelling is cooperative: not every runner looks.** A
+                    # runner that never checks the token runs to the end, and
+                    # reporting that as SUCCEEDED told the Showrunner her cancel
+                    # had worked when the work had in fact finished in full
+                    # (audited 2026-11-02: 11 of 47 runners do not look). The
+                    # work cannot be unwound from here, but the answer can at
+                    # least be honest — and a job that ends CANCELLED can be
+                    # dismissed, where one stuck at "cancelling…" could not.
+                    job.state = JobState.CANCELLED
+                    job.result = result
+                else:
+                    job.state = JobState.SUCCEEDED
+                    job.result = result
+                    job.progress = 1.0
             except JobCancelled:
                 job.state = JobState.CANCELLED
             except asyncio.CancelledError:

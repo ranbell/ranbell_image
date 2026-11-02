@@ -21,7 +21,8 @@ const props = defineProps({
   initialCharacterId: { type: String, default: '' },
   initialPartnerId: { type: String, default: '' },
 })
-const emit = defineEmits(['update:show', 'toast', 'select-image', 'session-state'])
+// `make-video`: a still's 🎬 — the video studio (App) takes it from there.
+const emit = defineEmits(['update:show', 'toast', 'select-image', 'session-state', 'make-video'])
 const { t, locale } = useI18n()
 
 //: Opening and closing the roster (`CharacterGallery`). The same two as classic —
@@ -1610,7 +1611,7 @@ function isStruckRow(row) {
                 <figure
                   v-for="img in boardImages"
                   :key="img.image_id || img.sha256 || img"
-                  class="cursor-zoom-in overflow-hidden rounded border border-white/10"
+                  class="relative cursor-zoom-in overflow-hidden rounded border border-white/10"
                   :title="t('muse.zoomImage')"
                   @click="openLightboxSha(img.image_id || img.sha256 || img)"
                 >
@@ -1619,6 +1620,12 @@ function isStruckRow(row) {
                     class="block w-full"
                     alt=""
                   />
+                  <button
+                    type="button"
+                    class="absolute bottom-1 right-1 rounded-full border border-amber-400/60 bg-black/70 px-2 py-0.5 text-[10px] text-amber-100 hover:bg-amber-900/70"
+                    :title="t('video.make')"
+                    @click.stop="emit('make-video', img.image_id || img.sha256 || img)"
+                  >🎬 {{ t('video.makeShort') }}</button>
                 </figure>
               </div>
             </div>
@@ -1629,7 +1636,7 @@ function isStruckRow(row) {
                 <figure
                   v-for="img in shootImages"
                   :key="img.image_id || img.sha256 || img"
-                  class="cursor-zoom-in overflow-hidden rounded border border-pink-500/40"
+                  class="relative cursor-zoom-in overflow-hidden rounded border border-pink-500/40"
                   :title="t('muse.zoomImage')"
                   @click="openLightboxSha(img.image_id || img.sha256 || img)"
                 >
@@ -1638,6 +1645,12 @@ function isStruckRow(row) {
                     class="block w-full"
                     alt=""
                   />
+                  <button
+                    type="button"
+                    class="absolute bottom-1 right-1 rounded-full border border-amber-400/60 bg-black/70 px-2 py-0.5 text-[10px] text-amber-100 hover:bg-amber-900/70"
+                    :title="t('video.make')"
+                    @click.stop="emit('make-video', img.image_id || img.sha256 || img)"
+                  >🎬 {{ t('video.makeShort') }}</button>
                 </figure>
               </div>
             </div>

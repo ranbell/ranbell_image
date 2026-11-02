@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -29,11 +30,15 @@ from .api.analyzer import router as analyzer_router
 from .api.alignment import router as alignment_router
 from .api.invoke import router as invoke_router
 from .characters.api import router as characters_router
+
+logger = logging.getLogger(__name__)
+
 # **Muse Classic retired (2026-09-12).** There is one studio, Muse Refine. Only the
 # green room and the notebook shared classic's router, so those were made
 # independent (the URLs stay `/api/muse/lounge/...` — that is how the screen calls
 # them).
 from .muse.lounge_api import router as muse_lounge_router
+from .muse.video_api import router as muse_video_router
 
 
 def _abort(msg: str) -> None:
@@ -158,6 +163,14 @@ async def lifespan(app: FastAPI):
     # Throttle all LLM traffic (every lane) at the client, per HTTP request
     ollama.set_resource(resources.get("remote-ollama"))
 
+    if _settings.unload_llm_before_render:
+        async def _free_card_for_render() -> None:
+            dropped = await ollama.unload_all()
+            if dropped:
+                logger.info("[render] unloaded %s before queueing", ", ".join(dropped))
+
+        comfy.before_queue = _free_card_for_render
+
     app.state.db = db
     app.state.ollama = ollama
     app.state.comfy = comfy
@@ -180,8 +193,18 @@ async def lifespan(app: FastAPI):
     await spooler.start()
 
     # On startup: apply pause settings saved in the DB to the spooler
-    from .runtime_config import _defaults as _rc_defaults
+    from .runtime_config import _defaults as _rc_defaults, LEGACY_KEYS as _rc_legacy_keys
     _saved_cfg = await db.get_config()
+    # Left behind by the LLM provider removed in v0.4.0. Nothing reads them, but
+    # the same names would surface again if a setting were ever called that,
+    # as `bonsai` did in the external-server form (2026-10-20).
+    _legacy = [k for k in _rc_legacy_keys if k in _saved_cfg]
+    if _legacy:
+        try:
+            await db.delete_config_keys(_legacy)
+            logger.info("Removed leftover config keys: %s", ", ".join(_legacy))
+        except Exception as exc:
+            logger.warning("Could not remove leftover config keys %s: %s", _legacy, exc)
     apply_llm_runtime_config(ollama, {**_rc_defaults, **_saved_cfg})
     # Topology-aware defaults — overridden by any value the user has saved in the DB.
     _default_pause_lanes = list(_rc_defaults["auto_pause_lanes"])  # ["embed", "eval"]
@@ -252,7 +275,7 @@ async def lifespan(app: FastAPI):
     await ollama.close()
 
 
-app = FastAPI(title="Ranbell Image", version="0.4.1", lifespan=lifespan)
+app = FastAPI(title="Ranbell Image", version="0.5.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -292,6 +315,7 @@ app.include_router(alignment_router)
 app.include_router(invoke_router)
 app.include_router(characters_router)
 app.include_router(muse_lounge_router)
+app.include_router(muse_video_router)
 app.include_router(muse_router)
 
 

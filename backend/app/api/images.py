@@ -16,6 +16,7 @@ from typing import Optional
 from ..ai.color_extractor import rgb_to_lab
 from ..config import settings
 from ..db.qdrant_client import QdrantDBClient
+from ..scanner.walk import PIL_FORMATS
 from ..thumbnails.generator import ensure_thumbnail, get_thumbnail_path
 from .cache import Cached
 from .sort_utils import sort_docs
@@ -158,6 +159,9 @@ async def list_images(
     include_partner: bool = False,  # also frames she was cast into as the second Muse
     muse_stage: str = "",           # "shoot" | "board" | "still"
     muse_session_id: str = "",      # one shoot
+    # Pictures made into a video in the studio: "talk" (talked over) or
+    # "prompt" (a prompt written). Rides the same sha256 path as align_min.
+    video: str = "",
 ):
     import base64 as _b64
 
@@ -172,6 +176,14 @@ async def list_images(
     align_sha256s: set[str] | None = None
     if align_min is not None:
         align_sha256s = await db.get_aligned_sha256s(align_min)
+
+    video = video if video in ("talk", "prompt") else ""
+    if video:
+        from ..muse import video_db
+        talked = await video_db.talked_shas(db, written=video == "prompt")
+        align_sha256s = talked if align_sha256s is None else (align_sha256s & talked)
+        if not align_sha256s:
+            return {"total": 0, "next_cursor": None, "images": [], "search_mode": True, "sort": sort}
 
     # ── dir filter (folder view) ──────────────────────────────────────────────
     if dir:
@@ -211,7 +223,7 @@ async def list_images(
     muse_stage = muse_stage if muse_stage in ("shoot", "board", "still") else ""
     is_filter = bool(keyword or inc_list or exc_list or model_list or star_min is not None
                      or category is not None or align_min is not None
-                     or character_id or muse_stage or muse_session_id)
+                     or character_id or muse_stage or muse_session_id or video)
 
     # date_seek: convert ISO datetime string to synthetic cursor for mtime-based sorts.
     #
@@ -308,6 +320,7 @@ async def list_images(
             "include_partner": include_partner,
             "muse_stage": muse_stage or "",
             "muse_session_id": muse_session_id or "",
+            "video": video,
         }
 
         # Use order_by cursor pagination (one page at a time, no full-load).
@@ -603,7 +616,7 @@ async def get_raw_metadata(sha256: str, request: Request):
         raise HTTPException(status_code=404, detail="File not on disk")
 
     try:
-        with _PILImage.open(file_path) as img:
+        with _PILImage.open(file_path, formats=PIL_FORMATS) as img:
             raw_info = img.info or {}
             fmt = img.format
     except Exception as exc:

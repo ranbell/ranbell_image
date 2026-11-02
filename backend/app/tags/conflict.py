@@ -1,10 +1,11 @@
 """Does one tag contradict another?
 
-``prompt.tag_merge._tags_conflict`` answers a looser question — "do these two
-tags overlap enough that the lower-weighted one should yield" — and it is right
-for merging several images, where losing a borderline tag costs nothing.
+``prompt.tag_merge._tags_conflict`` used to answer a looser question — "do
+these two tags share a word" — for merging several images. It threw away the
+lower-weighted image's features the same way, and now asks this module too
+(2026-10-31).
 
-It is too blunt for eviction. Told to protect ``purple_hair`` it also throws out
+A shared word is too blunt. Told to protect ``purple_hair`` it also throws out
 ``long_hair`` and ``hair_ribbon``, because all three contain "hair". A character
 can have long purple hair and a hair ribbon.
 

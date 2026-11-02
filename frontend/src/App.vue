@@ -8,7 +8,10 @@ import AnalyzerModal from './components/AnalyzerModal.vue'
 import AdminModal from './components/AdminModal.vue'
 import InspirePanel from './components/InspirePanel.vue'
 import InvokePanel from './components/InvokePanel.vue'
+import SceneSheetEditor from './components/refine/SceneSheetEditor.vue'
+import RefineSteps from './components/refine/RefineSteps.vue'
 import MusePanel from './components/MusePanel.vue'
+import VideoStudio from './components/VideoStudio.vue'
 import CharacterGallery from './components/CharacterGallery.vue'
 import ActressDiaryModal from './components/muse/ActressDiaryModal.vue'
 import CharacterDossier from './components/muse/CharacterDossier.vue'
@@ -188,6 +191,7 @@ const searchMode = ref('semantic')   // 'keyword' | 'semantic'
 const activeModels = ref([])        // selected model names (OR logic)
 const modelFilteredTagSet = ref(null) // Set<string> | null — tags in model-only filtered results
 const starFilter = ref(null)        // null | 1..5 — ≥N stars filter
+const videoFilter = ref(null)       // null | 'talk' | 'prompt' — made into a video in the studio
 const categoryFilter = ref('all')   // 'all' | 'AI' | 'NR'
 // Muse board sketches are registered in the library but hidden here by
 // default — six 512px throwaways per run would otherwise bury everything.
@@ -419,6 +423,12 @@ function onThumbMouseEnter(event, sha) {
   }
 }
 const showRefine = ref(false)
+// Where Refine's LLM calls go (Admin → External LLM server). On an external
+// server num_ctx is fixed when the model is loaded, so the picker is replaced
+// by the server's own window; temperature is still sent.
+const refineRoute = computed(() => aiStatus.value?.llm_routes?.refine || { backend: 'ollama' })
+const refineExternal = computed(() => refineRoute.value.backend === 'openai')
+watch(showRefine, open => { if (open) fetchAiStatus() })
 const refineOverlayMousedownOnBg = ref(false)
 const refineInstruction = ref('')
 const showInstructionModal = ref(false)
@@ -432,6 +442,19 @@ let refineAbortController = null
 
 // ── Refine settings ────────────────────────────────────────────────────────────
 const refineTemp = ref(0.7)
+// On an external server the temperature starts as "the server's default":
+// nothing is sent, so the server samples as it was started (Lemonade runs
+// Gemma 4 with --temp 1.0), and the slider shows that value when the server
+// tells it. Moving the slider sends that value instead.
+const refineTempOverride = ref(false)
+const refineServerTemp = computed(() => {
+  const t = refineRoute.value?.sampling?.temperature
+  return typeof t === 'number' ? t : null
+})
+const refineTempIsServerDefault = computed(() => refineExternal.value && !refineTempOverride.value)
+watch([refineTempIsServerDefault, refineServerTemp], ([useDefault, t]) => {
+  if (useDefault && t !== null) refineTemp.value = t
+}, { immediate: true })
 const refineDivergence = ref(0)        // 0.0〜1.0: Transmute (mutate style away from references)
 const refineMutationTags = ref([])     // mutation tags sampled by the backend
 const refineVariationCount = ref(1)    // natural style: prose pass fan-out (1〜3)
@@ -463,10 +486,168 @@ function applyRefineVariant(variant) {
   refinedPrompt.value = variant.positive
 }
 const refineNumCtx = ref(16384)
-const refineStyle = ref('natural')           // 'natural' | 'danbooru' | 'detailed'
+const refineStyle = ref('natural')           // 'natural' | 'danbooru' | 'detailed' | 'moss'
 const refineInstructionMode = ref('basic')   // 'none' | 'basic' | 'enhanced'
 const refineNegative = ref(false)
 const refineSuppressConflict = ref(false)
+// moss = MOSS-Image. 'caption' and 'layout' are written from the scene sheet
+// like the detailed style; 'tags' is the danbooru call put in MOSS order.
+const refineMossFormat = ref('caption')   // 'caption' | 'layout' | 'tags'
+const refineMoss = computed(() => refineStyle.value === 'moss')
+const refineMossLayout = computed(() => refineMoss.value && refineMossFormat.value === 'layout')
+// detailed = the Krea 2 visual script: it reads the picture, not WD14 tags,
+// writes no negative, and needs the medium stated (Krea 2 drifts to a photo).
+// MOSS-Image's caption and layout use the same sheet, so they count here too.
+const refineKrea = computed(() =>
+  refineStyle.value === 'detailed' || (refineMoss.value && refineMossFormat.value !== 'tags'))
+const refineVisualMedium = ref('')   // '' = from the reference | 'anime' | 'photo'
+// Several references: 'merge' fuses their people into one cast, 'coexist'
+// keeps every person from every image (the Showrunner, 2026-10-21).
+const refineCombineMode = ref('merge')
+// The world: 'blend' restates the references; 'fuse' draws WD14 tags as
+// ingredients that transform the scene, with the divergence dial as chaos.
+const refineWorldMode = ref('blend')
+// Hand the references' top WD14 tags to the sheet reader as a recommendation
+// of what is distinctive — a sheet read without them came out plain.
+const refineWd14Hints = ref(false)
+// How far the sheet is staged after it is read (the Showrunner, 2026-11-01):
+// 'read' as read | 'move' the reference's action caught mid-movement, with a
+// reason | 'restage' the same people and place, a different, larger action.
+const refineStaging = ref('move')
+// Hints under this WD14 confidence are removed in code before the reader sees them.
+const refineWd14HintMinScore = ref(0.5)
+const refineChaosOn = computed(() => !refineKrea.value || refineWorldMode.value === 'fuse')
+// The scene sheet the detailed style wrote from, editable on screen. Each
+// version the server returns is kept so a retake can be undone.
+const refineSheet = ref(null)
+const refineSheetHistory = ref([])
+const refineSheetLocked = ref([])
+const refineSheetInstruction = ref('')
+// 'read' = read the picture, 'rewrite' = write again from the edited sheet,
+// 'retake' = apply a spoken retake to the sheet first
+const refineSheetMode = ref('read')
+const refineSheetTab = ref('hand')            // 'hand' = edit the boxes | 'words' = say it | 'directions'
+// The sheet as the server last returned it, to tell unsaved edits.
+const refineSheetBaseline = ref('')
+const refineSheetDirty = computed(() =>
+  !!refineSheet.value && JSON.stringify(refineSheet.value) !== refineSheetBaseline.value)
+// What the last fusion or retake changed (from the thinking stream).
+const refineSheetChanges = ref([])
+// Also every tag the run left out, placed or kept unclassified — nothing the
+// tagger read leaves without being said (the Showrunner, 2026-10-31).
+const _SHEET_CHANGE_RE = /^\[(changed|fused|locked, not changed|ingredient not used|ingredients from [^\]]+|placed|unclassified[^\]]*|WD14 left out|WD14 hints not used by the reader|left out of the fusion|removed by the conflict check|check|staged|staging[^\]]*)\]/
+// The steps of the Krea card, numbered as they are shown.
+const kreaStepNo = key => {
+  const steps = ['medium', ...(selectedCount.value >= 2 ? ['combine'] : []), 'world', 'staging', 'hints',
+    ...(refineMossLayout.value ? [] : ['length'])]
+  return '①②③④⑤⑥⑦'[steps.indexOf(key)] || ''
+}
+function sheetPathLabel(path) {
+  const m = /^subjects\.(\d+)$/.exec(path)
+  return m ? t('refine.sheet.person', { n: Number(m[1]) + 1 }) : t(`refine.sheet.box.${path}`)
+}
+let _refineSheetRun = null
+function rewriteFromSheet() {
+  _refineSheetRun = { sheet: refineSheet.value }
+  refineSheetMode.value = 'rewrite'
+  runRefine()
+}
+function retakeSheet() {
+  if (!refineSheetInstruction.value.trim()) return
+  _refineSheetRun = {
+    sheet: refineSheet.value,
+    sheet_instruction: refineSheetInstruction.value,
+    locked: refineSheetLocked.value,
+  }
+  refineSheetMode.value = 'retake'
+  runRefine()
+}
+function undoSheet() {
+  if (refineSheetHistory.value.length) refineSheet.value = refineSheetHistory.value.pop()
+}
+// Directions: the model proposes, one lens per call, each held to its boxes;
+// the Showrunner picks one and the prompt is written from it.
+const DIRECTION_KINDS = ['light', 'camera', 'moment', 'world']
+const refineDirectionKinds = ref([...DIRECTION_KINDS])
+// Cards: { kind, title, direction, sheet, changed, refused, outside, from } or
+// { kind, failed: true, reason }. `from` is the sheet they were proposed for.
+const refineDirections = ref([])
+const refineDirecting = ref(false)
+const refineDirectingKind = ref('')
+const refineDirectionsError = ref('')
+// Titles already proposed for this sheet, per lens: a second try goes elsewhere.
+const refineDirectionAvoid = ref({})
+const directionStale = card => !!card.from && card.from !== JSON.stringify(refineSheet.value)
+function resetDirections() {
+  refineDirections.value = []
+  refineDirectionAvoid.value = {}
+  refineDirectionsError.value = ''
+}
+function _putDirection(card) {
+  const i = refineDirections.value.findIndex(c => c.kind === card.kind)
+  if (i >= 0) refineDirections.value.splice(i, 1, card)
+  else refineDirections.value.push(card)
+}
+async function proposeDirections(kinds) {
+  if (!refineSheet.value || refineDirecting.value || !kinds.length) return
+  refineDirecting.value = true
+  refineDirectionsError.value = ''
+  const from = JSON.stringify(refineSheet.value)
+  try {
+    const res = await fetch('/api/ai/refine/directions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sheet: refineSheet.value,
+        kinds,
+        locked: refineSheetLocked.value,
+        instruction: refineInstruction.value,
+        avoid: refineDirectionAvoid.value,
+        temperature: refineTempIsServerDefault.value ? null : refineTemp.value,
+        num_ctx: refineNumCtx.value,
+      }),
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const { job_id } = await res.json()
+    const stream = await fetch(`/api/ai/refine/${job_id}/stream`)
+    if (!stream.ok || !stream.body) throw new Error(`Stream HTTP ${stream.status}`)
+    const reader = stream.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() ?? ''
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        let evt
+        try { evt = JSON.parse(line.slice(6)) } catch { continue }
+        if (evt.type === 'phase') refineDirectingKind.value = evt.kind || ''
+        else if (evt.type === 'direction') {
+          _putDirection({ ...evt, from })
+          const seen = refineDirectionAvoid.value[evt.kind] || []
+          if (evt.title && !seen.includes(evt.title)) {
+            refineDirectionAvoid.value = { ...refineDirectionAvoid.value, [evt.kind]: [...seen, evt.title] }
+          }
+        } else if (evt.type === 'direction_failed') _putDirection({ ...evt, failed: true, from })
+        else if (evt.type === 'error') refineDirectionsError.value = evt.message || t('refine.error')
+      }
+    }
+  } catch (e) {
+    refineDirectionsError.value = e?.message || t('refine.error')
+  } finally {
+    refineDirecting.value = false
+    refineDirectingKind.value = ''
+  }
+}
+function takeDirection(card) {
+  if (!card.sheet || refining.value) return
+  refineSheetHistory.value.push(refineSheet.value)
+  refineSheet.value = card.sheet
+  rewriteFromSheet()
+}
 const refineAutoSubmit = ref(false)
 const refineBatchCount = ref(1)
 const refineWorkflow = ref('')
@@ -488,6 +669,11 @@ const randomCount = ref(3)
 const pinnedShas = ref(new Set())
 const imageWeights = ref(new Map())   // Map<sha256, number>  0–100 (integer)
 const refinePhase = ref('')             // '' | 'llm' | 'comfy' | 'done'
+// One forging run is a work package: the prompt job and the render it queues
+// share this label. It is how the screen finds the whole run again after a
+// reload, and how Cancel calls all of it off. The spooler owns it — nothing
+// about a run is kept in localStorage.
+const refineGroupId = ref(null)
 const refinePromptJobId = ref(null)     // PROMPT lane job ID (the refinement itself)
 const refinePromptJob = computed(() =>  // reactive reference from jobsMap
   refinePromptJobId.value ? (jobsMap.value.get(refinePromptJobId.value) ?? null) : null
@@ -504,9 +690,16 @@ const positivePrompt = ref('')
 const negativePromptText = ref('')
 const refineTagFormat = ref('underscore') // 'space' | 'underscore'
 
+// A MOSS-Image layout is JSON: its keys have underscores ("bbox_format"), and
+// the model reads it as one line. Copied and sent untouched; shown indented.
+const isMossLayout = text => typeof text === 'string' && text.startsWith('{"summary":')
 function fmtPrompt(text) {
-  if (!text) return text
+  if (!text || isMossLayout(text)) return text
   return refineTagFormat.value === 'space' ? text.replace(/_/g, ' ') : text
+}
+function viewPrompt(text) {
+  if (!isMossLayout(text)) return fmtPrompt(text)
+  try { return JSON.stringify(JSON.parse(text), null, 2) } catch { return text }
 }
 const comfyProgress = ref({ value: 0, max: 0, node: '' })
 const comfyExecuting = ref('')
@@ -515,27 +708,64 @@ const refineErrorMsg = ref('')
 const proseMissing = ref(false)
 const removedTags = ref([])
 const refinePhaseCode = ref('')
+const refinePhaseN = ref(0)       // a repeating step's pass number ("2 of 6")
+const refinePhaseTotal = ref(0)
 
-const refineTotalSteps = computed(() => {
-  let n = 2  // 画像ロード + 後処理
-  if (refineInstructionMode.value === 'enhanced') n++  // enhanced のみ LLM ステップあり
-  if (refineSuppressConflict.value) n++
-  n += refineStyle.value === 'natural' ? 2 : 1
-  return n
+// How many references the sheet reader will actually open: a 0% one is not read.
+const refineReadCount = computed(() => {
+  const shas = [...selectedIds.value].slice(0, 6)
+  const live = shas.filter(s => (imageWeights.value.get(s) ?? 50) > 0)
+  return Math.max(1, (live.length || shas.length))
 })
 
-const refineCurrentStep = computed(() => {
-  const order = ['loadingImages']
-  if (refineInstructionMode.value === 'enhanced') order.push('translatingInstruction')
-  if (refineSuppressConflict.value) order.push('analyzingConflicts')
+// Every phase the refine job reports, in the order it reports them. **One
+// list.** The step counter, the total and the stepper all read from here, so
+// they cannot drift — the counter and the total used to be two separate pieces
+// of arithmetic, and `buildingPrompt`, `placingHints` and `mergingSheets` were
+// in neither, so the counter blanked out whenever one of them ran.
+const refineStepOrder = computed(() => {
+  const o = ['loadingImages']
+  if (refineInstructionMode.value === 'enhanced') o.push('translatingInstruction')
+  if (refineSuppressConflict.value && !refineKrea.value) o.push('analyzingConflicts')
+  o.push('buildingPrompt')
+  // The chaos dial samples foreign tags — but only where WD14 still drives the
+  // prompt; the sheet styles spend it on a fusion instead.
+  if (refineDivergence.value > 0 && !refineKrea.value) o.push('mutatingTags')
   if (refineStyle.value === 'natural') {
-    order.push('writingTags', 'writingDescription')
+    o.push('writingTags', 'writingDescription')
+  } else if (refineKrea.value) {
+    if (refineSheetMode.value === 'read') {
+      o.push('readingScene')
+      if (refineReadCount.value > 1) o.push('mergingSheets')
+      if (refineWd14Hints.value) o.push('placingHints')
+      if (refineWorldMode.value === 'fuse') o.push('fusingWorlds')
+      if (refineStaging.value !== 'read') o.push('stagingScene')
+    }
+    if (refineSheetMode.value === 'retake') o.push('patchingScene')
+    o.push(refineMossLayout.value ? 'buildingLayout' : 'writingDescription')
   } else {
-    order.push('generatingPrompt')
+    o.push('generatingPrompt')
   }
-  order.push('parsingOutput')
-  const idx = order.indexOf(refinePhaseCode.value)
-  return idx >= 0 ? idx + 1 : 0
+  o.push('parsingOutput')
+  if (refineAutoSubmit.value) o.push('queuingGeneration')
+  return o
+})
+
+// A retry is the same step run again, not a step of its own.
+const REFINE_PHASE_ALIAS = { refiningDescription: 'writingDescription' }
+const refineStepIndex = computed(() => {
+  const code = REFINE_PHASE_ALIAS[refinePhaseCode.value] || refinePhaseCode.value
+  return refineStepOrder.value.indexOf(code)
+})
+const refineCurrentStep = computed(() => refineStepIndex.value + 1)
+const refineTotalSteps = computed(() => refineStepOrder.value.length)
+
+const refineSteps = computed(() => {
+  const at = refineStepIndex.value
+  return refineStepOrder.value.map((code, i) => ({
+    code,
+    state: at < 0 ? 'todo' : i < at ? 'done' : i === at ? 'now' : 'todo',
+  }))
 })
 
 const refineHairTags = ref([])
@@ -552,6 +782,54 @@ const refineWd14Analysis = ref(null)   // { common_tags, common_total, common_se
 const refineCommonRatio = ref(0.3)     // 0.0〜1.0
 const refineUniqueCount = ref(20)      // 固有タグ数/画像@100%重み
 const workflows = ref([])
+
+// ── The studio's choices, kept between visits ────────────────────────────────
+//
+// The Showrunner (2026-11-02): "I want the forging studio to remember its
+// choices, Krea2 and so on". Picking the output style, the medium, the staging
+// and the
+// workflow again every visit is work she already did.
+//
+// Only the dials are kept — never the instruction, the sheet, a direct prompt or
+// anything about a run. Those belong to one picture, and the spooler is what
+// remembers a run. One JSON blob rather than a key apiece, and a private window
+// or blocked site data simply means the defaults.
+const REFINE_PREFS_KEY = 'ranbell.refinePrefs.v1'
+const REFINE_PREFS = {
+  style: refineStyle, mossFormat: refineMossFormat, instructionMode: refineInstructionMode,
+  negative: refineNegative, suppressConflict: refineSuppressConflict,
+  visualMedium: refineVisualMedium, combineMode: refineCombineMode,
+  worldMode: refineWorldMode, wd14Hints: refineWd14Hints, staging: refineStaging,
+  wd14HintMinScore: refineWd14HintMinScore, temp: refineTemp,
+  tempOverride: refineTempOverride, numCtx: refineNumCtx, divergence: refineDivergence,
+  variationCount: refineVariationCount, proseParagraphs: refineProseParagraphs,
+  emotionShift: refineEmotionShift, commonRatio: refineCommonRatio,
+  uniqueCount: refineUniqueCount, autoSubmit: refineAutoSubmit,
+  batchCount: refineBatchCount, workflow: refineWorkflow, posNodeId: refinePosNodeId,
+  negNodeId: refineNegNodeId, useSeed: refineUseSeed, tagFormat: refineTagFormat,
+}
+
+function loadRefinePrefs() {
+  let saved = null
+  try {
+    saved = JSON.parse(localStorage.getItem(REFINE_PREFS_KEY) || 'null')
+  } catch { return }   // private window, blocked site data, or a corrupt blob
+  if (!saved || typeof saved !== 'object') return
+  for (const [key, r] of Object.entries(REFINE_PREFS)) {
+    const v = saved[key]
+    // A saved value of another shape is a setting that has changed meaning
+    // since it was written; the default is the better answer than a cast.
+    if (v !== undefined && v !== null && typeof v === typeof r.value) r.value = v
+  }
+}
+loadRefinePrefs()
+
+watch(
+  () => Object.fromEntries(Object.entries(REFINE_PREFS).map(([k, r]) => [k, r.value])),
+  (snapshot) => {
+    try { localStorage.setItem(REFINE_PREFS_KEY, JSON.stringify(snapshot)) } catch { /* private window */ }
+  },
+)
 
 // ── Lightbox ──────────────────────────────────────────────────────────────────
 const showLightbox = ref(false)
@@ -1473,7 +1751,7 @@ function onGraphCanvasHover(e) {
 
 // ── Computed ──────────────────────────────────────────────────────────────────
 const activeTags = computed(() => Object.entries(tagsFilter.value).filter(e => e[1] === 'include').map(e => e[0]))
-const isSearchMode = computed(() => !!searchQuery.value || !!Object.keys(tagsFilter.value).length || !!similarSource.value || !!activeModels.value.length || colorPickActive.value || !!starFilter.value || categoryFilter.value !== 'all' || alignMinFilter.value !== null || !!activeCharacter.value)
+const isSearchMode = computed(() => !!searchQuery.value || !!Object.keys(tagsFilter.value).length || !!similarSource.value || !!activeModels.value.length || colorPickActive.value || !!starFilter.value || !!videoFilter.value || categoryFilter.value !== 'all' || alignMinFilter.value !== null || !!activeCharacter.value)
 const effectiveQuery = computed(() => searchQuery.value || activeTags.value[0] || '')
 const selectedCount = computed(() => selectedIds.value.size)
 
@@ -1515,6 +1793,7 @@ async function fetchImages(reset = false) {
       if (activeModels.value.length) params.set('models', activeModels.value.join(','))
       if (activeCharacter.value) params.set('character_id', activeCharacter.value)
       if (starFilter.value) params.set('star_min', starFilter.value)
+      if (videoFilter.value) params.set('video', videoFilter.value)
       if (categoryFilter.value !== 'all') params.set('category', categoryFilter.value)
       if (showDrafts.value) params.set('include_drafts', 'true')
       if (alignMinFilter.value !== null) params.set('align_min', alignMinFilter.value)
@@ -1922,6 +2201,16 @@ function startJobStream() {
         }
       }
       if (evalMap.size > 0) alignmentEvaluating.value = evalMap
+
+      // On reload: rejoin a forging run that is still going. The spooler is
+      // the one that remembers it — that is what it is for — so nothing about
+      // the run is kept on this side.
+      if (!refineGroupId.value && !refining.value) {
+        const pkg = jobs.find(j =>
+          String(j.meta?.group_id || '').startsWith('refine:')
+          && REFINE_LIVE_STATES.includes(j.state))
+        if (pkg) resumeRefinePackage(pkg.meta.group_id, jobs)
+      }
     } catch (err) { console.debug('[sse] snapshot handler failed', err) }
   })
 
@@ -2204,6 +2493,7 @@ function clearFilter() {
   activeModels.value = []
   activeCharacter.value = null
   starFilter.value = null
+  videoFilter.value = null
   categoryFilter.value = 'all'
   alignMinFilter.value = null
   showSuggestions.value = false
@@ -2421,6 +2711,10 @@ function openRefineFromHistory(jobId) {
   refineInstruction.value          = m.instruction || ''
   refineInstructionMode.value      = m.instruction_mode || 'basic'
   refineStyle.value                = m.prompt_style || 'natural'
+  refineMossFormat.value           = m.moss_format || 'caption'
+  refineWd14Hints.value            = !!m.wd14_hints
+  refineStaging.value              = m.staging || 'move'
+  refineWd14HintMinScore.value     = m.wd14_hint_min_score ?? 0.5
   refineWorkflow.value             = m.workflow_name || ''
   refineBatchCount.value           = m.batch_count  || 1
   refineAutoSubmit.value           = true
@@ -2443,6 +2737,43 @@ function openRefineFromHistory(jobId) {
 
   controlRoomVisible.value = false
   showRefine.value         = true
+}
+
+// A picture whose check found boxes absent from it: write the script again from
+// the same sheet, with those boxes called out by name. The sheet is handed over,
+// so the references are never read a second time — a repair costs one text call.
+function rerollEmphasising(img) {
+  const rec = img?.creation_record || {}
+  const sheet = rec.scene_sheet
+  const boxes = [...new Set((img?.sheet_check?.missed || []).map(m => m.box))]
+  if (!sheet || !boxes.length) return
+
+  const sources = rec.source_images || []
+  const shas = sources.map(s => s.sha256).filter(Boolean)
+  selectedIds.value = new Set(shas)
+  pinnedShas.value = new Set(shas)
+  if (sources.length) {
+    const wm = new Map()
+    sources.forEach(s => wm.set(s.sha256, Math.round((s.weight ?? 0) * 100)))
+    imageWeights.value = wm
+  }
+  refineStyle.value        = rec.prompt_style || 'detailed'
+  refineMossFormat.value   = rec.moss_format || 'caption'
+  refineWd14Hints.value    = !!rec.wd14_hints
+  refineStaging.value      = rec.staging || 'move'
+  refineInstruction.value  = rec.instruction || ''
+  refineWorkflow.value     = rec.workflow_name || ''
+  refineBatchCount.value   = rec.batch_count || 1
+  refineAutoSubmit.value   = !!rec.workflow_name
+  refineDirectPrompt.value = null
+  refineSheet.value        = sheet
+  refineSheetLocked.value  = []
+
+  _refineSheetRun = { sheet, emphasise: boxes }
+  refineSheetMode.value    = 'rewrite'
+  controlRoomVisible.value = false
+  showRefine.value         = true
+  runRefine()
 }
 
 async function randomSelect() {
@@ -2518,8 +2849,112 @@ function normalizedPct(sha) {
   return Math.round(((imageWeights.value.get(sha) ?? 0) / weightTotal.value) * 100)
 }
 
-function cancelRefine() {
+// Which reference the Krea 2 scene sheet takes the person from. The backend
+// decides this in scene_sheet.build_mix_plan — exactly one lead, ties going to
+// the first — and this mirrors that rule so the screen agrees with the sheet.
+// A panel marked "style only" cannot own the person there, so it cannot here.
+const leadSha = computed(() => {
+  if (!refineKrea.value) return ''
+  const shas = [...selectedIds.value].slice(0, 6)
+    .filter(s => (imageWeights.value.get(s) ?? 0) > 0)
+  if (shas.length < 2) return ''
+  const eligible = shas.filter(s => (imageRoles.value.get(s) || 'both') !== 'style')
+  const pool = eligible.length ? eligible : shas
+  return pool.reduce((best, s) =>
+    (imageWeights.value.get(s) ?? 0) > (imageWeights.value.get(best) ?? 0) ? s : best, pool[0])
+})
+
+// Cancel has to ask the server now. It used to only abort the local reader and
+// rely on the stream cancelling the job on disconnect — but a dropped socket no
+// longer stops anything, because that is what made a browser reload lose the
+// run. Asking by work package also stops the render, which aborting the reader
+// never could once the ComfyUI job was queued.
+async function cancelRefine() {
+  const group = refineGroupId.value
+  if (group) {
+    try {
+      await fetch(`/api/jobs/groups/${encodeURIComponent(group)}/cancel`, { method: 'POST' })
+    } catch (e) {
+      console.warn('[refine] cancel request failed', e)
+    }
+  } else if (refinePromptJobId.value) {
+    // No package (an older run): fall back to the single job.
+    try {
+      await fetch(`/api/jobs/${encodeURIComponent(refinePromptJobId.value)}/cancel`, { method: 'POST' })
+    } catch (e) {
+      console.warn('[refine] cancel request failed', e)
+    }
+  }
   refineAbortController?.abort()
+}
+
+// Read one refine job's event stream to its end. Used both by a fresh run and
+// by rejoining one after a reload — the server keeps the queue, so whatever
+// piled up while nobody was listening arrives first, then the live tail.
+async function readRefineStream(jobId) {
+  refineAbortController = new AbortController()
+  const streamRes = await fetch(`/api/ai/refine/${jobId}/stream`, {
+    signal: refineAbortController.signal,
+  })
+  if (!streamRes.ok || !streamRes.body) throw new Error(`Stream HTTP ${streamRes.status}`)
+
+  const reader = streamRes.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue
+      try { handleRefineEvent(JSON.parse(line.slice(6))) } catch (err) { console.warn('[refine] stream event failed', err) }
+    }
+  }
+}
+
+// Rejoin a forging run that is still going after a browser reload. Nothing was
+// remembered on this side: the spooler's snapshot carries the whole package
+// (job meta included), which is what it is for.
+const REFINE_LIVE_STATES = ['queued', 'running', 'paused', 'cancelling']
+
+async function resumeRefinePackage(groupId, jobs) {
+  const mine = jobs.filter(j => j.meta?.group_id === groupId)
+  const promptJob = mine.find(j => j.lane === 'prompt')
+  const genJob = mine.find(j => j.lane === 'gen')
+  const m = promptJob?.meta || {}
+
+  refineGroupId.value = groupId
+  refinePromptJobId.value = promptJob?.id ?? null
+  refineGenJobId.value = REFINE_LIVE_STATES.includes(genJob?.state) ? genJob.id : null
+
+  const shas = m.sha256s || []
+  if (shas.length) {
+    selectedIds.value = new Set(shas)
+    pinnedShas.value = new Set(shas)
+  }
+  if (m.prompt_style) refineStyle.value = m.prompt_style
+
+  refineStarted.value = true
+  refineErrorMsg.value = ''
+  showRefine.value = true
+  controlRoomVisible.value = false
+
+  const promptLive = REFINE_LIVE_STATES.includes(promptJob?.state)
+  refinePhase.value = refineGenJobId.value ? 'comfy' : 'llm'
+  if (!promptLive) return   // the prose is already written; the render carries on
+
+  refining.value = true
+  try {
+    await readRefineStream(promptJob.id)
+  } catch (e) {
+    if (e?.name !== 'AbortError') console.warn('[refine] rejoin failed', e)
+  } finally {
+    refineAbortController = null
+    refining.value = false
+    if (refinePhase.value !== 'done' && !refineGenJobId.value) refinePhase.value = 'done'
+  }
 }
 
 async function runRefine() {
@@ -2541,6 +2976,7 @@ async function runRefine() {
   refineErrorMsg.value = ''
   proseMissing.value = false
   refinePromptJobId.value = null
+  refineGroupId.value = null
   refinePhaseCode.value = ''
   refineHairTags.value = []
   refineSubjectTags.value = []
@@ -2555,6 +2991,18 @@ async function runRefine() {
   refineWd14Analysis.value = null
   refineMutationTags.value = []
   refineVariants.value = []
+  const sheetRun = _refineSheetRun
+  _refineSheetRun = null
+  refineSheetChanges.value = []
+  if (!sheetRun) {
+    // A fresh reading: the old sheet, its versions and its locks belong to
+    // another picture.
+    refineSheetMode.value = 'read'
+    refineSheet.value = null
+    refineSheetHistory.value = []
+    refineSheetLocked.value = []
+    resetDirections()
+  }
 
   try {
     const orderedShas = [...selectedIds.value].slice(0, 6)
@@ -2563,11 +3011,19 @@ async function runRefine() {
       weights: orderedShas.map(s => normalizedPct(s) / 100),
       instruction: refineInstruction.value,
       instruction_mode: refineInstructionMode.value,
-      temperature: refineTemp.value,
+      temperature: refineTempIsServerDefault.value ? null : refineTemp.value,
       num_ctx: refineNumCtx.value,
       prompt_style: refineStyle.value,
+      moss_format: refineMossFormat.value,
       negative_prompt: refineNegative.value,
       suppress_conflict_tags: refineSuppressConflict.value,
+      visual_medium: refineKrea.value ? refineVisualMedium.value : '',
+      combine_mode: refineCombineMode.value,
+      world_mode: refineWorldMode.value,
+      wd14_hints: refineKrea.value && refineWd14Hints.value,
+      staging: refineKrea.value ? refineStaging.value : 'read',
+      wd14_hint_min_score: refineWd14HintMinScore.value,
+      ...(refineKrea.value && sheetRun ? sheetRun : {}),
       wd14_common_ratio: refineCommonRatio.value,
       wd14_unique_count: refineUniqueCount.value,
       divergence: refineDivergence.value,
@@ -2581,7 +3037,8 @@ async function runRefine() {
       positive_node_id: refinePosNodeId.value,
       negative_node_id: refineNegNodeId.value,
       use_ref_seed: refineUseSeed.value,
-      ...(refineDirectPrompt.value != null ? {
+      // A run from the sheet is never a direct prompt, even if one is still set.
+      ...(refineDirectPrompt.value != null && !sheetRun ? {
         direct_prompt: refineDirectPrompt.value,
         ...(refineDirectNegativePrompt.value ? { direct_negative_prompt: refineDirectNegativePrompt.value } : {}),
       } : {}),
@@ -2595,30 +3052,12 @@ async function runRefine() {
       body,
     })
     if (!submitRes.ok) throw new Error(`HTTP ${submitRes.status}`)
-    const { job_id } = await submitRes.json()
+    const { job_id, group_id } = await submitRes.json()
     refinePromptJobId.value = job_id
+    refineGroupId.value = group_id || null
 
     // Step 2: Connect to token stream
-    refineAbortController = new AbortController()
-    const streamRes = await fetch(`/api/ai/refine/${job_id}/stream`, {
-      signal: refineAbortController.signal,
-    })
-    if (!streamRes.ok || !streamRes.body) throw new Error(`Stream HTTP ${streamRes.status}`)
-
-    const reader = streamRes.body.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() ?? ''
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue
-        try { handleRefineEvent(JSON.parse(line.slice(6))) } catch (err) { console.warn('[refine] stream event failed', err) }
-      }
-    }
+    await readRefineStream(job_id)
   } catch (e) {
     // Without this the panel just flips to 'done' and looks like it succeeded.
     if (e?.name !== 'AbortError') {
@@ -2638,8 +3077,14 @@ function handleRefineEvent(evt) {
   switch (evt.type) {
     case 'phase':
       refinePhaseCode.value = evt.code || ''
+      // A repeating step says which pass it is on ("2 of 6 references").
+      refinePhaseN.value = evt.n ?? 0
+      refinePhaseTotal.value = evt.total ?? 0
       break
     case 'think':
+      for (const line of evt.text.split('\n')) {
+        if (_SHEET_CHANGE_RE.test(line.trim())) refineSheetChanges.value.push(line.trim())
+      }
       _pendingThink += evt.text
       _scheduleFlush()
       break
@@ -2656,6 +3101,17 @@ function handleRefineEvent(evt) {
       refineWd14Analysis.value = evt.wd14_analysis || null
       refineMutationTags.value = evt.mutation_tags || []
       refineVariants.value = evt.variants || []
+      if (evt.sheet) {
+        // Only a sheet the server changed is a version worth undoing to: a
+        // rewrite returns the sheet it was given, and pushing it made the next
+        // undo land on the same sheet.
+        if (refineSheet.value && JSON.stringify(refineSheet.value) !== JSON.stringify(evt.sheet)) {
+          refineSheetHistory.value.push(refineSheet.value)
+        }
+        refineSheet.value = evt.sheet
+        refineSheetBaseline.value = JSON.stringify(evt.sheet)
+        refineSheetInstruction.value = ''
+      }
       refineHairTags.value = evt.hair_tags || []
       refineSubjectTags.value = evt.subject_tags || []
       refineClothingTags.value = evt.clothing_tags || []
@@ -2770,6 +3226,18 @@ const musePendingCharacterId = ref('')
 const musePendingPartnerId = ref('')
 // A paused shoot. Held so the roster can show "shooting".
 const museResume = ref({ available: false, name: '', sessionId: '' })
+
+// ── Video studio ──────────────────────────────────────────────────────────────
+// Any still's 🎬 (the gallery detail, a Muse test shot or final) opens the
+// studio on that picture. Its own screen: the talk does not live in the shoot.
+const showVideoStudio = ref(false)
+const videoRequest = ref(null)
+function makeVideoFrom(sha) {
+  if (!sha) return
+  selected.value = null
+  videoRequest.value = { sha, nonce: Date.now() }
+  showVideoStudio.value = true
+}
 
 function startDuetPair({ leadId, partnerId }) {
   showMuseGallery.value = false
@@ -3192,6 +3660,18 @@ onUnmounted(() => {
             :class="starFilter === n ? 'text-yellow-400 bg-yellow-400/10 border border-yellow-600/50' : 'text-gray-600 hover:text-yellow-400/60 border border-transparent'">★{{ n }}+</button>
           <button v-if="starFilter" @click="starFilter = null; fetchImages(true)"
             class="text-gray-500 hover:text-gray-300 ml-0.5 leading-none">✕</button>
+        </div>
+
+        <div class="w-px h-3 bg-gray-700 flex-shrink-0"></div>
+
+        <!-- Made into a video in the studio -->
+        <div class="flex items-center gap-1 flex-shrink-0">
+          <span class="text-gray-500 mr-0.5">🎬:</span>
+          <button v-for="v in ['talk', 'prompt']" :key="v"
+            @click="videoFilter = videoFilter === v ? null : v; fetchImages(true)"
+            :title="$t(`header.filter.video_${v}Hint`)"
+            :class="videoFilter === v ? 'bg-emerald-800 text-emerald-100 border-emerald-600' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 border-gray-700'"
+            class="px-2 py-0.5 rounded-full border transition-colors">{{ $t(`header.filter.video_${v}`) }}</button>
         </div>
 
         <div class="w-px h-3 bg-gray-700 flex-shrink-0"></div>
@@ -3881,14 +4361,219 @@ onUnmounted(() => {
                   <p v-if="refineInstructionMode !== 'none'" class="mt-1.5 text-[10px] text-gray-600 whitespace-pre-line leading-relaxed">{{ $t('refine.instructionTextHint') }}</p>
                 </div>
 
+                <!-- Section 2: Output style -->
+                <details :open="refineDirectPrompt === null" class="group border rounded-xl overflow-hidden transition-colors"
+                  :class="refineDirectPrompt !== null ? 'border-gray-800/40 opacity-50 pointer-events-none' : 'border-gray-800'">
+                  <summary class="px-4 py-3 bg-gray-800/40 text-xs font-semibold text-gray-400 uppercase tracking-wide cursor-pointer list-none flex items-center justify-between hover:bg-gray-800/70 transition-colors">
+                    <span class="flex items-center gap-2">
+                      {{ $t('refine.outputStyle') }}
+                      <span v-if="refineDirectPrompt !== null" class="text-[9px] text-cyan-600 normal-case font-normal">{{ $t('refine.directSkipping') }}</span>
+                    </span>
+                    <span class="text-gray-600 group-open:rotate-180 transition-transform">▼</span>
+                  </summary>
+                  <div class="p-4 space-y-4">
+                    <!-- Output style: natural / danbooru / detailed / moss -->
+                    <div class="grid grid-cols-2 gap-2">
+                      <button @click="refineStyle = 'natural'" :disabled="refining"
+                        :class="refineStyle === 'natural' ? 'bg-purple-900/60 border-purple-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'"
+                        class="py-2.5 px-3 border rounded-lg text-xs font-medium transition-colors disabled:opacity-50 text-left">
+                        <div class="font-semibold">{{ $t('refine.styleNaturalLabel') }}</div>
+                        <div class="text-gray-500 font-normal mt-0.5">FLUX / Anima</div>
+                      </button>
+                      <button @click="refineStyle = 'danbooru'" :disabled="refining"
+                        :class="refineStyle === 'danbooru' ? 'bg-purple-900/60 border-purple-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'"
+                        class="py-2.5 px-3 border rounded-lg text-xs font-medium transition-colors disabled:opacity-50 text-left">
+                        <div class="font-semibold">{{ $t('refine.styleDanbooruLabel') }}</div>
+                        <div class="text-gray-500 font-normal mt-0.5">{{ $t('refine.styleDanbooruDesc') }}</div>
+                      </button>
+                      <button @click="refineStyle = 'detailed'" :disabled="refining"
+                        :class="refineStyle === 'detailed' ? 'bg-purple-900/60 border-purple-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'"
+                        class="py-2.5 px-3 border rounded-lg text-xs font-medium transition-colors disabled:opacity-50 text-left">
+                        <div class="font-semibold">{{ $t('refine.styleDetailedLabel') }}</div>
+                        <div class="text-gray-500 font-normal mt-0.5">{{ $t('refine.styleDetailedDesc') }}</div>
+                      </button>
+                      <button @click="refineStyle = 'moss'; refineNegative = true" :disabled="refining"
+                        :class="refineStyle === 'moss' ? 'bg-purple-900/60 border-purple-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'"
+                        class="py-2.5 px-3 border rounded-lg text-xs font-medium transition-colors disabled:opacity-50 text-left">
+                        <div class="font-semibold">{{ $t('refine.styleMossLabel') }}</div>
+                        <div class="text-gray-500 font-normal mt-0.5">{{ $t('refine.styleMossDesc') }}</div>
+                      </button>
+                    </div>
+
+                    <!-- MOSS-Image: which of its three prompt kinds -->
+                    <div v-if="refineMoss" class="border border-emerald-900/50 bg-emerald-950/20 rounded-xl p-3">
+                      <p class="text-[11px] font-semibold text-emerald-300 mb-2">{{ $t('refine.mossFormatLabel') }}</p>
+                      <div class="grid grid-cols-3 gap-2">
+                        <button v-for="f in ['caption', 'layout', 'tags']" :key="f"
+                          @click="refineMossFormat = f" :disabled="refining"
+                          :class="refineMossFormat === f ? 'bg-emerald-900/60 border-emerald-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'"
+                          class="py-1.5 px-2 border rounded-lg text-xs font-medium transition-colors disabled:opacity-50 text-left">
+                          <div class="font-semibold">{{ $t('refine.mossFormat_' + f) }}</div>
+                          <div class="text-gray-500 font-normal mt-0.5 text-[10px]">{{ $t('refine.mossFormat_' + f + 'Desc') }}</div>
+                        </button>
+                      </div>
+                    </div>
+
+                    <!-- Krea 2 visual script: how the picture is read, in the order it is decided -->
+                    <div v-if="refineKrea" class="border border-sky-900/50 bg-sky-950/20 rounded-xl p-3 space-y-4">
+                      <p class="text-[11px] font-semibold text-sky-300">🗺 {{ refineMoss ? $t('refine.mossSetup') : $t('refine.kreaSetup') }}</p>
+
+                      <div>
+                        <p class="text-xs text-gray-300 mb-2"><span class="inline-block w-4 text-sky-400 font-semibold">{{ kreaStepNo('medium') }}</span>{{ $t('refine.visualMediumLabel') }}</p>
+                                            <div class="grid grid-cols-3 gap-2">
+                        <button v-for="m in ['', 'anime', 'photo']" :key="m || 'auto'"
+                          @click="refineVisualMedium = m" :disabled="refining"
+                          :class="refineVisualMedium === m ? 'bg-purple-900/60 border-purple-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'"
+                          class="py-1.5 px-2 border rounded-lg text-xs font-medium transition-colors disabled:opacity-50 text-center">
+                          {{ $t('refine.visualMedium_' + (m || 'auto')) }}
+                        </button>
+                      </div>
+                      <p class="text-[10px] text-gray-600 mt-1.5">{{ $t('refine.visualMediumDesc') }}</p>
+                      </div>
+
+                      <div v-if="selectedCount >= 2">
+                        <p class="text-xs text-gray-300 mb-2"><span class="inline-block w-4 text-sky-400 font-semibold">{{ kreaStepNo('combine') }}</span>{{ $t('refine.combineLabel') }}</p>
+                                            <div class="grid grid-cols-2 gap-2">
+                        <button v-for="m in ['merge', 'coexist']" :key="m"
+                          @click="refineCombineMode = m" :disabled="refining"
+                          :class="refineCombineMode === m ? 'bg-purple-900/60 border-purple-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'"
+                          class="py-1.5 px-2 border rounded-lg text-xs font-medium transition-colors disabled:opacity-50 text-left">
+                          <div class="font-semibold">{{ $t('refine.combine_' + m) }}</div>
+                          <div class="text-gray-500 font-normal mt-0.5 text-[10px]">{{ $t('refine.combine_' + m + 'Desc') }}</div>
+                        </button>
+                      </div>
+                      </div>
+
+                      <div>
+                        <p class="text-xs text-gray-300 mb-2"><span class="inline-block w-4 text-sky-400 font-semibold">{{ kreaStepNo('world') }}</span>{{ $t('refine.worldLabel') }}</p>
+                                            <div class="grid grid-cols-2 gap-2">
+                        <button v-for="m in ['blend', 'fuse']" :key="m"
+                          @click="refineWorldMode = m" :disabled="refining"
+                          :class="refineWorldMode === m ? 'bg-teal-900/60 border-teal-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'"
+                          class="py-1.5 px-2 border rounded-lg text-xs font-medium transition-colors disabled:opacity-50 text-left">
+                          <div class="font-semibold">{{ $t('refine.world_' + m) }}</div>
+                          <div class="text-gray-500 font-normal mt-0.5 text-[10px]">{{ $t('refine.world_' + m + 'Desc') }}</div>
+                        </button>
+                      </div>
+                        <div v-if="refineWorldMode === 'fuse'" class="mt-3 pl-3 border-l-2 border-teal-700/50">
+                          <label class="text-xs text-gray-400 flex justify-between mb-1.5">
+                            <span>⚗️ {{ $t('refine.chaos') }}</span>
+                            <span class="text-teal-400 font-mono">{{ Math.round(refineDivergence * 100) }}%</span>
+                          </label>
+                          <input v-model.number="refineDivergence" type="range" min="0" max="1" step="0.05"
+                            :disabled="refining" class="w-full accent-teal-500 disabled:opacity-50" />
+                          <p class="text-[10px] text-gray-500 mt-1">{{ $t('refine.chaosDesc') }}</p>
+                        </div>
+                      </div>
+
+                      <div>
+                        <p class="text-xs text-gray-300 mb-2"><span class="inline-block w-4 text-sky-400 font-semibold">{{ kreaStepNo('staging') }}</span>{{ $t('refine.stagingLabel') }}</p>
+                        <div class="grid grid-cols-3 gap-2">
+                          <button v-for="m in ['read', 'move', 'restage']" :key="m"
+                            @click="refineStaging = m" :disabled="refining"
+                            :class="refineStaging === m ? 'bg-rose-900/60 border-rose-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'"
+                            class="py-1.5 px-2 border rounded-lg text-xs font-medium transition-colors disabled:opacity-50 text-left">
+                            <div class="font-semibold">{{ $t('refine.staging_' + m) }}</div>
+                            <div class="text-gray-500 font-normal mt-0.5 text-[10px]">{{ $t('refine.staging_' + m + 'Desc') }}</div>
+                          </button>
+                        </div>
+                      </div>
+
+                      <div class="flex items-center justify-between">
+                        <div>
+                          <p class="text-xs text-gray-300"><span class="inline-block w-4 text-sky-400 font-semibold">{{ kreaStepNo('hints') }}</span>{{ $t('refine.wd14HintsLabel') }}</p>
+                          <p class="text-[10px] text-gray-500 mt-0.5">{{ $t('refine.wd14HintsDesc') }}</p>
+                        </div>
+                        <button @click="refineWd14Hints = !refineWd14Hints" :disabled="refining"
+                          :class="refineWd14Hints ? 'bg-sky-600' : 'bg-gray-700'"
+                          class="relative w-10 h-5 rounded-full transition-colors disabled:opacity-50 flex-shrink-0 ml-4">
+                          <span :class="refineWd14Hints ? 'translate-x-5' : 'translate-x-0.5'"
+                            class="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform block"></span>
+                        </button>
+                      </div>
+                      <div v-if="refineWd14Hints" class="-mt-2 pl-3 border-l-2 border-sky-700/50">
+                        <label class="text-xs text-gray-400 flex justify-between mb-1.5">
+                          <span>{{ $t('refine.wd14HintMinScore') }}</span>
+                          <span class="text-sky-400 font-mono">{{ refineWd14HintMinScore.toFixed(2) }}</span>
+                        </label>
+                        <input v-model.number="refineWd14HintMinScore" type="range" min="0.35" max="0.95" step="0.05"
+                          :disabled="refining" class="w-full accent-sky-500 disabled:opacity-50" />
+                        <p class="text-[10px] text-gray-500 mt-1">{{ $t('refine.wd14HintMinScoreDesc') }}</p>
+                      </div>
+
+                      <div v-if="!refineMossLayout">
+                        <label class="text-xs text-gray-300 flex justify-between mb-1.5">
+                          <span><span class="inline-block w-4 text-sky-400 font-semibold">{{ kreaStepNo('length') }}</span>{{ $t('refine.proseLength') }}</span>
+                          <span class="text-purple-400 font-mono">{{ refineProseParagraphs }}{{ $t('refine.proseLengthUnit') }}</span>
+                        </label>
+                        <input v-model.number="refineProseParagraphs" type="range" min="3" max="7" step="1"
+                          :disabled="refining" class="w-full accent-purple-500 disabled:opacity-50" />
+                      </div>
+                    </div>
+
+                    <!-- Instruction mode: none / basic / enhanced -->
+                    <div>
+                      <p class="text-xs text-gray-400 mb-2">{{ $t('refine.instructionModeLabel') }}</p>
+                      <div class="grid grid-cols-3 gap-2">
+                        <button @click="refineInstructionMode = 'none'" :disabled="refining"
+                          :class="refineInstructionMode === 'none' ? 'bg-gray-700 border-gray-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-500 hover:border-gray-500'"
+                          class="py-1.5 px-2 border rounded-lg text-xs font-medium transition-colors disabled:opacity-50 text-center">
+                          {{ $t('refine.instructionModeNone') }}
+                        </button>
+                        <button @click="refineInstructionMode = 'basic'" :disabled="refining"
+                          :class="refineInstructionMode === 'basic' ? 'bg-purple-900/60 border-purple-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'"
+                          class="py-1.5 px-2 border rounded-lg text-xs font-medium transition-colors disabled:opacity-50 text-center">
+                          {{ $t('refine.instructionModeBasic') }}
+                        </button>
+                        <button @click="refineInstructionMode = 'enhanced'" :disabled="refining"
+                          :class="refineInstructionMode === 'enhanced' ? 'bg-amber-900/60 border-amber-500 text-amber-200' : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'"
+                          class="py-1.5 px-2 border rounded-lg text-xs font-medium transition-colors disabled:opacity-50 text-center">
+                          {{ $t('refine.instructionModeEnhanced') }}
+                        </button>
+                      </div>
+                      <p class="text-[10px] text-gray-600 mt-1.5">{{ $t('refine.instructionModeDesc_' + refineInstructionMode) }}</p>
+                    </div>
+                    <div v-if="!refineKrea || refineMoss" class="flex items-center justify-between"
+                      :class="refineDirectPrompt !== null ? 'opacity-50 pointer-events-none' : ''">
+                      <div>
+                        <p class="text-xs text-gray-300">{{ $t('refine.negPrompt') }}</p>
+                        <p class="text-xs text-gray-600 mt-0.5">{{ refineDirectPrompt !== null ? $t('refine.negPromptFromInversion') : refineMoss ? $t('refine.negPromptMoss') : refineKrea ? $t('refine.negPromptKrea') : $t('refine.negPromptDesc') }}</p>
+                      </div>
+                      <button @click="refineNegative = !refineNegative" :disabled="refining || refineDirectPrompt !== null || (refineKrea && !refineMoss)"
+                        :class="refineNegative ? 'bg-purple-600' : 'bg-gray-700'"
+                        class="relative w-10 h-5 rounded-full transition-colors disabled:opacity-50 flex-shrink-0 ml-4">
+                        <span :class="refineNegative ? 'translate-x-5' : 'translate-x-0.5'"
+                          class="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform block"></span>
+                      </button>
+                    </div>
+                    <!-- Conflict tag suppression -->
+                    <div v-if="!refineKrea" class="flex items-center justify-between">
+                      <div>
+                        <p class="text-xs text-gray-300">{{ $t('refine.suppressConflictTags') }}</p>
+                        <p class="text-xs text-gray-600 mt-0.5">{{ $t('refine.suppressConflictTagsDesc') }}</p>
+                      </div>
+                      <button @click="refineSuppressConflict = !refineSuppressConflict" :disabled="refining || refineKrea"
+                        :class="refineSuppressConflict ? 'bg-amber-600' : 'bg-gray-700'"
+                        class="relative w-10 h-5 rounded-full transition-colors disabled:opacity-50 flex-shrink-0 ml-4">
+                        <span :class="refineSuppressConflict ? 'translate-x-5' : 'translate-x-0.5'"
+                          class="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform block"></span>
+                      </button>
+                    </div>
+                  </div>
+                </details>
+
                 <!-- Section 1: Ollama controls -->
                 <details open class="group border rounded-xl overflow-hidden transition-colors"
                   :class="refineDirectPrompt !== null ? 'border-gray-800/40 opacity-50' : 'border-gray-800'">
                   <summary class="px-4 py-3 bg-gray-800/40 text-xs font-semibold text-gray-400 uppercase tracking-wide cursor-pointer list-none flex items-center justify-between hover:bg-gray-800/70 transition-colors">
                     <span class="flex items-center gap-2">
-                      {{ $t('refine.ollamaControl') }}
+                      <template v-if="refineExternal">
+                        {{ $t('refine.externalControl') }}
+                        <span class="text-[9px] text-sky-400 normal-case font-normal font-mono">{{ refineRoute.model || refineRoute.vision_model }}</span>
+                      </template>
+                      <template v-else>{{ $t('refine.ollamaControl') }}</template>
                       <span v-if="refineDirectPrompt !== null" class="text-[9px] text-cyan-600 normal-case font-normal">{{ $t('refine.directSkipping') }}</span>
-                      <span v-else-if="ollamaOffline" class="text-[9px] text-amber-500 normal-case font-normal flex items-center gap-1">
+                      <span v-else-if="ollamaOffline && !refineExternal" class="text-[9px] text-amber-500 normal-case font-normal flex items-center gap-1">
                         <span class="w-1 h-1 rounded-full bg-amber-500 animate-pulse inline-block"></span>
                         {{ $t('refine.ollamaOfflineBadge') }}
                       </span>
@@ -3899,21 +4584,34 @@ onUnmounted(() => {
                     <div>
                       <label class="text-xs text-gray-500 flex justify-between mb-1.5">
                         <span>{{ $t('refine.temperature') }}</span>
-                        <span class="text-purple-400 font-mono">{{ refineTemp.toFixed(1) }}</span>
+                        <span class="font-mono flex items-center gap-1.5">
+                          <template v-if="refineTempIsServerDefault">
+                            <span class="text-sky-400">{{ refineServerTemp !== null ? refineServerTemp.toFixed(1) : '—' }}</span>
+                            <span class="text-[9px] text-sky-500/80 font-sans">{{ $t('refine.tempServerDefault') }}</span>
+                          </template>
+                          <template v-else>
+                            <span class="text-purple-400">{{ refineTemp.toFixed(1) }}</span>
+                            <button v-if="refineExternal" @click="refineTempOverride = false" :disabled="refining"
+                              class="text-[9px] text-gray-500 hover:text-gray-300 font-sans underline">{{ $t('refine.tempResetToServer') }}</button>
+                          </template>
+                        </span>
                       </label>
                       <input v-model.number="refineTemp" type="range" min="0.0" max="1.5" step="0.1"
+                        @input="refineTempOverride = true"
                         :disabled="refining || refineDirectPrompt !== null" class="w-full accent-purple-500 disabled:opacity-50" />
+                      <p v-if="refineTempIsServerDefault && refineServerTemp === null" class="text-[10px] text-gray-500 mt-1">{{ $t('refine.tempServerUnknown') }}</p>
                       <div class="flex justify-between text-xs text-gray-600 mt-0.5">
                         <span>{{ $t('refine.tempLow') }}</span><span>{{ $t('refine.tempHigh') }}</span>
                       </div>
                     </div>
-                    <div>
+                    <div v-if="!refineKrea">
                       <label class="text-xs text-gray-500 flex justify-between mb-1.5">
-                        <span :title="$t('refine.divergenceTitle')">⚗️ {{ $t('refine.divergence') }}</span>
+                        <span :title="$t('refine.divergenceTitle')">⚗️ {{ refineKrea ? $t('refine.chaos') : $t('refine.divergence') }}</span>
                         <span class="text-teal-400 font-mono">{{ Math.round(refineDivergence * 100) }}%</span>
                       </label>
                       <input v-model.number="refineDivergence" type="range" min="0" max="1" step="0.05"
-                        :disabled="refining || refineDirectPrompt !== null" class="w-full accent-teal-500 disabled:opacity-50" />
+                        :disabled="refining || refineDirectPrompt !== null || !refineChaosOn" class="w-full accent-teal-500 disabled:opacity-50" />
+                      <p v-if="refineKrea" class="text-[10px] text-gray-500 mt-1">{{ refineChaosOn ? $t('refine.chaosDesc') : $t('refine.chaosOff') }}</p>
                       <div class="flex justify-between text-xs text-gray-600 mt-0.5">
                         <span>{{ $t('refine.divergenceLow') }}</span><span>{{ $t('refine.divergenceHigh') }}</span>
                       </div>
@@ -3960,25 +4658,35 @@ onUnmounted(() => {
                         <span>{{ $t('refine.proseLengthLong') }}</span>
                       </div>
                     </div>
-                    <div>
+                    <div :class="refineExternal ? 'opacity-50' : ''">
                       <label class="text-xs text-gray-500 block mb-1">{{ $t('refine.numCtx') }}</label>
-                      <select v-model.number="refineNumCtx" :disabled="refining || refineDirectPrompt !== null"
+                      <select v-model.number="refineNumCtx" :disabled="refining || refineDirectPrompt !== null || refineExternal"
                         class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none focus:border-purple-500 disabled:opacity-50">
                         <option :value="8192">8,192</option>
                         <option :value="16384">{{ $t('refine.numCtxRecommended') }}</option>
                         <option :value="32768">32,768</option>
                       </select>
+                      <p v-if="refineExternal" class="mt-1 text-[10px] text-gray-500">
+                        <template v-if="refineRoute.context">
+                          {{ $t('refine.numCtxServer', { n: refineRoute.context.toLocaleString() }) }}
+                          <template v-if="refineRoute.vision_context && refineRoute.vision_context !== refineRoute.context">
+                            / {{ $t('refine.numCtxServerVision', { n: refineRoute.vision_context.toLocaleString() }) }}
+                          </template>
+                        </template>
+                        <template v-else>{{ $t('refine.numCtxServerUnknown') }}</template>
+                      </p>
                     </div>
                     <!-- WD14 tag decomposition settings -->
-                    <div class="border-t border-gray-700/50 pt-3 space-y-3">
+                    <div class="border-t border-gray-700/50 pt-3 space-y-3" :class="refineKrea && !refineWd14Hints ? 'opacity-50' : ''">
                       <p class="text-xs text-gray-500 font-semibold uppercase tracking-wide">{{ $t('refine.wd14Settings') }}</p>
+                      <p v-if="refineKrea" class="text-[10px] text-gray-500 -mt-2">{{ refineWd14Hints ? $t('refine.wd14HintsAmount') : $t('refine.notUsedByKrea') }}</p>
                       <div>
                         <label class="text-xs text-gray-500 flex justify-between mb-1.5">
                           <span>{{ $t('refine.wd14CommonRatio') }}</span>
                           <span class="text-purple-400 font-mono">{{ Math.round(refineCommonRatio * 100) }}%</span>
                         </label>
                         <input v-model.number="refineCommonRatio" type="range" min="0" max="1" step="0.1"
-                          :disabled="refining || refineDirectPrompt !== null"
+                          :disabled="refining || refineDirectPrompt !== null || (refineKrea && !refineWd14Hints)"
                           class="w-full accent-purple-500 disabled:opacity-50" />
                         <div class="flex justify-between text-xs text-gray-600 mt-0.5">
                           <span>{{ $t('refine.wd14CommonRatioLow') }}</span><span>{{ $t('refine.wd14CommonRatioHigh') }}</span>
@@ -3990,96 +4698,12 @@ onUnmounted(() => {
                           <span class="text-purple-400 font-mono">{{ refineUniqueCount }}</span>
                         </label>
                         <input v-model.number="refineUniqueCount" type="range" min="5" max="40" step="5"
-                          :disabled="refining || refineDirectPrompt !== null"
+                          :disabled="refining || refineDirectPrompt !== null || (refineKrea && !refineWd14Hints)"
                           class="w-full accent-purple-500 disabled:opacity-50" />
                         <div class="flex justify-between text-xs text-gray-600 mt-0.5">
                           <span>5</span><span>40</span>
                         </div>
                       </div>
-                    </div>
-                  </div>
-                </details>
-
-                <!-- Section 2: Output style -->
-                <details :open="refineDirectPrompt === null" class="group border rounded-xl overflow-hidden transition-colors"
-                  :class="refineDirectPrompt !== null ? 'border-gray-800/40 opacity-50 pointer-events-none' : 'border-gray-800'">
-                  <summary class="px-4 py-3 bg-gray-800/40 text-xs font-semibold text-gray-400 uppercase tracking-wide cursor-pointer list-none flex items-center justify-between hover:bg-gray-800/70 transition-colors">
-                    <span class="flex items-center gap-2">
-                      {{ $t('refine.outputStyle') }}
-                      <span v-if="refineDirectPrompt !== null" class="text-[9px] text-cyan-600 normal-case font-normal">{{ $t('refine.directSkipping') }}</span>
-                    </span>
-                    <span class="text-gray-600 group-open:rotate-180 transition-transform">▼</span>
-                  </summary>
-                  <div class="p-4 space-y-4">
-                    <!-- Output style: natural / danbooru / detailed -->
-                    <div class="grid grid-cols-3 gap-2">
-                      <button @click="refineStyle = 'natural'" :disabled="refining"
-                        :class="refineStyle === 'natural' ? 'bg-purple-900/60 border-purple-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'"
-                        class="py-2.5 px-3 border rounded-lg text-xs font-medium transition-colors disabled:opacity-50 text-left">
-                        <div class="font-semibold">{{ $t('refine.styleNaturalLabel') }}</div>
-                        <div class="text-gray-500 font-normal mt-0.5">FLUX / Anima</div>
-                      </button>
-                      <button @click="refineStyle = 'danbooru'" :disabled="refining"
-                        :class="refineStyle === 'danbooru' ? 'bg-purple-900/60 border-purple-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'"
-                        class="py-2.5 px-3 border rounded-lg text-xs font-medium transition-colors disabled:opacity-50 text-left">
-                        <div class="font-semibold">{{ $t('refine.styleDanbooruLabel') }}</div>
-                        <div class="text-gray-500 font-normal mt-0.5">{{ $t('refine.styleDanbooruDesc') }}</div>
-                      </button>
-                      <button @click="refineStyle = 'detailed'" :disabled="refining"
-                        :class="refineStyle === 'detailed' ? 'bg-purple-900/60 border-purple-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'"
-                        class="py-2.5 px-3 border rounded-lg text-xs font-medium transition-colors disabled:opacity-50 text-left">
-                        <div class="font-semibold">{{ $t('refine.styleDetailedLabel') }}</div>
-                        <div class="text-gray-500 font-normal mt-0.5">{{ $t('refine.styleDetailedDesc') }}</div>
-                      </button>
-                    </div>
-
-                    <!-- Instruction mode: none / basic / enhanced -->
-                    <div>
-                      <p class="text-xs text-gray-400 mb-2">{{ $t('refine.instructionModeLabel') }}</p>
-                      <div class="grid grid-cols-3 gap-2">
-                        <button @click="refineInstructionMode = 'none'" :disabled="refining"
-                          :class="refineInstructionMode === 'none' ? 'bg-gray-700 border-gray-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-500 hover:border-gray-500'"
-                          class="py-1.5 px-2 border rounded-lg text-xs font-medium transition-colors disabled:opacity-50 text-center">
-                          {{ $t('refine.instructionModeNone') }}
-                        </button>
-                        <button @click="refineInstructionMode = 'basic'" :disabled="refining"
-                          :class="refineInstructionMode === 'basic' ? 'bg-purple-900/60 border-purple-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'"
-                          class="py-1.5 px-2 border rounded-lg text-xs font-medium transition-colors disabled:opacity-50 text-center">
-                          {{ $t('refine.instructionModeBasic') }}
-                        </button>
-                        <button @click="refineInstructionMode = 'enhanced'" :disabled="refining"
-                          :class="refineInstructionMode === 'enhanced' ? 'bg-amber-900/60 border-amber-500 text-amber-200' : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'"
-                          class="py-1.5 px-2 border rounded-lg text-xs font-medium transition-colors disabled:opacity-50 text-center">
-                          {{ $t('refine.instructionModeEnhanced') }}
-                        </button>
-                      </div>
-                      <p class="text-[10px] text-gray-600 mt-1.5">{{ $t('refine.instructionModeDesc_' + refineInstructionMode) }}</p>
-                    </div>
-                    <div class="flex items-center justify-between"
-                      :class="refineDirectPrompt !== null ? 'opacity-50 pointer-events-none' : ''">
-                      <div>
-                        <p class="text-xs text-gray-300">{{ $t('refine.negPrompt') }}</p>
-                        <p class="text-xs text-gray-600 mt-0.5">{{ refineDirectPrompt !== null ? $t('refine.negPromptFromInversion') : $t('refine.negPromptDesc') }}</p>
-                      </div>
-                      <button @click="refineNegative = !refineNegative" :disabled="refining || refineDirectPrompt !== null"
-                        :class="refineNegative ? 'bg-purple-600' : 'bg-gray-700'"
-                        class="relative w-10 h-5 rounded-full transition-colors disabled:opacity-50 flex-shrink-0 ml-4">
-                        <span :class="refineNegative ? 'translate-x-5' : 'translate-x-0.5'"
-                          class="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform block"></span>
-                      </button>
-                    </div>
-                    <!-- Conflict tag suppression -->
-                    <div class="flex items-center justify-between">
-                      <div>
-                        <p class="text-xs text-gray-300">{{ $t('refine.suppressConflictTags') }}</p>
-                        <p class="text-xs text-gray-600 mt-0.5">{{ $t('refine.suppressConflictTagsDesc') }}</p>
-                      </div>
-                      <button @click="refineSuppressConflict = !refineSuppressConflict" :disabled="refining"
-                        :class="refineSuppressConflict ? 'bg-amber-600' : 'bg-gray-700'"
-                        class="relative w-10 h-5 rounded-full transition-colors disabled:opacity-50 flex-shrink-0 ml-4">
-                        <span :class="refineSuppressConflict ? 'translate-x-5' : 'translate-x-0.5'"
-                          class="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform block"></span>
-                      </button>
                     </div>
                   </div>
                 </details>
@@ -4222,7 +4846,7 @@ onUnmounted(() => {
                       <button @click="copyToClipboard(fmtPrompt(positivePrompt))"
                         class="text-xs text-gray-500 hover:text-gray-200 px-2 py-0.5 bg-gray-800 hover:bg-gray-700 rounded transition-colors">{{ $t('refine.copy') }}</button>
                     </div>
-                    <p class="text-xs text-gray-200 bg-gray-800/80 rounded-lg p-3 whitespace-pre-wrap break-words leading-relaxed max-h-36 overflow-y-auto">{{ fmtPrompt(positivePrompt) }}</p>
+                    <p class="text-xs text-gray-200 bg-gray-800/80 rounded-lg p-3 whitespace-pre-wrap break-words leading-relaxed max-h-36 overflow-y-auto">{{ viewPrompt(positivePrompt) }}</p>
                   </div>
                   <div v-if="refineInjectedLiterals.length" class="flex flex-wrap items-center gap-1.5">
                     <span class="text-[10px] text-purple-400/80 font-semibold uppercase tracking-wide">{{ $t('refine.injectedLiterals') }}</span>
@@ -4279,7 +4903,9 @@ onUnmounted(() => {
                         : 'bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400 text-white shadow-lg shadow-purple-900/30'">
                   <span v-if="!refining">
                     <template v-if="refineAutoSubmit && !refineWorkflow">{{ $t('refine.workflowRequired') }}</template>
-                    <template v-else>{{ refineDirectPrompt !== null ? $t('refine.directRunLabel') : $t('refine.run', { n: selectedCount }) }}</template>
+                    <template v-else-if="refineDirectPrompt !== null">{{ $t('refine.directRunLabel') }}</template>
+                    <template v-else-if="refineKrea && refineSheet">{{ $t('refine.runReread', { n: selectedCount }) }}</template>
+                    <template v-else>{{ $t('refine.run', { n: selectedCount }) }}</template>
                   </span>
                   <span v-else class="flex items-center justify-center gap-2">
                     <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -4331,9 +4957,16 @@ onUnmounted(() => {
                         📌
                       </div>
                     </div>
-                    <div class="mt-1 px-0.5">
-                      <div class="text-center text-[10px] text-purple-300 font-mono leading-none mb-0.5 select-none">
-                        {{ normalizedPct(sha256) }}%
+                    <div class="mt-1 px-0.5" :class="refineKrea && normalizedPct(sha256) === 0 ? 'opacity-40' : ''">
+                      <div class="text-center text-[10px] font-mono leading-none mb-0.5 select-none flex items-center justify-center gap-1">
+                        <span v-if="refineKrea && sha256 === leadSha"
+                          :title="$t('refine.weightLeadTip')"
+                          class="px-1 rounded bg-purple-600 text-white text-[8px] font-semibold tracking-wide">
+                          {{ $t('refine.weightLead') }}
+                        </span>
+                        <span :class="refineKrea && normalizedPct(sha256) === 0 ? 'text-gray-500' : 'text-purple-300'">
+                          {{ normalizedPct(sha256) }}%
+                        </span>
                       </div>
                       <input
                         type="range" min="0" max="100" step="1"
@@ -4341,8 +4974,12 @@ onUnmounted(() => {
                         :disabled="refining"
                         @input="onWeightChange(sha256, Number($event.target.value))"
                         class="w-full h-1 rounded appearance-none bg-gray-700 accent-purple-500 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
-                        :title="$t('refine.weightTip')"
+                        :title="refineKrea ? $t('refine.weightTipKrea') : $t('refine.weightTip')"
                       />
+                      <p v-if="refineKrea && normalizedPct(sha256) === 0"
+                        class="text-center text-[8px] text-gray-500 leading-tight mt-0.5 select-none">
+                        {{ $t('refine.weightOff') }}
+                      </p>
                       <button @click="cycleImageRole(sha256)"
                         :disabled="refining"
                         :title="$t('refine.roleTip')"
@@ -4386,6 +5023,10 @@ onUnmounted(() => {
                       color="purple-gradient"
                       size="md"
                     />
+                    <!-- Where the job has got to, and what is still to come. -->
+                    <div class="mt-1.5">
+                      <RefineSteps :steps="refineSteps" :n="refinePhaseN" :total="refinePhaseTotal" />
+                    </div>
                   </div>
                   <!-- Waiting for first token (refinement circle animation) -->
                   <div v-if="refinePhase === 'llm' && !streamingText && !positivePrompt"
@@ -4544,7 +5185,7 @@ onUnmounted(() => {
                       <button @click="copyToClipboard(fmtPrompt(positivePrompt))"
                         class="text-xs text-gray-500 hover:text-gray-200 px-2 py-0.5 bg-gray-800 hover:bg-gray-700 rounded transition-colors">{{ $t('refine.copy') }}</button>
                     </div>
-                    <p class="text-xs text-gray-200 whitespace-pre-wrap break-words leading-relaxed">{{ fmtPrompt(positivePrompt) }}</p>
+                    <p class="text-xs text-gray-200 whitespace-pre-wrap break-words leading-relaxed">{{ viewPrompt(positivePrompt) }}</p>
                     <div v-if="negativePromptText" class="pt-2 border-t border-gray-800 space-y-1.5">
                       <div class="flex items-center justify-between">
                         <p class="text-xs text-red-400 font-semibold uppercase tracking-wide">{{ $t('refine.negativePromptLabel') }}</p>
@@ -4562,6 +5203,119 @@ onUnmounted(() => {
                       </div>
                     </div>
                   </div>
+                  <!-- Scene sheet (detailed style): the prompt above was written from it.
+                       Fix it by hand or in words, then write the prompt again. -->
+                  <div v-if="refineKrea && refineSheet" class="bg-gray-900 border border-sky-800/40 rounded-xl overflow-hidden">
+                    <div class="px-4 py-3 bg-sky-900/20 space-y-2">
+                      <div class="flex items-center justify-between">
+                        <p class="text-xs text-sky-300 font-semibold">🗺 {{ $t('refine.sheet.title') }}</p>
+                        <button v-if="refineSheetHistory.length" @click="undoSheet" :disabled="refining"
+                          class="text-[11px] text-gray-400 hover:text-gray-200 disabled:opacity-40">↶ {{ $t('refine.sheet.undo') }}</button>
+                      </div>
+                      <p class="text-[10px] text-gray-400">{{ $t('refine.sheet.lead') }}</p>
+                      <!-- Where you are: read → fix → write again -->
+                      <div class="flex items-center gap-1 text-[10px]">
+                        <span class="px-2 py-0.5 rounded-full bg-sky-800/50 text-sky-200">① {{ $t('refine.sheet.stepRead') }}</span>
+                        <span class="text-gray-600">→</span>
+                        <span class="px-2 py-0.5 rounded-full" :class="refineSheetDirty || refineSheetInstruction.trim() ? 'bg-amber-700/60 text-amber-100' : 'bg-gray-800 text-gray-400'">② {{ $t('refine.sheet.stepFix') }}</span>
+                        <span class="text-gray-600">→</span>
+                        <span class="px-2 py-0.5 rounded-full bg-gray-800 text-gray-400">③ {{ $t('refine.sheet.stepWrite') }}</span>
+                      </div>
+                    </div>
+
+                    <!-- What the last retake or fusion changed -->
+                    <div v-if="refineSheetChanges.length" class="px-4 py-2 border-t border-sky-900/30 space-y-1">
+                      <p class="text-[10px] text-gray-500">{{ $t('refine.sheet.changesLabel') }}</p>
+                      <p v-for="(c, i) in refineSheetChanges" :key="i" class="text-[10px] font-mono leading-snug"
+                        :class="c.startsWith('[locked') ? 'text-gray-500' : 'text-amber-200/80'">{{ c }}</p>
+                    </div>
+
+                    <!-- Two ways to fix it -->
+                    <div class="flex border-t border-sky-900/30">
+                      <button v-for="tab in ['hand', 'words', 'directions']" :key="tab" @click="refineSheetTab = tab"
+                        class="flex-1 py-2 text-xs font-medium transition-colors"
+                        :class="refineSheetTab === tab ? 'bg-sky-900/40 text-sky-100 border-b-2 border-sky-400' : 'text-gray-500 hover:text-gray-300 border-b-2 border-transparent'">
+                        {{ $t('refine.sheet.tab_' + tab) }}
+                      </button>
+                    </div>
+
+                    <div v-if="refineSheetTab === 'hand'" class="p-3 space-y-3">
+                      <p class="text-[10px] text-gray-500">{{ $t('refine.sheet.handHint') }}</p>
+                      <SceneSheetEditor v-model="refineSheet" v-model:locked="refineSheetLocked" :disabled="refining" />
+                      <!-- Follows the scroll, so it is in reach wherever the edit was made -->
+                      <div class="sticky bottom-0 -mx-3 -mb-3 px-3 py-3 bg-gray-900/95 border-t border-sky-900/40 backdrop-blur">
+                      <button @click="rewriteFromSheet" :disabled="refining"
+                        class="w-full py-2 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50"
+                        :class="refineSheetDirty ? 'bg-sky-600 hover:bg-sky-500 text-white' : 'bg-sky-900/50 border border-sky-700/50 text-sky-200 hover:bg-sky-800/60'">
+                        ✍️ {{ $t('refine.sheet.rewrite') }}
+                        <span v-if="refineSheetDirty" class="ml-1 text-[10px] font-normal opacity-90">· {{ $t('refine.sheet.unsaved') }}</span>
+                      </button>
+                      </div>
+                    </div>
+
+                    <div v-else-if="refineSheetTab === 'directions'" class="p-3 space-y-3">
+                      <p class="text-[10px] text-gray-500">{{ $t('refine.sheet.directionsHint') }}</p>
+                      <div class="flex flex-wrap gap-1.5">
+                        <label v-for="k in DIRECTION_KINDS" :key="k"
+                          class="flex items-center gap-1 px-2 py-1 rounded-lg border text-[11px] cursor-pointer"
+                          :class="refineDirectionKinds.includes(k) ? 'border-amber-600/60 bg-amber-900/30 text-amber-100' : 'border-gray-700 text-gray-500'">
+                          <input type="checkbox" class="accent-amber-500" :value="k" v-model="refineDirectionKinds" :disabled="refineDirecting" />
+                          {{ $t('refine.sheet.direction_' + k) }}
+                        </label>
+                      </div>
+                      <button @click="proposeDirections(refineDirectionKinds)"
+                        :disabled="refining || refineDirecting || !refineDirectionKinds.length"
+                        class="w-full py-2 rounded-lg text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-white disabled:opacity-40 disabled:bg-gray-800 disabled:text-gray-400 transition-colors">
+                        <template v-if="refineDirecting">⏳ {{ $t('refine.sheet.proposing', { kind: refineDirectingKind ? $t('refine.sheet.direction_' + refineDirectingKind) : '' }) }}</template>
+                        <template v-else>🎬 {{ $t('refine.sheet.proposeDirections') }}</template>
+                      </button>
+                      <p v-if="refineDirectionsError" class="text-[11px] text-red-400 break-all">{{ refineDirectionsError }}</p>
+                      <div v-for="card in refineDirections" :key="card.kind"
+                        class="rounded-lg border p-3 space-y-2 transition-opacity"
+                        :class="[card.failed ? 'border-red-900/50 bg-red-950/20' : 'border-amber-800/40 bg-amber-950/10', directionStale(card) ? 'opacity-50' : '']">
+                        <div class="flex items-center gap-2">
+                          <span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/50 text-amber-200 whitespace-nowrap">{{ $t('refine.sheet.direction_' + card.kind) }}</span>
+                          <span class="text-xs font-semibold text-gray-100 truncate">{{ card.title || '' }}</span>
+                        </div>
+                        <p v-if="card.direction" class="text-[11px] text-gray-300 leading-snug">{{ card.direction }}</p>
+                        <p v-if="card.failed" class="text-[11px] text-red-300">{{ $t('refine.sheet.directionFailed', { reason: card.reason }) }}</p>
+                        <template v-else>
+                          <p v-for="(c, i) in card.changed" :key="'c' + i" class="text-[10px] font-mono leading-snug text-amber-200/80">{{ c }}</p>
+                          <p v-if="!card.changed.length" class="text-[10px] text-gray-500">{{ $t('refine.sheet.directionNoChange') }}</p>
+                          <p v-if="card.outside.length" class="text-[10px] text-gray-500">{{ $t('refine.sheet.directionOutside', { list: card.outside.join(', ') }) }}</p>
+                          <p v-if="card.refused.length" class="text-[10px] text-gray-500">🔒 {{ card.refused.join(', ') }}</p>
+                        </template>
+                        <p v-if="directionStale(card)" class="text-[10px] text-gray-500">{{ $t('refine.sheet.directionStale') }}</p>
+                        <div class="flex gap-2">
+                          <button v-if="!card.failed" @click="takeDirection(card)"
+                            :disabled="refining || refineDirecting || directionStale(card) || !card.changed.length"
+                            class="flex-1 py-1.5 rounded-lg text-xs font-semibold bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-40 disabled:bg-gray-800 disabled:text-gray-400 transition-colors">
+                            ✍️ {{ $t('refine.sheet.takeDirection') }}
+                          </button>
+                          <button @click="proposeDirections([card.kind])" :disabled="refining || refineDirecting"
+                            class="px-3 py-1.5 rounded-lg text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-40 transition-colors">
+                            🎲 {{ $t('refine.sheet.againDirection') }}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div v-else class="p-3 space-y-2">
+                      <p class="text-[10px] text-gray-500">{{ $t('refine.sheet.wordsHint') }}</p>
+                      <textarea v-model="refineSheetInstruction" :disabled="refining" rows="2"
+                        @keydown.enter.ctrl.prevent="retakeSheet" @keydown.enter.meta.prevent="retakeSheet"
+                        :placeholder="$t('refine.sheet.retakePlaceholder')"
+                        class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-xs text-gray-200 focus:outline-none focus:border-sky-500 resize-y" />
+                      <p v-if="refineSheetLocked.length" class="text-[10px] text-gray-500">
+                        🔒 {{ $t('refine.sheet.lockedNow', { list: refineSheetLocked.map(sheetPathLabel).join('、') }) }}
+                      </p>
+                      <button @click="retakeSheet" :disabled="refining || !refineSheetInstruction.trim()"
+                        class="w-full py-2 rounded-lg text-xs font-semibold bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-40 disabled:bg-gray-800 disabled:text-gray-400 transition-colors">
+                        💬 {{ $t('refine.sheet.retake') }}
+                      </button>
+                    </div>
+                  </div>
+
                   <!-- Done without ComfyUI -->
                   <div v-if="refinePhase === 'done' && positivePrompt && !refineAutoSubmit"
                     class="text-center py-2">
@@ -4857,6 +5611,16 @@ onUnmounted(() => {
                   class="flex items-center gap-1.5 px-3 py-1.5 bg-amber-900/50 hover:bg-amber-800/70 border border-amber-700/50 text-amber-300 hover:text-amber-100 rounded-lg text-xs transition-colors">
                   ✨ {{ $t('detail.refineFromThis') }}
                 </button>
+                <!-- Making a video from this picture belongs with the other
+                     "make something from this" actions, not pinned beside the
+                     close button where it crowded the title row. -->
+                <button
+                  type="button"
+                  @click="makeVideoFrom(selected.sha256)"
+                  :title="$t('video.make')"
+                  class="flex items-center gap-1.5 px-3 py-1.5 bg-rose-900/50 hover:bg-rose-800/70 border border-rose-700/50 text-rose-300 hover:text-rose-100 rounded-lg text-xs transition-colors">
+                  🎬 {{ $t('video.makeShort') }}
+                </button>
                 <button
                   v-if="selected.positive_prompt"
                   @click="handleSendToRefineDirect({ shas: [selected.sha256], directPrompt: selected.positive_prompt, directNegativePrompt: selected.negative_prompt || '', source: 'detail' })"
@@ -5059,6 +5823,34 @@ onUnmounted(() => {
                      class="text-xs text-indigo-300/70">
                     ✦ {{ $t('detail.creationInspireMode') }}: {{ selected.creation_record.inspire_context.mode }}
                   </p>
+                  <!-- The check: did the picture actually show the sheet? -->
+                  <div v-if="selected.sheet_check && !selected.sheet_check.error">
+                    <template v-if="selected.sheet_check.missed?.length">
+                      <p class="text-xs text-amber-300/90 font-medium">
+                        ⚠ {{ $t('detail.sheetCheckMissed', { n: selected.sheet_check.missed.length }) }}
+                      </p>
+                      <ul class="mt-1 space-y-0.5">
+                        <li v-for="(m, i) in selected.sheet_check.missed" :key="i"
+                            class="flex gap-2 text-[11px] leading-snug">
+                          <span class="text-amber-200/70 shrink-0 w-28 truncate"
+                                :title="m.person ? m.box + ' — ' + m.who : m.box">
+                            {{ m.person ? m.box + ' (' + m.who + ')' : m.box }}
+                          </span>
+                          <span class="text-gray-400 truncate" :title="m.value">{{ m.value }}</span>
+                        </li>
+                      </ul>
+                      <button v-if="selected.creation_record.scene_sheet"
+                              @click="rerollEmphasising(selected)" :disabled="refining"
+                              :title="$t('detail.sheetCheckRerollTip')"
+                              class="mt-1.5 px-2.5 py-1 rounded-lg border border-amber-700/60 bg-amber-950/40 text-amber-200 hover:bg-amber-900/50 transition disabled:opacity-40 text-[11px]">
+                        {{ $t('detail.sheetCheckReroll') }}
+                      </button>
+                    </template>
+                    <p v-else-if="selected.sheet_check.checked"
+                       class="text-[11px] text-emerald-400/70">
+                      ✓ {{ $t('detail.sheetCheckClean', { n: selected.sheet_check.checked }) }}
+                    </p>
+                  </div>
                   <!-- Technical settings -->
                   <dl class="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px] text-gray-500">
                     <template v-if="selected.creation_record.workflow_name">
@@ -5552,6 +6344,14 @@ onUnmounted(() => {
       @update:show="onMuseShow"
       @session-state="onMuseSessionState"
       @select-image="openImageBySha($event)"
+      @make-video="makeVideoFrom($event)"
+      @toast="showToast($event.msg, $event.type)"
+    />
+
+    <VideoStudio
+      :show="showVideoStudio"
+      :request="videoRequest"
+      @update:show="showVideoStudio = $event"
       @toast="showToast($event.msg, $event.type)"
     />
 

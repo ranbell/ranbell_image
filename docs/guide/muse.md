@@ -1,6 +1,6 @@
 # Muse — Creator's Guide
 
-**Ranbell Image v0.4.0**
+**Ranbell Image v0.5.0**
 
 日本語版はこちら → [muse.ja.md](muse.ja.md)
 
@@ -358,6 +358,41 @@ A model that cannot read images may be on the seat. Switch back to **Gemma 4 26B
 
 **Test or final will not start / it falls over**
 Renders go through the scheduler. A busy card means wait; climbing on while it is full can drop the job. Check the Control Room generation lane.
+
+---
+
+## 10. The video studio — a video from this still
+
+A place to settle a short video that starts from a still, by talking it over with an actress. It is its own screen, apart from the photo shoot.
+
+**Opening it.** Press "🎬 Video" in the gallery's image detail, or on the corner of a Muse test shot or final.
+
+**Who to talk with.** The actresses' faces sit under the picture on the left; press one to talk with her. "+ Add a second" brings in another, and the two of them talk it over together.
+
+- A still from a Muse shoot seats that shoot's actress already, and the talk carries on from the shoot. She remembers what you were shooting.
+- You can pick someone else instead; she then talks about it as someone else's shoot, not her own.
+- In a photo from elsewhere, the people in it are not her, and she talks about them as the people in the photo.
+
+Pick the length (5, 10 or 15 seconds) and the model, write in one line what kind of video you want (or leave it and say it in the talk), and press "Start the talk". The model starts on the one that shoot ran on for a still from a shoot, otherwise on your last pick here (the latest shoot's the first time). Only models that can read pictures are listed.
+
+The talk goes in three steps, and the strip under the picture shows which one you are on (① Direction → ② Timetable → ③ Done) and what moves it on. The buttons that move it on sit just above the talk's input.
+
+**① Settle the direction.** She looks at the picture and first asks what kind of video you want. Answer, and four ideas of different kinds are written to fit it; then she says what she thinks. The ideas sit as cards under the picture, but they are material for the talk, not a menu (the moment goes on, the camera reveals, somewhere else, the world changes; with a line written at the start they come straight away; "Let them pitch anyway" leaves it to her, "Ask for other ideas" draws again). She has opinions of her own and says so when she would do it differently. Where there is a choice to make, two buttons appear; pressing one says it as your line. The small bracketed lines are her muttering to herself. When the talk shows the direction is settled ("let's go with that"), it moves on by itself; "Settle this and draft the timetable" does it as the talk stands.
+
+**How it is shot.** The style is settled along with the direction, and "🎥 Shot as" under the picture changes it at any time.
+- **Quiet**: one shot, a quiet camera; the face and small movements carry it.
+- **Moving**: one shot, and the camera never stops — closing in, circling, following, flowing from one move to the next.
+- **Cuts**: two or three shots, joined by movement — a whip pan, the camera passing behind someone.
+
+Say "I want the camera to circle round her" and that is the style; say nothing and the one that suits the clip is picked. Every segment of the prompt also says how the place moves — light, wind, the background (Environment).
+
+**② Go through the timetable.** What is settled (direction, style, length, what to keep out) and a timetable in one- or two-second segments appear under the picture. She goes through it from the first segment, asking whether each one is right; the one on the table has a ▶. Say what you want changed ("at the end she notices the camera and gets shy", "circle round her here"). Only what you ask for, or say yes to, is written in, and "🗒 Updated the timetable" shows each time. When a segment is fine, press "✓ This one is fine — next" under the talk, or just say "good" or "next": it gets a ✓ and the talk moves on. What you say no to ("no trembling") stays under "🚫 Kept out" and is kept out of the whole clip. To rethink the whole thing, press "Back to the direction".
+
+**③ Write the prompt.** Once every segment has been gone through she asks whether to write the prompt; you can also say "write it up" or press "📝 Write the prompt from this timetable" at any point. The prompt to paste into Hailuo (MiniMax) appears under the picture: each segment with its action and expression, camera, the place around them, and music. It takes twenty to fifty seconds. Then the talk is done: she closes it, and "📋 Copy", "✏️ Change" and "＋ New video from this still" sit under the talk. Paste the prompt with Hailuo's prompt optimizer off — left on, it rewrites the times and the names. "✏️ Change", or simply saying something, takes the talk back to the timetable; writing again adds a numbered prompt.
+
+**Coming back.** Talks are kept. Pressing "🎬 Video" on the same still again picks its talk back up, and "🔍 Find a talk" at the top opens any of them. Type there to search the prompts, the directions and timetables, the ideas' titles and stories, the actresses' names and the talk itself (several words narrow it to talks with all of them); a hit in a prompt opens that prompt. When a talk wrote several prompts, the numbers on the prompt box switch between them. "Change the cast" starts again with someone else.
+
+When a talk starts, and on "Ask for other ideas", an image model still resident on the GPU is unloaded first (never while a render is running), so a talk right after a shoot does not crawl. The video itself is not rendered here.
 
 ---
 

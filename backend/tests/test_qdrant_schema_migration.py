@@ -188,6 +188,10 @@ def sample_points(n=5, colour=False):
 def make_db(fake) -> QdrantDBClient:
     db = QdrantDBClient.__new__(QdrantDBClient)
     db._qc = fake
+    # Copying a collection goes through the client that is allowed to wait —
+    # the default one timed out partway through a real 17,985-point adoption
+    # (2026-11-02). One fake stands in for both.
+    db._qc_bulk = fake
     db.has_mrl = False
     db.has_color_vector = False
     db._small_dim = settings.embed_dim_small

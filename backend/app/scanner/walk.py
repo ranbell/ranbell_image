@@ -21,6 +21,11 @@ import time
 from dataclasses import dataclass, field
 
 SCAN_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".webp"})
+# What Pillow may decode those files as. Image.open sniffs the content, not
+# the name, so without this a TIFF or FlashPix file named .png runs through
+# decoders with known heap overflows (Pillow advisories fixed in 13.0.0,
+# 2026-10). Nothing Ranbell reads is in any other format.
+PIL_FORMATS = ("PNG", "JPEG", "WEBP")
 RACY_NS = 2_000_000_000
 
 

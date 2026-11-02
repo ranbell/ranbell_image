@@ -1,6 +1,6 @@
 # 技術リファレンス: Muse — 会話が撮影になる仕組み
 
-**Ranbell Image v0.4.0**
+**Ranbell Image v0.5.0**
 
 English → [muse.md](muse.md)
 

@@ -6,11 +6,11 @@
 
 **Local AI image studio — discover by meaning, synthesize by instinct.**
 
-![Version](https://img.shields.io/badge/version-0.4.1-blue)
+![Version](https://img.shields.io/badge/version-0.5.0-blue)
 ![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
 ![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker)
 ![ghcr.io](https://img.shields.io/badge/ghcr.io-ranbell%2Franbell--image-blue?logo=github)
-![Qdrant](https://img.shields.io/badge/Qdrant-v1.19-6B4FBB)
+![Qdrant](https://img.shields.io/badge/Qdrant-v1.20-6B4FBB)
 ![Ollama](https://img.shields.io/badge/Ollama-local_AI-grey)
 ![ComfyUI](https://img.shields.io/badge/ComfyUI-integration-orange)
 ![WD14](https://img.shields.io/badge/WD14-tagger-pink)
@@ -67,6 +67,7 @@ Look at the test shot — *is this okay?* If it is, go to the final with **the s
 - **Test shot → final** — each test press draws a fresh seed; the final keeps **the seed you approved** and only raises the steps
 - **It knows which model family a workflow belongs to** — Anima and Krea2 want different steps, and only one of them takes a negative prompt. cfg and resolution are whatever the workflow was saved with
 - **After the shoot** — she writes a secret diary nobody sees, posts something short in the green room, and now and then goes out with friends. Next time, those memories are in her preamble
+- **Video prompts — beta** 🧪 — take any still into a video studio and talk with an actress about what it could become. She proposes a few directions and writes the shot into a video prompt. Early days: the shape of it may still change
 
 The Muse guide and technical reference are in Japanese:
 

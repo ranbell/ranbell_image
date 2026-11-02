@@ -1,6 +1,6 @@
 # Technical reference: Muse — how talk becomes a shoot
 
-**Ranbell Image v0.4.0**
+**Ranbell Image v0.5.0**
 
 日本語版はこちら → [muse.ja.md](muse.ja.md)
 

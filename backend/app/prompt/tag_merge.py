@@ -64,12 +64,17 @@ def _resolve_weights(sha256s: list[str], raw_weights: list[float]) -> list[float
     return [w / total for w in raw_weights]
 
 def _tags_conflict(tag_a: str, tag_b: str) -> bool:
-    """BM25-style: shared meaningful token (len≥3) → same category → likely conflict."""
+    """Two tags that cannot both be true: one slot, two values (tags.conflict).
+
+    It used to call any two tags sharing a word of three letters a conflict,
+    so with several references `long_hair` lost to `blonde_hair` and
+    `hair_ornament` to `hair_ribbon` — the lower-weighted image's features
+    were thrown away although nothing contradicted them (2026-10-31).
+    """
     if tag_a == tag_b:
         return False  # identical = duplicate, handled separately
-    toks_a = {t for t in tag_a.split("_") if len(t) >= 3}
-    toks_b = {t for t in tag_b.split("_") if len(t) >= 3}
-    return bool(toks_a & toks_b)
+    from ..tags.conflict import contradicts
+    return contradicts(tag_a, tag_b)
 
 def _filter_tags_for_role(scored: list[tuple[str, float]], role: str) -> list[tuple[str, float]]:
     """Filter an image's scored WD14 tags according to its reference role.
@@ -323,7 +328,7 @@ def _build_all_must(wd14_analysis: dict) -> list[str]:
     return result
 
 def _apply_must_replacements(tags: list[str], all_must: list[str]) -> list[str]:
-    """Replace each tag with a conflicting WD14 must_unique tag (BM25-style), dedup."""
+    """Replace each tag with a WD14 must_unique tag that contradicts it, dedup."""
     seen: set[str] = set()
     result: list[str] = []
     for tag in tags:

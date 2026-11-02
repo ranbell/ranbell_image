@@ -3,6 +3,7 @@ import io
 import os
 from pathlib import Path
 from PIL import Image
+from ..scanner.walk import PIL_FORMATS
 from ..config import settings
 
 
@@ -17,7 +18,7 @@ def thumbnail_exists(sha256: str) -> bool:
 def _generate_sync(image_path: Path, sha256: str, data: bytes | None = None) -> Path:
     out = get_thumbnail_path(sha256)
     out.parent.mkdir(parents=True, exist_ok=True)
-    with Image.open(io.BytesIO(data) if data is not None else image_path) as img:
+    with Image.open(io.BytesIO(data) if data is not None else image_path, formats=PIL_FORMATS) as img:
         img.thumbnail((settings.thumbnail_size, settings.thumbnail_size), Image.LANCZOS)
         mode = "RGBA" if img.mode in ("RGBA", "LA", "P") else "RGB"
         # Write beside it and rename: the thumbnail route may be serving this

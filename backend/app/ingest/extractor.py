@@ -8,6 +8,7 @@ from pathlib import Path
 
 from PIL import Image
 
+from ..scanner.walk import PIL_FORMATS
 from .a1111_parser import parse_a1111
 from .comfyui_parser import (
     detect_format,
@@ -175,7 +176,7 @@ def extract_from_image(path: Path, data: bytes | None = None) -> ExtractionResul
 
 
 def _read_png_info(path: Path, data: bytes | None = None) -> dict:
-    with Image.open(io.BytesIO(data) if data is not None else path) as img:
+    with Image.open(io.BytesIO(data) if data is not None else path, formats=PIL_FORMATS) as img:
         return img.info or {}
 
 

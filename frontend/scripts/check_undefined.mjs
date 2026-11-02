@@ -8,7 +8,7 @@
  */
 import { readFileSync } from 'node:fs'
 import { parse, compileScript } from 'vue/compiler-sfc'
-import { transform } from 'esbuild'
+import { transformWithOxc } from 'vite'
 
 const KNOWN = new Set([
   // Browser and standard library
@@ -67,18 +67,19 @@ const compiled = compileScript(descriptor, {
   templateOptions: { compilerOptions: { onWarn() {} } },
 })
 
-// Let esbuild check the syntax and strip the comments while it is there.
+// Let Vite's own transformer (Oxc) check the syntax and strip the types. It keeps
+// most comments, so they go in the one-pass scan below.
 // (Otherwise "SSE (…)" or "galleries (…)" inside a comment looks like a call.)
-const stripped = (await transform(compiled.content, {
-  loader: 'ts', format: 'esm', minifyWhitespace: true,
-})).code
+const stripped = (await transformWithOxc(compiled.content, `${file}.ts`, { lang: 'ts' })).code
 console.warn = warn
 // String literals are stripped too — a 「…（」 inside Japanese text looks like a call
 // **Scanned in one pass.** Replacing the three kinds one after another lets an
 // apostrophe inside double quotes (`"it's"`) throw the counting off, and the strings
 // after it survive.
+// Comments are taken in the same pass, so a "/*" or "//" inside a string stays a string.
 const code = stripped
-  .replace(/`(?:\\.|[^`\\])*`|'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"/g, '""')
+  .replace(/`(?:\\.|[^`\\])*`|'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|\/\*[\s\S]*?\*\/|\/\/[^\n]*/g,
+    m => (m[0] === '/' ? ' ' : '""'))
   // Regex literals are stripped too — the `SAY(` in `/^\s*SAY(?:\s*\(/` looks like a call
   .replace(/(^|[=(,:[!&|?{};+\s])\/(?![*/])(?:\\.|\[(?:\\.|[^\]\\])*\]|[^/\\\n])+\/[gimsuy]*/g, '$1/./')
 

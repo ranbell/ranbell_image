@@ -33,6 +33,17 @@ _defaults = {
     # ConfigBody but not here, so every save read back empty.
     "cluster_common_tags": [],
     "ollama_num_ctx":          16384,
+    # External OpenAI-compatible server. Inspire and Refine each choose
+    # "ollama" or "openai"; embeddings always stay on Ollama. Not named
+    # `openai_*`: a provider removed in v0.4.0 used those names, and its
+    # values (`bonsai`, host.docker.internal:8080) were still in saved configs.
+    # Those are removed at startup (LEGACY_KEYS).
+    "external_llm_url":       "",
+    "external_llm_api_key":   "",
+    "external_llm_model":     "",
+    "external_llm_vlm_model": "",
+    "inspire_llm_backend":    "ollama",
+    "refine_llm_backend":     "ollama",
     # Muse's defaults (2026-09-13). The Showrunner: "empty the llm and image model
     # too, so they are chosen before running. If a default is set in the admin
     # screen, it should be possible to start from that default." **Empty means the
@@ -70,6 +81,11 @@ _defaults = {
     # Set False only when Ollama runs on a different GPU than ComfyUI.
     "eval_auto_pause":          True,
     "auto_alignment_evaluate":  False,
+    # Read a finished sheet-style picture back and compare it box by box with
+    # the sheet it was written from. Safe on by default: it only fires for a
+    # render that carries a scene sheet, and the EVALUATION lane waits for the
+    # card to be free on its own.
+    "auto_sheet_check":         True,
     # WD14 tag weighting for refine (common/unique decomposition)
     "wd14_common_ratio":         0.3,
     "wd14_unique_count":         20,
@@ -82,6 +98,14 @@ _defaults = {
     "semantic_search_limit":    100,
     "muse_block_nsfw":          True,
 }
+
+# Saved by settings that no longer exist; removed from the config at startup
+# and whenever the settings are saved.
+LEGACY_KEYS = (
+    "llm_provider", "openai_base_url", "openai_api_key", "openai_model",
+    # the first external-server build (e5de99b) also saved this one
+    "openai_vlm_model",
+)
 
 _cache: RuntimeConfigCache | None = None
 

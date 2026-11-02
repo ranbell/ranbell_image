@@ -6,11 +6,11 @@
 
 **ローカル AI 画像スタジオ — 意味で探し、感覚で錬成する。**
 
-[![Version](https://img.shields.io/badge/version-0.4.1-blue)](https://github.com/ranbell/ranbell_image/releases)
+[![Version](https://img.shields.io/badge/version-0.5.0-blue)](https://github.com/ranbell/ranbell_image/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker)](docker-compose.yml)
 [![ghcr.io](https://img.shields.io/badge/ghcr.io-ranbell%2Franbell--image-blue?logo=github)](https://github.com/ranbell/ranbell_image/pkgs/container/ranbell-image-backend)
-[![Qdrant](https://img.shields.io/badge/Qdrant-v1.19-6B4FBB)](https://qdrant.tech/)
+[![Qdrant](https://img.shields.io/badge/Qdrant-v1.20-6B4FBB)](https://qdrant.tech/)
 [![Ollama](https://img.shields.io/badge/Ollama-local_AI-grey)](https://ollama.ai/)
 [![ComfyUI](https://img.shields.io/badge/ComfyUI-integration-orange)](https://github.com/comfyanonymous/ComfyUI)
 [![WD14](https://img.shields.io/badge/WD14-tagger-pink)](https://huggingface.co/SmilingWolf)
@@ -63,6 +63,7 @@ Ranbell Image は**完全ローカル動作**のアプリケーションです�
 - **試し撮り → 本番** — 試し撮りは押すたびに seed を引き直し、本番は**OK を出した seed のまま**　steps だけ上げて仕上げます
 - **ワークフローの系統を自動で見分ける** — anima 系と krea2 系で steps・negative の要不要が違います。cfg と解像度はワークフローに焼かれた値をそのまま使います
 - **撮影のあと** — 彼女は誰にも見せない秘密の日記を書き、楽屋に短い投稿をし、たまに友達と出かけます。次の撮影ではその記憶が前置きに入ります
+- **動画プロンプト作成 — ベータ版** 🧪 — 一枚の写真を動画スタジオに持ち込み、女優と「この絵がどんな動画になるか」を話します。彼女が方向性をいくつか出し、決まったものを動画プロンプトに書き上げます。まだ試験公開で、仕様は変わる可能性があります
 
 詳細は、以下を参考にしてください。
 > 📖 [クリエイターガイド — Muse](docs/guide/muse.ja.md) ／ [技術リファレンス](docs/tech/muse.ja.md)

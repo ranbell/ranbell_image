@@ -6,6 +6,46 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · Versioning: 
 
 ---
 
+## [0.5.0] — 2026-11-03
+
+The video studio, and a forging studio rebuilt for models that read sentences
+instead of tags.
+
+### Added
+
+- **Video prompts — beta** 🧪
+  - **Talk a still into a video.** Take any picture into the video studio and an actress looks at it with you. A still from a Muse shoot carries that shoot's theme and ledger in, and she remembers being in it; any other photograph gets an actress called in to riff on it with you
+  - She proposes directions — carry on where it stands, let the camera reveal, go somewhere else, or change the world — and the one you pick is written into a timetable of segments and then into a video prompt
+  - Each talk is its own record, searchable, with the pictures that became videos findable from the gallery. Quiet, moving or cut clips; camera moves planned on the timetable; what you said no to is held for the whole clip
+  - It is beta: the shape of it may still change
+
+- **The forging studio reads each reference on its own.** A multi-image mix used to be one tiled board capped at 336 px a picture, so six references arrived as thumbnails. Each is now read at full resolution in its own pass — about 9× the pixels at six references — and the sheets are merged in code rather than averaged by the model
+- **The mix sliders decide who the picture belongs to.** They used to end up as nothing but a hint-word count, which is why they barely moved the result. The heaviest reference now owns identity, the rest contribute scene, and the plan is stated in the script
+- **The finished picture is read back** and scored against the sheet it was written from, naming the boxes the render dropped, with a re-roll that emphasises them
+- **Krea 2 prompts are written as a scene sheet** — JSON boxes filled by the model, then a visual script written from the sheet, with a length slider, re-asking when it comes back short, and what the people are doing written before how they look
+- **MOSS-Image prompts** — caption, layout and tags
+- **An external OpenAI-compatible server** can run Inspire and Refine, with every model in the list and the server's own temperature
+- **A forging run is one work package**, so a browser reload rejoins it instead of losing it, and a progress diagram shows which phase is running and what is still to come
+- **The studio remembers its dials** (output style, medium, staging) between visits
+
+### Changed
+
+- **Qdrant 1.20.0**, and the `images` collection is reached through an alias, so a future rebuild can be swapped in without downtime
+- **Startup takes 52 ms where it took 15 s.** Payload indexes that already exist are no longer re-requested, and index drops look before deleting
+- A collection copy is now bounded by **progress rather than a fixed deadline** — every call that returns resets the clock, and only a stall that lasts ends it. A fixed timeout failed the bigger library for being big
+- Frontend on Vite 8, Vue I18n 11 and Node 22, with unused packages dropped; Pillow 13, decoding only PNG, JPEG and WebP
+- Only ComfyUI's VRAM is freed, keeping its models in RAM, and every Ollama model is unloaded before any render is queued
+
+### Fixed
+
+- **A cancelled job is no longer reported as a success.** Cancelling is cooperative, and 11 of 47 runners never looked at the token — so the work ran to the end and the console said it had succeeded. Every runner now watches the token, and a job that returns with the token set is recorded as cancelled
+- **Cancel reaches the render.** It used to work by dropping the socket, which never reached a queued ComfyUI job
+- **A deleted picture takes its derived rows with it.** `images_color` and `alignment` were never deleted from, leaking a row for every file removed outside Ranbell — 398 of them on the live library. Existing leftovers are swept
+- Drifted shot labels are read, and failed writes kept
+- The video button sits in the action row where it belongs
+
+---
+
 ## [0.4.1] — 2026-10-10
 
 Scanning that touches only what changed, and prompt extraction for more ComfyUI workflows.

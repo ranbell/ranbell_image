@@ -2,6 +2,7 @@
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ProgressBar from './ProgressBar.vue'
+import ModelCombo from './ModelCombo.vue'
 
 const { t, locale } = useI18n()
 
@@ -45,6 +46,42 @@ const vlmModelLacksVision = computed(() =>
   !!adminConfig.value?.vlm_model &&
   !ollamaVisionModels.value.includes(adminConfig.value.vlm_model)
 )
+// External OpenAI-compatible server (Inspire / Refine). The saved API key is
+// never sent to the browser; typing one replaces it, the clear button removes it.
+const externalModels = ref([])
+const externalTest = ref(null)   // { ok, base_url, models, error } | null
+const externalTesting = ref(false)
+const externalKeyClear = ref(false)
+
+async function testExternalServer() {
+  externalTesting.value = true
+  externalTest.value = null
+  try {
+    const r = await fetch('/api/admin/openai/models', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        base_url: adminConfig.value?.external_llm_url || '',
+        api_key: adminConfig.value?.external_llm_api_key || '',
+      }),
+    })
+    const data = r.ok ? await r.json() : { ok: false, error: await r.text() }
+    externalTest.value = data
+    if (data.ok) externalModels.value = data.models || []
+  } catch (e) {
+    externalTest.value = { ok: false, error: String(e) }
+  } finally {
+    externalTesting.value = false
+  }
+}
+
+// Opening a model list with nothing in it fetches the list, as the test button does.
+function loadExternalModels() {
+  if (!externalModels.value.length && !externalTesting.value && adminConfig.value?.external_llm_url) {
+    testExternalServer()
+  }
+}
+
 const showAdvanced = ref(false)
 const adminStats = ref(null)
 const adminConfig = ref(null)
@@ -178,13 +215,15 @@ async function saveAdminConfig() {
   adminLoading.value = 'config'
   adminError.value = ''
   try {
-    const { source_images_dir, generated_images_dir, thumbnails_dir, ...body } = adminConfig.value
+    const { source_images_dir, generated_images_dir, thumbnails_dir, external_llm_api_key_set, ...body } = adminConfig.value
+    if (externalKeyClear.value) body.external_llm_api_key_clear = true
     const r = await fetch('/api/admin/config', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
     if (r.ok) {
+      externalKeyClear.value = false
       adminConfig.value = await r.json()
       adminSuccess.value = t('admin.saveSuccess')
       setTimeout(() => { adminSuccess.value = '' }, 3000)
@@ -355,6 +394,25 @@ async function fetchColorStatus() {
   const r = await fetch('/api/admin/colors/status')
   if (!r.ok) return
   colorStatus.value = await r.json()
+}
+
+// Rows the derived collections still hold for images that are gone. Deleting a
+// file outside Ranbell used to leave its colour row behind for good; the
+// cascade stops new ones, and this says what had already piled up.
+const orphans = ref(null)          // { images_color: n, alignment: n }
+const orphansLoading = ref(false)
+const orphanTotal = computed(() =>
+  Object.values(orphans.value || {}).reduce((a, b) => a + b, 0)
+)
+
+async function fetchOrphans() {
+  orphansLoading.value = true
+  try {
+    const r = await fetch('/api/admin/orphans')
+    if (r.ok) orphans.value = (await r.json()).orphans
+  } finally {
+    orphansLoading.value = false
+  }
 }
 
 async function fetchDuplicates() {
@@ -1353,6 +1411,37 @@ watch(() => props.jobs?.find(j => j.title === 'backup')?.state, (state) => {
                   </button>
                 </div>
 
+                <!-- Orphans left by images that are gone -->
+                <div class="bg-gray-800 rounded-xl p-4 space-y-3">
+                  <div class="flex items-center justify-between">
+                    <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">{{ $t('admin.orphans.title') }}</p>
+                    <button @click="fetchOrphans" :disabled="orphansLoading"
+                      class="text-xs text-gray-600 hover:text-gray-400 disabled:opacity-40">
+                      {{ $t('admin.orphans.check') }}
+                    </button>
+                  </div>
+                  <p class="text-[11px] text-gray-500 leading-relaxed">{{ $t('admin.orphans.hint') }}</p>
+                  <div v-if="orphans" class="space-y-1">
+                    <div v-for="(n, name) in orphans" :key="name"
+                      class="flex items-center justify-between text-sm">
+                      <span class="text-gray-500 text-xs font-mono">{{ name }}</span>
+                      <span :class="n > 0 ? 'text-yellow-400' : 'text-green-400'" class="font-mono">
+                        {{ n.toLocaleString() }}
+                      </span>
+                    </div>
+                    <p v-if="orphanTotal === 0" class="text-xs text-green-500/80 pt-1">
+                      {{ $t('admin.orphans.clean') }}
+                    </p>
+                  </div>
+                  <button
+                    v-if="orphanTotal > 0"
+                    @click="adminAction('orphanSweep', '/api/admin/orphans/sweep', { successMsg: () => $t('admin.orphans.sweepStart') }).then(fetchOrphans)"
+                    :disabled="!!adminLoading"
+                    class="w-full py-2 border rounded-lg text-xs disabled:opacity-40 transition-colors bg-indigo-900/40 hover:bg-indigo-800/60 border-indigo-700/40 text-indigo-300">
+                    {{ $t('admin.orphans.sweepBtn', { n: orphanTotal }) }}
+                  </button>
+                </div>
+
                 <!-- Duplicate file detection -->
                 <div class="bg-gray-800 rounded-xl p-4 space-y-3">
                   <div class="flex items-center justify-between">
@@ -1540,6 +1629,80 @@ watch(() => props.jobs?.find(j => j.title === 'backup')?.state, (state) => {
                   class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
                 <p class="text-[10px] text-gray-600 mt-1">{{ $t('admin.config.numCtxHint') }}</p>
               </div>
+            </div>
+
+            <div class="bg-gray-800 rounded-xl p-4 space-y-4">
+              <div>
+                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">{{ $t('admin.external.title') }}</p>
+                <p class="text-[10px] text-gray-600 mt-1">{{ $t('admin.external.hint') }}</p>
+              </div>
+              <div>
+                <label class="text-xs text-gray-500 block mb-1">{{ $t('admin.external.url') }}</label>
+                <div class="flex gap-2">
+                  <input v-model="adminConfig.external_llm_url" type="text" placeholder="http://localhost:8000/v1"
+                    class="flex-1 min-w-0 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
+                  <button @click="testExternalServer" :disabled="externalTesting || !adminConfig.external_llm_url"
+                    class="px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-xs text-gray-200 whitespace-nowrap">
+                    {{ externalTesting ? $t('admin.external.testing') : $t('admin.external.test') }}
+                  </button>
+                </div>
+                <p v-if="externalTest?.ok" class="mt-1 text-[11px] text-green-400">
+                  ✓ {{ $t('admin.external.testOk', { n: externalTest.models.length, url: externalTest.base_url }) }}
+                </p>
+                <p v-else-if="externalTest" class="mt-1 text-[11px] text-red-400 break-all">
+                  ✗ {{ $t('admin.external.testFailed') }}: {{ externalTest.error }}
+                </p>
+              </div>
+              <div>
+                <label class="text-xs text-gray-500 block mb-1">{{ $t('admin.external.apiKey') }}</label>
+                <div class="flex gap-2 items-center">
+                  <input v-model="adminConfig.external_llm_api_key" type="password" autocomplete="off"
+                    :placeholder="adminConfig.external_llm_api_key_set && !externalKeyClear ? $t('admin.external.apiKeySaved') : $t('admin.external.apiKeyNone')"
+                    class="flex-1 min-w-0 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
+                  <button v-if="adminConfig.external_llm_api_key_set && !externalKeyClear"
+                    @click="externalKeyClear = true; adminConfig.external_llm_api_key = ''"
+                    class="px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-xs text-gray-300 whitespace-nowrap">
+                    {{ $t('admin.external.apiKeyClear') }}
+                  </button>
+                </div>
+              </div>
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="text-xs text-gray-500 block mb-1">{{ $t('admin.external.model') }}</label>
+                  <ModelCombo v-model="adminConfig.external_llm_model" :options="externalModels"
+                    :loading="externalTesting" :empty-text="$t('admin.external.modelsEmpty')"
+                    @open="loadExternalModels" />
+                </div>
+                <div>
+                  <label class="text-xs text-gray-500 block mb-1">{{ $t('admin.external.vlmModel') }}</label>
+                  <ModelCombo v-model="adminConfig.external_llm_vlm_model" :options="externalModels"
+                    :placeholder="$t('admin.external.vlmModelFallback')"
+                    :loading="externalTesting" :empty-text="$t('admin.external.modelsEmpty')"
+                    @open="loadExternalModels" />
+                </div>
+                <div>
+                  <label class="text-xs text-gray-500 block mb-1">{{ $t('admin.external.useForInspire') }}</label>
+                  <select v-model="adminConfig.inspire_llm_backend"
+                    class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-purple-500">
+                    <option value="ollama">Ollama</option>
+                    <option value="openai">{{ $t('admin.external.backendExternal') }}</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="text-xs text-gray-500 block mb-1">{{ $t('admin.external.useForRefine') }}</label>
+                  <select v-model="adminConfig.refine_llm_backend"
+                    class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-purple-500">
+                    <option value="ollama">Ollama</option>
+                    <option value="openai">{{ $t('admin.external.backendExternal') }}</option>
+                  </select>
+                </div>
+              </div>
+              <p v-if="(adminConfig.inspire_llm_backend === 'openai' || adminConfig.refine_llm_backend === 'openai')
+                       && (!adminConfig.external_llm_url || !(adminConfig.external_llm_model || adminConfig.external_llm_vlm_model))"
+                class="text-[11px] text-amber-400">
+                ⚠ {{ $t('admin.external.incomplete') }}
+              </p>
+              <p class="text-[10px] text-gray-600">{{ $t('admin.external.embedNote') }}</p>
             </div>
 
             <div class="bg-gray-800 rounded-xl p-4 space-y-4">

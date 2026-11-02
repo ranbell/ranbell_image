@@ -1,4 +1,5 @@
 import asyncio
+import time
 import base64
 import json
 import logging
@@ -16,6 +17,22 @@ from .id_utils import sha256_to_point_id
 from ..config import settings
 
 logger = logging.getLogger(__name__)
+
+def _optional_error(module: str, name: str):
+    """An exception class from a package that may not be installed. None if not."""
+    try:
+        return getattr(__import__(module, fromlist=[name]), name)
+    except Exception:
+        return None
+
+
+#: Only the connection giving up is worth trying again; see `_retrying`.
+_RETRYABLE_ERRORS = tuple(c for c in (
+    _optional_error("qdrant_client.http.exceptions", "ResponseHandlingException"),
+    _optional_error("httpx", "TransportError"),
+    TimeoutError, ConnectionError, OSError,
+) if c is not None)
+
 
 IMAGES_COLLECTION = "images"
 # `images` is an alias pointing at a physical `images_v{N}` collection.
@@ -58,6 +75,11 @@ CHARACTER_COMPAT_COLLECTION = "character_compat"
 # Payload-only — same shape as muse_sessions.
 MUSE_LOUNGE_COLLECTION = "muse_lounge"
 MUSE_HANDPOST_COLLECTION = "muse_handpost"
+# Video talks (the video studio): a still talked into a video prompt with an
+# actress. Kept apart from muse_sessions so the session list, chemistry
+# (`characters/compat.py` reads co-shoots there) and the lounge never take a
+# talk about a photo for a shoot. Payload-only.
+MUSE_VIDEO_COLLECTION = "muse_video_talks"
 # What the scanner saw last time, one point per directory: its mtime when it
 # was last reconciled. A directory whose mtime has not moved has had nothing
 # added, removed or renamed in it, so a heal does not list it. Payload-only and
@@ -436,6 +458,122 @@ class QdrantDBClient:
         tail = name[len(IMAGES_VERSION_PREFIX):]
         return int(tail) if tail.isdigit() else 0
 
+    #: A copy that has stopped moving for this long has stopped. Until then it
+    #: is allowed to take as long as it takes.
+    REBUILD_STALL_SECONDS = 300.0
+
+    #: **Only the connection giving up is worth trying again.** Retrying
+    #: anything else spends the whole stall window on a failure that was never
+    #: going to clear — a collection that is not there will not appear — and
+    #: buries the real error five minutes deep.
+    _RETRYABLE = _RETRYABLE_ERRORS
+
+    async def _retrying(self, call, *, what: str, cancel=None,
+                        stall_seconds: float | None = None):
+        """Run one chunked Qdrant call, retrying while it is the transport giving up.
+
+        **Progress decides when to stop, not a deadline.** A fixed timeout
+        cannot tell a copy that is slow from a copy that is stuck, so it fails
+        the bigger library for being big: a 17,985-point adoption died on an
+        upsert, and raising the number only moves where the next one dies.
+
+        Every call that returns resets the clock, so a copy that is still moving
+        runs as long as it needs and one that has stopped moving gives up after
+        ``stall_seconds``.
+
+        Retrying is safe because every call this wraps is addressed by point id:
+        sending the same batch again lands the same points, including when the
+        first attempt did land and only the answer was lost.
+        """
+        limit = self.REBUILD_STALL_SECONDS if stall_seconds is None else stall_seconds
+        started = time.monotonic()
+        # Back off in proportion to the window: waiting two seconds before the
+        # second try is sensible against a five-minute window and absurd against
+        # a one-second one.
+        delay = min(2.0, max(0.02, limit / 8))
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                return await call()
+            except asyncio.CancelledError:
+                raise
+            except self._RETRYABLE as exc:
+                if cancel is not None:
+                    cancel.raise_if_set()
+                waited = time.monotonic() - started
+                if waited >= limit:
+                    raise RuntimeError(
+                        f"{what} stopped moving: no progress for {waited:.0f}s "
+                        f"over {attempt} attempt(s) ({type(exc).__name__}: {exc})"
+                    ) from exc
+                logger.warning("[qdrant] %s did not go through (attempt %d, %.0fs "
+                               "of %.0fs): %s — trying again",
+                               what, attempt, waited, limit, exc)
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 30.0)
+
+    async def stale_rebuild_targets(self) -> list[dict]:
+        """Versioned collections that `images` does not resolve to, with counts.
+
+        **Listing only, and deliberately not automatic.** Two very different
+        things end up looking the same here: the half-built target of a copy
+        that died, and the previous collection a *successful* migration left on
+        purpose ("delete it by hand once you are satisfied"). Nothing can tell
+        them apart from the name, so nothing here decides; it reports, with the
+        point counts that let a person decide.
+
+        Three guards, because this names collections for deletion:
+
+        - when `images` resolves nowhere the newest version **is** the library —
+          an adoption that died between the drop and the alias — and
+          `_start_images` restores the alias from it at boot, so the list is
+          empty rather than wrong;
+        - whatever `images` resolves to is never listed;
+        - the counts come back so a leftover holding more than the live
+          collection is obvious before anyone acts on it.
+        """
+        physical, _ = await self._resolve_images()
+        if physical is None:
+            logger.warning("[qdrant] 'images' resolves nowhere — the newest "
+                           "version is the library; listing nothing as stale")
+            return []
+        names = await self._collection_names()
+        out: list[dict] = []
+        for name in sorted((n for n in names if self._version_of(n) > 0),
+                           key=self._version_of):
+            if name == physical:
+                continue
+            try:
+                count = await self._point_count(name)
+            except Exception:
+                count = -1
+            out.append({"collection": name, "points": count})
+        return out
+
+    async def drop_stale_rebuild_target(self, name: str) -> dict:
+        """Delete one leftover, after proving again that it is not the library.
+
+        The checks are redone here rather than trusted from the listing: what
+        the screen was told a minute ago is not what is true now.
+        """
+        physical, _ = await self._resolve_images()
+        if physical is None:
+            raise RuntimeError(
+                "'images' resolves nowhere: the versioned collection may be the "
+                "library itself. Restart first so the alias is restored."
+            )
+        if self._version_of(name) <= 0:
+            raise RuntimeError(f"{name!r} is not a versioned images collection")
+        if name == physical:
+            raise RuntimeError(f"{name!r} is what 'images' resolves to")
+        if await self._alias_target(IMAGES_COLLECTION) == name:
+            raise RuntimeError(f"{name!r} is the target of the 'images' alias")
+        count = await self._point_count(name)
+        await self._qc.delete_collection(name)
+        logger.warning("[qdrant] dropped stale rebuild target %s (%d points)", name, count)
+        return {"collection": name, "points": count}
+
     async def _next_version_name(self) -> str:
         names = await self._collection_names()
         highest = max((self._version_of(n) for n in names), default=0)
@@ -499,7 +637,13 @@ class QdrantDBClient:
             vectors_config=self._images_vectors_config(small_dim, embed_dim=full_dim),
             on_disk_payload=True,
         )
-        await self._create_images_indexes(target)
+        # **Indexes after the points, not before.** Asking for the 34 payload
+        # indexes on the empty collection and then pouring 17,985 points in put
+        # every batch behind index maintenance: measured 2026-11-02, six
+        # consecutive upserts took 60.07 s each (HTTP 200 — waiting, not
+        # failing), and the moment the builds finished the same call took
+        # 0.16 s. Seven minutes of a nine-minute copy was queueing. Nothing in
+        # the copy needs them, so they are asked for once the points are in.
 
         total = await self._point_count(source)
         copied = 0
@@ -508,9 +652,18 @@ class QdrantDBClient:
         while True:
             if cancel is not None:
                 cancel.raise_if_set()
-            pts, next_offset = await self._qc.scroll(
-                source, limit=200, with_payload=True,
-                with_vectors=with_vectors, offset=offset,
+            # **The bulk client, not `_qc`.** Copying a collection is the same
+            # shape of work as a heal — chunked reads and writes that have to be
+            # allowed to wait while Qdrant optimizes, which a big batch of
+            # writes sets off by itself. `_qc_bulk` exists for exactly that, and
+            # this path never got it: a 17,985-point adoption died on an upsert
+            # timeout at the default (2026-11-02).
+            pts, next_offset = await self._retrying(
+                lambda off=offset: self._qc_bulk.scroll(
+                    source, limit=200, with_payload=True,
+                    with_vectors=with_vectors, offset=off,
+                ),
+                what=f"reading {source}", cancel=cancel,
             )
             for p in pts:
                 payload = dict(p.payload or {})
@@ -523,7 +676,10 @@ class QdrantDBClient:
                     vector={k: v for k, v in vectors.items() if v},
                 ))
                 if len(batch) >= 200:
-                    await self._qc.upsert(target, points=batch)
+                    await self._retrying(
+                        lambda b=batch: self._qc_bulk.upsert(target, points=b),
+                        what=f"writing into {target}", cancel=cancel,
+                    )
                     copied += len(batch)
                     batch = []
                     if reporter is not None and total:
@@ -535,8 +691,13 @@ class QdrantDBClient:
                 break
             offset = next_offset
         if batch:
-            await self._qc.upsert(target, points=batch)
+            await self._retrying(
+                lambda b=batch: self._qc_bulk.upsert(target, points=b),
+                what=f"writing into {target}", cancel=cancel,
+            )
             copied += len(batch)
+
+        await self._create_images_indexes(target)
 
         src_n = await self._point_count(source)
         dst_n = await self._point_count(target)
@@ -755,7 +916,7 @@ class QdrantDBClient:
         batch: list[qm.PointStruct] = []
         offset = None
         while True:
-            pts, next_offset = await self._qc.scroll(
+            pts, next_offset = await self._qc_bulk.scroll(
                 source, limit=200, with_payload=True,
                 with_vectors=["color_vector"], offset=offset,
             )
@@ -771,14 +932,14 @@ class QdrantDBClient:
                     vector={"color_vector": vec} if vec else {},
                 ))
                 if len(batch) >= 200:
-                    await self._qc.upsert(IMAGES_COLOR_COLLECTION, points=batch)
+                    await self._qc_bulk.upsert(IMAGES_COLOR_COLLECTION, points=batch)
                     copied += len(batch)
                     batch = []
             if next_offset is None:
                 break
             offset = next_offset
         if batch:
-            await self._qc.upsert(IMAGES_COLOR_COLLECTION, points=batch)
+            await self._qc_bulk.upsert(IMAGES_COLOR_COLLECTION, points=batch)
             copied += len(batch)
 
         landed = await self._point_count(IMAGES_COLOR_COLLECTION)
@@ -789,17 +950,12 @@ class QdrantDBClient:
         return copied
 
     async def _create_color_indexes(self) -> None:
-        for field, schema_type in (
+        await self._ensure_payload_indexes(IMAGES_COLOR_COLLECTION, (
             ("palette_hues", qm.PayloadSchemaType.FLOAT),
             ("palette_hex", qm.PayloadSchemaType.KEYWORD),
             ("avg_saturation", qm.PayloadSchemaType.FLOAT),
             ("avg_value", qm.PayloadSchemaType.FLOAT),
-        ):
-            await self._qc.create_payload_index(
-                collection_name=IMAGES_COLOR_COLLECTION,
-                field_name=field, field_schema=schema_type,
-                wait=False,
-            )
+        ))
 
     async def start(self) -> None:
         await self._wait_for_qdrant()
@@ -826,16 +982,10 @@ class QdrantDBClient:
                 on_disk_payload=True,
             )
             logger.info("Created collection: %s", MUSE_SESSIONS_COLLECTION)
-        for field, schema in (
+        await self._ensure_payload_indexes(MUSE_SESSIONS_COLLECTION, (
             ("status", qm.PayloadSchemaType.KEYWORD),
             ("created_at", qm.PayloadSchemaType.FLOAT),
-        ):
-            await self._qc.create_payload_index(
-                collection_name=MUSE_SESSIONS_COLLECTION,
-                field_name=field,
-                field_schema=schema,
-                wait=False,
-            )
+        ))
 
         if not await self._qc.collection_exists(SCAN_DIRS_COLLECTION):
             await self._qc.create_collection(
@@ -868,13 +1018,25 @@ class QdrantDBClient:
         # Lounge threads + studio handpost (payload-only social layer).
         await self.ensure_muse_lounge_collection()
         await self.ensure_muse_handpost_collection()
+        await self.ensure_muse_video_collection()
 
         count = await self.total_count()
         logger.info("Qdrant ready: %d images", count)
 
     async def _drop_umap_indexes(self, collection: str = IMAGES_COLLECTION) -> None:
-        """Drop umap_x/y payload indexes — presence-only checks don't need indexes."""
+        """Drop umap_x/y payload indexes — presence-only checks don't need indexes.
+
+        **Look before deleting.** Asking Qdrant to delete an index that is not
+        there costs ~2 s a field (measured 2026-11-02), and after the very first
+        boot it is never there — so this quietly spent four seconds of every
+        start-up removing something already gone, swallowing the exception.
+        """
+        have = await self._existing_payload_indexes(collection)
+        if have is None:
+            return
         for field in ("umap_x", "umap_y"):
+            if field not in have:
+                continue
             try:
                 await self._qc.delete_payload_index(
                     collection_name=collection,
@@ -882,7 +1044,7 @@ class QdrantDBClient:
                 )
                 logger.info("Dropped payload index: %s", field)
             except Exception:
-                pass  # already absent
+                pass  # raced with another boot
 
     async def _ensure_quantization(self, collection: str = IMAGES_COLLECTION) -> None:
         """Apply INT8 scalar quantization to embedding vectors if not already set."""
@@ -914,20 +1076,60 @@ class QdrantDBClient:
             )
             logger.info("Applied INT8 scalar quantization to: %s", list(vectors_config))
 
-    async def _create_images_indexes(self, collection: str = IMAGES_COLLECTION) -> None:
-        """Ask for every index in `IMAGE_PAYLOAD_INDEXES`, without waiting.
+    #: How many index builds to ask for at once on a first boot. Qdrant takes
+    #: them in parallel; this only keeps a cold start from firing forty at once.
+    _INDEX_CONCURRENCY = 8
 
-        Asking for one that already exists is a no-op Qdrant answers immediately,
-        so this stays safe to run on every boot.
+    async def _existing_payload_indexes(self, collection: str) -> set[str] | None:
+        """Which payload indexes `collection` already has. `None` if it cannot say."""
+        try:
+            info = await self._qc.get_collection(collection_name=collection)
+            return set((info.payload_schema or {}).keys())
+        except Exception as exc:
+            logger.debug("[qdrant] cannot read %s payload_schema: %s", collection, exc)
+            return None
+
+    async def _ensure_payload_indexes(self, collection: str, fields) -> int:
+        """Create only the payload indexes `collection` does not already have.
+
+        **Asking for an index that already exists is not free.** This used to say
+        it was "a no-op Qdrant answers immediately" and ask for all of them on
+        every boot; measured against a 17.9k-point collection (2026-11-02) each
+        such ask costs ~176 ms, and forty of them were 11 of the 15 seconds
+        `start()` took. One `get_collection` costs 9 ms and says what is there.
+
+        `index_progress` has been reading `payload_schema` for exactly this
+        answer all along, for `/api/health`.
         """
-        for field, schema in IMAGE_PAYLOAD_INDEXES:
-            await self._qc.create_payload_index(
-                collection_name=collection,
-                field_name=field,
-                field_schema=schema,
-                # **Do not block the boot on the build.** See the table's comment.
-                wait=False,
-            )
+        have = await self._existing_payload_indexes(collection)
+        if have is None:
+            have = set()   # cannot tell — ask for all of them, as before
+        missing = [(f, s) for f, s in fields if f not in have]
+        if not missing:
+            return 0
+
+        sem = asyncio.Semaphore(self._INDEX_CONCURRENCY)
+
+        async def _one(field, schema) -> None:
+            async with sem:
+                await self._qc.create_payload_index(
+                    collection_name=collection,
+                    field_name=field,
+                    field_schema=schema,
+                    # **Do not block the boot on the build.** See the table's comment.
+                    wait=False,
+                )
+
+        # Only a first boot gets here with a long list, and these are independent
+        # of one another, so they go together rather than one after the next.
+        await asyncio.gather(*(_one(f, s) for f, s in missing))
+        logger.info("[qdrant] %s: asked for %d new payload index(es)",
+                    collection, len(missing))
+        return len(missing)
+
+    async def _create_images_indexes(self, collection: str = IMAGES_COLLECTION) -> None:
+        """Ask for the indexes in `IMAGE_PAYLOAD_INDEXES` that are not there yet."""
+        await self._ensure_payload_indexes(collection, IMAGE_PAYLOAD_INDEXES)
 
     async def index_progress(self, collection: str = IMAGES_COLLECTION) -> dict:
         """How many of the payload indexes are live, for `/api/health`.
@@ -1080,12 +1282,44 @@ class QdrantDBClient:
             points=qm.PointIdsList(points=[point_id]),
         )
 
+    #: Collections keyed by the same point id as `images`, holding what was
+    #: derived from a picture. They have to go when the picture does.
+    DERIVED_OF_IMAGES = (IMAGES_COLOR_COLLECTION, ALIGNMENT_COLLECTION)
+
+    async def _delete_derived(self, point_ids, *, client=None, wait: bool = True) -> None:
+        """Clear the same points out of every collection derived from `images`.
+
+        **Nothing used to do this.** Deleting only touched `images`, so a file
+        removed outside Ranbell — the scanner's `delete_batch` when it finds one
+        gone — left its colour row behind for good; 398 of them had piled up by
+        2026-11-02, and `alignment` had the same hole waiting.
+
+        Best effort on purpose: losing the picture's own row is what matters, so
+        a derived row that will not go is logged and left for the sweep rather
+        than failing the delete.
+        """
+        ids = list(point_ids)
+        if not ids:
+            return
+        qc = client or self._qc
+        for name in self.DERIVED_OF_IMAGES:
+            try:
+                await qc.delete(
+                    collection_name=name,
+                    points_selector=qm.PointIdsList(points=ids),
+                    wait=wait,
+                )
+            except Exception as exc:
+                logger.warning("[qdrant] could not clear %s for %d point(s): %s",
+                               name, len(ids), exc)
+
     async def delete(self, sha256: str) -> None:
         point_id = sha256_to_point_id(sha256)
         await self._qc.delete(
             collection_name=IMAGES_COLLECTION,
             points_selector=qm.PointIdsList(points=[point_id]),
         )
+        await self._delete_derived([point_id])
 
     # ── Query / Scroll ───────────────────────────────────────────────────────────
 
@@ -1889,15 +2123,69 @@ class QdrantDBClient:
 
     async def delete_batch(self, sha256s: list[str], *, wait: bool = True) -> None:
         for i in range(0, len(sha256s), 512):
+            ids = [sha256_to_point_id(s) for s in sha256s[i:i + 512]]
             await self._qc_bulk.delete(
                 collection_name=IMAGES_COLLECTION,
-                points_selector=qm.PointIdsList(
-                    points=[sha256_to_point_id(s) for s in sha256s[i:i + 512]]
-                ),
+                points_selector=qm.PointIdsList(points=ids),
                 wait=False,
             )
+            # This is the path a file deleted outside Ranbell takes
+            # (`scanner.run_heal`), and it is where the colour rows leaked.
+            await self._delete_derived(ids, client=self._qc_bulk, wait=False)
         if wait and sha256s:
             await self.images_barrier()
+
+    async def sweep_orphans(
+        self, *, delete: bool = False, should_stop=None,
+    ) -> dict[str, int]:
+        """Rows in the derived collections whose image is gone. Counts, or clears.
+
+        `delete=False` is a stock-take and touches nothing — that is what the
+        admin screen shows before anyone presses anything. Only `images` decides
+        what exists; a derived row is never the reason to keep a picture.
+        """
+        live: set = set()
+        offset = None
+        while True:
+            if should_stop is not None and should_stop():
+                return {"cancelled": 1}
+            points, offset = await self._qc_bulk.scroll(
+                collection_name=IMAGES_COLLECTION, limit=2000,
+                with_payload=False, with_vectors=False, offset=offset,
+            )
+            live.update(p.id for p in points)
+            if offset is None:
+                break
+
+        out: dict[str, int] = {}
+        for name in self.DERIVED_OF_IMAGES:
+            found: list = []
+            offset = None
+            try:
+                while True:
+                    if should_stop is not None and should_stop():
+                        out["cancelled"] = 1
+                        return out
+                    points, offset = await self._qc_bulk.scroll(
+                        collection_name=name, limit=2000,
+                        with_payload=False, with_vectors=False, offset=offset,
+                    )
+                    found.extend(p.id for p in points if p.id not in live)
+                    if offset is None:
+                        break
+            except Exception as exc:
+                logger.warning("[qdrant] orphan sweep could not read %s: %s", name, exc)
+                continue
+            out[name] = len(found)
+            if delete and found:
+                for i in range(0, len(found), 512):
+                    await self._qc_bulk.delete(
+                        collection_name=name,
+                        points_selector=qm.PointIdsList(points=found[i:i + 512]),
+                        wait=False,
+                    )
+                logger.info("[qdrant] swept %d orphan(s) out of %s", len(found), name)
+        return out
 
     async def backfill_image_dirs(self) -> int:
         """Write `dir` onto images registered before it existed. Returns how many.
@@ -2056,19 +2344,28 @@ class QdrantDBClient:
             vectors_config={},
             on_disk_payload=True,
         )
-        for field, schema in (
+        await self._ensure_payload_indexes(MUSE_LOUNGE_COLLECTION, (
             ("kind", qm.PayloadSchemaType.KEYWORD),
             ("created_at", qm.PayloadSchemaType.FLOAT),
             ("session_id", qm.PayloadSchemaType.KEYWORD),
             ("author_character_id", qm.PayloadSchemaType.KEYWORD),
-        ):
-            await self._qc.create_payload_index(
-                collection_name=MUSE_LOUNGE_COLLECTION,
-                field_name=field,
-                field_schema=schema,
-                wait=False,
-            )
+        ))
         logger.info("Created collection: %s", MUSE_LOUNGE_COLLECTION)
+
+    async def ensure_muse_video_collection(self) -> None:
+        """Video studio talks — one record per still talked over."""
+        if await self._qc.collection_exists(MUSE_VIDEO_COLLECTION):
+            return
+        await self._qc.create_collection(
+            collection_name=MUSE_VIDEO_COLLECTION,
+            vectors_config={},
+            on_disk_payload=True,
+        )
+        await self._ensure_payload_indexes(MUSE_VIDEO_COLLECTION, (
+            ("created_at", qm.PayloadSchemaType.FLOAT),
+            ("sha256", qm.PayloadSchemaType.KEYWORD),
+        ))
+        logger.info("Created collection: %s", MUSE_VIDEO_COLLECTION)
 
     async def ensure_muse_handpost_collection(self) -> None:
         """Studio handpost pages — director notices and preference history."""
@@ -2079,17 +2376,11 @@ class QdrantDBClient:
             vectors_config={},
             on_disk_payload=True,
         )
-        for field, schema in (
+        await self._ensure_payload_indexes(MUSE_HANDPOST_COLLECTION, (
             ("pinned", qm.PayloadSchemaType.BOOL),
             ("updated_at", qm.PayloadSchemaType.FLOAT),
             ("author", qm.PayloadSchemaType.KEYWORD),
-        ):
-            await self._qc.create_payload_index(
-                collection_name=MUSE_HANDPOST_COLLECTION,
-                field_name=field,
-                field_schema=schema,
-                wait=False,
-            )
+        ))
         logger.info("Created collection: %s", MUSE_HANDPOST_COLLECTION)
 
     async def total_count(self, *, exclude_drafts: bool = False) -> int:
@@ -2489,11 +2780,14 @@ class QdrantDBClient:
             offset = next_offset
         return count
 
-    async def backfill_small_embeddings(self) -> int:
+    async def backfill_small_embeddings(self, should_stop=None) -> int:
         """For all points with 'embedding' but missing 'embedding_small', add the truncated vector."""
         count = 0
         offset = None
         while True:
+            if should_stop is not None and should_stop():
+                logger.info("backfill_small_embeddings: stopped on cancel after %d", count)
+                return count
             points, next_offset = await self._qc.scroll(
                 IMAGES_COLLECTION,
                 scroll_filter=qm.Filter(must=[
@@ -2528,11 +2822,14 @@ class QdrantDBClient:
             offset = next_offset
         return count
 
-    async def backfill_model_name(self) -> int:
+    async def backfill_model_name(self, should_stop=None) -> int:
         """Populate model_name field from params.Model for existing documents that lack it."""
         count = 0
         offset = None
         while True:
+            if should_stop is not None and should_stop():
+                logger.info("backfill_model_name: stopped on cancel after %d", count)
+                return count
             points, next_offset = await self._qc.scroll(
                 IMAGES_COLLECTION,
                 limit=500,
@@ -2565,7 +2862,7 @@ class QdrantDBClient:
             offset = next_offset
         return count
 
-    async def backfill_batch_category(self) -> int:
+    async def backfill_batch_category(self, should_stop=None) -> int:
         """Populate batch_category for documents that lack it.
 
         Uses raw_metadata.format to classify: "a1111"/"comfyui" → "AI", else → "NR".
@@ -2574,6 +2871,9 @@ class QdrantDBClient:
         count = 0
         offset = None
         while True:
+            if should_stop is not None and should_stop():
+                logger.info("backfill_batch_category: stopped on cancel after %d", count)
+                return count
             points, next_offset = await self._qc.scroll(
                 IMAGES_COLLECTION,
                 limit=500,
@@ -2612,7 +2912,7 @@ class QdrantDBClient:
             offset = next_offset
         return count
 
-    async def backfill_is_reference(self) -> int:
+    async def backfill_is_reference(self, should_stop=None) -> int:
         """Populate is_reference for documents that lack it.
 
         Uses path prefix against settings.source_images_dir to classify.
@@ -2621,6 +2921,9 @@ class QdrantDBClient:
         count = 0
         offset = None
         while True:
+            if should_stop is not None and should_stop():
+                logger.info("backfill_is_reference: stopped on cancel after %d", count)
+                return count
             points, next_offset = await self._qc.scroll(
                 IMAGES_COLLECTION,
                 limit=500,
@@ -2973,6 +3276,14 @@ class QdrantDBClient:
                 points=qm.PointIdsList(points=[CONFIG_POINT_ID]),
             )
 
+    async def delete_config_keys(self, keys: list[str]) -> None:
+        """Remove named keys from the config document, leaving the rest."""
+        await self._qc.delete_payload(
+            collection_name=CONFIG_COLLECTION,
+            keys=keys,
+            points=qm.PointIdsList(points=[CONFIG_POINT_ID]),
+        )
+
     # ── Invoke / Genesis ──────────────────────────────────────────────────────────
 
     async def set_genesis_payload(self, sha256: str, genesis: dict) -> None:
@@ -3118,30 +3429,12 @@ class QdrantDBClient:
     # ── Alignment ─────────────────────────────────────────────────────────────────
 
     async def _create_alignment_indexes(self) -> None:
-        await self._qc.create_payload_index(
-            collection_name=ALIGNMENT_COLLECTION,
-            field_name="image_id",
-            field_schema=qm.PayloadSchemaType.KEYWORD,
-            wait=False,
-        )
-        await self._qc.create_payload_index(
-            collection_name=ALIGNMENT_COLLECTION,
-            field_name="status",
-            field_schema=qm.PayloadSchemaType.KEYWORD,
-            wait=False,
-        )
-        await self._qc.create_payload_index(
-            collection_name=ALIGNMENT_COLLECTION,
-            field_name="evaluated_at",
-            field_schema=qm.PayloadSchemaType.DATETIME,
-            wait=False,
-        )
-        await self._qc.create_payload_index(
-            collection_name=ALIGNMENT_COLLECTION,
-            field_name="score",
-            field_schema=qm.PayloadSchemaType.FLOAT,
-            wait=False,
-        )
+        await self._ensure_payload_indexes(ALIGNMENT_COLLECTION, (
+            ("image_id", qm.PayloadSchemaType.KEYWORD),
+            ("status", qm.PayloadSchemaType.KEYWORD),
+            ("evaluated_at", qm.PayloadSchemaType.DATETIME),
+            ("score", qm.PayloadSchemaType.FLOAT),
+        ))
 
     async def upsert_alignment(self, sha256: str, record: dict) -> None:
         point_id = sha256_to_point_id(sha256)

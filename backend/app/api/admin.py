@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 from ..config import settings
 from ..ai import wd14 as wd14_mod
-from ..runtime_config import get_runtime_config, invalidate_cache
+from ..runtime_config import LEGACY_KEYS, get_runtime_config, invalidate_cache
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +35,16 @@ class ConfigBody(BaseModel):
     cluster_common_tags: list[str] | None = None
     prompt_removal_tags: list[str] | None = None
     ollama_num_ctx: Annotated[int, Field(ge=512)] | None = None
+    # External OpenAI-compatible server (Inspire / Refine)
+    external_llm_url: str | None = None
+    # Never sent back to the browser, so an empty value means "unchanged";
+    # `external_llm_api_key_clear` removes a saved key.
+    external_llm_api_key: str | None = None
+    external_llm_api_key_clear: bool | None = None
+    external_llm_model: str | None = None
+    external_llm_vlm_model: str | None = None
+    inspire_llm_backend: Literal["ollama", "openai"] | None = None
+    refine_llm_backend: Literal["ollama", "openai"] | None = None
     # Muse's defaults (empty means the screen asks to choose)
     muse_model: str | None = None
     muse_workflow: str | None = None
@@ -43,6 +53,7 @@ class ConfigBody(BaseModel):
     auto_pause_on_generation: bool | None = None
     auto_pause_lanes: list[str] | None = None
     auto_alignment_evaluate: bool | None = None
+    auto_sheet_check: bool | None = None
     # Processing parallelism
     alignment_concurrency: Annotated[int, Field(ge=1, le=8)] | None = None
     pipeline_auto_continue: bool | None = None
@@ -64,14 +75,21 @@ class ConfigBody(BaseModel):
     muse_block_nsfw: bool | None = None
 
 
+def _config_for_browser(cfg: dict) -> dict:
+    out = dict(cfg)
+    out["source_images_dir"] = str(settings.source_images_dir)
+    out["generated_images_dir"] = str(settings.generated_images_dir)
+    out["thumbnails_dir"] = str(settings.thumbnails_dir)
+    # The key stays on the server; the screen only learns whether one is saved.
+    out["external_llm_api_key_set"] = bool(out.get("external_llm_api_key"))
+    out["external_llm_api_key"] = ""
+    return out
+
+
 @router.get("/config")
 async def get_config(request: Request):
     db = request.app.state.db
-    cfg = await get_runtime_config(db)
-    cfg["source_images_dir"] = str(settings.source_images_dir)
-    cfg["generated_images_dir"] = str(settings.generated_images_dir)
-    cfg["thumbnails_dir"] = str(settings.thumbnails_dir)
-    return cfg
+    return _config_for_browser(await get_runtime_config(db))
 
 
 async def _probe_embedding_width(ollama, model: str) -> int | None:
@@ -89,6 +107,10 @@ async def update_config(body: ConfigBody, request: Request):
     db = request.app.state.db
     existing = await db.get_config()
     updates = body.model_dump(exclude_none=True)
+    if not updates.get("external_llm_api_key"):
+        updates.pop("external_llm_api_key", None)
+    if updates.pop("external_llm_api_key_clear", False):
+        updates["external_llm_api_key"] = ""
 
     # Changing the embedding model is the one ordinary setting that can put the
     # collection and the vectors in it out of step. Check before saving, because
@@ -129,15 +151,19 @@ async def update_config(body: ConfigBody, request: Request):
 
     existing.update(updates)
     existing["_updated_at"] = time.time()
+    # Settings that no longer exist are not written back, and are deleted by
+    # name. The rest is merged, not replaced: other writers (UMAP, schema,
+    # Invoke stats) put their own keys into the same document.
+    legacy = [k for k in LEGACY_KEYS if existing.pop(k, None) is not None]
     await db.put_config(existing)
+    if legacy:
+        await db.delete_config_keys(legacy)
     invalidate_cache()
 
-    # Hot-apply LLM URL without restart
-    llm_keys = {"ollama_url", "vlm_model"}
-    if llm_keys & updates.keys():
-        from ..ai.llm import apply_llm_runtime_config
-        from ..runtime_config import get_runtime_config as _grc
-        apply_llm_runtime_config(request.app.state.ollama, await _grc(db))
+    # Hot-apply LLM connection settings without restart
+    from ..ai.llm import LLM_RUNTIME_KEYS, apply_llm_runtime_config
+    if LLM_RUNTIME_KEYS & updates.keys():
+        apply_llm_runtime_config(request.app.state.ollama, await get_runtime_config(db))
 
     spooler = request.app.state.spooler
 
@@ -156,13 +182,36 @@ async def update_config(body: ConfigBody, request: Request):
             existing.get("disk_fault_pct", 90),
         )
 
-    cfg = await get_runtime_config(db)
-    cfg["source_images_dir"] = str(settings.source_images_dir)
-    cfg["generated_images_dir"] = str(settings.generated_images_dir)
-    cfg["thumbnails_dir"] = str(settings.thumbnails_dir)
+    cfg = _config_for_browser(await get_runtime_config(db))
     if warning:
         cfg["warning"] = warning
     return cfg
+
+
+class OpenAIModelsBody(BaseModel):
+    base_url: str = ""
+    # Empty → use the saved key.
+    api_key: str = ""
+
+
+@router.post("/openai/models")
+async def external_llm_models(body: OpenAIModelsBody, request: Request):
+    """Connection test for the external server: list its models.
+
+    Takes the URL from the form, so it can be tried before saving.
+    """
+    url = body.base_url.strip()
+    if not url:
+        raise HTTPException(400, "base_url is required")
+    cfg = await get_runtime_config(request.app.state.db)
+    api_key = body.api_key or cfg.get("external_llm_api_key") or ""
+    from ..ai.openai_compat import normalize_base_url
+    external = request.app.state.ollama.external
+    try:
+        models = await external.list_models(url, api_key=api_key)
+    except Exception as exc:
+        return {"ok": False, "base_url": normalize_base_url(url), "models": [], "error": str(exc) or type(exc).__name__}
+    return {"ok": True, "base_url": normalize_base_url(url), "models": models}
 
 
 # ── Schema ────────────────────────────────────────────────────────────────────
@@ -597,6 +646,62 @@ async def start_is_reference_backfill(request: Request):
     spooler = request.app.state.spooler
     db = request.app.state.db
     job_id = spooler.submit(JobLane.SYNC, "is_reference_backfill", run_is_reference_backfill, db=db)
+    return {"status": "queued", "job_id": job_id}
+
+
+@router.get("/schema/stale")
+async def list_stale_rebuild_targets(request: Request):
+    """Versioned collections `images` does not resolve to, with their counts.
+
+    A copy that dies leaves its half-built target behind, and the next attempt
+    takes the *next* number rather than reusing it, so they pile up. A migration
+    that succeeds also leaves the previous collection on purpose. This reports
+    both; which is which is a judgement with the counts in hand.
+    """
+    return {"stale": await request.app.state.db.stale_rebuild_targets()}
+
+
+class DropStaleBody(BaseModel):
+    collection: str
+    confirm: str = ""
+
+
+@router.post("/schema/stale/drop")
+async def drop_stale_rebuild_target(body: DropStaleBody, request: Request):
+    """Delete one leftover, named explicitly and confirmed.
+
+    Never a sweep: the name has to be given, because one of these may be the
+    previous library, kept deliberately.
+    """
+    if body.confirm != CONFIRM_PHRASE:
+        raise HTTPException(status_code=400, detail={
+            "error": "confirm_required",
+            "message": f'Type "{CONFIRM_PHRASE}" to confirm.',
+        })
+    try:
+        return await request.app.state.db.drop_stale_rebuild_target(body.collection)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail={"error": "refused", "message": str(exc)})
+
+
+@router.get("/orphans")
+async def count_orphans(request: Request):
+    """How many rows the derived collections hold for images that are gone.
+
+    A stock-take: it reads and deletes nothing. Deleting a file outside Ranbell
+    used to leave its colour row behind for good, so this says what has piled
+    up before anyone decides to clear it.
+    """
+    return {"orphans": await request.app.state.db.sweep_orphans()}
+
+
+@router.post("/orphans/sweep")
+async def start_orphan_sweep(request: Request):
+    from ..jobs.runners import run_orphan_sweep
+    from ..spooler.models import JobLane
+    spooler = request.app.state.spooler
+    db = request.app.state.db
+    job_id = spooler.submit(JobLane.SYNC, "orphan_sweep", run_orphan_sweep, db=db)
     return {"status": "queued", "job_id": job_id}
 
 

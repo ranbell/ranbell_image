@@ -510,8 +510,12 @@ async def run_mrl_backfill(
     *,
     db,
 ) -> dict:
+    # The backfill walks the whole library a page at a time and is told to stop
+    # between pages: cancelling is cooperative, so a runner that never looks
+    # runs to the end however early the Showrunner pressed cancel.
     reporter.indeterminate()
-    count = await db.backfill_small_embeddings()
+    count = await db.backfill_small_embeddings(should_stop=cancel._event.is_set)
+    cancel.raise_if_set()
     return {"done": count}
 
 
@@ -621,6 +625,96 @@ async def run_schema_apply(
 
 
 # ── EVALUATION lane: alignment evaluation ─────────────────────────────────────
+
+async def run_sheet_check(
+    reporter: ProgressReporter,
+    cancel: CancelToken,
+    *,
+    db,
+    ollama,
+    sha256s: list[str],
+) -> dict:
+    """EVALUATION lane — read a finished picture back and compare it, box by
+    box, with the scene sheet its prompt was written from.
+
+    Everything before this was open loop: the sheet was read, the script was
+    written, the picture came out and nobody looked. `_cover_the_sheet` checks
+    that the WRITER kept every box; it cannot know whether the IMAGE MODEL did.
+
+    This lives on the EVALUATION lane on purpose. That lane is auto-paused
+    while GENERATION, PROMPT or EMBEDDING are active, so the read waits for the
+    card to be free by itself — no `ollama.unload()` dance, and no chance of
+    landing on top of a render (CLAUDE.md).
+    """
+    from datetime import datetime, timezone
+    from pathlib import Path as _Path
+
+    from ..api.inspire import _parse_json_from_llm
+    from ..prompt import scene_sheet
+    from ..runtime_config import get_runtime_config
+
+    cfg = await get_runtime_config(db)
+    model = cfg["vlm_model"]
+    checked_n = 0
+    skipped = 0
+    total = len(sha256s or [])
+
+    for i, sha256 in enumerate(sha256s or []):
+        cancel.raise_if_set()
+        await cancel.pause_checkpoint()
+        reporter.update(i / total if total else 0.0, f"{i}/{total} images",
+                        key="images", done=i, total=total)
+
+        doc = await db.get(sha256)
+        intended = ((doc or {}).get("creation_record") or {}).get("scene_sheet")
+        if not intended:
+            # Only the sheet styles have one; everything else is not ours.
+            skipped += 1
+            continue
+
+        record: dict = {
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+            "missed": [], "checked": 0, "covered": 0, "got_sheet": None, "error": "",
+        }
+        try:
+            path = _Path((doc or {}).get("path") or "")
+            if not path.exists():
+                raise FileNotFoundError(str(path))
+            img = await asyncio.get_running_loop().run_in_executor(None, path.read_bytes)
+
+            tokens: list[str] = []
+            async for event in ollama.generate_vlm_stream(
+                scene_sheet.sheet_prompt(reference_count=1), [img], model=model,
+            ):
+                cancel.raise_if_set()
+                if event.get("type") == "token":
+                    tokens.append(event["text"])
+            got = scene_sheet.normalize_sheet(_parse_json_from_llm("".join(tokens)))
+
+            if not got.get("subjects") and not got.get("setting"):
+                # A model that cannot read pictures fails silently with an empty
+                # answer (CLAUDE.md). Say so; do not score a guess.
+                raise RuntimeError("the picture could not be read")
+
+            missed, n = scene_sheet.compare_sheets(intended, got)
+            record.update(missed=missed, checked=n, covered=n - len(missed), got_sheet=got)
+            checked_n += 1
+        except JobCancelled:
+            raise
+        except Exception as exc:
+            # A failed check must never cost the picture it was checking.
+            logger.warning("[sheet_check] %s: %s", sha256[:12], exc)
+            record["error"] = str(exc)
+
+        try:
+            await db.set_payload(sha256, {"sheet_check": record})
+        except Exception as exc:
+            logger.warning("[sheet_check] payload write failed for %s: %s", sha256[:12], exc)
+
+    reporter.update(1.0, f"{checked_n}/{total} images", key="images",
+                    done=checked_n, total=total)
+    return {"checked": checked_n, "skipped": skipped}
+
 
 async def run_alignment_evaluate(
     reporter: ProgressReporter,
@@ -746,7 +840,8 @@ async def run_batch_category_backfill(
     db,
 ) -> dict:
     reporter.indeterminate()
-    count = await db.backfill_batch_category()
+    count = await db.backfill_batch_category(should_stop=cancel._event.is_set)
+    cancel.raise_if_set()
     return {"done": count}
 
 
@@ -757,8 +852,27 @@ async def run_is_reference_backfill(
     db,
 ) -> dict:
     reporter.indeterminate()
-    count = await db.backfill_is_reference()
+    count = await db.backfill_is_reference(should_stop=cancel._event.is_set)
+    cancel.raise_if_set()
     return {"done": count}
+
+
+async def run_orphan_sweep(
+    reporter: ProgressReporter,
+    cancel: CancelToken,
+    *,
+    db,
+) -> dict:
+    """Clear rows in the derived collections whose image is gone.
+
+    Deleting only ever touched `images`, so a file removed outside Ranbell left
+    its colour row behind for good. The cascade stops new ones; this clears what
+    had already piled up.
+    """
+    reporter.indeterminate()
+    out = await db.sweep_orphans(delete=True, should_stop=cancel._event.is_set)
+    cancel.raise_if_set()
+    return out
 
 
 async def run_model_name_backfill(
@@ -775,7 +889,8 @@ async def run_model_name_backfill(
     write, which is worth looking at rather than silently papering over.
     """
     reporter.indeterminate()
-    count = await db.backfill_model_name()
+    count = await db.backfill_model_name(should_stop=cancel._event.is_set)
+    cancel.raise_if_set()
     return {"done": count}
 
 
@@ -795,6 +910,8 @@ async def run_generation(
     batch_count: int = 1,
     creation_meta: dict | None = None,
     seed: int | None = None,
+    spooler=None,
+    ollama=None,
 ) -> dict:
     import asyncio as _asyncio
     import random as _random
@@ -834,6 +951,10 @@ async def run_generation(
                 source_images=source_images,
                 inspire_context=InspireContext(**inspire_raw) if inspire_raw else None,
                 seed=creation_meta.get("seed"),
+                scene_sheet=creation_meta.get("scene_sheet"),
+                moss_format=creation_meta.get("moss_format", ""),
+                wd14_hints=bool(creation_meta.get("wd14_hints")),
+                staging=creation_meta.get("staging", ""),
             )
             await db.set_payload(sha256, {"creation_record": record.model_dump()})
         except Exception as exc:
@@ -917,6 +1038,30 @@ async def run_generation(
                 await _write_creation_record(sha256)
         except Exception as exc:
             logger.error("ComfyUI history image save error: %s", exc)
+
+    # Close the loop: read the finished pictures back and compare them with the
+    # sheet they were written from. Having a scene_sheet IS the condition — only
+    # the sheet styles carry one, so there is no style name to test here.
+    if spooler is not None and ollama is not None and saved_sha256s \
+            and (creation_meta or {}).get("scene_sheet"):
+        from ..runtime_config import get_runtime_config
+        from ..spooler.models import JobLane
+        try:
+            cfg = await get_runtime_config(db)
+            if not cfg.get("auto_sheet_check", True):
+                logger.info("[sheet_check] skipped: turned off in the admin settings")
+            elif not spooler.is_lane_active(JobLane.EVALUATION):
+                logger.info("[sheet_check] skipped: EVALUATION lane is paused")
+            else:
+                spooler.submit(
+                    JobLane.EVALUATION, "sheet_check", run_sheet_check,
+                    meta={"sha256s": saved_sha256s},
+                    db=db, ollama=ollama, sha256s=list(saved_sha256s),
+                )
+        except Exception as exc:
+            # The pictures are saved; a check that cannot be queued is not a
+            # reason to fail the render.
+            logger.warning("[sheet_check] submit failed: %s", exc)
 
     reporter.update(1.0, f"{len(saved_sha256s)} images generated",
                     key="imagesGenerated", n=len(saved_sha256s))
@@ -1038,6 +1183,7 @@ async def run_expand_theme(
 
     image_bytes_list: list[bytes] = []
     for sha256 in body.sha256s[:4]:
+        cancel.raise_if_set()
         doc = await db.get(sha256)
         if doc:
             fp = Path(doc.get("path", ""))
@@ -1048,12 +1194,17 @@ async def run_expand_theme(
     safe_theme = body.theme.replace("{", "{{").replace("}", "}}")
     prompt = _EXPAND_THEME_PROMPT.format(theme=safe_theme)
 
+    cancel.raise_if_set()
     try:
         if tile_bytes:
             raw = await ollama.generate_vlm(prompt, [tile_bytes], model=cfg["vlm_model"])
         else:
             raw = await ollama.generate_text(prompt, model=cfg["vlm_model"])
+        cancel.raise_if_set()   # the answer is in; do not spend it if it was called off
         data = _parse_json_from_llm(raw) or {}
+    except JobCancelled:
+        await event_queue.put(None)
+        raise
     except Exception as exc:
         await event_queue.put(_sse({"type": "error", "message": str(exc)}))
         await event_queue.put(None)
@@ -1116,6 +1267,130 @@ async def _find_conflict_tags(
         return set()
 
 
+async def run_refine_directions(
+    reporter: ProgressReporter,
+    cancel: CancelToken,
+    *,
+    body_dict: dict,
+    db,
+    ollama,
+    token_queue: asyncio.Queue,
+) -> None:
+    """PROMPT lane runner — directions for a Krea 2 scene sheet, one lens per call.
+
+    Each lens is proposed freely (thinking pane), then applied as a patch held
+    to that lens's boxes, and sent as a card. A lens that fails is said and
+    the rest go on. Always ends with a None sentinel.
+    """
+    from ..ai.json_util import parse_json_object
+    from ..api.ai import DirectionsRequest
+    from ..prompt import scene_sheet
+    from ..runtime_config import get_runtime_config
+
+    body = DirectionsRequest(**body_dict)
+
+    def _put(event: dict | None) -> None:
+        token_queue.put_nowait(event)
+
+    _abort = asyncio.Event()
+    cancel.on_cancel(_abort.set)
+    cfg = await get_runtime_config(db)
+    base = {"num_ctx": body.num_ctx}
+    if body.temperature is not None:
+        base["temperature"] = body.temperature
+    # The entrance runs hot (at least 1.0); the patch keeps the Showrunner's
+    # temperature. With none set, the server's own default stands for both.
+    propose_options = dict(base)
+    if body.temperature is not None:
+        propose_options["temperature"] = max(body.temperature, 1.0)
+
+    async def _stream(prompt: str, options: dict) -> str:
+        tokens: list[str] = []
+        async for event in ollama.generate_text_stream(prompt, model=cfg["vlm_model"], options=options):
+            if _abort.is_set():
+                raise JobCancelled()
+            _put({**event, "type": "think"} if event["type"] == "token" else event)
+            if event["type"] == "token":
+                tokens.append(event["text"])
+        return "".join(tokens)
+
+    def _read(raw: str) -> dict:
+        try:
+            return parse_json_object(raw)
+        except Exception:
+            return {}
+
+    sheet = scene_sheet.normalize_sheet(body.sheet)
+    kinds = [k for k in body.kinds if k in scene_sheet.DIRECTION_KINDS]
+    try:
+        for n, kind in enumerate(kinds):
+            share = 1.0 / max(len(kinds), 1)
+            reporter.update(n * share, f"Proposing ({kind})...")
+            _put({"type": "phase", "code": "proposingDirection", "kind": kind, "progress": n * share})
+            _put({"type": "think", "text": f"\n[{kind}] "})
+            proposal = _read(await _stream(
+                scene_sheet.direction_prompt(sheet, kind, instruction=body.instruction,
+                                             avoid=body.avoid.get(kind) or []),
+                propose_options,
+            ))
+            title = str(proposal.get("title") or "").strip()
+            direction = str(proposal.get("direction") or "").strip()
+            if not direction:
+                _put({"type": "direction_failed", "kind": kind,
+                      "reason": "the proposal could not be read"})
+                continue
+            _put({"type": "phase", "code": "applyingDirection", "kind": kind,
+                  "progress": (n + 0.5) * share})
+            locks = scene_sheet.direction_locks(sheet, kind, body.locked)
+            patch = _read(await _stream(scene_sheet.patch_prompt(sheet, direction, locks), base))
+            if not patch:
+                _put({"type": "direction_failed", "kind": kind, "title": title,
+                      "direction": direction, "reason": "the patch could not be read"})
+                continue
+            new, changed, refused, outside = scene_sheet.apply_direction(
+                sheet, patch, kind, body.locked)
+            _put({"type": "direction", "kind": kind, "title": title or kind,
+                  "direction": direction, "sheet": new, "changed": changed,
+                  "refused": refused, "outside": outside})
+    except JobCancelled:
+        _put({"type": "cancelled"})
+        _put(None)
+        return
+    except Exception as exc:
+        logger.error("run_refine_directions failed: %s", exc)
+        _put({"type": "error", "message": str(exc)})
+        _put(None)
+        raise
+    _put({"type": "done"})
+    _put(None)
+
+
+def _refine_canvas(comfy, workflow_name: str) -> tuple[int, int, str]:
+    """The size the chosen workflow renders at, for placing a MOSS-Image
+    layout's boxes in its pixels. 1024x1024 (the model's own default) when
+    there is no workflow or its latent cannot be read."""
+    if workflow_name:
+        try:
+            canvas = comfy.workflow_canvas(comfy.load_workflow(workflow_name))
+            if canvas:
+                return int(canvas["width"]), int(canvas["height"]), workflow_name
+        except Exception as exc:
+            logger.info("[refine] canvas of %s unreadable: %s", workflow_name, exc)
+    return 1024, 1024, ""
+
+
+def _read_layout_draft(raw: str) -> dict | None:
+    """The writer's layout draft, or None when it cannot be read as one."""
+    from ..ai.json_util import parse_json_object
+    try:
+        draft = parse_json_object(raw)
+    except Exception:
+        return None
+    if not draft.get("caption") and not draft.get("boxes"):
+        return None
+    return draft
+
+
 async def run_refine_prompt(
     reporter: ProgressReporter,
     cancel: CancelToken,
@@ -1126,9 +1401,16 @@ async def run_refine_prompt(
     spooler,
     comfy,
     token_queue: asyncio.Queue,
+    group_id: str = "",
 ) -> None:
     """PROMPT lane runner — generates a prompt via VLM and streams events into token_queue.
     Always puts a None sentinel at the end, whether done, cancelled, or errored.
+
+    ``group_id`` labels this forging run as one work package; the render it
+    queues carries the same label, so the screen can find the whole thing again
+    after a reload and Cancel can call all of it off at once. It is a label and
+    nothing more: this runner queues the render and returns, because a job that
+    waited on another would hold its lane for the length of the render.
     """
     # lazy import — avoids circular import with api.ai
     from ..api.ai import (
@@ -1155,12 +1437,12 @@ async def run_refine_prompt(
         _translate_and_classify,
         _extract_literal_texts,
         _append_literal_texts,
-        _parse_detailed_output,
         _sample_mutation_tags,
         _REFINE_CAT_FIELDS,
     )
-    from ..api.inspire import _parse_json_from_llm, _split_tags
+    from ..api.inspire import _parse_json_from_llm
     from ..ai.tile_image import create_tile_image
+    from ..prompt import moss as moss_prompt
     from ..prompt.visual_spec import clamp_prose_paragraphs
     from ..runtime_config import get_runtime_config
     from ..spooler.models import JobLane
@@ -1170,9 +1452,16 @@ async def run_refine_prompt(
     def _put(event: dict | None) -> None:
         token_queue.put_nowait(event)
 
-    def _phase(code: str, progress: float, text: str) -> None:
+    def _phase(code: str, progress: float, text: str,
+               *, n: int | None = None, total: int | None = None) -> None:
+        """Say which step is running. ``n``/``total`` are for a step that repeats:
+        reading six references is one step reported six times, and the screen
+        can only say "2 of 6" if it is told."""
         reporter.update(progress, text)
-        _put({"type": "phase", "code": code, "progress": progress})
+        evt = {"type": "phase", "code": code, "progress": progress}
+        if n is not None and total is not None:
+            evt["n"], evt["total"] = n, total
+        _put(evt)
 
     # event for cancel signal (can be set synchronously from on_cancel handler)
     _abort = asyncio.Event()
@@ -1199,7 +1488,8 @@ async def run_refine_prompt(
             _put({"type": "error", "message": "Auto-submit is on but no workflow was selected"})
         elif body.auto_submit:
             try:
-                gen_job_id = _submit_gen_direct(spooler, comfy, db, body, positive, negative, seed=seed_for_gen)
+                gen_job_id = _submit_gen_direct(spooler, comfy, db, body, positive, negative, seed=seed_for_gen,
+                                                ollama=ollama, group_id=group_id)
                 _put({"type": "comfy_job_id", "job_id": gen_job_id})
             except Exception as exc:
                 logger.error("Refine direct auto-submit failed: %s", exc)
@@ -1212,6 +1502,11 @@ async def run_refine_prompt(
     image_bytes_list: list[bytes] = []
     weights = _resolve_weights(body.sha256s[:6], body.weights)
     raw_docs: list[tuple[dict, int]] = []  # (doc, original_idx)
+    # Which original image each tile panel holds, in reading order. The mix
+    # block names panels ("the second image"), so it has to be told what the
+    # reader is actually looking at — not the selection order, which skips a
+    # picture whose file has gone missing.
+    tile_order: list[int] = []
 
     for idx, sha256 in enumerate(body.sha256s[:6]):
         cancel.raise_if_set()
@@ -1222,6 +1517,7 @@ async def run_refine_prompt(
         fp = Path(doc.get("path", ""))
         if fp.exists():
             image_bytes_list.append(fp.read_bytes())
+            tile_order.append(idx)
 
     if not raw_docs and not image_bytes_list:
         _put({"type": "error", "message": "No valid images found"})
@@ -1234,7 +1530,9 @@ async def run_refine_prompt(
 
     # 3. build VLM prompt
     cfg = await get_runtime_config(db)
-    options = {"temperature": body.temperature, "num_ctx": body.num_ctx}
+    options = {"num_ctx": body.num_ctx}
+    if body.temperature is not None:
+        options["temperature"] = body.temperature
 
     # 3a. instruction pre-processing: separate literals from NL
     # LLM/VLM understands Japanese directly — translation is unnecessary overhead.
@@ -1252,14 +1550,26 @@ async def run_refine_prompt(
             )
 
     # 3b. conflict tag suppression: identify WD14 tags that contradict user instruction
+    # The detailed style (Krea 2 visual script) and MOSS-Image's caption and
+    # layout read the picture into a scene sheet, not WD14 tags, so the
+    # WD14-based steps below are skipped for them. MOSS-Image's tags are the
+    # danbooru call put in its order, so they keep WD14.
+    moss = body.prompt_style == "moss"
+    moss_tags = moss and body.moss_format == "tags"
+    sheet_style = body.prompt_style == "detailed" or (moss and not moss_tags)
+
     conflict_tags: set[str] = set()
-    if body.suppress_conflict_tags and nl_instruction:
+    if body.suppress_conflict_tags and nl_instruction and not sheet_style:
         all_source_tags = [t for doc, _ in raw_docs for t in doc.get("wd14_tags", [])]
         if all_source_tags:
             _phase("analyzingConflicts", 0.08, "Analyzing tag conflicts...")
             conflict_tags = await _find_conflict_tags(
                 nl_instruction, all_source_tags, db, ollama, cfg["vlm_model"]
             )
+            if conflict_tags:
+                # The Showrunner turned this on; every tag it removes is said.
+                _put({"type": "think", "text":
+                      f"[removed by the conflict check] {', '.join(sorted(conflict_tags))}\n"})
 
     # 1b. build context with common/unique WD14 tag decomposition.
     # Transmute: divergence loosens the shared-trait lock and injects mutation tags.
@@ -1326,7 +1636,7 @@ async def run_refine_prompt(
             context += "\n".join(lines)
 
     mutation_tags: list[str] = []
-    if divergence > 0:
+    if divergence > 0 and not sheet_style:
         _phase("mutatingTags", 0.14, "Sampling mutation tags...")
         mutation_tags = await _sample_mutation_tags(db, ollama, wd14_analysis, divergence)
         if mutation_tags:
@@ -1347,15 +1657,25 @@ async def run_refine_prompt(
         phase_end: float = 1.0,
         expected_tokens: int = 200,
         phase_text: str = "",
+        as_think: bool = False,
+        images: list[bytes] | None = None,
     ) -> str:
-        """Run one VLM call (with images), forwarding tokens to token_queue."""
+        """Run one VLM call (with images), forwarding tokens to token_queue.
+
+        ``as_think`` shows the answer in the thinking pane instead of the
+        prompt pane — for an intermediate step whose output is not the prompt.
+
+        ``images`` overrides the tile — the scene sheet reads one reference at
+        a time, at its own size, rather than six at 336px in a 1008px tile.
+        """
         tokens: list[str] = []
         async for event in ollama.generate_vlm_stream(
-            prompt, images_for_vlm, model=cfg["vlm_model"], options=options
+            prompt, images_for_vlm if images is None else images,
+            model=cfg["vlm_model"], options=options
         ):
             if _abort.is_set():
                 raise JobCancelled()
-            _put(event)
+            _put({**event, "type": "think"} if as_think and event["type"] == "token" else event)
             if event["type"] == "token":
                 tokens.append(event["text"])
                 n = len(tokens)
@@ -1371,15 +1691,17 @@ async def run_refine_prompt(
         expected_tokens: int = 200,
         phase_text: str = "",
         options_override: dict | None = None,
+        as_think: bool = False,
     ) -> str:
-        """Run a text-only LLM call (no images), forwarding tokens to token_queue."""
+        """Run a text-only LLM call (no images), forwarding tokens to token_queue.
+        ``as_think`` as in ``_stream_vlm``."""
         tokens: list[str] = []
         async for event in ollama.generate_text_stream(
             prompt, model=cfg["vlm_model"], options=options_override or options
         ):
             if _abort.is_set():
                 raise JobCancelled()
-            _put(event)
+            _put({**event, "type": "think"} if as_think and event["type"] == "token" else event)
             if event["type"] == "token":
                 tokens.append(event["text"])
                 n = len(tokens)
@@ -1390,6 +1712,7 @@ async def run_refine_prompt(
 
     # 4. Ollama call(s) → token_queue
     context_story = ""
+    scene_sheet_out: dict | None = None  # detailed style: the sheet the script came from
     cat_tags: dict[str, list[str]] = {f: [] for f in _REFINE_CAT_FIELDS}
     _all_must = _build_all_must(wd14_analysis)
 
@@ -1470,61 +1793,389 @@ async def run_refine_prompt(
                 if _all_must:
                     _v_story = _correct_prose_wd14_conflicts(_v_story, _all_must)
                 fanout_stories.append((f"{tags_positive}\n\n{_v_story}", _vt))
+        elif sheet_style:
+            # Step 1: the picture → a scene sheet (shown as thinking).
+            from ..prompt import scene_sheet
+            medium = scene_sheet.MEDIUM_CHOICES.get(body.visual_medium, "")
+            sheet_notes: list[str] = []
+            if body.emotion_shift:
+                sheet_notes.append(
+                    f"Shift the mood, lighting and colour toward: {body.emotion_shift}. "
+                    "Keep the people, poses and composition."
+                )
+            ic = body.inspire_context if isinstance(body.inspire_context, dict) else {}
+            if ic.get("change_targets") or ic.get("axes"):
+                targets = ic.get("change_targets") or ic.get("axes") or []
+                sheet_notes.append(f"Inspire asked to change: {', '.join(str(t) for t in targets)}")
+            if divergence > 0 and body.world_mode != "fuse":
+                # In this style the dial is the chaos of a fusion.
+                _put({"type": "think", "text": "[chaos is used only when worlds are fused]\n"})
+            # Hints handed over this run; the script must carry every one.
+            hint_words: list[str] = []
+            sheet_notes_out: list[str] = []
+            if body.sheet:
+                # Edited on screen: the picture is not read again. The sheet's
+                # own medium stands — the user may have changed it there.
+                sheet = scene_sheet.normalize_sheet(body.sheet, literal_texts=literal_texts,
+                                                    notes=sheet_notes_out)
+            else:
+                # Each tag's WD14 confidence (the highest over the references), for
+                # the Showrunner's floor on hints and on fusion ingredients alike.
+                tag_scores: dict[str, float] = {}
+                for doc, _ in raw_docs:
+                    tags_d, scores_d = doc.get("wd14_tags") or [], doc.get("wd14_tags_scores") or []
+                    if len(tags_d) == len(scores_d):
+                        for t, sc in zip(tags_d, scores_d):
+                            tag_scores[t] = max(float(sc), tag_scores.get(t, 0.0))
+                min_score = max(0.0, min(1.0, body.wd14_hint_min_score))
+
+                # The weight sliders decide which reference owns which box. The
+                # plan is spent on the merge below, in code, rather than asked
+                # of a vision model looking at a collage.
+                mix_plan = scene_sheet.build_mix_plan(
+                    [weights[i] if i < len(weights) else 0.0 for i in tile_order],
+                    roles=[(body.roles[i] if i < len(body.roles) else "both")
+                           for i in tile_order] if body.roles else None,
+                    combine=body.combine_mode,
+                )
+                # A reference at 0% is simply not read. The tile used to show it
+                # to the reader anyway, so it had to be waved off in words.
+                read_panels = [
+                    (n, idx) for n, idx in enumerate(tile_order)
+                    if (weights[idx] if idx < len(weights) else 0.0) > 0
+                ] or list(enumerate(tile_order))
+                if len(read_panels) > 1:
+                    _put({"type": "think",
+                          "text": f"[the mix] {scene_sheet.mix_summary(mix_plan)}\n"})
+
+                # Each reference is read on its own, at its own size, one after
+                # another: six VLM calls at once would not fit on the card
+                # (CLAUDE.md — GPU work goes through the scheduler).
+                hints: dict[str, list[str]] = {}
+                dropped: list[tuple[str, str]] = []
+                sheets: list[tuple[int, dict]] = []
+                for k, (n, idx) in enumerate(read_panels):
+                    cancel.raise_if_set()
+                    own_hints: dict[str, list[str]] = {}
+                    if body.wd14_hints:
+                        # The tagger's tags as a recommendation, aimed: this
+                        # image is handed what the tagger saw in THIS image.
+                        own_hints = scene_sheet.hints_for_image(
+                            wd14_analysis, idx, skip=set(_PERSON_COUNT_TAGS),
+                            scores=tag_scores, min_score=min_score, dropped=dropped,
+                        )
+                        for words in own_hints.values():
+                            hints.setdefault(scene_sheet.panel_label(n, len(tile_order)), []).extend(words)
+                            _put({"type": "think", "text":
+                                  f"[WD14 hints from {scene_sheet.panel_label(n, len(tile_order))}]"
+                                  f" {', '.join(words)}\n"})
+                    lo = 0.20 + 0.30 * k / len(read_panels)
+                    hi = 0.20 + 0.30 * (k + 1) / len(read_panels)
+                    text = (f"Reading reference {k + 1} of {len(read_panels)}..."
+                            if len(read_panels) > 1 else "Reading the scene...")
+                    _phase("readingScene", lo, text,
+                           n=k + 1, total=len(read_panels))
+                    raw = await _stream_vlm(
+                        scene_sheet.sheet_prompt(
+                            instruction=nl_instruction, notes=sheet_notes,
+                            literal_texts=literal_texts, medium=medium,
+                            reference_count=1,
+                            combine=body.combine_mode,
+                            hints=own_hints,
+                        ),
+                        lo, hi, 400, text, as_think=True,
+                        images=[image_bytes_list[n]],
+                    )
+                    data = _parse_json_from_llm(raw)
+                    if not data.get("subjects") and not data.get("setting"):
+                        # Not a usable sheet. Writing from it would invent the
+                        # scene, so stop and say why rather than hand Krea 2 a guess.
+                        raise RuntimeError(
+                            "The scene sheet could not be read from the model's answer"
+                        )
+                    sheets.append((n, scene_sheet.normalize_sheet(
+                        data, medium=medium, literal_texts=literal_texts,
+                        notes=sheet_notes_out)))
+                if dropped:
+                    _put({"type": "think", "text":
+                          "[WD14 left out] " + ", ".join(f"{w} ({why})" for w, why in dropped) + "\n"})
+                if body.wd14_hints and not hints:
+                    _put({"type": "think", "text": "[no WD14 tags to hand over — read without hints]\n"})
+
+                sheet, provenance = scene_sheet.merge_sheets(sheets, mix_plan)
+                for line in provenance:
+                    _put({"type": "think", "text": f"[from] {line}\n"})
+                if len(sheets) > 1:
+                    # The merge is exact where the weights decided and silent
+                    # where they did not: one person may be wearing two worlds'
+                    # clothes, and nothing has said what a combined cast does.
+                    # The locks are what stop this call undoing the mix.
+                    _phase("mergingSheets", 0.48, "Reconciling the references...")
+                    locks = scene_sheet.merge_locks(sheet, mix_plan, locked=body.locked)
+                    patch = _parse_json_from_llm(await _stream_text(
+                        scene_sheet.reconcile_prompt(sheet, mix_plan, locked=body.locked),
+                        0.48, 0.50, 250, "Reconciling the references...", as_think=True,
+                    ))
+                    if patch:
+                        sheet, changed, refused = scene_sheet.apply_patch(sheet, patch, locks)
+                        for line in changed:
+                            _put({"type": "think", "text": f"[reconciled] {line}\n"})
+                        for path in refused:
+                            _put({"type": "think", "text": f"[the mix held] {path}\n"})
+                if hints:
+                    hint_words = [w for words in hints.values() for w in words]
+                    unused = scene_sheet.unused_ingredients(sheet, hints)
+                    if unused:
+                        # Not dropped: one more call places each into a box, and
+                        # what still has none is kept as unclassified.
+                        _put({"type": "think", "text": f"\n[WD14 hints not used by the reader] {', '.join(unused)}\n"})
+                        _phase("placingHints", 0.50, "Placing the remaining tags...")
+                        place_raw = await _stream_text(
+                            scene_sheet.place_prompt(sheet, unused), 0.50, 0.55, 150,
+                            "Placing the remaining tags...", as_think=True,
+                        )
+                        try:
+                            from ..ai.json_util import parse_json_object
+                            placement = parse_json_object(place_raw)
+                        except Exception:
+                            placement = {}
+                        sheet, placed, unclassified = scene_sheet.apply_placement(sheet, placement, unused)
+                        for line in placed:
+                            _put({"type": "think", "text": f"\n[placed] {line}"})
+                        if unclassified:
+                            _put({"type": "think", "text": f"\n[unclassified — written into the prompt] {', '.join(unclassified)}"})
+
+                if body.world_mode == "fuse":
+                    # WD14 as ingredients: each reference's distinctive tags, and
+                    # foreign vocabulary when there is only one world to draw on.
+                    pools: dict[str, list[str]] = {}
+                    # Chaos says how many ingredients there are; the weights say
+                    # whose they are, so a 60% reference brings more of the
+                    # fusion than a 10% one.
+                    pool_shares: dict[str, float] = {}
+                    _by_image = sorted((wd14_analysis.get("unique_by_image") or {}).items(),
+                                       key=lambda kv: int(kv[0]))
+                    for n_ref, (key, info) in enumerate(_by_image):
+                        label = scene_sheet.panel_label(n_ref, len(_by_image))
+                        pools[label] = (
+                            list(info.get("must") or []) + list(info.get("ref") or [])
+                        )
+                        pool_shares[label] = (
+                            weights[int(key)] if int(key) < len(weights) else 0.0
+                        )
+                    # Similar references share a world; an outsider gives the fusion
+                    # something to collide with.
+                    if len(pools) < 2 or divergence >= 0.34:
+                        foreign = await _sample_mutation_tags(db, ollama, wd14_analysis, max(divergence, 0.3))
+                        if foreign:
+                            pools["another world"] = foreign
+                    left_out: list[tuple[str, str]] = []
+                    ingredients = scene_sheet.pick_ingredients(
+                        pools, divergence, skip=set(_PERSON_COUNT_TAGS),
+                        scores=tag_scores, min_score=min_score, dropped=left_out,
+                        shares=pool_shares if len(pools) > 1 else None,
+                    )
+                    if left_out:
+                        _put({"type": "think", "text":
+                              "\n[left out of the fusion] " + ", ".join(f"{w} ({why})" for w, why in left_out)})
+                    if not ingredients:
+                        _put({"type": "think", "text": "\n[no WD14 tags to fuse — written as read]"})
+                    else:
+                        mutation_tags = [w for words in ingredients.values() for w in words]
+                        for source, words in ingredients.items():
+                            _put({"type": "think", "text": f"\n[ingredients from {source}] {', '.join(words)}"})
+                        _phase("fusingWorlds", 0.40, "Fusing the worlds...")
+                        fuse_raw = await _stream_text(
+                            scene_sheet.fuse_prompt(sheet, ingredients, divergence, body.locked),
+                            0.40, 0.55, 300, "Fusing the worlds...", as_think=True,
+                        )
+                        fusion = _parse_json_from_llm(fuse_raw)
+                        if not fusion:
+                            raise RuntimeError("The fusion could not be read as a change to the scene")
+                        sheet, changed, refused = scene_sheet.apply_fusion(sheet, fusion, body.locked)
+                        for line in changed:
+                            _put({"type": "think", "text": f"\n[fused] {line}"})
+                        for word in scene_sheet.unused_ingredients(sheet, ingredients):
+                            _put({"type": "think", "text": f"\n[ingredient not used] {word}"})
+                        for path in refused:
+                            _put({"type": "think", "text": f"\n[locked, not changed] {path}"})
+
+                if body.staging in scene_sheet.STAGING_SCOPES:
+                    # From people posing to a moment where something happens: what
+                    # each person does and why, the body, the gaze, the movement.
+                    _phase("stagingScene", 0.45, "Staging the scene...")
+                    stage_raw = await _stream_text(
+                        scene_sheet.stage_prompt(sheet, body.staging, instruction=nl_instruction,
+                                                 locked=body.locked),
+                        0.45, 0.55, 500, "Staging the scene...", as_think=True,
+                    )
+                    try:
+                        from ..ai.json_util import parse_json_object
+                        staging = parse_json_object(stage_raw)
+                    except Exception:
+                        staging = {}
+                    if not staging:
+                        # Said, not hidden: the script is written from the sheet as read.
+                        _put({"type": "think", "text": "\n[staging could not be read — written from the sheet as read]"})
+                    else:
+                        sheet, changed, refused, outside = scene_sheet.apply_staging(
+                            sheet, staging, body.staging, body.locked)
+                        for line in changed:
+                            _put({"type": "think", "text": f"\n[staged] {line}"})
+                        for path in refused:
+                            _put({"type": "think", "text": f"\n[locked, not changed] {path}"})
+                        if outside:
+                            _put({"type": "think", "text": f"\n[staging outside its range, not used] {', '.join(outside)}"})
+                        if not changed:
+                            _put({"type": "think", "text": "\n[staging changed nothing in the sheet]"})
+
+            if body.sheet_instruction.strip():
+                # A spoken retake becomes a patch: only the boxes it names change.
+                _phase("patchingScene", 0.25, "Applying the retake to the scene...")
+                patch_raw = await _stream_text(
+                    scene_sheet.patch_prompt(sheet, body.sheet_instruction, body.locked),
+                    0.25, 0.55, 200, "Applying the retake to the scene...",
+                    as_think=True,
+                )
+                patch = _parse_json_from_llm(patch_raw)
+                if not patch:
+                    # Writing from the old sheet would look like the retake was
+                    # taken and ignored.
+                    raise RuntimeError("The retake could not be read as a change to the scene")
+                sheet, changed, refused = scene_sheet.apply_patch(sheet, patch, body.locked)
+                for line in changed:
+                    _put({"type": "think", "text": f"\n[changed] {line}"})
+                for path in refused:
+                    _put({"type": "think", "text": f"\n[locked, not changed] {path}"})
+                if not changed:
+                    _put({"type": "think", "text": "\n[the retake changed nothing in the scene]"})
+            for note in sheet_notes_out:
+                _put({"type": "think", "text": f"\n[check] {note}"})
+            scene_sheet_out = sheet
+            if moss:
+                note = moss_prompt.kana_note(sheet.get("text_in_image") or [])
+                if note:
+                    _put({"type": "think", "text": f"\n[check] {note}"})
+
+            if moss and body.moss_format == "layout":
+                # Step 2 (MOSS-Image layout): the sheet → a summary and one box per
+                # person, text and prop. The program turns the boxes into pixels.
+                width, height, canvas_from = _refine_canvas(comfy, body.workflow_name)
+                _put({"type": "think", "text":
+                      f"\n[layout canvas {width}x{height}"
+                      + (f" from {canvas_from}]" if canvas_from else " — no workflow canvas to read]")})
+                items = moss_prompt.layout_items(sheet)
+                layout_req = moss_prompt.layout_prompt(
+                    sheet, items, width=width, height=height, instruction=nl_instruction,
+                )
+                _phase("buildingLayout", 0.55, "Placing the layout...")
+                _layout_tokens = 250 + 120 * (len(items) + 2)
+                layout_raw = await _stream_text(
+                    layout_req, 0.55, 0.85, _layout_tokens, "Placing the layout...", as_think=True,
+                )
+                draft = _read_layout_draft(layout_raw)
+                if draft is None:
+                    logger.warning("[refine] MOSS layout unreadable: %r", layout_raw[:300])
+                    _put({"type": "think", "text": "\n[the layout could not be read — asking once more]\n"})
+                    _phase("buildingLayout", 0.75, "Placing the layout again...")
+                    layout_raw = await _stream_text(
+                        moss_prompt.LAYOUT_RETRY_PREFIX + layout_req, 0.75, 0.90, _layout_tokens,
+                        "Placing the layout again...", as_think=True,
+                    )
+                    draft = _read_layout_draft(layout_raw)
+                    if draft is None:
+                        # Boxes made up by the program would look like the model's plan.
+                        raise RuntimeError("The layout could not be read from the model's answer")
+                positive, repairs = moss_prompt.compile_layout(
+                    draft, items, sheet, width=width, height=height,
+                )
+                for note in repairs:
+                    logger.warning("[refine] MOSS layout: %s", note)
+                    _put({"type": "think", "text": f"\n[check] {note}"})
+                negative = moss_prompt.MOSS_NEGATIVE if body.negative_prompt else ""
+                context_story = positive
+                prose_missing = False
+            else:
+                # Step 2: the sheet → the visual script (Krea 2) or caption (MOSS-Image).
+                # Boxes the last picture dropped are named for the writer, with
+                # their values read off the sheet rather than the request.
+                _emphasise = scene_sheet.emphasis_lines(sheet, body.emphasise) or None
+                if _emphasise:
+                    _put({"type": "think", "text":
+                          "\n[emphasised — missing from the last picture] "
+                          + "; ".join(_emphasise) + "\n"})
+                _script_model = "moss" if moss else "krea2"
+                _phase("writingDescription", 0.55, "Writing the visual script...")
+                _script_n = clamp_prose_paragraphs(getattr(body, "prose_paragraphs", 5))
+                script_raw = await _stream_text(
+                    scene_sheet.script_prompt(sheet, instruction=nl_instruction, paragraphs=_script_n,
+                                              model=_script_model, emphasise=_emphasise),
+                    0.55, 0.90, 300 + _script_n * 110, "Writing the visual script...",
+                )
+                positive, repairs = scene_sheet.finish_script(script_raw, sheet, required=hint_words)
+                _min_words = 25 * _script_n
+                if len(positive.split()) < _min_words:
+                    # Logged raw, so the next time it happens the log says why.
+                    logger.warning(
+                        "[refine] visual script came back short (%d words < %d): %r",
+                        len(positive.split()), _min_words, script_raw[:300],
+                    )
+                    _put({"type": "think", "text":
+                          f"\n[the script came back short ({len(positive.split())} words) — asking once more]\n"})
+                    _phase("writingDescription", 0.75, "Writing the visual script again...")
+                    retry_raw = await _stream_text(
+                        scene_sheet.SCRIPT_RETRY_PREFIX
+                        + scene_sheet.script_prompt(sheet, instruction=nl_instruction, paragraphs=_script_n,
+                                                    model=_script_model, emphasise=_emphasise),
+                        0.75, 0.90, 300 + _script_n * 110, "Writing the visual script again...",
+                    )
+                    retry, retry_repairs = scene_sheet.finish_script(retry_raw, sheet, required=hint_words)
+                    if len(retry.split()) > len(positive.split()):
+                        positive, repairs = retry, retry_repairs
+                for note in repairs:
+                    logger.warning("[refine] visual script: %s", note)
+                    _put({"type": "think", "text": f"\n[check] {note}"})
+                if moss:
+                    # MOSS-Image's recommended negative, fixed; the writer is not asked.
+                    negative = moss_prompt.MOSS_NEGATIVE if body.negative_prompt else ""
+                else:
+                    # Krea 2 workflows zero the negative out; nothing would read one.
+                    negative = ""
+                    if body.negative_prompt:
+                        _put({"type": "think", "text": "\n[the detailed style writes no negative prompt]"})
+                context_story = positive
+                prose_missing = len(positive.split()) < 25 * _script_n
         else:
+            # MOSS-Image tags are the danbooru call, put in order afterwards;
+            # its negative is fixed, so the model is not asked for one.
             vlm_prompt = _build_vlm_prompt(
-                context, nl_instruction, body.prompt_style, body.negative_prompt,
+                context, nl_instruction, "danbooru" if moss_tags else body.prompt_style,
+                body.negative_prompt and not moss_tags,
                 instruction_framing=instruction_framing,
             )
             _phase("generatingPrompt", 0.20, "VLM generating...")
             raw_text = await _stream_vlm(vlm_prompt, 0.20, 0.90, 150, "VLM generating...")
             prose_missing = False
 
-            if body.prompt_style == "detailed":
-                # Split off trailing per-category JSON block before parsing 8 sections
-                _cb = raw_text.rfind("```json")
-                if _cb >= 0:
-                    _sections_text = raw_text[:_cb].strip()
-                    _cat_json = _parse_json_from_llm(raw_text[_cb:])
-                    for _f in _REFINE_CAT_FIELDS:
-                        _v = _cat_json.get(_f, "")
-                        cat_tags[_f] = _split_tags(_v) if _v else []
-                else:
-                    _sections_text = raw_text
-
-                # Parse 8-section format BEFORE _clean_markdown strips ** bold markers
-                if body.negative_prompt:
-                    # Extract 8 sections from full raw text — do NOT split on POSITIVE: first,
-                    # as that would discard everything before the POSITIVE: label.
-                    parsed = _parse_detailed_output(_sections_text)
-                    if parsed:
-                        positive = _clean_markdown(parsed)
-                    else:
-                        # Fallback: no 8-section structure found — use POSITIVE: block directly
-                        positive_raw, _ = _parse_positive_negative(_sections_text)
-                        positive = _clean_markdown(positive_raw)
-                    neg_m = re.search(r"NEGATIVE:\s*(.*?)$", _sections_text, re.S | re.I)
-                    negative = _clean_markdown(neg_m.group(1).strip()) if neg_m else ""
-                else:
-                    _raw_stripped = _strip_stray_negative(_sections_text)
-                    parsed = _parse_detailed_output(_raw_stripped)
-                    positive = _clean_markdown(parsed if parsed else _raw_stripped)
-                    negative = ""
-            elif body.negative_prompt:
+            if body.negative_prompt and not moss_tags:
                 positive_raw, negative_raw = _parse_positive_negative(raw_text)
                 positive = _clean_markdown(positive_raw)
                 negative = _clean_markdown(negative_raw)
             else:
                 positive = _clean_markdown(_strip_stray_negative(raw_text))
                 negative = ""
-            # Subject-count safety net for danbooru/detailed (natural already does this).
+            # Subject-count safety net (natural already does this).
             positive = _ensure_subject_anchor(positive, raw_docs)
-            # WD14 post-processing for danbooru/detailed (mirrors natural branch)
-            if body.prompt_style == "danbooru" and divergence <= 0.5:
+            if divergence <= 0.5:
                 positive = _inject_wd14_must_tags(positive, wd14_analysis)
             if _all_must:
-                if body.prompt_style == "detailed":
-                    positive = _correct_prose_wd14_conflicts(positive, _all_must)
                 cat_tags = _enforce_wd14_on_cat_tags(cat_tags, _all_must)
+            if moss_tags:
+                from ..api.inspire import _WD14_CHAR_TAGS
+                positive, tag_notes = moss_prompt.compile_tags(positive, characters=_WD14_CHAR_TAGS)
+                for note in tag_notes:
+                    _put({"type": "think", "text": f"\n[check] {note}"})
+                negative = moss_prompt.MOSS_NEGATIVE if body.negative_prompt else ""
     except JobCancelled:
         _put({"type": "cancelled"})
         _put(None)
@@ -1540,15 +2191,21 @@ async def run_refine_prompt(
     # 5. post-process: forced-tag removal + literal directive injection
     _phase("parsingOutput", 0.90, "Parsing output...")
     removal_tags = {t.lower().replace(' ', '_') for t in cfg.get("prompt_removal_tags", [])}
-    positive, removed_tags = _remove_forced_tags(
-        positive,
-        removal_tags,
-        all_lines=(body.prompt_style in ("detailed", "danbooru")),
-    )
+    if sheet_style:
+        # Sentences (or a layout's JSON), not a tag list: removing comma-separated tags would cut
+        # words out of them. Quality words are kept out by the writer, and
+        # visible text was woven in as a quoted sentence by finish_script.
+        removed_tags = []
+    else:
+        positive, removed_tags = _remove_forced_tags(
+            positive,
+            removal_tags,
+            all_lines=(body.prompt_style == "danbooru" or moss_tags),
+        )
 
-    # 5b. append literal text render tags (text "X") to end of positive prompt
-    if literal_texts:
-        positive = _append_literal_texts(positive, literal_texts)
+        # 5b. append literal text render tags (text "X") to end of positive prompt
+        if literal_texts:
+            positive = _append_literal_texts(positive, literal_texts)
 
     # 5c. process fan-out variants with the same post-processing as the main prompt
     variants: list[dict] = []
@@ -1579,6 +2236,7 @@ async def run_refine_prompt(
         "divergence": divergence,
         "mutation_tags": mutation_tags,
         "variants": variants,
+        "sheet": scene_sheet_out,
         **cat_tags,
     })
 
@@ -1590,7 +2248,9 @@ async def run_refine_prompt(
     elif body.auto_submit:
         try:
             _phase("queuingGeneration", 0.97, "Queuing generation job...")
-            gen_job_id = _submit_gen_direct(spooler, comfy, db, body, positive, negative, seed=seed_for_gen)
+            gen_job_id = _submit_gen_direct(spooler, comfy, db, body, positive, negative,
+                                            seed=seed_for_gen, scene_sheet=scene_sheet_out,
+                                            ollama=ollama, group_id=group_id)
             _put({"type": "comfy_job_id", "job_id": gen_job_id})
         except Exception as exc:
             logger.error("Refine auto-submit failed: %s", exc)
@@ -1598,7 +2258,8 @@ async def run_refine_prompt(
         # One bad variant must not cost the others their render.
         for v in variants:
             try:
-                _submit_gen_direct(spooler, comfy, db, body, v["positive"], negative, seed=seed_for_gen)
+                _submit_gen_direct(spooler, comfy, db, body, v["positive"], negative, seed=seed_for_gen,
+                                   ollama=ollama, group_id=group_id)
             except Exception as exc:
                 logger.error("Refine variant submit failed: %s", exc)
                 _put({"type": "error", "message": f"Variant job error: {exc}"})
@@ -1607,14 +2268,22 @@ async def run_refine_prompt(
     _put(None)
 
 
-def _submit_gen_direct(spooler, comfy, db, body, positive: str, negative: str, seed: int | None = None) -> str:
-    """Submit a ComfyUI job to the GENERATION lane and return its job_id (no request object needed)."""
+def _submit_gen_direct(spooler, comfy, db, body, positive: str, negative: str, seed: int | None = None,
+                       scene_sheet: dict | None = None, ollama=None, group_id: str = "") -> str:
+    """Submit a ComfyUI job to the GENERATION lane and return its job_id (no request object needed).
+
+    ``spooler`` and ``ollama`` ride along so the render can queue the sheet
+    check behind itself once it knows what it produced.
+    """
     from ..spooler.models import JobLane
     return spooler.submit(
         JobLane.GENERATION,
         f"comfy_generate ({body.workflow_name})",
         run_generation,
         meta={
+            # The same work package as the forging that asked for it, so the
+            # screen finds both after a reload and Cancel calls off both.
+            **({"group_id": group_id} if group_id else {}),
             "sha256s": body.sha256s[:6],
             "positive_preview": positive[:300],
             "negative_preview": (negative or "")[:200],
@@ -1624,6 +2293,10 @@ def _submit_gen_direct(spooler, comfy, db, body, positive: str, negative: str, s
             "negative_prompt": negative or "",
             "instruction": body.instruction,
             "prompt_style": body.prompt_style,
+            "moss_format": body.moss_format if body.prompt_style == "moss" else "",
+            "wd14_hints": body.wd14_hints,
+            "wd14_hint_min_score": body.wd14_hint_min_score,
+            "staging": body.staging,
             "weights": body.weights,
             "direct_prompt": body.direct_prompt,
             "direct_negative_prompt": body.direct_negative_prompt or "",
@@ -1634,6 +2307,8 @@ def _submit_gen_direct(spooler, comfy, db, body, positive: str, negative: str, s
         },
         comfy=comfy,
         db=db,
+        spooler=spooler,
+        ollama=ollama,
         workflow_name=body.workflow_name,
         positive=positive,
         negative=negative,
@@ -1646,8 +2321,13 @@ def _submit_gen_direct(spooler, comfy, db, body, positive: str, negative: str, s
             "weights": body.weights,
             "instruction": body.instruction,
             "prompt_style": body.prompt_style,
+            "moss_format": body.moss_format if body.prompt_style == "moss" else "",
+            "wd14_hints": body.wd14_hints,
+            "wd14_hint_min_score": body.wd14_hint_min_score,
+            "staging": body.staging,
             "temperature": body.temperature,
             "num_ctx": body.num_ctx,
+            "scene_sheet": scene_sheet,
             "workflow_name": body.workflow_name,
             "batch_count": body.batch_count,
             "positive_prompt": positive,
