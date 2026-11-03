@@ -16,8 +16,15 @@ part of the answer goes through the door it always went through —
 ``scene_sheet.apply_placement`` — in that order, so placed tags are appended
 last and do not shift the numbered objects.
 
-The reconstruction stays a call of its own: it is the second look, and a look
-inside the same call that made the changes would not be a second look.
+The last look joins too (the Showrunner, 2026-11-04). The call is made with
+the reference picture, and after the parts that change the sheet comes one
+more part, "rebuild": the whole sheet checked as one picture — the same rules
+``scene_sheet.reconstruct_prompt`` gives the last look when it runs alone —
+applied last through ``scene_sheet.apply_reconstruction``. It is no longer a
+second pair of eyes; it is the same answer reading back what it just wrote,
+which is what the measured run could afford. When nothing here runs (only a
+merge, a fusion or a retake changed the sheet), the last look still runs as a
+call of its own.
 """
 from __future__ import annotations
 
@@ -48,16 +55,22 @@ def _staging_exclude(active: list[str]) -> tuple[str, ...]:
 def shape_prompt(
     sheet: dict, *, staging: str, props_mode: str, tags: list[str],
     instruction: str = "", locked: list[str] | None = None,
+    reference_count: int = 1, earlier: list[dict] | None = None,
 ) -> str:
+    """``earlier`` is the ledger's steps so far (a merge, a fusion), so the
+    rebuild part knows what had already been changed before this call."""
     active = jobs(staging=staging, props_mode=props_mode, tags=tags)
     indexed = dict(sheet)
     indexed["subjects"] = [{"index": i, **s} for i, s in enumerate(sheet.get("subjects") or [])]
     names = {"staging": "stage the moment", "objects": "fit the objects to it",
              "place": "place the tagger's leftover tags"}
+    refs = ("the reference picture" if reference_count <= 1 else
+            f"{reference_count} reference pictures")
     lines = [
-        "Below is the scene sheet a vision model read from a reference picture. You have "
-        f"{len(active)} job{'s' if len(active) > 1 else ''} on it, answered together so that "
-        "they agree with each other: " + "; ".join(names[j] for j in active) + ".",
+        f"You are given {refs} and the scene sheet a vision model read from it. You have "
+        f"{len(active) + 1} jobs on the sheet, answered together so that they agree with each "
+        "other: " + "; ".join(names[j] for j in active)
+        + "; and last, look at the whole sheet as one picture and fix what does not hold.",
     ]
     if "staging" in active:
         lines += [
@@ -89,16 +102,30 @@ def shape_prompt(
             "[Tags]",
             *[f"- {t}" for t in tags],
         ]
+    lines += [
+        "",
+        "[Last job: one picture]",
+        "Each job above changes only its own boxes. Read the whole sheet as it stands after "
+        "them, against the reference, and patch what does not hold together.",
+        *scene_sheet.rebuild_rules(staging=staging, reference_count=reference_count,
+                                   same_call=True),
+        "A box the rebuild leaves out stays as the parts above left it. If it all holds "
+        "together, the rebuild is {\"set\": {}}.",
+    ]
     lines += ["", "Output only one JSON object, with one part per job:", "{"]
     if "staging" in active:
         lines += ['  "staging":', *scene_sheet.stage_answer_shape(staging, indent="  ")]
     if "objects" in active:
         lines += ['  "objects":', *props_pass.props_answer_shape(props_mode, indent="  ")]
     if "place" in active:
-        lines.append('  "place": [{"tag": "<the tag as given>", "box": "<box>", "person": <index or null>}]')
+        lines.append('  "place": [{"tag": "<the tag as given>", "box": "<box>", "person": <index or null>}],')
+    lines.append('  "rebuild": ' + scene_sheet.REBUILD_ANSWER_SHAPE)
     lines.append("}")
     if instruction:
         lines += ["", "[User instruction — the sheet already follows it; keep it]", instruction]
+    if earlier:
+        lines += ["", "[What earlier steps already changed]",
+                  json.dumps(earlier, ensure_ascii=False, indent=2)]
     lines += ["", "[Scene sheet]", json.dumps(indexed, ensure_ascii=False, indent=2)]
     return "\n".join(lines)
 
@@ -117,7 +144,8 @@ def apply_shape(
 
     ``{"staging": {"changed", "refused", "outside", "stock", "read"},
        "objects": {"changed", "refused", "dropped", "read"},
-       "place": {"placed", "unclassified"}}``
+       "place": {"placed", "unclassified"},
+       "rebuild": {"changed", "refused", "outside"}}``
 
     ``read`` is False when that job's part was missing or empty: said, so
     the run can say it, never silently taken as "nothing to change".
@@ -145,4 +173,8 @@ def apply_shape(
         sheet, placed, unclassified = scene_sheet.apply_placement(
             sheet, {"place": place if isinstance(place, list) else []}, tags)
         report["place"] = {"placed": placed, "unclassified": unclassified}
+    # Last, the whole read back as one picture, through the last look's door.
+    sheet, changed, refused, outside = scene_sheet.apply_reconstruction(
+        sheet, _part(answer, "rebuild"), locked)
+    report["rebuild"] = {"changed": changed, "refused": refused, "outside": outside}
     return sheet, report

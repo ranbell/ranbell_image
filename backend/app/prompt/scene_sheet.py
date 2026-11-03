@@ -1013,8 +1013,8 @@ def script_prompt(
         "- Each hand is written once: what it does and what is in it, in one clause. "
         "\"hands\" and \"holding\" describe the same hands — do not say the same hand "
         "rests on an object and then that it holds it.",
-        "- Where the sheet still says \"X or Y\" about something visible, write only one "
-        "of them. A hedge in the prompt is drawn as two half-things.",
+        "- Where the sheet still says \"X or Y\" or \"X/Y\" about something visible, write "
+        "only one of them. A hedge in the prompt is drawn as two half-things.",
         "- Spend the length on the action and the people — movement, hands, legs, faces, "
         "where the eyes go — then on materials and textures.",
         "- The setting is the place the action happens in: write it as that, with the props "
@@ -1103,6 +1103,34 @@ def clean_script(text: str) -> str:
     out = re.sub(r"[ \t]{2,}", " ", out)
     out = re.sub(r"\n{3,}", "\n\n", out)
     return out.strip()
+
+
+def still_on_sheet(words: list[str] | None, sheet: dict) -> list[str]:
+    """The hint words the final sheet still holds.
+
+    A hint the reader used and a later step deliberately took away — "head
+    rest" after a restage gave her a different pose (2026-11-03) — is not
+    something the script owes the picture any more; asking the writer for it
+    again would bring the old pose back. Matched the way ``uncovered`` matches
+    a tag against the script, here against the sheet.
+    """
+    text = _sheet_text(sheet).lower()
+    words_on_sheet = re.findall(r"[a-z]+", text)
+    # "leaves" is the plural of the hint "leaf" (`_stem` is calibrated for the
+    # script check and stays as it is).
+    stems = {_stem(w) for w in words_on_sheet} | {
+        _stem(w[:-3] + "f") for w in words_on_sheet if w.endswith("ves")}
+    compact = re.sub(r"[^a-z]", "", text)
+    out: list[str] = []
+    for word in words or []:
+        core = re.sub(r"\s*\([^)]*\)", "", str(word)).replace("_", " ").strip()
+        if not core:
+            continue
+        content = _content(core, 3)
+        if (re.sub(r"[^a-z]", "", core.lower()) in compact
+                or (content and all(_stem(w) in stems for w in content))):
+            out.append(word)
+    return out
 
 
 def finish_script(
@@ -1864,8 +1892,9 @@ STAGING_SCOPES: dict[str, dict] = {
 #: classroom or library", "deep brown or black leather"). A hedge on the sheet
 #: becomes two half-pictures, so every rewrite decides.
 DECIDE_LINE = (
-    "- Decide. Never write \"X or Y\" about anything visible — one place, one material, "
-    "one colour. Where you cannot tell, choose the one that fits this picture."
+    "- Decide. Never write \"X or Y\" about anything visible, and never \"X/Y\" either "
+    "(\"vest/cardigan\" is the same hedge) — one place, one garment, one material, one "
+    "colour. Where you cannot tell, choose the one that fits this picture."
 )
 #: Said wherever a person's hands are rewritten: the book her left hand both
 #: "rests on" and "holds" (2026-11-03).
@@ -2009,42 +2038,44 @@ def ledger_step(step: str, intent: str, changes: list[str]) -> dict:
     return {"step": step, "intent": intent, "changes": list(changes)}
 
 
-def reconstruct_prompt(
-    ledger: dict, *, staging: str = "read", instruction: str = "", reference_count: int = 1,
-) -> str:
-    """What the vision model is asked: the ledger → one coherent sheet."""
+def rebuild_rules(*, staging: str = "read", reference_count: int = 1,
+                  same_call: bool = False) -> list[str]:
+    """What one picture needs, as lines. Shared by ``reconstruct_prompt`` (the
+    last look as a call of its own) and ``shaping.shape_prompt`` (the last part
+    of the shaping call, after the parts that changed the sheet).
+
+    ``same_call`` words it for the shaping call: the stock poses are the ones
+    named in this answer's own staging part, and "the steps" are the parts
+    above.
+    """
     refs = ("the reference picture" if reference_count <= 1 else
-            f"the {_NUMBER_WORDS.get(reference_count, reference_count)} reference pictures, in order")
+            f"the {_NUMBER_WORDS.get(reference_count, reference_count)} reference pictures")
+    named = ("you named in \"stock_poses\" above" if same_call
+             else "the staging step named in its intent")
+    steps = "the parts above" if same_call else "the steps"
     if staging == "restage":
         pose = (
             "- The pose was changed on purpose (the user asked for a different action). Keep the "
-            "action, but check each person's pose against the stock poses the staging step "
-            "named in its intent: a pose that is one of them, or a near copy, is not done — "
-            "replace it with one only this person in this place would take, and rewrite "
-            "\"signature\", \"pose_action\" and \"hands\" to match. Check too that every "
-            "\"signature\" is as specific as a real picture's would be — what touches what, "
-            "where the weight goes, what is asymmetric. The first pose that comes to mind is "
-            "not a fix."
+            f"action, but check each person's pose against the stock poses {named}: a pose that "
+            "is one of them, or a near copy, is not done — replace it with one only this person "
+            "in this place would take, and rewrite \"signature\", \"pose_action\" and "
+            "\"hands\" to match. Check too that every \"signature\" is as specific as a real "
+            "picture's would be — what touches what, where the weight goes, what is asymmetric. "
+            "The first pose that comes to mind is not a fix."
         )
     else:
         pose = (
             f"- Look at {refs}: each person's pose there is what made it worth reading, and "
-            "\"signature\" says what makes it their own. Where a later step drifted from it, "
+            f"\"signature\" says what makes it their own. Where {steps} drifted from it, "
             "bring it back. Turning a particular pose into a more ordinary one is a loss, "
             "never a correction."
         )
-    lines = [
-        f"You are given {refs} and the ledger of a scene sheet made from it: \"read\" is "
-        "what a vision model saw, \"steps\" is what each later step changed and why, "
-        "\"current\" is the sheet as it stands. Each step changed only its own boxes and "
-        "none of them looked at the whole, so \"current\" may no longer be one picture. "
-        "Rebuild it into one.",
-        "",
+    return [
         "What one picture needs:",
         "- One \"story\": a sentence saying who is doing what and what the picture is about. "
         "Every box serves it. The people who are not its centre take part in that moment "
         "briefly; they do not each get a scene of their own.",
-        "- One count: the people are the same people as in \"current\" — nobody added, "
+        "- One count: the people are the same people as on the sheet — nobody added, "
         "nobody removed — and nothing anywhere on the sheet says a different number.",
         "- One body each: each hand does one thing at a time, and what a person leans on, "
         "holds or touches uses a hand or an arm. The pose, the hands, what they hold and "
@@ -2054,23 +2085,43 @@ def reconstruct_prompt(
         "railing, table, wall or edge they are on, as the camera sees it. Nobody floats "
         "unless the picture means them to.",
         "- One place: the setting is one place, said as one — not a choice between two.",
-        DECIDE_LINE.replace("- Decide.", "- Decided, everywhere:") + " Find every \"or\" "
-        "between two visible things on the sheet and replace it with one.",
+        DECIDE_LINE.replace("- Decide.", "- Decided, everywhere:") + " Find every \"or\" and "
+        "every slash between two visible things on the sheet and replace it with one.",
         "- The camera can show what the sheet describes of the people.",
         pose,
-        "- What the steps added (the objects, the staged action) stays where it fits the "
+        f"- What {steps} added (the objects, the staged action) stays where it fits the "
         "story. Where it does not, move it or reshape it so that it does.",
         "- Everything else stays exactly as it is. Do not soften, blur or shorten a box, "
         "and do not swap a word for a milder or vaguer one. Who the people are, how they "
         "look and what they wear do not change, and neither does the medium.",
+    ]
+
+
+REBUILD_ANSWER_SHAPE = (
+    '{"set": {"<scene box>": "<new value>"}, '
+    '"subjects": [{"index": 0, "set": {"<person box>": "<new value>"}}]}'
+)
+
+
+def reconstruct_prompt(
+    ledger: dict, *, staging: str = "read", instruction: str = "", reference_count: int = 1,
+) -> str:
+    """What the vision model is asked: the ledger → one coherent sheet."""
+    refs = ("the reference picture" if reference_count <= 1 else
+            f"the {_NUMBER_WORDS.get(reference_count, reference_count)} reference pictures, in order")
+    lines = [
+        f"You are given {refs} and the ledger of a scene sheet made from it: \"read\" is "
+        "what a vision model saw, \"steps\" is what each later step changed and why, "
+        "\"current\" is the sheet as it stands. Each step changed only its own boxes and "
+        "none of them looked at the whole, so \"current\" may no longer be one picture. "
+        "Rebuild it into one.",
+        "",
+        *rebuild_rules(staging=staging, reference_count=reference_count),
         "",
         "Output only the boxes you change, as a patch on \"current\" — a box you leave out "
         "stays exactly as it is. People are addressed by their \"index\" in \"current\". "
         "If the sheet already holds together, output {\"set\": {}}.",
-        "{",
-        '  "set": {"<scene box>": "<new value>"},',
-        '  "subjects": [{"index": 0, "set": {"<person box>": "<new value>"}}]',
-        "}",
+        REBUILD_ANSWER_SHAPE,
     ]
     if instruction:
         lines += ["", "[User instruction — the sheet already follows it; keep it]", instruction]

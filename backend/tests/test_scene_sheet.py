@@ -165,9 +165,17 @@ class _LLM:
 
     def __init__(self):
         self.vlm_prompts, self.text_prompts, self.embeds = [], [], 0
-        self.rebuild_prompts = []
+        self.rebuild_prompts, self.shape_prompts = [], []
+
+    def shape_answer(self, prompt: str) -> str:
+        """The one shaping call (staging, objects, tags, rebuild): nothing to say."""
+        return "{}"
 
     async def generate_vlm_stream(self, prompt, images, **kw):
+        if "[Job: " in prompt:
+            self.shape_prompts.append(prompt)
+            yield {"type": "token", "text": self.shape_answer(prompt)}
+            return
         if _is_rebuild(prompt):
             self.rebuild_prompts.append(prompt)
             yield {"type": "token", "text": _rebuilt(prompt)}
@@ -229,6 +237,10 @@ class _TwoRefLLM(_LLM):
         self.images_seen = []
 
     async def generate_vlm_stream(self, prompt, images, **kw):
+        if "[Job: " in prompt:
+            self.shape_prompts.append(prompt)
+            yield {"type": "token", "text": self.shape_answer(prompt)}
+            return
         if _is_rebuild(prompt):
             self.rebuild_prompts.append(prompt)
             yield {"type": "token", "text": _rebuilt(prompt)}
@@ -1154,7 +1166,7 @@ async def test_wd14_hints_reach_the_sheet_reader_and_unused_ones_are_said(tmp_pa
     # call, which (in this fake) answers nothing usable — so both are kept as
     # unclassified and written into the prompt, not dropped.
     assert "[WD14 hints not used by the reader] night sky, lens flare" in thinking
-    assert "[Job: place the tagger's leftover tags]" in llm.text_prompts[0]
+    assert "[Job: place the tagger's leftover tags]" in llm.shape_prompts[0]
     assert "[unclassified — written into the prompt] night sky, lens flare" in thinking
     done = next(e for e in events if e and e["type"] == "done")
     assert done["sheet"]["unclassified"] == ["night sky", "lens flare"]
@@ -1395,7 +1407,17 @@ def test_a_dropped_action_box_is_found():
 class _StagingLLM(_LLM):
     """Reads one girl; stages her; writes a script."""
 
+    def shape_answer(self, prompt: str) -> str:
+        return json.dumps({"staging":
+            {"set": {"situation": "the ferry is leaving without her"},
+             "subjects": [{"index": 0, "set": {"pose_action": "sprinting down the pier",
+                                                "outfit": "a raincoat"}}]}})
+
     async def generate_vlm_stream(self, prompt, images, **kw):
+        if "[Job: " in prompt:
+            self.shape_prompts.append(prompt)
+            yield {"type": "token", "text": self.shape_answer(prompt)}
+            return
         if _is_rebuild(prompt):
             self.rebuild_prompts.append(prompt)
             yield {"type": "token", "text": _rebuilt(prompt)}
@@ -1407,13 +1429,7 @@ class _StagingLLM(_LLM):
 
     async def generate_text_stream(self, prompt, **kw):
         self.text_prompts.append(prompt)
-        if "[Job: stage the moment]" in prompt:
-            yield {"type": "token", "text": json.dumps({"staging":
-                {"set": {"situation": "the ferry is leaving without her"},
-                 "subjects": [{"index": 0, "set": {"pose_action": "sprinting down the pier",
-                                                    "outfit": "a raincoat"}}]}})}
-        else:
-            yield {"type": "token", "text": "An anime illustration. " + "A girl sprints down the pier after the ferry. " * 30}
+        yield {"type": "token", "text": "An anime illustration. " + "A girl sprints down the pier after the ferry. " * 30}
 
 
 async def _staging_run(body, tmp_path):
@@ -1438,7 +1454,7 @@ async def _staging_run(body, tmp_path):
 @pytest.mark.asyncio
 async def test_staging_runs_once_after_a_fresh_reading(tmp_path):
     llm, events = await _staging_run({}, tmp_path)  # "move" is the default
-    staged = [p for p in llm.text_prompts if "[Job: stage the moment]" in p]
+    staged = [p for p in llm.shape_prompts if "[Job: stage the moment]" in p]
     assert len(staged) == 1
     done = next(e for e in events if e["type"] == "done")
     assert done["sheet"]["subjects"][0]["pose_action"] == "sprinting down the pier"
@@ -1452,9 +1468,9 @@ async def test_staging_runs_once_after_a_fresh_reading(tmp_path):
 @pytest.mark.asyncio
 async def test_staging_is_skipped_when_read_or_when_the_sheet_was_edited(tmp_path):
     llm, _ = await _staging_run({"staging": "read"}, tmp_path)
-    assert not any("[Job: stage the moment]" in p for p in llm.text_prompts)
+    assert not any("[Job: stage the moment]" in p for p in llm.shape_prompts)
     llm, _ = await _staging_run({"sheet": _one_girl()}, tmp_path)
-    assert not any("[Job: stage the moment]" in p for p in llm.text_prompts)
+    assert not any("[Job: stage the moment]" in p for p in llm.shape_prompts)
 
 
 # ── Reconstruction: the ledger and the reference, read back into one picture ─
@@ -1547,11 +1563,12 @@ def test_an_empty_or_unreadable_rebuild_keeps_the_sheet_as_it_stood():
 
 
 @pytest.mark.asyncio
-async def test_a_staged_run_is_rebuilt_once_with_the_reference(tmp_path):
+async def test_a_staged_run_is_rebuilt_in_the_same_call_with_the_reference(tmp_path):
     llm, events = await _staging_run({}, tmp_path)
-    assert len(llm.rebuild_prompts) == 1
-    p = llm.rebuild_prompts[0]
-    assert '"step": "staging (move)"' in p and "pose_action" in p
+    # the last look is the shaping call's last part, not a call of its own
+    assert llm.rebuild_prompts == [] and len(llm.shape_prompts) == 1
+    p = llm.shape_prompts[0]
+    assert "[Last job: one picture]" in p and '"rebuild":' in p and "What one picture needs" in p
     done = next(e for e in events if e["type"] == "done")
     assert done["ledger"]["read"]["subjects"][0]["pose_action"] == "standing"
     assert done["ledger"]["current"] == done["sheet"]
@@ -1571,7 +1588,8 @@ async def test_every_model_call_is_timed(tmp_path):
     llm, events = await _staging_run({}, tmp_path)
     done = next(e for e in events if e["type"] == "done")
     steps = [row["step"] for row in done["timings"]]
-    assert steps[0] == "readingScene" and "shapingScene" in steps and "reconstructingScene" in steps
+    assert steps[0] == "readingScene" and "shapingScene" in steps
+    assert "reconstructingScene" not in steps  # joined into the shaping call
     assert all(row["seconds"] >= 0 and row["answer"] >= 1 for row in done["timings"])
     thinking = "".join(e["text"] for e in events if e["type"] == "think")
     assert "[time] shapingScene" in thinking and "[time] total" in thinking

@@ -1846,6 +1846,7 @@ async def run_refine_prompt(
             # lines the thinking pane already shows are kept — nothing judged.
             ledger_steps: list[dict] = []
             sheet_read: dict | None = None
+            rebuilt_in_shaping = False
             # The references actually read (0% is not read), for the last look.
             read_images = [
                 image_bytes_list[n] for n, idx in enumerate(tile_order)
@@ -2045,13 +2046,16 @@ async def run_refine_prompt(
                     # leftover tags, asked in ONE call: three calls each thought
                     # about the same sheet from scratch (2026-11-03, measured).
                     # Each part of the answer still goes through its own door.
+                    # With the reference: the last part reads the whole sheet back
+                    # as one picture, so the last look is part of this call.
                     _phase("shapingScene", 0.45, "Staging the scene and its objects...")
-                    shape_raw = await _stream_text(
+                    shape_raw = await _stream_vlm(
                         shaping.shape_prompt(sheet, staging=body.staging, props_mode=body.props_mode,
                                              tags=pending_tags, instruction=nl_instruction,
-                                             locked=body.locked),
-                        0.45, 0.55, 300 + 400 * len(shape_jobs), "Staging the scene and its objects...",
-                        as_think=True,
+                                             locked=body.locked, reference_count=len(read_images),
+                                             earlier=ledger_steps or None),
+                        0.45, 0.55, 400 + 400 * len(shape_jobs), "Staging the scene and its objects...",
+                        as_think=True, images=read_images,
                     )
                     try:
                         from ..ai.json_util import parse_json_object
@@ -2111,6 +2115,19 @@ async def run_refine_prompt(
                         if pl["unclassified"]:
                             _put({"type": "think", "text": f"\n[unclassified — written into the prompt] {', '.join(pl['unclassified'])}"})
 
+                    rb = shape_report["rebuild"]
+                    ledger_steps.append(scene_sheet.ledger_step(
+                        "reconstruct", "the whole read back against the reference as one picture",
+                        rb["changed"]))
+                    for line in rb["changed"]:
+                        _put({"type": "think", "text": f"\n[reconstructed] {line}"})
+                    for path in rb["refused"]:
+                        _put({"type": "think", "text": f"\n[locked, not changed] {path}"})
+                    if rb["outside"]:
+                        _put({"type": "think", "text":
+                              f"\n[reconstruction outside its range, not used] {', '.join(rb['outside'])}"})
+                    rebuilt_in_shaping = True
+
             if body.sheet_instruction.strip():
                 # A spoken retake becomes a patch: only the boxes it names change.
                 _phase("patchingScene", 0.25, "Applying the retake to the scene...")
@@ -2133,7 +2150,8 @@ async def run_refine_prompt(
                     _put({"type": "think", "text": f"\n[locked, not changed] {path}"})
                 if not changed:
                     _put({"type": "think", "text": "\n[the retake changed nothing in the scene]"})
-            if sheet_read is not None and any(st["changes"] for st in ledger_steps):
+            if (sheet_read is not None and not rebuilt_in_shaping
+                    and any(st["changes"] for st in ledger_steps)):
                 # The last look: each step changed only its own boxes, so the
                 # reference and the ledger are read back into one picture. The
                 # model decides; code keeps the shape and the user's locks.
@@ -2227,6 +2245,9 @@ async def run_refine_prompt(
                                               model=_script_model, emphasise=_emphasise),
                     0.55, 0.90, 300 + _script_n * 110, "Writing the visual script...",
                 )
+                # Hints a later step deliberately took off the sheet (an old pose
+                # after a restage) are not asked of the writer.
+                hint_words = scene_sheet.still_on_sheet(hint_words, sheet)
                 positive, repairs = scene_sheet.finish_script(script_raw, sheet, required=hint_words)
                 _min_words = 25 * _script_n
                 # One retry at most, for both reasons at once: a short draft and

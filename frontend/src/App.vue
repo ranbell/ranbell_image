@@ -740,14 +740,16 @@ const refineStepOrder = computed(() => {
       o.push('readingScene')
       if (refineReadCount.value > 1) o.push('mergingSheets')
       if (refineWorldMode.value === 'fuse') o.push('fusingWorlds')
-      // Staging, the objects and the leftover tags are one call (prompt/shaping.py).
-      if (refineWd14Hints.value || refineStaging.value !== 'read' || refineProps.value !== 'keep') o.push('shapingScene')
     }
     if (refineSheetMode.value === 'retake') o.push('patchingScene')
-    // The last look runs only when some step changed the sheet.
-    if ((refineSheetMode.value === 'read' && (refineReadCount.value > 1 || refineWd14Hints.value
-        || refineWorldMode.value === 'fuse' || refineStaging.value !== 'read'
-        || refineProps.value !== 'keep')) || refineSheetMode.value === 'retake') o.push('reconstructingScene')
+    // Staging, the objects, the leftover tags and the last look are one call
+    // (prompt/shaping.py). The last look runs alone only when something else —
+    // a merge, a fusion, a retake — changed the sheet.
+    const shaping = refineSheetMode.value === 'read'
+      && (refineWd14Hints.value || refineStaging.value !== 'read' || refineProps.value !== 'keep')
+    if (shaping) o.push('shapingScene')
+    else if ((refineSheetMode.value === 'read' && (refineReadCount.value > 1 || refineWorldMode.value === 'fuse'))
+      || refineSheetMode.value === 'retake') o.push('reconstructingScene')
     o.push(refineMossLayout.value ? 'buildingLayout' : 'writingDescription')
   } else {
     o.push('generatingPrompt')

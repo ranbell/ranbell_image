@@ -208,3 +208,30 @@ def test_every_rewrite_is_told_to_decide_and_keep_one_hand_one_answer():
     assert scene_sheet.ONE_HAND_LINE in scene_sheet.reconstruct_prompt({"read": sheet, "steps": [], "current": sheet})
     w = scene_sheet.script_prompt(sheet)
     assert "never copy the note's phrasing" in w and "Each hand is written once" in w
+
+
+def test_the_rebuild_part_is_applied_last_through_the_last_looks_door():
+    answer = {
+        "staging": {"subjects": [{"index": 0, "set": {"pose_action": "lunging after a flying page"}}]},
+        "rebuild": {"set": {"setting": "an autumn classroom, its windows open to the wind"},
+                    "subjects": [{"index": 0, "set": {"outfit": "a raincoat",
+                                                      "legs_feet": "one knee on the chair"}}]},
+    }
+    sheet, report = shaping.apply_shape(_two(), answer, staging="move", props_mode="keep", tags=[])
+    assert sheet["setting"] == "an autumn classroom, its windows open to the wind"
+    assert sheet["subjects"][0]["legs_feet"] == "one knee on the chair"
+    assert sheet["subjects"][0]["outfit"] == "a uniform"          # not the last look's to change
+    assert "subjects.0.outfit" in report["rebuild"]["outside"]
+    p = shaping.shape_prompt(_two(), staging="restage", props_mode="keep", tags=[])
+    assert "[Last job: one picture]" in p and 'you named in "stock_poses" above' in p
+
+
+def test_a_hint_a_later_step_took_away_is_not_owed_to_the_script():
+    sheet = normalize_sheet({"medium": "anime illustration", "effects": "maple leaves drifting",
+                             "subjects": [{"who": "a girl", "pose_action": "pointing at the page",
+                                           "outfit": "dark socks"}]})
+    assert scene_sheet.still_on_sheet(["head rest", "maple leaf", "socks"], sheet) == ["maple leaf", "socks"]
+
+
+def test_a_slash_is_a_hedge_too():
+    assert '"X/Y"' in scene_sheet.DECIDE_LINE
