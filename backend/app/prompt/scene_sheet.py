@@ -1318,13 +1318,11 @@ def uncovered(script: str, sheet: dict, required: list[str] | None = None) -> li
         # teens and warm and affectionate" (2026-11-04).
         # The first few words, not the first comma: "Long, wavy, bright red hair"
         # gave "(person 1, Long)".
-        words: list[str] = []
-        for clause in (person.get("appearance") or person.get("position") or "").split(","):
-            words += re.findall(r"[A-Za-z][A-Za-z-]*", clause)
-            if len(words) >= 3:
-                break
-        looks = " ".join(words[:6]).lower()
-        label = f"person {i + 1}" + (f", {looks}" if looks else "")
+        # Where they are in the frame — the box made for telling people apart,
+        # short and never the note ("bright red wavy hair that is" came of
+        # cutting the looks).
+        where = re.split(r"[,;]", person.get("position") or "")[0].strip().lower()
+        label = f"person {i + 1}" + (f", {where}" if where else "")
         # "who" is not checked: the writer always renames it ("female, young adult"
         # becomes "a young woman"), and the audit showed it flagged on every run.
         for box in _SUBJECT_FIELDS:
@@ -2094,8 +2092,10 @@ def stock_poses(answer: dict) -> list[str]:
 
 
 def stage_prompt(sheet: dict, mode: str, *, instruction: str = "",
-                 locked: list[str] | None = None) -> str:
-    """What the text model is asked: stage the sheet, as a patch."""
+                 locked: list[str] | None = None, avoid: list[str] | None = None,
+                 subject: str = "", exclude: tuple[str, ...] = ()) -> str:
+    """What the text model is asked: stage the sheet, as a patch. On its own
+    now only when the shaping call's staging part could not be read."""
     indexed = dict(sheet)
     indexed["subjects"] = [{"index": i, **s} for i, s in enumerate(sheet.get("subjects") or [])]
     lines = [
@@ -2104,10 +2104,10 @@ def stage_prompt(sheet: dict, mode: str, *, instruction: str = "",
         "standing and posing — nothing happens in it. Stage it: turn it into a moment where "
         "something is happening.",
         "",
-        *stage_rules(mode, locked=locked),
+        *stage_rules(mode, locked=locked, avoid=avoid, subject=subject, exclude=exclude),
         "",
         "Output only JSON in this shape:",
-        *stage_answer_shape(mode),
+        *stage_answer_shape(mode, given=bool(avoid)),
     ]
     if instruction:
         lines += ["", "[User instruction — the sheet already follows it; keep it]", instruction]

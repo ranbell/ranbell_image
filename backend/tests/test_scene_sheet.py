@@ -1323,14 +1323,14 @@ def test_a_joined_word_counts_as_written():
     assert ss.uncovered("An anime illustration of a girl with a gold hair clip.", sheet) == []
 
 
-def test_people_are_named_by_number_and_looks_never_by_the_who_note():
+def test_people_are_named_by_number_and_place_never_by_the_who_note():
     sheet = ss.normalize_sheet({"medium": "anime illustration", "subjects": [
-        {"who": "Female, appears late teens, warm and affectionate",
+        {"who": "Female, appears late teens, warm and affectionate", "position": "Back left, leaning over the desk",
          "appearance": "long wavy red hair, blue eyes", "gaze": "the stalls across the street"},
         {"who": "Female, appears late teens, warm and affectionate", "gaze": "her friend beside her"},
     ]})
     missing = ss.uncovered("An anime illustration of two young women.", sheet)
-    assert "gaze (person 1, long wavy red hair): the stalls across the street" in missing
+    assert "gaze (person 1, back left): the stalls across the street" in missing
     assert "gaze (person 2): her friend beside her" in missing
     assert not any("affectionate" in line for line in missing)
 
@@ -1777,3 +1777,67 @@ def test_a_hedging_box_is_opened_to_the_last_look_and_only_that_box():
     from backend.app.prompt import shaping
     assert "[These boxes hedge — decide each one]" in shaping.shape_prompt(
         sheet, staging="move", props_mode="keep", tags=[])
+
+
+def test_a_broken_shaping_answer_is_read_part_by_part():
+    from backend.app.prompt import shaping
+    # live 2026-11-04: one person's boxes written straight into the staging "set"
+    text = """Plan first.
+```json
+{
+  "staging": {"set": {"story": "x"}, "pose_action": "y" }, {"index": 1} ],
+  "objects": {"items": [{"index": 0, "item": "a chipped teacup on the sill"}]},
+  "place": [{"tag": "maple leaf", "box": "effects", "person": null}],
+  "rebuild": {"set": {"setting": "a sunlit classroom"}}
+}
+```"""
+    parts, lost = shaping.parse_parts(text)
+    assert lost == ["staging"]
+    assert parts["objects"]["items"][0]["item"] == "a chipped teacup on the sill"
+    assert parts["place"][0]["tag"] == "maple leaf"
+    assert parts["rebuild"] == {"set": {"setting": "a sunlit classroom"}}
+    whole, none = shaping.parse_parts('{"staging": {"set": {}}, "rebuild": {"set": {}}}')
+    assert none == [] and whole["staging"] == {"set": {}}
+
+
+class _BrokenStagingLLM(_RestageLLM):
+    def shape_answer(self, prompt: str) -> str:
+        return ('{"staging": {"set": {"story": "x"}, "pose_action": "y" }, {"index": 1} ], '
+                '"rebuild": {"set": {"setting": "nowhere"}}}\n=== PROMPT ===\n' + _PIER_SCRIPT)
+
+    async def generate_text_stream(self, prompt, **kw):
+        self.text_prompts.append(prompt)
+        if "Stage it" in prompt:
+            yield {"type": "token", "text": json.dumps(
+                {"set": {"situation": "the ferry is leaving without her"},
+                 "subjects": [{"index": 0, "set": {"pose_action": "sprinting down the pier"}}]})}
+        else:
+            yield {"type": "token", "text": _PIER_SCRIPT}
+
+
+@pytest.mark.asyncio
+async def test_a_lost_staging_part_is_staged_alone_and_the_rest_runs_on_its_own(tmp_path):
+    from PIL import Image
+
+    from backend.app import runtime_config
+    from backend.app.jobs.runners import run_refine_prompt
+
+    runtime_config._cache = None
+    img = tmp_path / "ref.png"
+    Image.new("RGB", (64, 64)).save(img)
+    llm, q = _BrokenStagingLLM(), asyncio.Queue()
+    await run_refine_prompt(_Reporter(), _Cancel(), body_dict={
+        "sha256s": ["a"], "prompt_style": "detailed", "staging": "restage"},
+        db=_DB(img), ollama=llm, spooler=None, comfy=None, token_queue=q)
+    events = []
+    while not q.empty():
+        events.append(q.get_nowait())
+    done = next(e for e in events if e and e["type"] == "done")
+    stage = next(p for p in llm.text_prompts if "Stage it" in p)
+    assert "- waving at the ferry" in stage            # the reader's list, still given
+    assert done["sheet"]["subjects"][0]["pose_action"] == "sprinting down the pier"
+    assert done["sheet"]["setting"] == "a pier"         # the lost staging's rebuild was not used
+    assert len(llm.rebuild_prompts) == 1                # the last look ran on its own
+    assert any(p.startswith("Write the prompt") for p in llm.text_prompts)  # and the writer
+    thinking = "".join(e["text"] for e in events if e and e["type"] == "think")
+    assert "[part of the shaping answer could not be read: staging]" in thinking

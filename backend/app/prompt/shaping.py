@@ -35,12 +35,88 @@ retry, when the draft is short, dropped a box or hedged.
 from __future__ import annotations
 
 import json
+import re
 
 from . import props as props_pass
 from . import scene_sheet
 
 #: The line between the JSON answer and the visual script that follows it.
 SCRIPT_MARKER = "=== PROMPT ==="
+
+
+#: The parts of a shaping answer, each readable on its own.
+PART_KEYS = ("staging", "objects", "place", "rebuild")
+
+
+def _balanced(text: str, start: int) -> str:
+    """The bracketed value that opens at ``start``, up to its matching close
+    (strings respected); the rest of the text when it never closes."""
+    opener = text[start]
+    closer = "}" if opener == "{" else "]"
+    depth, in_string, escaped = 0, False, False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == opener:
+            depth += 1
+        elif ch == closer:
+            depth -= 1
+            if depth == 0:
+                return text[start:i + 1]
+    return text[start:]
+
+
+def parse_parts(text: str) -> tuple[dict, list[str]]:
+    """The shaping answer as ``(parts, lost)``.
+
+    One answer carries four parts, and this model does not always nest them
+    right: on the dev box (2026-11-04) it wrote one person's boxes straight
+    into the staging part's "set", and the whole answer was thrown away —
+    the objects and the rebuild with it. So when the whole will not parse,
+    each part is read on its own: what reads is used, what does not is named
+    in ``lost``.
+    """
+    from ..ai.json_util import parse_json_object
+
+    try:
+        return parse_json_object(text), []
+    except Exception:
+        pass
+    body = text or ""
+    fence = re.search(r"```(?:json)?\s*([\s\S]*?)```", body)
+    if fence:
+        body = fence.group(1)
+    parts: dict = {}
+    lost: list[str] = []
+    for key in PART_KEYS:
+        m = re.search(rf'"{key}"\s*:\s*([\[{{])', body)
+        if not m:
+            continue
+        chunk = _balanced(body, m.start(1))
+        # A part that "closes" where the model went wrong reads as valid JSON
+        # cut short — its last person's boxes left in the scene's "set". So a
+        # part counts only when what follows it is the next part or the end.
+        after = body[m.start(1) + len(chunk):]
+        if not re.match(r'\s*(?:,\s*"(?:' + "|".join(PART_KEYS) + r')"\s*:|\})', after):
+            lost.append(key)
+            continue
+        try:
+            if chunk.startswith("{"):
+                parts[key] = parse_json_object(chunk)
+            else:
+                parts[key] = parse_json_object('{"v": ' + chunk + "}")["v"]
+        except Exception:
+            lost.append(key)
+    return parts, lost
 
 
 def split_answer(raw: str) -> tuple[str, str]:

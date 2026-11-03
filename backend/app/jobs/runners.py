@@ -2083,11 +2083,29 @@ async def run_refine_prompt(
                         as_think=True, images=read_images,
                     )
                     shape_json, shaped_script = shaping.split_answer(shape_raw)
-                    try:
-                        from ..ai.json_util import parse_json_object
-                        shape_answer = parse_json_object(shape_json)
-                    except Exception:
-                        shape_answer = {}
+                    shape_answer, shape_lost = shaping.parse_parts(shape_json)
+                    if shape_lost:
+                        _put({"type": "think", "text":
+                              f"\n[part of the shaping answer could not be read: {', '.join(shape_lost)}]"})
+                    restaged_alone = False
+                    if "staging" in shape_jobs and not shape_answer.get("staging"):
+                        # Without it the restage would silently not happen. The
+                        # rebuild and the script were written for the staging
+                        # that was lost, so they go too: the last look and the
+                        # writer run on their own after this.
+                        _put({"type": "think", "text": "\n[staging once more, on its own]"})
+                        _phase("stagingScene", 0.50, "Staging the scene...")
+                        stage_raw = await _stream_text(
+                            scene_sheet.stage_prompt(
+                                sheet, body.staging, instruction=nl_instruction, locked=body.locked,
+                                avoid=avoid_poses or None, subject=pose_subject,
+                                exclude=("props",) if "objects" in shape_jobs else ()),
+                            0.50, 0.55, 600, "Staging the scene...", as_think=True,
+                        )
+                        shape_answer["staging"] = _parse_json_from_llm(stage_raw) or {}
+                        shape_answer.pop("rebuild", None)
+                        shaped_script = ""
+                        restaged_alone = True
                     if shape_answer and shaped_script:
                         drafted_script = shaped_script
                     elif _shape_script:
@@ -2158,7 +2176,8 @@ async def run_refine_prompt(
                     if rb["outside"]:
                         _put({"type": "think", "text":
                               f"\n[reconstruction outside its range, not used] {', '.join(rb['outside'])}"})
-                    rebuilt_in_shaping = True
+                    # A restage staged on its own leaves the last look to its own call.
+                    rebuilt_in_shaping = not restaged_alone
 
             if body.sheet_instruction.strip():
                 # A spoken retake becomes a patch: only the boxes it names change.

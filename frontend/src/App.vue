@@ -760,7 +760,8 @@ const refineStepOrder = computed(() => {
 })
 
 // A retry is the same step run again, not a step of its own.
-const REFINE_PHASE_ALIAS = { refiningDescription: 'writingDescription' }
+// Staging on its own is the shaping call's fallback, when its staging part could not be read.
+const REFINE_PHASE_ALIAS = { refiningDescription: 'writingDescription', stagingScene: 'shapingScene' }
 const refineStepIndex = computed(() => {
   const code = REFINE_PHASE_ALIAS[refinePhaseCode.value] || refinePhaseCode.value
   return refineStepOrder.value.indexOf(code)
