@@ -164,6 +164,7 @@ def sheet_prompt(
         "- Without a stated medium the image model drifts to a photograph. "
         + medium_line,
         "- Write plain English phrases. No booru tags, no underscores, no parentheses.",
+        DECIDE_LINE,
         "- Describe what is visible. If you are unsure of a detail, leave it out rather "
         "than guess. Look at each face separately: eyes open or closed, mouth open or "
         "closed. Look at each pair of hands: what is in them.",
@@ -986,6 +987,9 @@ def script_prompt(
         "anything happens in it.",
         f"- {count_line} Name them by what they are (women, girls, men, ...), "
         "not as \"people\".",
+        "- \"who\" is a note for you, not wording. Name each person the way a caption "
+        "would — what they are and what is most visible about them — and never copy the "
+        "note's phrasing (its ages, roles and commas) into the prompt.",
         "- Then each person, kept together, in this order: what they are doing and why — "
         "the action as it happens, with real verbs; then the body — where the weight is, "
         "the legs and feet, each hand and what it holds, and the movement you can see; then "
@@ -1006,6 +1010,11 @@ def script_prompt(
         "box is where the picture gets its richness, so write all of it out for that person.",
         "- An object in someone's hands is written once, with that person. Repeating it "
         "elsewhere makes the image model draw a second one.",
+        "- Each hand is written once: what it does and what is in it, in one clause. "
+        "\"hands\" and \"holding\" describe the same hands — do not say the same hand "
+        "rests on an object and then that it holds it.",
+        "- Where the sheet still says \"X or Y\" about something visible, write only one "
+        "of them. A hedge in the prompt is drawn as two half-things.",
         "- Spend the length on the action and the people — movement, hands, legs, faces, "
         "where the eyes go — then on materials and textures.",
         "- The setting is the place the action happens in: write it as that, with the props "
@@ -1431,23 +1440,33 @@ def unused_ingredients(sheet: dict, ingredients: dict[str, list[str]]) -> list[s
 # rewriting what the box already says — and a tag that still has nowhere to go
 # is kept as "unclassified" and written into the prompt anyway.
 
-def place_prompt(sheet: dict, tags: list[str]) -> str:
-    """What the text model is asked: which box each tag belongs in."""
-    indexed = dict(sheet)
-    indexed["subjects"] = [{"index": i, **s} for i, s in enumerate(sheet.get("subjects") or [])]
+PLACE_ANSWER_SHAPE = '{"place": [{"tag": "<the tag as given>", "box": "<box>", "person": <index or null>}]}'
+
+
+def place_rules(tags: list[str]) -> list[str]:
+    """The placing job, as lines (shared with ``shaping.shape_prompt``)."""
     scene = [b for b in _SCENE_BOXES if b not in ("medium", "rendering")]
-    lines = [
-        "Below is the scene sheet for a picture, and tags a tagger read from the same "
-        "picture that the sheet does not mention yet. Say which box each tag belongs in.",
-        "",
+    return [
         "- Every tag gets a box. A tag about one person goes in that person's box, with "
         "their \"index\"; anything else in a scene box. When no box fits, use \"other\".",
         "- Do not leave a tag out, and do not change its words: it is added to the box "
         "as it is.",
         f"- Scene boxes: {', '.join(scene)}. Person boxes: {', '.join(_SUBJECT_FIELDS)}.",
+    ]
+
+
+def place_prompt(sheet: dict, tags: list[str]) -> str:
+    """What the text model is asked: which box each tag belongs in."""
+    indexed = dict(sheet)
+    indexed["subjects"] = [{"index": i, **s} for i, s in enumerate(sheet.get("subjects") or [])]
+    lines = [
+        "Below is the scene sheet for a picture, and tags a tagger read from the same "
+        "picture that the sheet does not mention yet. Say which box each tag belongs in.",
+        "",
+        *place_rules(tags),
         "",
         "Output only JSON:",
-        '{"place": [{"tag": "<the tag as given>", "box": "<box>", "person": <index or null>}]}',
+        PLACE_ANSWER_SHAPE,
         "",
         "[Tags]",
         *[f"- {t}" for t in tags],
@@ -1841,25 +1860,48 @@ STAGING_SCOPES: dict[str, dict] = {
 }
 
 
-def stage_prompt(sheet: dict, mode: str, *, instruction: str = "",
-                 locked: list[str] | None = None) -> str:
-    """What the text model is asked: stage the sheet, as a patch."""
+#: Said wherever the sheet is rewritten (the Showrunner, 2026-11-03: "a wooden
+#: classroom or library", "deep brown or black leather"). A hedge on the sheet
+#: becomes two half-pictures, so every rewrite decides.
+DECIDE_LINE = (
+    "- Decide. Never write \"X or Y\" about anything visible — one place, one material, "
+    "one colour. Where you cannot tell, choose the one that fits this picture."
+)
+#: Said wherever a person's hands are rewritten: the book her left hand both
+#: "rests on" and "holds" (2026-11-03).
+ONE_HAND_LINE = (
+    "- \"hands\" says what each hand does and \"holding\" names what is in it. They are "
+    "the same two hands and must agree: an object is held, or rested on, or touched — "
+    "one of them, by one hand."
+)
+
+
+def stage_rules(mode: str, *, locked: list[str] | None = None,
+                exclude: tuple[str, ...] = ()) -> list[str]:
+    """The staging job, as lines: how far, the pose, what a staged moment
+    holds, which boxes. Shared by ``stage_prompt`` and the one-call
+    ``shaping.shape_prompt``. ``exclude`` takes boxes away from staging when
+    another job in the same call owns them (the objects job owns "props")."""
     spec = STAGING_SCOPES[mode]
-    indexed = dict(sheet)
-    indexed["subjects"] = [{"index": i, **s} for i, s in enumerate(sheet.get("subjects") or [])]
     person_boxes = ", ".join(spec["person"])
-    scene_boxes = ", ".join(spec["scene"])
+    scene_boxes = ", ".join(b for b in spec["scene"] if b not in exclude)
     lines = [
-        "Below is the scene sheet a vision model read from a reference picture. As read, it "
-        "says how the people look and what the mood is, and the picture it makes is people "
-        "standing and posing — nothing happens in it. Stage it: turn it into a moment where "
-        "something is happening.",
-        "",
         "[How far]",
         spec["how"],
         "",
         "[The pose]",
         spec["pose"],
+    ]
+    if mode == "restage":
+        # Naming the stock poses first is what lets the model go past them:
+        # told only "not a stock pose", it wrote "a classic laugh gesture"
+        # (2026-11-03). The list stays in the ledger for the last look.
+        lines.append(
+            "Before you choose, write in \"stock_poses\" the poses a picture of this "
+            "situation would get by default — the ones every such picture already has. The "
+            "pose you give each person must be none of them, and not a near copy."
+        )
+    lines += [
         "",
         "What a staged moment holds:",
         "- What each person is doing, as a verb in the middle of happening. A held pose, a "
@@ -1869,6 +1911,7 @@ def stage_prompt(sheet: dict, mode: str, *, instruction: str = "",
         "given is not staging; build it from these people, their things and this place.",
         "- The body: where the weight is, what the legs and feet are doing, what each hand "
         "is doing and touching.",
+        ONE_HAND_LINE,
         "- The face shows the feeling, and the eyes are on something or someone in the scene.",
         "- Movement that can be seen: hair, cloth and air moving, the direction of the momentum.",
         "- With several people, what they are doing to or with each other — and one moment "
@@ -1877,6 +1920,7 @@ def stage_prompt(sheet: dict, mode: str, *, instruction: str = "",
         "- \"situation\": what is happening, what has just happened and what is about to.",
         "- \"story\": one sentence of what the picture is about once it is staged.",
         "- Write it plainly, as it would be seen. Nothing softened or blurred into a vaguer word.",
+        DECIDE_LINE,
         "- The people stay who they are: face, hair, body and clothing do not change, and "
         "nobody is added or removed.",
         f"- Change only these boxes. Person boxes: {person_boxes}. Scene boxes: {scene_boxes}. "
@@ -1885,13 +1929,42 @@ def stage_prompt(sheet: dict, mode: str, *, instruction: str = "",
     if locked:
         lines.append("- Locked by the user, must not appear in the patch: " + ", ".join(locked)
                      + " (\"subjects.N\" is the whole person N).")
+    return lines
+
+
+def stage_answer_shape(mode: str, indent: str = "") -> list[str]:
+    lines = [f"{indent}{{"]
+    if mode == "restage":
+        lines.append(f'{indent}  "stock_poses": ["<a pose this situation gets by default>"],')
     lines += [
+        f'{indent}  "set": {{"<scene box>": "<new value>"}},',
+        f'{indent}  "subjects": [{{"index": 0, "set": {{"<person box>": "<new value>"}}}}]',
+        f"{indent}}}",
+    ]
+    return lines
+
+
+def stock_poses(answer: dict) -> list[str]:
+    """The stock poses a restage named before choosing, as plain strings."""
+    raw = answer.get("stock_poses") if isinstance(answer, dict) else None
+    return [t for t in (_text(x) for x in (raw if isinstance(raw, list) else [])) if t]
+
+
+def stage_prompt(sheet: dict, mode: str, *, instruction: str = "",
+                 locked: list[str] | None = None) -> str:
+    """What the text model is asked: stage the sheet, as a patch."""
+    indexed = dict(sheet)
+    indexed["subjects"] = [{"index": i, **s} for i, s in enumerate(sheet.get("subjects") or [])]
+    lines = [
+        "Below is the scene sheet a vision model read from a reference picture. As read, it "
+        "says how the people look and what the mood is, and the picture it makes is people "
+        "standing and posing — nothing happens in it. Stage it: turn it into a moment where "
+        "something is happening.",
+        "",
+        *stage_rules(mode, locked=locked),
         "",
         "Output only JSON in this shape:",
-        "{",
-        '  "set": {"<scene box>": "<new value>"},',
-        '  "subjects": [{"index": 0, "set": {"<person box>": "<new value>"}}]',
-        "}",
+        *stage_answer_shape(mode),
     ]
     if instruction:
         lines += ["", "[User instruction — the sheet already follows it; keep it]", instruction]
@@ -1901,11 +1974,14 @@ def stage_prompt(sheet: dict, mode: str, *, instruction: str = "",
 
 def apply_staging(
     sheet: dict, patch: dict, mode: str, locked: list[str] | None = None,
+    *, exclude: tuple[str, ...] = (),
 ) -> tuple[dict, list[str], list[str], list[str]]:
     """apply_patch held to the staging scope: who the people are, how they
-    look and what they wear never change, and no one is added or removed."""
+    look and what they wear never change, and no one is added or removed.
+    ``exclude`` as in ``stage_rules``."""
     spec = STAGING_SCOPES[mode]
-    return _apply_scoped(sheet, patch, scope_locks(sheet, spec["scene"], spec["person"], locked), locked)
+    scene = tuple(b for b in spec["scene"] if b not in exclude)
+    return _apply_scoped(sheet, patch, scope_locks(sheet, scene, spec["person"], locked), locked)
 
 
 # ── Reconstruction: the ledger and the reference, read back into one picture ─
@@ -1942,9 +2018,13 @@ def reconstruct_prompt(
     if staging == "restage":
         pose = (
             "- The pose was changed on purpose (the user asked for a different action). Keep the "
-            "new one. Check that each \"signature\" is as specific as a real picture's would "
-            "be — what touches what, where the weight goes, what is asymmetric — and sharpen it "
-            "where it has gone general. The first pose that comes to mind is not a fix."
+            "action, but check each person's pose against the stock poses the staging step "
+            "named in its intent: a pose that is one of them, or a near copy, is not done — "
+            "replace it with one only this person in this place would take, and rewrite "
+            "\"signature\", \"pose_action\" and \"hands\" to match. Check too that every "
+            "\"signature\" is as specific as a real picture's would be — what touches what, "
+            "where the weight goes, what is asymmetric. The first pose that comes to mind is "
+            "not a fix."
         )
     else:
         pose = (
@@ -1969,10 +2049,13 @@ def reconstruct_prompt(
         "- One body each: each hand does one thing at a time, and what a person leans on, "
         "holds or touches uses a hand or an arm. The pose, the hands, what they hold and "
         "the legs all describe the same body.",
+        ONE_HAND_LINE,
         "- Footing: say what each person stands, sits or lies on, and which side of any "
         "railing, table, wall or edge they are on, as the camera sees it. Nobody floats "
         "unless the picture means them to.",
         "- One place: the setting is one place, said as one — not a choice between two.",
+        DECIDE_LINE.replace("- Decide.", "- Decided, everywhere:") + " Find every \"or\" "
+        "between two visible things on the sheet and replace it with one.",
         "- The camera can show what the sheet describes of the people.",
         pose,
         "- What the steps added (the objects, the staged action) stays where it fits the "

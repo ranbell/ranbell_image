@@ -161,12 +161,46 @@ _HOW = {
 }
 
 
-def props_prompt(sheet: dict, mode: str, *, instruction: str = "") -> str:
-    """What the text model is asked. **Only the boxes it may write are shown as
-    numbered lists**; the rest of the scene is given as read-only context (the
-    ledger's `for_model`: a box the model is not shown is a box it cannot fill)."""
+def props_task(sheet: dict, mode: str) -> list[str]:
+    """The objects job, as lines: what to do, the rules, the numbered lists.
+    Shared by ``props_prompt`` and the one-call ``shaping.shape_prompt``.
+    **Only the boxes it may write are numbered** (the ledger's `for_model`: a
+    box the model is not shown is a box it cannot fill)."""
     items = split_items(sheet.get("props") or "")
     held = held_items(sheet) if mode == "elaborate" else []
+    lines = [
+        _HOW[mode],
+        "",
+        "Rules:",
+        "- One object is named once. An object already in someone's hands is not also a "
+        "loose object somewhere.",
+        "- Write plain English phrases, concrete and visible. No tags, no underscores.",
+        scene_sheet.DECIDE_LINE,
+        "- The people, their clothes and the place are not yours to change.",
+        "",
+        "[Objects — numbered]",
+    ]
+    lines += [f"{n}. {item}" for n, item in enumerate(items)] or ["(none yet)"]
+    if held:
+        lines += ["", "[Held by the people — numbered by person]"]
+        lines += [f"{i}. {h}" for i, h in held]
+    return lines
+
+
+def props_answer_shape(mode: str, indent: str = "") -> list[str]:
+    if mode == "simplify":
+        return [f'{indent}{{"keep": [{{"index": 0, "item": "the shortened item"}}]}}']
+    return [
+        f"{indent}{{",
+        f'{indent}  "items": [{{"index": 0, "item": "the same object, described for this scene, with its place"}}],',
+        f'{indent}  "add": [{{"item": "a new object", "where": "where it is", "why": "what it says about this scene"}}],',
+        f'{indent}  "holding": [{{"index": 0, "holding": "the same object, described better, in the same hand"}}]',
+        f"{indent}}}",
+    ]
+
+
+def props_prompt(sheet: dict, mode: str, *, instruction: str = "") -> str:
+    """What the text model is asked when the objects are the only job."""
     scene = {k: sheet.get(k) for k in ("medium", "story", "setting", "situation", "layers",
                                         "lighting", "palette_mood", "effects")
              if sheet.get(k)}
@@ -179,31 +213,11 @@ def props_prompt(sheet: dict, mode: str, *, instruction: str = "") -> str:
         "and the scene they are in.",
         "",
         "[What to do]",
-        _HOW[mode],
+        *props_task(sheet, mode),
         "",
-        "Rules:",
-        "- One object is named once. An object already in someone's hands is not also a "
-        "loose object somewhere.",
-        "- Write plain English phrases, concrete and visible. No tags, no underscores.",
-        "- The people, their clothes and the place are not yours to change.",
-        "",
-        "[Objects — numbered]",
+        "Output only JSON in this shape:",
+        *props_answer_shape(mode),
     ]
-    lines += [f"{n}. {item}" for n, item in enumerate(items)] or ["(none yet)"]
-    if held:
-        lines += ["", "[Held by the people — numbered by person]"]
-        lines += [f"{i}. {h}" for i, h in held]
-    lines += ["", "Output only JSON in this shape:"]
-    if mode == "simplify":
-        lines += ['{"keep": [{"index": 0, "item": "the shortened item"}]}']
-    else:
-        lines += [
-            "{",
-            '  "items": [{"index": 0, "item": "the same object, described for this scene, with its place"}],',
-            '  "add": [{"item": "a new object", "where": "where it is", "why": "what it says about this scene"}],',
-            '  "holding": [{"index": 0, "holding": "the same object, described better, in the same hand"}]',
-            "}",
-        ]
     if instruction:
         lines += ["", "[User instruction — the scene already follows it; keep it]", instruction]
     lines += [

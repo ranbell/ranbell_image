@@ -139,3 +139,72 @@ def test_prompt_shows_only_the_writable_boxes_numbered():
     assert "[Held by the people" in text and '"add"' in text
     simple = props.props_prompt(_sheet("a cup on the table"), "simplify")
     assert "[Held by the people" not in simple and '"add"' not in simple
+
+
+# ── One call for staging, the objects and the leftover tags ─────────────────
+
+from app.prompt import scene_sheet, shaping
+
+
+def _two() -> dict:
+    return normalize_sheet({
+        "medium": "anime illustration", "setting": "an autumn classroom",
+        "props": "a stack of books on the desk",
+        "subjects": [{"who": "a girl", "pose_action": "reading", "holding": "a book in her left hand",
+                      "outfit": "a uniform"}],
+    })
+
+
+def test_only_the_asked_jobs_are_in_the_prompt():
+    p = shaping.shape_prompt(_two(), staging="restage", props_mode="elaborate", tags=["maple leaf"])
+    assert "[Job: stage the moment]" in p and "[Job: fit the objects to it]" in p
+    assert "[Job: place the tagger's leftover tags]" in p and "- maple leaf" in p
+    assert '"stock_poses"' in p and '"objects":' in p and '"place":' in p
+    # the objects job owns props: staging is not offered the box
+    stage = p.split("[Job: stage the moment]")[1].split("[Job: fit the objects to it]")[0]
+    assert "Scene boxes: story, situation, interaction, effects, camera, layers." in stage
+    only = shaping.shape_prompt(_two(), staging="read", props_mode="simplify", tags=[])
+    assert "[Job: stage the moment]" not in only and "[Job: place" not in only
+    assert shaping.jobs(staging="read", props_mode="keep", tags=[]) == []
+
+
+def test_each_part_goes_through_its_own_door():
+    answer = {
+        "staging": {"stock_poses": ["reading quietly at the desk"],
+                    "set": {"situation": "a gust scatters her notes", "props": "a vase"},
+                    "subjects": [{"index": 0, "set": {"pose_action": "lunging after a flying page",
+                                                      "outfit": "a raincoat"}}]},
+        "objects": {"items": [{"index": 0, "item": "a toppling stack of library books on the desk"}],
+                    "add": [{"item": "a paper lantern", "where": "hanging by the window"}]},
+        "place": [{"tag": "maple leaf", "box": "effects", "person": None}],
+    }
+    sheet, report = shaping.apply_shape(_two(), answer, staging="restage", props_mode="elaborate",
+                                        tags=["maple leaf"])
+    assert sheet["subjects"][0]["pose_action"] == "lunging after a flying page"
+    assert sheet["subjects"][0]["outfit"] == "a uniform"
+    # props came from the objects job, not staging's "a vase"
+    assert sheet["props"] == ("a toppling stack of library books on the desk; "
+                              "a paper lantern hanging by the window")
+    assert "props" in report["staging"]["outside"]
+    assert report["staging"]["stock"] == ["reading quietly at the desk"]
+    assert sheet["effects"] == "maple leaf" and report["place"]["placed"] == ["maple leaf → effects"]
+
+
+def test_a_missing_part_is_said_and_leftover_tags_are_kept():
+    sheet, report = shaping.apply_shape(_two(), {}, staging="move", props_mode="elaborate",
+                                        tags=["maple leaf"])
+    assert report["staging"]["read"] is False and report["objects"]["read"] is False
+    assert sheet["props"] == "a stack of books on the desk"
+    assert sheet["unclassified"] == ["maple leaf"]
+
+
+def test_every_rewrite_is_told_to_decide_and_keep_one_hand_one_answer():
+    sheet = _two()
+    for p in (scene_sheet.sheet_prompt(), scene_sheet.stage_prompt(sheet, "move"),
+              props.props_prompt(sheet, "elaborate"),
+              scene_sheet.reconstruct_prompt({"read": sheet, "steps": [], "current": sheet})):
+        assert 'Never write "X or Y"' in p, p[:80]
+    assert scene_sheet.ONE_HAND_LINE in scene_sheet.stage_prompt(sheet, "move")
+    assert scene_sheet.ONE_HAND_LINE in scene_sheet.reconstruct_prompt({"read": sheet, "steps": [], "current": sheet})
+    w = scene_sheet.script_prompt(sheet)
+    assert "never copy the note's phrasing" in w and "Each hand is written once" in w

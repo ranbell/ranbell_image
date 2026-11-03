@@ -1669,6 +1669,9 @@ async def run_refine_prompt(
         tokens: list[str] = []
         thinking = 0
         started = time.monotonic()
+        # The model's thinking starts on a line of its own, not glued to the
+        # last "[staged] …" line.
+        _put({"type": "think", "text": "\n"})
         async for event in stream:
             if _abort.is_set():
                 raise JobCancelled()
@@ -1966,30 +1969,16 @@ async def run_refine_prompt(
                             _put({"type": "think", "text": f"[reconciled] {line}\n"})
                         for path in refused:
                             _put({"type": "think", "text": f"[the mix held] {path}\n"})
+                # Tags the reader did not use: placed in the one shaping call
+                # below, with the staging and the objects (prompt/shaping.py).
+                pending_tags: list[str] = []
                 if hints:
                     hint_words = [w for words in hints.values() for w in words]
-                    unused = scene_sheet.unused_ingredients(sheet, hints)
-                    if unused:
-                        # Not dropped: one more call places each into a box, and
+                    pending_tags = scene_sheet.unused_ingredients(sheet, hints)
+                    if pending_tags:
+                        # Not dropped: the shaping call places each into a box, and
                         # what still has none is kept as unclassified.
-                        _put({"type": "think", "text": f"\n[WD14 hints not used by the reader] {', '.join(unused)}\n"})
-                        _phase("placingHints", 0.50, "Placing the remaining tags...")
-                        place_raw = await _stream_text(
-                            scene_sheet.place_prompt(sheet, unused), 0.50, 0.55, 150,
-                            "Placing the remaining tags...", as_think=True,
-                        )
-                        try:
-                            from ..ai.json_util import parse_json_object
-                            placement = parse_json_object(place_raw)
-                        except Exception:
-                            placement = {}
-                        sheet, placed, unclassified = scene_sheet.apply_placement(sheet, placement, unused)
-                        ledger_steps.append(scene_sheet.ledger_step(
-                            "place hints", "the tagger's leftover tags put into boxes", placed))
-                        for line in placed:
-                            _put({"type": "think", "text": f"\n[placed] {line}"})
-                        if unclassified:
-                            _put({"type": "think", "text": f"\n[unclassified — written into the prompt] {', '.join(unclassified)}"})
+                        _put({"type": "think", "text": f"\n[WD14 hints not used by the reader] {', '.join(pending_tags)}\n"})
 
                 if body.world_mode == "fuse":
                     # WD14 as ingredients: each reference's distinctive tags, and
@@ -2048,71 +2037,79 @@ async def run_refine_prompt(
                         for path in refused:
                             _put({"type": "think", "text": f"\n[locked, not changed] {path}"})
 
-                if body.staging in scene_sheet.STAGING_SCOPES:
-                    # From people posing to a moment where something happens: what
-                    # each person does and why, the body, the gaze, the movement.
-                    _phase("stagingScene", 0.45, "Staging the scene...")
-                    stage_raw = await _stream_text(
-                        scene_sheet.stage_prompt(sheet, body.staging, instruction=nl_instruction,
-                                                 locked=body.locked),
-                        0.45, 0.55, 500, "Staging the scene...", as_think=True,
+                from ..prompt import shaping
+                shape_jobs = shaping.jobs(staging=body.staging, props_mode=body.props_mode,
+                                          tags=pending_tags)
+                if shape_jobs:
+                    # Staging (people posing → a moment), the objects and the
+                    # leftover tags, asked in ONE call: three calls each thought
+                    # about the same sheet from scratch (2026-11-03, measured).
+                    # Each part of the answer still goes through its own door.
+                    _phase("shapingScene", 0.45, "Staging the scene and its objects...")
+                    shape_raw = await _stream_text(
+                        shaping.shape_prompt(sheet, staging=body.staging, props_mode=body.props_mode,
+                                             tags=pending_tags, instruction=nl_instruction,
+                                             locked=body.locked),
+                        0.45, 0.55, 300 + 400 * len(shape_jobs), "Staging the scene and its objects...",
+                        as_think=True,
                     )
                     try:
                         from ..ai.json_util import parse_json_object
-                        staging = parse_json_object(stage_raw)
+                        shape_answer = parse_json_object(shape_raw)
                     except Exception:
-                        staging = {}
-                    if not staging:
-                        # Said, not hidden: the script is written from the sheet as read.
-                        _put({"type": "think", "text": "\n[staging could not be read — written from the sheet as read]"})
-                    else:
-                        sheet, changed, refused, outside = scene_sheet.apply_staging(
-                            sheet, staging, body.staging, body.locked)
+                        shape_answer = {}
+                    if not shape_answer:
+                        _put({"type": "think", "text": "\n[the shaping answer could not be read — written from the sheet as read]"})
+                    sheet, shape_report = shaping.apply_shape(
+                        sheet, shape_answer, staging=body.staging, props_mode=body.props_mode,
+                        tags=pending_tags, locked=body.locked)
+
+                    st = shape_report.get("staging")
+                    if st is not None:
+                        intent = ("the reference's action made into a moment" if body.staging == "move"
+                                  else "the same people given a different, larger action")
+                        if st["stock"]:
+                            # Kept for the last look: what this restage set out to avoid.
+                            intent += "; stock poses it set out to avoid: " + "; ".join(st["stock"])
+                            _put({"type": "think", "text": "\n[staging avoids] " + "; ".join(st["stock"])})
                         ledger_steps.append(scene_sheet.ledger_step(
-                            f"staging ({body.staging})",
-                            "the reference's action made into a moment" if body.staging == "move"
-                            else "the same people given a different, larger action", changed))
-                        for line in changed:
+                            f"staging ({body.staging})", intent, st["changed"]))
+                        for line in st["changed"]:
                             _put({"type": "think", "text": f"\n[staged] {line}"})
-                        for path in refused:
+                        for path in st["refused"]:
                             _put({"type": "think", "text": f"\n[locked, not changed] {path}"})
-                        if outside:
-                            _put({"type": "think", "text": f"\n[staging outside its range, not used] {', '.join(outside)}"})
-                        if not changed:
+                        if st["outside"]:
+                            _put({"type": "think", "text": f"\n[staging outside its range, not used] {', '.join(st['outside'])}"})
+                        if shape_answer and not st["read"]:
+                            _put({"type": "think", "text": "\n[staging could not be read — written from the sheet as read]"})
+                        elif not st["changed"]:
                             _put({"type": "think", "text": "\n[staging changed nothing in the sheet]"})
 
-                if body.props_mode in ("simplify", "elaborate"):
-                    # After staging, which can move objects too: the objects are
-                    # fitted to the scene as it now stands. The model proposes;
-                    # props.apply_props decides what reaches the sheet.
-                    from ..prompt import props as props_pass
-                    _phase("dressingProps", 0.50, "Fitting the objects to the scene...")
-                    props_raw = await _stream_text(
-                        props_pass.props_prompt(sheet, body.props_mode, instruction=nl_instruction),
-                        0.50, 0.55, 300, "Fitting the objects to the scene...", as_think=True,
-                    )
-                    try:
-                        from ..ai.json_util import parse_json_object
-                        props_answer = parse_json_object(props_raw)
-                    except Exception:
-                        props_answer = {}
-                    if not props_answer:
-                        _put({"type": "think", "text": "\n[props could not be read — the objects stay as read]"})
-                    else:
-                        sheet, changed, refused, dropped_props = props_pass.apply_props(
-                            sheet, props_answer, body.props_mode, body.locked)
+                    ob = shape_report.get("objects")
+                    if ob is not None:
                         ledger_steps.append(scene_sheet.ledger_step(
                             f"objects ({body.props_mode})",
                             "only the objects the scene needs kept" if body.props_mode == "simplify"
-                            else "the objects fitted to the place and moment, a few added", changed))
-                        for line in changed:
+                            else "the objects fitted to the place and moment, a few added", ob["changed"]))
+                        for line in ob["changed"]:
                             _put({"type": "think", "text": f"\n[props] {line}"})
-                        for path in refused:
+                        for path in ob["refused"]:
                             _put({"type": "think", "text": f"\n[locked, not changed] {path}"})
-                        for line in dropped_props:
+                        for line in ob["dropped"]:
                             _put({"type": "think", "text": f"\n[props not used] {line}"})
-                        if not changed:
+                        if shape_answer and not ob["read"]:
+                            _put({"type": "think", "text": "\n[props could not be read — the objects stay as read]"})
+                        elif not ob["changed"]:
                             _put({"type": "think", "text": "\n[props changed nothing in the sheet]"})
+
+                    pl = shape_report.get("place")
+                    if pl is not None:
+                        ledger_steps.append(scene_sheet.ledger_step(
+                            "place hints", "the tagger's leftover tags put into boxes", pl["placed"]))
+                        for line in pl["placed"]:
+                            _put({"type": "think", "text": f"\n[placed] {line}"})
+                        if pl["unclassified"]:
+                            _put({"type": "think", "text": f"\n[unclassified — written into the prompt] {', '.join(pl['unclassified'])}"})
 
             if body.sheet_instruction.strip():
                 # A spoken retake becomes a patch: only the boxes it names change.

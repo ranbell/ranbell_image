@@ -512,6 +512,7 @@
       "buildingLayout": "Placing the layout...",
       "stagingScene": "Staging the scene...",
       "dressingProps": "Fitting the objects to the scene...",
+      "shapingScene": "Staging the scene and its objects...",
       "reconstructingScene": "Rebuilding the scene as one picture..."
     },
     "positiveNodePlaceholder": "e.g. 6",

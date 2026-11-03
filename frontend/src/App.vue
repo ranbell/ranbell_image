@@ -739,10 +739,9 @@ const refineStepOrder = computed(() => {
     if (refineSheetMode.value === 'read') {
       o.push('readingScene')
       if (refineReadCount.value > 1) o.push('mergingSheets')
-      if (refineWd14Hints.value) o.push('placingHints')
       if (refineWorldMode.value === 'fuse') o.push('fusingWorlds')
-      if (refineStaging.value !== 'read') o.push('stagingScene')
-      if (refineProps.value !== 'keep') o.push('dressingProps')
+      // Staging, the objects and the leftover tags are one call (prompt/shaping.py).
+      if (refineWd14Hints.value || refineStaging.value !== 'read' || refineProps.value !== 'keep') o.push('shapingScene')
     }
     if (refineSheetMode.value === 'retake') o.push('patchingScene')
     // The last look runs only when some step changed the sheet.

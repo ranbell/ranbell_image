@@ -1154,7 +1154,7 @@ async def test_wd14_hints_reach_the_sheet_reader_and_unused_ones_are_said(tmp_pa
     # call, which (in this fake) answers nothing usable — so both are kept as
     # unclassified and written into the prompt, not dropped.
     assert "[WD14 hints not used by the reader] night sky, lens flare" in thinking
-    assert llm.text_prompts[0].startswith("Below is the scene sheet for a picture, and tags")
+    assert "[Job: place the tagger's leftover tags]" in llm.text_prompts[0]
     assert "[unclassified — written into the prompt] night sky, lens flare" in thinking
     done = next(e for e in events if e and e["type"] == "done")
     assert done["sheet"]["unclassified"] == ["night sky", "lens flare"]
@@ -1407,11 +1407,11 @@ class _StagingLLM(_LLM):
 
     async def generate_text_stream(self, prompt, **kw):
         self.text_prompts.append(prompt)
-        if prompt.startswith("Below is the scene sheet a vision model read from a reference picture. As read"):
-            yield {"type": "token", "text": json.dumps(
+        if "[Job: stage the moment]" in prompt:
+            yield {"type": "token", "text": json.dumps({"staging":
                 {"set": {"situation": "the ferry is leaving without her"},
                  "subjects": [{"index": 0, "set": {"pose_action": "sprinting down the pier",
-                                                    "outfit": "a raincoat"}}]})}
+                                                    "outfit": "a raincoat"}}]}})}
         else:
             yield {"type": "token", "text": "An anime illustration. " + "A girl sprints down the pier after the ferry. " * 30}
 
@@ -1438,7 +1438,7 @@ async def _staging_run(body, tmp_path):
 @pytest.mark.asyncio
 async def test_staging_runs_once_after_a_fresh_reading(tmp_path):
     llm, events = await _staging_run({}, tmp_path)  # "move" is the default
-    staged = [p for p in llm.text_prompts if "Stage it" in p]
+    staged = [p for p in llm.text_prompts if "[Job: stage the moment]" in p]
     assert len(staged) == 1
     done = next(e for e in events if e["type"] == "done")
     assert done["sheet"]["subjects"][0]["pose_action"] == "sprinting down the pier"
@@ -1452,9 +1452,9 @@ async def test_staging_runs_once_after_a_fresh_reading(tmp_path):
 @pytest.mark.asyncio
 async def test_staging_is_skipped_when_read_or_when_the_sheet_was_edited(tmp_path):
     llm, _ = await _staging_run({"staging": "read"}, tmp_path)
-    assert not any("Stage it" in p for p in llm.text_prompts)
+    assert not any("[Job: stage the moment]" in p for p in llm.text_prompts)
     llm, _ = await _staging_run({"sheet": _one_girl()}, tmp_path)
-    assert not any("Stage it" in p for p in llm.text_prompts)
+    assert not any("[Job: stage the moment]" in p for p in llm.text_prompts)
 
 
 # ── Reconstruction: the ledger and the reference, read back into one picture ─
@@ -1501,7 +1501,7 @@ def test_the_reconstruct_prompt_carries_the_ledger_and_the_pose():
     assert '"read"' in p and '"steps"' in p and '"current"' in p
     assert "chin in her right palm" in p
     assert "never a correction" in p
-    assert "has gone general" in ss.reconstruct_prompt(ledger, staging="restage")
+    assert "stock poses the staging step" in ss.reconstruct_prompt(ledger, staging="restage")
     assert "the two reference pictures" in ss.reconstruct_prompt(ledger, reference_count=2)
 
 
@@ -1571,10 +1571,10 @@ async def test_every_model_call_is_timed(tmp_path):
     llm, events = await _staging_run({}, tmp_path)
     done = next(e for e in events if e["type"] == "done")
     steps = [row["step"] for row in done["timings"]]
-    assert steps[0] == "readingScene" and "stagingScene" in steps and "reconstructingScene" in steps
+    assert steps[0] == "readingScene" and "shapingScene" in steps and "reconstructingScene" in steps
     assert all(row["seconds"] >= 0 and row["answer"] >= 1 for row in done["timings"])
     thinking = "".join(e["text"] for e in events if e["type"] == "think")
-    assert "[time] stagingScene" in thinking and "[time] total" in thinking
+    assert "[time] shapingScene" in thinking and "[time] total" in thinking
 
 
 class _ShortAndMissingLLM(_LLM):

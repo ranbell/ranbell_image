@@ -512,6 +512,7 @@
       "buildingLayout": "レイアウトを配置中...",
       "stagingScene": "場面を演じさせています...",
       "dressingProps": "場面に合わせて小道具を整えています...",
+      "shapingScene": "場面を演じさせ、小道具を整えています...",
       "reconstructingScene": "元絵と台帳から一枚の画に組み直しています..."
     },
     "positiveNodePlaceholder": "例: 6",
