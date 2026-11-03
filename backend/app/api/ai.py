@@ -129,6 +129,11 @@ class RefineRequest(BaseModel):
     # action and place but makes it an instant with a reason, body and motion;
     # "restage" gives the same people and place a different, larger action.
     staging: Literal["read", "move", "restage"] = "move"
+    # Detailed style (and MOSS caption/layout): what happens to the objects
+    # after staging. "keep" leaves them as read; "simplify" keeps the few the
+    # scene needs; "elaborate" fits each to the place and moment and adds a few
+    # the place would have (prompt/props.py — the model proposes, code decides).
+    props_mode: Literal["keep", "simplify", "elaborate"] = "keep"
     # MOSS-Image style: which of its three prompt kinds to write. "caption" and
     # "layout" are written from the scene sheet (all the detailed-style fields
     # above apply), "tags" from the danbooru call put in MOSS-Image's order.

@@ -58,3 +58,5 @@ class CreationRecord(BaseModel):
     wd14_hints: bool = False
     # Detailed style: how far the sheet was staged ("read" / "move" / "restage").
     staging: str = ""
+    # Detailed style: what was done to the objects ("keep" / "simplify" / "elaborate").
+    props_mode: str = ""

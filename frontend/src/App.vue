@@ -514,6 +514,8 @@ const refineWd14Hints = ref(false)
 // 'read' as read | 'move' the reference's action caught mid-movement, with a
 // reason | 'restage' the same people and place, a different, larger action.
 const refineStaging = ref('move')
+// What happens to the objects after staging: 'keep' / 'simplify' / 'elaborate'.
+const refineProps = ref('keep')
 // Hints under this WD14 confidence are removed in code before the reader sees them.
 const refineWd14HintMinScore = ref(0.5)
 const refineChaosOn = computed(() => !refineKrea.value || refineWorldMode.value === 'fuse')
@@ -535,10 +537,10 @@ const refineSheetDirty = computed(() =>
 const refineSheetChanges = ref([])
 // Also every tag the run left out, placed or kept unclassified — nothing the
 // tagger read leaves without being said (the Showrunner, 2026-10-31).
-const _SHEET_CHANGE_RE = /^\[(changed|fused|locked, not changed|ingredient not used|ingredients from [^\]]+|placed|unclassified[^\]]*|WD14 left out|WD14 hints not used by the reader|left out of the fusion|removed by the conflict check|check|staged|staging[^\]]*)\]/
+const _SHEET_CHANGE_RE = /^\[(changed|fused|locked, not changed|ingredient not used|ingredients from [^\]]+|placed|unclassified[^\]]*|WD14 left out|WD14 hints not used by the reader|left out of the fusion|removed by the conflict check|check|staged|staging[^\]]*|props[^\]]*)\]/
 // The steps of the Krea card, numbered as they are shown.
 const kreaStepNo = key => {
-  const steps = ['medium', ...(selectedCount.value >= 2 ? ['combine'] : []), 'world', 'staging', 'hints',
+  const steps = ['medium', ...(selectedCount.value >= 2 ? ['combine'] : []), 'world', 'staging', 'props', 'hints',
     ...(refineMossLayout.value ? [] : ['length'])]
   return '①②③④⑤⑥⑦'[steps.indexOf(key)] || ''
 }
@@ -740,6 +742,7 @@ const refineStepOrder = computed(() => {
       if (refineWd14Hints.value) o.push('placingHints')
       if (refineWorldMode.value === 'fuse') o.push('fusingWorlds')
       if (refineStaging.value !== 'read') o.push('stagingScene')
+      if (refineProps.value !== 'keep') o.push('dressingProps')
     }
     if (refineSheetMode.value === 'retake') o.push('patchingScene')
     o.push(refineMossLayout.value ? 'buildingLayout' : 'writingDescription')
@@ -800,6 +803,7 @@ const REFINE_PREFS = {
   negative: refineNegative, suppressConflict: refineSuppressConflict,
   visualMedium: refineVisualMedium, combineMode: refineCombineMode,
   worldMode: refineWorldMode, wd14Hints: refineWd14Hints, staging: refineStaging,
+  propsMode: refineProps,
   wd14HintMinScore: refineWd14HintMinScore, temp: refineTemp,
   tempOverride: refineTempOverride, numCtx: refineNumCtx, divergence: refineDivergence,
   variationCount: refineVariationCount, proseParagraphs: refineProseParagraphs,
@@ -2714,6 +2718,7 @@ function openRefineFromHistory(jobId) {
   refineMossFormat.value           = m.moss_format || 'caption'
   refineWd14Hints.value            = !!m.wd14_hints
   refineStaging.value              = m.staging || 'move'
+  refineProps.value                = m.props_mode || 'keep'
   refineWd14HintMinScore.value     = m.wd14_hint_min_score ?? 0.5
   refineWorkflow.value             = m.workflow_name || ''
   refineBatchCount.value           = m.batch_count  || 1
@@ -2761,6 +2766,7 @@ function rerollEmphasising(img) {
   refineMossFormat.value   = rec.moss_format || 'caption'
   refineWd14Hints.value    = !!rec.wd14_hints
   refineStaging.value      = rec.staging || 'move'
+  refineProps.value        = rec.props_mode || 'keep'
   refineInstruction.value  = rec.instruction || ''
   refineWorkflow.value     = rec.workflow_name || ''
   refineBatchCount.value   = rec.batch_count || 1
@@ -3022,6 +3028,7 @@ async function runRefine() {
       world_mode: refineWorldMode.value,
       wd14_hints: refineKrea.value && refineWd14Hints.value,
       staging: refineKrea.value ? refineStaging.value : 'read',
+      props_mode: refineKrea.value ? refineProps.value : 'keep',
       wd14_hint_min_score: refineWd14HintMinScore.value,
       ...(refineKrea.value && sheetRun ? sheetRun : {}),
       wd14_common_ratio: refineCommonRatio.value,
@@ -4475,6 +4482,19 @@ onUnmounted(() => {
                             class="py-1.5 px-2 border rounded-lg text-xs font-medium transition-colors disabled:opacity-50 text-left">
                             <div class="font-semibold">{{ $t('refine.staging_' + m) }}</div>
                             <div class="text-gray-500 font-normal mt-0.5 text-[10px]">{{ $t('refine.staging_' + m + 'Desc') }}</div>
+                          </button>
+                        </div>
+                      </div>
+
+                      <div>
+                        <p class="text-xs text-gray-300 mb-2"><span class="inline-block w-4 text-sky-400 font-semibold">{{ kreaStepNo('props') }}</span>{{ $t('refine.propsLabel') }}</p>
+                        <div class="grid grid-cols-3 gap-2">
+                          <button v-for="m in ['keep', 'simplify', 'elaborate']" :key="m"
+                            @click="refineProps = m" :disabled="refining"
+                            :class="refineProps === m ? 'bg-rose-900/60 border-rose-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'"
+                            class="py-1.5 px-2 border rounded-lg text-xs font-medium transition-colors disabled:opacity-50 text-left">
+                            <div class="font-semibold">{{ $t('refine.props_' + m) }}</div>
+                            <div class="text-gray-500 font-normal mt-0.5 text-[10px]">{{ $t('refine.props_' + m + 'Desc') }}</div>
                           </button>
                         </div>
                       </div>

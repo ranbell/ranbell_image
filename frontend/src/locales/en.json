@@ -510,7 +510,8 @@
       "mutatingTags": "Sampling mutation tags...",
       "placingHints": "Placing the remaining tags...",
       "buildingLayout": "Placing the layout...",
-      "stagingScene": "Staging the scene..."
+      "stagingScene": "Staging the scene...",
+      "dressingProps": "Fitting the objects to the scene..."
     },
     "positiveNodePlaceholder": "e.g. 6",
     "negativeNodePlaceholder": "e.g. 7",
@@ -685,6 +686,13 @@
     "staging_moveDesc": "The reference's action, caught mid-movement, with a reason and a situation",
     "staging_restage": "Restage",
     "staging_restageDesc": "Same people, clothes and place, in a different, larger action",
+    "propsLabel": "Objects",
+    "props_keep": "As read",
+    "props_keepDesc": "The objects as the reference has them",
+    "props_simplify": "Simplify",
+    "props_simplifyDesc": "Keep only the few the scene needs (at most 3), in fewer words",
+    "props_elaborate": "Elaborate",
+    "props_elaborateDesc": "Fit each object to the place and moment, and add a few the place would have",
     "kreaSetup": "Krea2 setup (decide from the top down)",
     "mossSetup": "MOSS-Image setup (decide from the top down)",
     "runReread": "🔄 Read the pictures again ({n} refs)"

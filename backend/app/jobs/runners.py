@@ -955,6 +955,7 @@ async def run_generation(
                 moss_format=creation_meta.get("moss_format", ""),
                 wd14_hints=bool(creation_meta.get("wd14_hints")),
                 staging=creation_meta.get("staging", ""),
+                props_mode=creation_meta.get("props_mode", ""),
             )
             await db.set_payload(sha256, {"creation_record": record.model_dump()})
         except Exception as exc:
@@ -2029,6 +2030,35 @@ async def run_refine_prompt(
                         if not changed:
                             _put({"type": "think", "text": "\n[staging changed nothing in the sheet]"})
 
+                if body.props_mode in ("simplify", "elaborate"):
+                    # After staging, which can move objects too: the objects are
+                    # fitted to the scene as it now stands. The model proposes;
+                    # props.apply_props decides what reaches the sheet.
+                    from ..prompt import props as props_pass
+                    _phase("dressingProps", 0.50, "Fitting the objects to the scene...")
+                    props_raw = await _stream_text(
+                        props_pass.props_prompt(sheet, body.props_mode, instruction=nl_instruction),
+                        0.50, 0.55, 300, "Fitting the objects to the scene...", as_think=True,
+                    )
+                    try:
+                        from ..ai.json_util import parse_json_object
+                        props_answer = parse_json_object(props_raw)
+                    except Exception:
+                        props_answer = {}
+                    if not props_answer:
+                        _put({"type": "think", "text": "\n[props could not be read — the objects stay as read]"})
+                    else:
+                        sheet, changed, refused, dropped_props = props_pass.apply_props(
+                            sheet, props_answer, body.props_mode, body.locked)
+                        for line in changed:
+                            _put({"type": "think", "text": f"\n[props] {line}"})
+                        for path in refused:
+                            _put({"type": "think", "text": f"\n[locked, not changed] {path}"})
+                        for line in dropped_props:
+                            _put({"type": "think", "text": f"\n[props not used] {line}"})
+                        if not changed:
+                            _put({"type": "think", "text": "\n[props changed nothing in the sheet]"})
+
             if body.sheet_instruction.strip():
                 # A spoken retake becomes a patch: only the boxes it names change.
                 _phase("patchingScene", 0.25, "Applying the retake to the scene...")
@@ -2297,6 +2327,7 @@ def _submit_gen_direct(spooler, comfy, db, body, positive: str, negative: str, s
             "wd14_hints": body.wd14_hints,
             "wd14_hint_min_score": body.wd14_hint_min_score,
             "staging": body.staging,
+            "props_mode": body.props_mode,
             "weights": body.weights,
             "direct_prompt": body.direct_prompt,
             "direct_negative_prompt": body.direct_negative_prompt or "",
@@ -2325,6 +2356,7 @@ def _submit_gen_direct(spooler, comfy, db, body, positive: str, negative: str, s
             "wd14_hints": body.wd14_hints,
             "wd14_hint_min_score": body.wd14_hint_min_score,
             "staging": body.staging,
+            "props_mode": body.props_mode,
             "temperature": body.temperature,
             "num_ctx": body.num_ctx,
             "scene_sheet": scene_sheet,

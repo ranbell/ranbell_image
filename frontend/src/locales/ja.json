@@ -510,7 +510,8 @@
       "mutatingTags": "変異タグを抽選中...",
       "placingHints": "残りのタグを欄に割り付け中...",
       "buildingLayout": "レイアウトを配置中...",
-      "stagingScene": "場面を演じさせています..."
+      "stagingScene": "場面を演じさせています...",
+      "dressingProps": "場面に合わせて小道具を整えています..."
     },
     "positiveNodePlaceholder": "例: 6",
     "negativeNodePlaceholder": "例: 7",
@@ -685,6 +686,13 @@
     "staging_moveDesc": "参照の動作を動いている瞬間にし、理由と場面を与える",
     "staging_restage": "作り直す",
     "staging_restageDesc": "同じ人物・服・場所で、動きの大きい別の場面に",
+    "propsLabel": "小道具",
+    "props_keep": "そのまま",
+    "props_keepDesc": "読んだ物をそのまま使う",
+    "props_simplify": "シンプル化",
+    "props_simplifyDesc": "場面に要る物だけを最大3つ残し、言い回しも削る",
+    "props_elaborate": "精緻化",
+    "props_elaborateDesc": "物を場所・場面に合わせて具体的にし、その場にありそうな物を数個足す",
     "kreaSetup": "Krea2 の組み立て（上から順に決めます）",
     "mossSetup": "MOSS-Image の組み立て（上から順に決めます）",
     "runReread": "🔄 画像から読み直す（{n}枚参照）"
