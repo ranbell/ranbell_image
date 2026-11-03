@@ -1454,11 +1454,17 @@ async def run_refine_prompt(
     def _put(event: dict | None) -> None:
         token_queue.put_nowait(event)
 
+    # Where the time goes (the Showrunner, 2026-11-03: the run got long — measure
+    # before cutting anything that could cost quality). Each model call is one
+    # row, named by the step the screen was last told about.
+    _clock: dict = {"phase": "", "timings": []}
+
     def _phase(code: str, progress: float, text: str,
                *, n: int | None = None, total: int | None = None) -> None:
         """Say which step is running. ``n``/``total`` are for a step that repeats:
         reading six references is one step reported six times, and the screen
         can only say "2 of 6" if it is told."""
+        _clock["phase"] = code
         reporter.update(progress, text)
         evt = {"type": "phase", "code": code, "progress": progress}
         if n is not None and total is not None:
@@ -1653,6 +1659,37 @@ async def run_refine_prompt(
 
     instruction_framing = body.instruction_mode != "none"
 
+    async def _consume(
+        stream, phase_start: float, phase_end: float, expected_tokens: int,
+        phase_text: str, as_think: bool,
+    ) -> str:
+        """Forward one model call's events to token_queue and return its answer,
+        timing it. The model's own thinking is counted apart from the answer,
+        before ``as_think`` moves the answer into the thinking pane."""
+        tokens: list[str] = []
+        thinking = 0
+        started = time.monotonic()
+        async for event in stream:
+            if _abort.is_set():
+                raise JobCancelled()
+            _put({**event, "type": "think"} if as_think and event["type"] == "token" else event)
+            if event["type"] == "think":
+                thinking += 1
+            elif event["type"] == "token":
+                tokens.append(event["text"])
+                n = len(tokens)
+                if n % 8 == 0:
+                    frac = min(n / expected_tokens, 0.97)
+                    reporter.update(phase_start + (phase_end - phase_start) * frac, phase_text)
+        row = {"step": _clock["phase"] or "call", "seconds": round(time.monotonic() - started, 1),
+               "answer": len(tokens), "thinking": thinking}
+        _clock["timings"].append(row)
+        line = (f"[time] {row['step']} {row['seconds']}s — answer {row['answer']} tokens, "
+                f"thinking {row['thinking']}")
+        logger.info("[refine] %s", line)
+        _put({"type": "think", "text": f"\n{line}\n"})
+        return "".join(tokens)
+
     async def _stream_vlm(
         prompt: str,
         phase_start: float = 0.0,
@@ -1670,21 +1707,13 @@ async def run_refine_prompt(
         ``images`` overrides the tile — the scene sheet reads one reference at
         a time, at its own size, rather than six at 336px in a 1008px tile.
         """
-        tokens: list[str] = []
-        async for event in ollama.generate_vlm_stream(
-            prompt, images_for_vlm if images is None else images,
-            model=cfg["vlm_model"], options=options
-        ):
-            if _abort.is_set():
-                raise JobCancelled()
-            _put({**event, "type": "think"} if as_think and event["type"] == "token" else event)
-            if event["type"] == "token":
-                tokens.append(event["text"])
-                n = len(tokens)
-                if n % 8 == 0:
-                    frac = min(n / expected_tokens, 0.97)
-                    reporter.update(phase_start + (phase_end - phase_start) * frac, phase_text)
-        return "".join(tokens)
+        return await _consume(
+            ollama.generate_vlm_stream(
+                prompt, images_for_vlm if images is None else images,
+                model=cfg["vlm_model"], options=options
+            ),
+            phase_start, phase_end, expected_tokens, phase_text, as_think,
+        )
 
     async def _stream_text(
         prompt: str,
@@ -1697,20 +1726,12 @@ async def run_refine_prompt(
     ) -> str:
         """Run a text-only LLM call (no images), forwarding tokens to token_queue.
         ``as_think`` as in ``_stream_vlm``."""
-        tokens: list[str] = []
-        async for event in ollama.generate_text_stream(
-            prompt, model=cfg["vlm_model"], options=options_override or options
-        ):
-            if _abort.is_set():
-                raise JobCancelled()
-            _put({**event, "type": "think"} if as_think and event["type"] == "token" else event)
-            if event["type"] == "token":
-                tokens.append(event["text"])
-                n = len(tokens)
-                if n % 8 == 0:
-                    frac = min(n / expected_tokens, 0.97)
-                    reporter.update(phase_start + (phase_end - phase_start) * frac, phase_text)
-        return "".join(tokens)
+        return await _consume(
+            ollama.generate_text_stream(
+                prompt, model=cfg["vlm_model"], options=options_override or options
+            ),
+            phase_start, phase_end, expected_tokens, phase_text, as_think,
+        )
 
     # 4. Ollama call(s) → token_queue
     context_story = ""
@@ -2125,17 +2146,23 @@ async def run_refine_prompt(
                     scene_sheet.reconstruct_prompt(
                         scene_ledger, staging=body.staging, instruction=nl_instruction,
                         reference_count=len(read_images)),
-                    0.52, 0.55, 900, "Rebuilding the scene as one picture...", as_think=True,
+                    0.52, 0.55, 300, "Rebuilding the scene as one picture...", as_think=True,
                     images=read_images,
                 )
-                sheet, changed, rebuild_notes = scene_sheet.apply_reconstruction(
-                    sheet, _parse_json_from_llm(rebuilt_raw), body.locked)
+                rebuilt = _parse_json_from_llm(rebuilt_raw)
+                sheet, changed, refused, outside = scene_sheet.apply_reconstruction(
+                    sheet, rebuilt, body.locked)
                 for line in changed:
                     _put({"type": "think", "text": f"\n[reconstructed] {line}"})
-                for note in rebuild_notes:
-                    _put({"type": "think", "text": f"\n[reconstruction] {note}"})
-                if not changed and not rebuild_notes:
-                    _put({"type": "think", "text": "\n[reconstruction changed nothing — the sheet already held together]"})
+                for path in refused:
+                    _put({"type": "think", "text": f"\n[locked, not changed] {path}"})
+                if outside:
+                    _put({"type": "think", "text":
+                          f"\n[reconstruction outside its range, not used] {', '.join(outside)}"})
+                if not changed:
+                    # An unreadable answer and "nothing to fix" both leave the sheet
+                    # as it stood; the answer itself is in the thinking pane above.
+                    _put({"type": "think", "text": "\n[reconstruction changed nothing — written from the sheet as it stood]"})
                 ledger_steps.append(scene_sheet.ledger_step(
                     "reconstruct", "the reference and this ledger read back into one picture", changed))
             if sheet_read is not None:
@@ -2205,7 +2232,12 @@ async def run_refine_prompt(
                 )
                 positive, repairs = scene_sheet.finish_script(script_raw, sheet, required=hint_words)
                 _min_words = 25 * _script_n
-                if len(positive.split()) < _min_words:
+                # One retry at most, for both reasons at once: a short draft and
+                # boxes the draft left out are asked for in the same call, rather
+                # than writing the whole script up to three times.
+                short = len(positive.split()) < _min_words
+                missing = scene_sheet.uncovered(positive, sheet, hint_words)
+                if short:
                     # Logged raw, so the next time it happens the log says why.
                     logger.warning(
                         "[refine] visual script came back short (%d words < %d): %r",
@@ -2213,33 +2245,25 @@ async def run_refine_prompt(
                     )
                     _put({"type": "think", "text":
                           f"\n[the script came back short ({len(positive.split())} words) — asking once more]\n"})
-                    _phase("writingDescription", 0.75, "Writing the visual script again...")
-                    retry_raw = await _stream_text(
-                        scene_sheet.SCRIPT_RETRY_PREFIX
-                        + scene_sheet.script_prompt(sheet, instruction=nl_instruction, paragraphs=_script_n,
-                                                    model=_script_model, emphasise=_emphasise),
-                        0.75, 0.90, 300 + _script_n * 110, "Writing the visual script again...",
-                    )
-                    retry, retry_repairs = scene_sheet.finish_script(retry_raw, sheet, required=hint_words)
-                    if len(retry.split()) > len(positive.split()):
-                        positive, repairs = retry, retry_repairs
-                missing = scene_sheet.uncovered(positive, sheet, hint_words)
                 if missing:
                     # Written back by the writer, as sentences of the picture —
                     # not pasted on the end as fragments.
                     _put({"type": "think", "text":
                           "\n[not in the script — asking the writer once more] "
                           + "; ".join(missing) + "\n"})
-                    _phase("writingDescription", 0.85, "Writing the missing parts back in...")
-                    again_raw = await _stream_text(
-                        scene_sheet.script_prompt(sheet, instruction=nl_instruction, paragraphs=_script_n,
-                                                  model=_script_model, emphasise=_emphasise,
-                                                  left_out=missing),
-                        0.85, 0.90, 300 + _script_n * 110, "Writing the missing parts back in...",
+                if short or missing:
+                    _phase("writingDescription", 0.75, "Writing the visual script again...")
+                    retry_raw = await _stream_text(
+                        (scene_sheet.SCRIPT_RETRY_PREFIX if short else "")
+                        + scene_sheet.script_prompt(sheet, instruction=nl_instruction, paragraphs=_script_n,
+                                                    model=_script_model, emphasise=_emphasise,
+                                                    left_out=missing or None),
+                        0.75, 0.90, 300 + _script_n * 110, "Writing the visual script again...",
                     )
-                    again, again_repairs = scene_sheet.finish_script(again_raw, sheet, required=hint_words)
-                    if len(again.split()) >= min(_min_words, len(positive.split())):
-                        positive, repairs = again, again_repairs
+                    retry, retry_repairs = scene_sheet.finish_script(retry_raw, sheet, required=hint_words)
+                    if (len(retry.split()) > len(positive.split()) if short
+                            else len(retry.split()) >= min(_min_words, len(positive.split()))):
+                        positive, repairs = retry, retry_repairs
                 for note in repairs:
                     logger.warning("[refine] visual script: %s", note)
                     _put({"type": "think", "text": f"\n[check] {note}"})
@@ -2331,6 +2355,17 @@ async def run_refine_prompt(
         _put(None)
         raise RuntimeError("run_refine_prompt produced an empty positive prompt")
 
+    if _clock["timings"]:
+        # One line for the whole run: the total, then each step's share.
+        by_step: dict[str, float] = {}
+        for row in _clock["timings"]:
+            by_step[row["step"]] = by_step.get(row["step"], 0.0) + row["seconds"]
+        total = sum(by_step.values())
+        summary = (f"[time] total {total:.1f}s over {len(_clock['timings'])} calls — "
+                   + ", ".join(f"{k} {v:.1f}s" for k, v in by_step.items()))
+        logger.info("[refine] %s", summary)
+        _put({"type": "think", "text": f"\n{summary}\n"})
+
     _put({
         "type": "done",
         "positive": positive,
@@ -2346,6 +2381,7 @@ async def run_refine_prompt(
         "variants": variants,
         "sheet": scene_sheet_out,
         "ledger": scene_ledger_out,
+        "timings": _clock["timings"],
         **cat_tags,
     })
 

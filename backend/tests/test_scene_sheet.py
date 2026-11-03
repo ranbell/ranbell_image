@@ -149,15 +149,13 @@ def _is_rebuild(prompt: str) -> bool:
 
 
 def _rebuilt(prompt: str) -> str:
-    """An identity reconstruction: the sheet handed back as it stands. Fakes
-    that read a canned sheet would otherwise answer the last look with the
-    reading and undo every step."""
-    return json.dumps(json.loads(prompt.split("[Ledger]\n", 1)[1])["current"])
+    """An identity reconstruction: the sheet already holds together."""
+    return json.dumps({"set": {}})
 
 
 def _writes(llm) -> list[str]:
-    """The writer's calls, minus the one that asks for what it left out (a
-    fake script leaves most of the sheet out)."""
+    """The writer's calls, minus the retry that asks for what the draft left
+    out (a fake script leaves most of the sheet out)."""
     return [p for p in llm.text_prompts if "[Your last draft left these out]" not in p]
 
 
@@ -1079,7 +1077,7 @@ async def test_a_short_script_is_asked_for_once_more(tmp_path):
     llm = _ShortThenLongLLM()
     events = await _run({"sheet": _stage()}, llm, tmp_path)
     done = next(e for e in events if e["type"] == "done")
-    assert len(_writes(llm)) == 2
+    assert len(llm.text_prompts) == 2  # the draft and one retry, never more
     assert len(done["positive"].split()) > 100 and done["prose_missing"] is False
     assert any(e["type"] == "think" and "came back short" in e["text"] for e in events)
 
@@ -1507,34 +1505,45 @@ def test_the_reconstruct_prompt_carries_the_ledger_and_the_pose():
     assert "the two reference pictures" in ss.reconstruct_prompt(ledger, reference_count=2)
 
 
-def test_a_rebuilt_sheet_is_taken_as_the_model_wrote_it_except_the_locks():
+def test_the_reconstruct_prompt_asks_for_a_patch_on_indexed_people():
+    sheet = _pier()
+    p = ss.reconstruct_prompt({"read": sheet, "steps": [], "current": sheet})
+    assert "Output only the boxes you change" in p and '{"set": {}}' in p
+    assert '"index": 1' in p
+
+
+def test_a_rebuild_patch_changes_its_range_and_nothing_else():
     before = _pier()
-    answer = json.loads(json.dumps(before))
-    answer["setting"] = "a wooden pier over the harbour, beside a night market"
-    answer["subjects"][0]["hands"] = "right palm under her chin, left forearm on the railing"
-    answer["subjects"][1]["outfit"] = "a raincoat"
-    answer["medium"] = "photograph"
-    new, changed, notes = ss.apply_reconstruction(before, answer, locked=["subjects.1.outfit"])
+    patch = {
+        "set": {"setting": "a wooden pier over the harbour, beside a night market",
+                "story": "she stops to watch the meteors while her friends walk on",
+                "medium": "photograph"},
+        "subjects": [
+            {"index": 0, "set": {"hands": "right palm under her chin, left forearm on the railing",
+                                 "appearance": "black hair"}},
+            {"index": 1, "set": {"outfit": "a raincoat", "pose_action": "strolling on, laughing"}},
+        ],
+        "add_subjects": [{"who": "a stranger"}], "remove_subjects": [1],
+    }
+    new, changed, refused, outside = ss.apply_reconstruction(before, patch, locked=["subjects.1.pose_action"])
     assert new["setting"] == "a wooden pier over the harbour, beside a night market"
+    assert new["story"].startswith("she stops")
     assert new["subjects"][0]["hands"].startswith("right palm")
-    assert new["subjects"][1]["outfit"] == "a white t-shirt"   # locked by the user
-    assert new["medium"] == "anime illustration"                 # the medium is not the model's
-    assert any(c.startswith("setting:") for c in changed) and not notes
+    # the medium, looks and clothes are not the last look's to change
+    assert new["medium"] == "anime illustration"
+    assert new["subjects"][0]["appearance"] == "" and new["subjects"][1]["outfit"] == "a white t-shirt"
+    assert {"medium", "subjects.0.appearance", "subjects.1.outfit"} <= set(outside)
+    # the user's lock holds, and nobody is added or removed
+    assert new["subjects"][1]["pose_action"] == "walking past" and refused == ["subjects.1.pose_action"]
+    assert len(new["subjects"]) == 2
+    assert any(c.startswith("setting:") for c in changed)
 
 
-def test_an_unreadable_rebuild_keeps_the_sheet_as_it_stood():
+def test_an_empty_or_unreadable_rebuild_keeps_the_sheet_as_it_stood():
     before = _pier()
-    for answer in ({}, {"medium": "x"}, {"setting": "a pier", "subjects": []}):
-        new, changed, notes = ss.apply_reconstruction(before, answer)
-        assert new is before and not changed and notes
-
-
-def test_a_rebuild_that_changes_the_people_under_a_person_lock_is_not_taken():
-    before = _pier()
-    answer = json.loads(json.dumps(before))
-    answer["subjects"] = answer["subjects"][:1]
-    new, _, notes = ss.apply_reconstruction(before, answer, locked=["subjects.0"])
-    assert new is before and "locked" in notes[0]
+    for answer in ({"set": {}}, {}, None, "not json"):
+        new, changed, refused, outside = ss.apply_reconstruction(before, answer)
+        assert new == before and not changed and not refused and not outside
 
 
 @pytest.mark.asyncio
@@ -1555,3 +1564,33 @@ async def test_nothing_is_rebuilt_when_no_step_changed_the_sheet(tmp_path):
     assert llm.rebuild_prompts == []
     done = next(e for e in events if e["type"] == "done")
     assert done["ledger"]["steps"] == []
+
+
+@pytest.mark.asyncio
+async def test_every_model_call_is_timed(tmp_path):
+    llm, events = await _staging_run({}, tmp_path)
+    done = next(e for e in events if e["type"] == "done")
+    steps = [row["step"] for row in done["timings"]]
+    assert steps[0] == "readingScene" and "stagingScene" in steps and "reconstructingScene" in steps
+    assert all(row["seconds"] >= 0 and row["answer"] >= 1 for row in done["timings"])
+    thinking = "".join(e["text"] for e in events if e["type"] == "think")
+    assert "[time] stagingScene" in thinking and "[time] total" in thinking
+
+
+class _ShortAndMissingLLM(_LLM):
+    async def generate_text_stream(self, prompt, **kw):
+        self.text_prompts.append(prompt)
+        yield {"type": "token", "text": "An anime illustration."}
+
+
+@pytest.mark.asyncio
+async def test_a_short_draft_that_also_left_boxes_out_is_asked_for_once(tmp_path):
+    llm = _ShortAndMissingLLM()
+    events = await _run({"sheet": _stage()}, llm, tmp_path)
+    writes = [p for p in llm.text_prompts if p.startswith("Write the prompt")
+              or p.startswith(ss.SCRIPT_RETRY_PREFIX)]
+    assert len(writes) == 2
+    assert writes[1].startswith(ss.SCRIPT_RETRY_PREFIX)
+    assert "[Your last draft left these out]" in writes[1]
+    thinking = "".join(e["text"] for e in events if e["type"] == "think")
+    assert "came back short" in thinking and "[not in the script" in thinking

@@ -1981,68 +1981,41 @@ def reconstruct_prompt(
         "and do not swap a word for a milder or vaguer one. Who the people are, how they "
         "look and what they wear do not change, and neither does the medium.",
         "",
-        "Output only the whole sheet, every box, in the same JSON shape as \"current\".",
+        "Output only the boxes you change, as a patch on \"current\" — a box you leave out "
+        "stays exactly as it is. People are addressed by their \"index\" in \"current\". "
+        "If the sheet already holds together, output {\"set\": {}}.",
+        "{",
+        '  "set": {"<scene box>": "<new value>"},',
+        '  "subjects": [{"index": 0, "set": {"<person box>": "<new value>"}}]',
+        "}",
     ]
     if instruction:
         lines += ["", "[User instruction — the sheet already follows it; keep it]", instruction]
-    lines += ["", "[Ledger]", json.dumps(ledger, ensure_ascii=False, indent=2)]
+    current = dict(ledger.get("current") or {})
+    current["subjects"] = [{"index": i, **p} for i, p in enumerate(current.get("subjects") or [])]
+    lines += ["", "[Ledger]", json.dumps({**ledger, "current": current}, ensure_ascii=False, indent=2)]
     return "\n".join(lines)
 
 
-def sheet_changes(before: dict, after: dict) -> list[str]:
-    """Readable lines for what differs between two sheets, the way the patch
-    steps report theirs."""
-    out: list[str] = []
-    for box in _SCENE_BOXES + ("text_in_image",):
-        a, b = before.get(box) or "", after.get(box) or ""
-        if a != b:
-            out.append(f"{box}: {_short(str(a))} → {_short(str(b))}")
-    pa, pb = before.get("subjects") or [], after.get("subjects") or []
-    if len(pa) != len(pb):
-        out.append(f"people: {len(pa)} → {len(pb)}")
-    for i, (x, y) in enumerate(zip(pa, pb)):
-        for box in _SUBJECT_FIELDS:
-            if (x.get(box) or "") != (y.get(box) or ""):
-                out.append(f"person {i + 1} {box}: {_short(x.get(box))} → {_short(y.get(box))}")
-    return out
+#: What the last look may not touch: the picture's medium and visible text, and
+#: who the people are, how they look and what they wear. The prompt says so;
+#: this is the same thing as a scope (the staging door, `_apply_scoped`).
+_RECONSTRUCT_HELD_SCENE = ("medium", "rendering", "text_in_image")
+_RECONSTRUCT_HELD_PERSON = ("who", "appearance", "outfit")
 
 
 def apply_reconstruction(
     before: dict, answer: dict, locked: list[str] | None = None,
-) -> tuple[dict, list[str], list[str]]:
-    """The model's rebuilt sheet → the sheet. Returns the sheet, what changed,
-    and notes (why something was not taken).
+) -> tuple[dict, list[str], list[str], list[str]]:
+    """The model's patch → the sheet. Returns the sheet, what changed, what the
+    user's locks refused, and what fell outside the last look's range.
 
-    No judgement of the content here — that was the point of asking. Only the
-    shape (``normalize_sheet``), the medium, the visible text the user asked
-    for, and the user's own locks are held.
+    A patch, not the whole sheet: the boxes that already hold together are not
+    written out again, which was most of the answer and most of the wait (the
+    Showrunner, 2026-11-03). No judgement of the content here; nobody is added
+    or removed, and the user's locks hold.
     """
-    if not isinstance(answer, dict) or not (answer.get("subjects") or answer.get("setting")):
-        return before, [], ["the rebuilt sheet could not be read — written from the sheet as it stood"]
-    locked = list(locked or [])
-    data = dict(answer)
-    if "unclassified" not in data:
-        data["unclassified"] = list(before.get("unclassified") or [])
-    new = normalize_sheet(data, medium=before.get("medium") or "",
-                          literal_texts=list(before.get("text_in_image") or []))
-    if before.get("subjects") and not new.get("subjects"):
-        return before, [], ["the rebuilt sheet lost its people — written from the sheet as it stood"]
-    person_locks = [p for p in locked if p.startswith("subjects.")]
-    if person_locks and len(new["subjects"]) != len(before.get("subjects") or []):
-        # The locks name people by number; with a different list they would
-        # point at someone else.
-        return before, [], ["the rebuilt sheet changed the people while some were locked — "
-                            "written from the sheet as it stood"]
-    for path in locked:
-        parts = path.split(".")
-        if parts[0] == "subjects" and len(parts) >= 2 and parts[1].isdigit():
-            i = int(parts[1])
-            if i >= len(new["subjects"]) or i >= len(before.get("subjects") or []):
-                continue
-            if len(parts) == 2:
-                new["subjects"][i] = dict(before["subjects"][i])
-            elif parts[2] in _SUBJECT_FIELDS:
-                new["subjects"][i][parts[2]] = before["subjects"][i].get(parts[2], "")
-        elif path in before:
-            new[path] = before[path]
-    return new, sheet_changes(before, new), []
+    scene = tuple(b for b in _SCENE_BOXES if b not in _RECONSTRUCT_HELD_SCENE)
+    person = tuple(b for b in _SUBJECT_FIELDS if b not in _RECONSTRUCT_HELD_PERSON)
+    locks = scope_locks(before, scene, person, locked)
+    return _apply_scoped(before, answer if isinstance(answer, dict) else {}, locks, locked)
