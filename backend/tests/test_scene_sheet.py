@@ -1612,3 +1612,68 @@ async def test_a_short_draft_that_also_left_boxes_out_is_asked_for_once(tmp_path
     assert "[Your last draft left these out]" in writes[1]
     thinking = "".join(e["text"] for e in events if e["type"] == "think")
     assert "came back short" in thinking and "[not in the script" in thinking
+
+
+# ── Hedges, stock poses, and the script written in the shaping call ─────────
+
+def test_hedges_are_found_and_ordinary_ors_are_not():
+    text = ("She wears a navy jumper/vest and a jumper dress or pinafore with silver/white hair. "
+            "Whether or not she knows, a moment before or after, one or two books, and/or more.")
+    assert ss.hedges(text) == ["jumper/vest", "silver/white", "dress or pinafore"]
+    p = ss.script_prompt(_one_girl(), hedged=ss.hedges(text))
+    assert "[Your last draft hedged — choose one each time]" in p and '- "jumper/vest"' in p
+
+
+def test_a_restage_names_the_subjects_first_ideas_not_the_reference():
+    rules = "\n".join(ss.stage_rules("restage"))
+    assert "at least four poses anyone would draw first for that subject" in rules
+    assert "not the reference's own pose" in rules
+    shape = "\n".join(ss.stage_answer_shape("restage"))
+    assert '"subject"' in shape and '"stock_poses"' in shape
+    assert '"stock_poses"' not in "\n".join(ss.stage_answer_shape("move"))
+
+
+def test_the_shaping_call_can_end_with_the_script():
+    from backend.app.prompt import shaping
+    p = shaping.shape_prompt(_one_girl(), staging="move", props_mode="keep", tags=[],
+                             script_model="krea2")
+    assert "[Then: write the prompt for the Krea 2 image model]" in p
+    assert shaping.SCRIPT_MARKER in p and "You are transcribing the sheet" in p
+    assert shaping.SCRIPT_MARKER not in shaping.shape_prompt(
+        _one_girl(), staging="move", props_mode="keep", tags=[])
+    head, script = shaping.split_answer('{"rebuild": {"set": {}}}\n=== PROMPT ===\nAn anime illustration.')
+    assert head.strip().startswith("{") and script == "An anime illustration."
+    assert shaping.split_answer('{"set": {}}') == ('{"set": {}}', "")
+
+
+_PIER_SCRIPT = ("An anime illustration of a girl in a sailor dress sprinting down the pier, "
+                "because the ferry is leaving without her. " * 12)
+
+
+class _ScriptInShapingLLM(_StagingLLM):
+    def shape_answer(self, prompt: str) -> str:
+        return super().shape_answer(prompt) + "\n=== PROMPT ===\n" + _PIER_SCRIPT
+
+
+@pytest.mark.asyncio
+async def test_a_script_written_in_the_shaping_call_skips_the_writer(tmp_path):
+    from PIL import Image
+
+    from backend.app import runtime_config
+    from backend.app.jobs.runners import run_refine_prompt
+
+    runtime_config._cache = None
+    img = tmp_path / "ref.png"
+    Image.new("RGB", (64, 64)).save(img)
+    llm, q = _ScriptInShapingLLM(), asyncio.Queue()
+    await run_refine_prompt(_Reporter(), _Cancel(), body_dict={
+        "sha256s": ["a"], "prompt_style": "detailed"},
+        db=_DB(img), ollama=llm, spooler=None, comfy=None, token_queue=q)
+    events = []
+    while not q.empty():
+        events.append(q.get_nowait())
+    done = next(e for e in events if e and e["type"] == "done")
+    assert "[Then: write the prompt" in llm.shape_prompts[0]
+    assert not any(p.startswith("Write the prompt") for p in llm.text_prompts)
+    assert done["positive"].startswith("An anime illustration of a girl in a sailor dress")
+    assert [row["step"] for row in done["timings"]] == ["readingScene", "shapingScene"]

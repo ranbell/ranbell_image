@@ -25,6 +25,12 @@ second pair of eyes; it is the same answer reading back what it just wrote,
 which is what the measured run could afford. When nothing here runs (only a
 merge, a fusion or a retake changed the sheet), the last look still runs as a
 call of its own.
+
+And the prompt itself (2026-11-04): with ``script_model`` given, the answer
+ends with the visual script, written from the sheet as all the parts above
+leave it, after a marker line (``SCRIPT_MARKER``) — prose kept out of the JSON,
+where its quotes would need escaping. The writer's own call is then only the
+retry, when the draft is short, dropped a box or hedged.
 """
 from __future__ import annotations
 
@@ -32,6 +38,19 @@ import json
 
 from . import props as props_pass
 from . import scene_sheet
+
+#: The line between the JSON answer and the visual script that follows it.
+SCRIPT_MARKER = "=== PROMPT ==="
+
+
+def split_answer(raw: str) -> tuple[str, str]:
+    """``(json part, script part)``. The script part is empty when the answer
+    has no marker — the writer is then asked on its own, as before."""
+    text = raw or ""
+    if SCRIPT_MARKER not in text:
+        return text, ""
+    head, _, tail = text.partition(SCRIPT_MARKER)
+    return head, tail.strip()
 
 
 def jobs(*, staging: str, props_mode: str, tags: list[str]) -> list[str]:
@@ -56,9 +75,12 @@ def shape_prompt(
     sheet: dict, *, staging: str, props_mode: str, tags: list[str],
     instruction: str = "", locked: list[str] | None = None,
     reference_count: int = 1, earlier: list[dict] | None = None,
+    script_model: str = "", paragraphs: int = 5,
 ) -> str:
     """``earlier`` is the ledger's steps so far (a merge, a fusion), so the
-    rebuild part knows what had already been changed before this call."""
+    rebuild part knows what had already been changed before this call.
+    ``script_model`` ("krea2" / "moss") asks for the visual script after the
+    JSON, behind ``SCRIPT_MARKER``."""
     active = jobs(staging=staging, props_mode=props_mode, tags=tags)
     indexed = dict(sheet)
     indexed["subjects"] = [{"index": i, **s} for i, s in enumerate(sheet.get("subjects") or [])]
@@ -112,6 +134,15 @@ def shape_prompt(
         "A box the rebuild leaves out stays as the parts above left it. If it all holds "
         "together, the rebuild is {\"set\": {}}.",
     ]
+    if script_model:
+        spec = scene_sheet._SCRIPT_MODELS.get(script_model, scene_sheet._SCRIPT_MODELS["krea2"])
+        lines += [
+            "",
+            f"[Then: write the prompt for the {spec['name']} image model]",
+            "Write it from the sheet as it stands once every part of your JSON — the rebuild "
+            "included — is applied, not from the sheet as given below.",
+            *scene_sheet.script_rules(sheet, paragraphs=paragraphs, model=script_model),
+        ]
     lines += ["", "Output only one JSON object, with one part per job:", "{"]
     if "staging" in active:
         lines += ['  "staging":', *scene_sheet.stage_answer_shape(staging, indent="  ")]
@@ -121,6 +152,9 @@ def shape_prompt(
         lines.append('  "place": [{"tag": "<the tag as given>", "box": "<box>", "person": <index or null>}],')
     lines.append('  "rebuild": ' + scene_sheet.REBUILD_ANSWER_SHAPE)
     lines.append("}")
+    if script_model:
+        lines += [f"then a line with only {SCRIPT_MARKER} on it, then the prompt as plain "
+                  "paragraphs — no JSON, no headings."]
     if instruction:
         lines += ["", "[User instruction — the sheet already follows it; keep it]", instruction]
     if earlier:

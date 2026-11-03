@@ -956,18 +956,11 @@ _SCRIPT_MODELS = {
 }
 
 
-def script_prompt(
-    sheet: dict, *, instruction: str = "", paragraphs: int = DEFAULT_PROSE_PARAGRAPHS,
-    model: str = "krea2", emphasise: list[str] | None = None,
-    left_out: list[str] | None = None,
-) -> str:
-    """Step 2: what the writer is asked to turn the sheet into.
-
-    ``emphasise`` is ``emphasis_lines``' output: boxes the check found absent
-    from the last picture. Being in the sheet was not enough for them once
-    already, so they are called out by name rather than left to take their turn
-    in the ordinary order.
-    """
+def script_rules(
+    sheet: dict, *, paragraphs: int = DEFAULT_PROSE_PARAGRAPHS, model: str = "krea2",
+) -> list[str]:
+    """How the writer turns the sheet into the prompt, as lines. Shared by
+    ``script_prompt`` and the last part of ``shaping.shape_prompt``."""
     spec = _SCRIPT_MODELS.get(model, _SCRIPT_MODELS["krea2"])
     n = sheet.get("subject_count") or 0
     count_line = (
@@ -977,9 +970,7 @@ def script_prompt(
         "There is one person; describe them once." if n == 1 else
         "There are no people; do not add any."
     )
-    lines = [
-        f"Write the prompt for the {spec['name']} image model from the scene sheet below.",
-        "",
+    return [
         spec["reads"],
         f"- Begin the first sentence with the medium, \"{sheet.get('medium', '')}\", and "
         "what is happening in this scene — the situation and the main action. The medium "
@@ -1037,6 +1028,27 @@ def script_prompt(
         spec["text"],
         f"- {_length_line(paragraphs, n)} Output only the prompt.",
     ]
+
+
+def script_prompt(
+    sheet: dict, *, instruction: str = "", paragraphs: int = DEFAULT_PROSE_PARAGRAPHS,
+    model: str = "krea2", emphasise: list[str] | None = None,
+    left_out: list[str] | None = None, hedged: list[str] | None = None,
+) -> str:
+    """Step 2: what the writer is asked to turn the sheet into.
+
+    ``emphasise`` is ``emphasis_lines``' output: boxes the check found absent
+    from the last picture. Being in the sheet was not enough for them once
+    already, so they are called out by name rather than left to take their turn
+    in the ordinary order. ``left_out`` and ``hedged`` are what the last draft
+    dropped and where it hedged (``uncovered``, ``hedges``).
+    """
+    spec = _SCRIPT_MODELS.get(model, _SCRIPT_MODELS["krea2"])
+    lines = [
+        f"Write the prompt for the {spec['name']} image model from the scene sheet below.",
+        "",
+        *script_rules(sheet, paragraphs=paragraphs, model=model),
+    ]
     if emphasise:
         lines += [
             "",
@@ -1057,6 +1069,15 @@ def script_prompt(
             "picture — inside the sentences about that person or that part of the scene, in "
             "the story's flow. Not as a list, and not tacked onto the end.",
             *[f"- {line}" for line in left_out],
+        ]
+    if hedged:
+        lines += [
+            "",
+            "[Your last draft hedged — choose one each time]",
+            "Each of these offers two things where the picture has one. Write the whole "
+            "prompt again with only one of them, the one that fits this picture — the "
+            "image model draws a hedge as two half-things.",
+            *[f"- \"{h}\"" for h in hedged],
         ]
     if instruction:
         lines += ["", "[User instruction — already applied in the sheet; keep it]", instruction]
@@ -1103,6 +1124,39 @@ def clean_script(text: str) -> str:
     out = re.sub(r"[ \t]{2,}", " ", out)
     out = re.sub(r"\n{3,}", "\n\n", out)
     return out.strip()
+
+
+# "jumper/vest", "silver/white hair", "jumper dress or pinafore", "plaid skirt
+# or blanket" (2026-11-04) — told to decide, the writer still hedged. Finding
+# one is plain text matching; deciding which is the writer's, on the retry.
+_SLASH_HEDGE_RE = re.compile(r"\b[a-z][a-z-]*/[a-z][a-z-]*\b", re.I)
+_OR_HEDGE_RE = re.compile(r"\b((?:[a-z-]+ ){0,2}[a-z-]+) or ((?:[a-z-]+ ){0,2}[a-z-]+)\b", re.I)
+#: Words around "or" that make it a sentence's "or", not two things offered
+#: for one ("whether or not", "more or less", "one or two", "before or after").
+_OR_NOT_A_HEDGE = frozenset({
+    "whether", "not", "either", "more", "less", "one", "two", "three", "few", "so",
+    "before", "after", "sooner", "later", "rather", "else", "otherwise", "and",
+})
+
+
+def hedges(script: str) -> list[str]:
+    """Where the script offers two things for one: "X/Y", and "X or Y" when
+    both sides name a thing. Each found once, as written."""
+    out: list[str] = []
+    for m in _SLASH_HEDGE_RE.finditer(script or ""):
+        if m.group(0).lower() == "and/or":
+            continue
+        if m.group(0) not in out:
+            out.append(m.group(0))
+    for m in _OR_HEDGE_RE.finditer(script or ""):
+        left = m.group(1).lower().split()
+        right = m.group(2).lower().split()
+        if not left or not right or left[-1] in _OR_NOT_A_HEDGE or right[0] in _OR_NOT_A_HEDGE:
+            continue
+        phrase = f"{left[-1]} or {right[0]}"
+        if phrase not in out:
+            out.append(phrase)
+    return out
 
 
 def still_on_sheet(words: list[str] | None, sheet: dict) -> list[str]:
@@ -1925,10 +1979,17 @@ def stage_rules(mode: str, *, locked: list[str] | None = None,
         # Naming the stock poses first is what lets the model go past them:
         # told only "not a stock pose", it wrote "a classic laugh gesture"
         # (2026-11-03). The list stays in the ledger for the last look.
+        # Asked only for "this situation", it listed the reference's own pose —
+        # which was being replaced anyway — and then gave everyone the same
+        # first idea for the subject: three runs, three "pointing at a passage
+        # in the book" (2026-11-04). So the list is about the subject, and long.
         lines.append(
-            "Before you choose, write in \"stock_poses\" the poses a picture of this "
-            "situation would get by default — the ones every such picture already has. The "
-            "pose you give each person must be none of them, and not a near copy."
+            "Before you choose, name the subject of this picture in a few words (what kind "
+            "of scene it is), and write in \"stock_poses\" at least four poses anyone would "
+            "draw first for that subject — the first ideas for it, not the reference's own "
+            "pose, which is being replaced anyway. If the pose you were about to give is "
+            "among them, or close to one, it is a stock pose too: list it and choose again. "
+            "The pose you give each person must be none of them, and not a near copy."
         )
     lines += [
         "",
@@ -1964,7 +2025,8 @@ def stage_rules(mode: str, *, locked: list[str] | None = None,
 def stage_answer_shape(mode: str, indent: str = "") -> list[str]:
     lines = [f"{indent}{{"]
     if mode == "restage":
-        lines.append(f'{indent}  "stock_poses": ["<a pose this situation gets by default>"],')
+        lines.append(f'{indent}  "subject": "<what kind of scene this is, in a few words>",')
+        lines.append(f'{indent}  "stock_poses": ["<a first-idea pose for that subject>", "...", "...", "..."],')
     lines += [
         f'{indent}  "set": {{"<scene box>": "<new value>"}},',
         f'{indent}  "subjects": [{{"index": 0, "set": {{"<person box>": "<new value>"}}}}]',

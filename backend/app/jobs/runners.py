@@ -1847,6 +1847,8 @@ async def run_refine_prompt(
             ledger_steps: list[dict] = []
             sheet_read: dict | None = None
             rebuilt_in_shaping = False
+            # The visual script, when the shaping call already wrote it.
+            drafted_script = ""
             # The references actually read (0% is not read), for the last look.
             read_images = [
                 image_bytes_list[n] for n, idx in enumerate(tile_order)
@@ -2048,20 +2050,32 @@ async def run_refine_prompt(
                     # Each part of the answer still goes through its own door.
                     # With the reference: the last part reads the whole sheet back
                     # as one picture, so the last look is part of this call.
+                    # And the script, as its last part — except for a MOSS layout,
+                    # whose boxes are placed by a call of their own.
+                    _shape_script = "" if (moss and body.moss_format == "layout") else (
+                        "moss" if moss else "krea2")
                     _phase("shapingScene", 0.45, "Staging the scene and its objects...")
                     shape_raw = await _stream_vlm(
                         shaping.shape_prompt(sheet, staging=body.staging, props_mode=body.props_mode,
                                              tags=pending_tags, instruction=nl_instruction,
                                              locked=body.locked, reference_count=len(read_images),
-                                             earlier=ledger_steps or None),
-                        0.45, 0.55, 400 + 400 * len(shape_jobs), "Staging the scene and its objects...",
+                                             earlier=ledger_steps or None, script_model=_shape_script,
+                                             paragraphs=clamp_prose_paragraphs(
+                                                 getattr(body, "prose_paragraphs", 5))),
+                        0.45, 0.80, 400 + 400 * len(shape_jobs) + (900 if _shape_script else 0),
+                        "Staging the scene and its objects...",
                         as_think=True, images=read_images,
                     )
+                    shape_json, shaped_script = shaping.split_answer(shape_raw)
                     try:
                         from ..ai.json_util import parse_json_object
-                        shape_answer = parse_json_object(shape_raw)
+                        shape_answer = parse_json_object(shape_json)
                     except Exception:
                         shape_answer = {}
+                    if shape_answer and shaped_script:
+                        drafted_script = shaped_script
+                    elif _shape_script:
+                        _put({"type": "think", "text": "\n[no prompt after the shaping answer — the writer is asked on its own]"})
                     if not shape_answer:
                         _put({"type": "think", "text": "\n[the shaping answer could not be read — written from the sheet as read]"})
                     sheet, shape_report = shaping.apply_shape(
@@ -2238,13 +2252,18 @@ async def run_refine_prompt(
                           "\n[emphasised — missing from the last picture] "
                           + "; ".join(_emphasise) + "\n"})
                 _script_model = "moss" if moss else "krea2"
-                _phase("writingDescription", 0.55, "Writing the visual script...")
                 _script_n = clamp_prose_paragraphs(getattr(body, "prose_paragraphs", 5))
-                script_raw = await _stream_text(
-                    scene_sheet.script_prompt(sheet, instruction=nl_instruction, paragraphs=_script_n,
-                                              model=_script_model, emphasise=_emphasise),
-                    0.55, 0.90, 300 + _script_n * 110, "Writing the visual script...",
-                )
+                if drafted_script:
+                    # Written in the shaping call; it goes to the prompt pane now.
+                    script_raw = drafted_script
+                    _put({"type": "token", "text": drafted_script})
+                else:
+                    _phase("writingDescription", 0.55, "Writing the visual script...")
+                    script_raw = await _stream_text(
+                        scene_sheet.script_prompt(sheet, instruction=nl_instruction, paragraphs=_script_n,
+                                                  model=_script_model, emphasise=_emphasise),
+                        0.55, 0.90, 300 + _script_n * 110, "Writing the visual script...",
+                    )
                 # Hints a later step deliberately took off the sheet (an old pose
                 # after a restage) are not asked of the writer.
                 hint_words = scene_sheet.still_on_sheet(hint_words, sheet)
@@ -2255,6 +2274,7 @@ async def run_refine_prompt(
                 # than writing the whole script up to three times.
                 short = len(positive.split()) < _min_words
                 missing = scene_sheet.uncovered(positive, sheet, hint_words)
+                hedged = scene_sheet.hedges(positive)
                 if short:
                     # Logged raw, so the next time it happens the log says why.
                     logger.warning(
@@ -2269,19 +2289,25 @@ async def run_refine_prompt(
                     _put({"type": "think", "text":
                           "\n[not in the script — asking the writer once more] "
                           + "; ".join(missing) + "\n"})
-                if short or missing:
+                if hedged:
+                    # Found here; which one is meant is the writer's to decide.
+                    _put({"type": "think", "text":
+                          "\n[the script hedges — asking the writer to choose] "
+                          + "; ".join(hedged) + "\n"})
+                if short or missing or hedged:
                     _phase("writingDescription", 0.75, "Writing the visual script again...")
                     retry_raw = await _stream_text(
                         (scene_sheet.SCRIPT_RETRY_PREFIX if short else "")
                         + scene_sheet.script_prompt(sheet, instruction=nl_instruction, paragraphs=_script_n,
                                                     model=_script_model, emphasise=_emphasise,
-                                                    left_out=missing or None),
+                                                    left_out=missing or None, hedged=hedged or None),
                         0.75, 0.90, 300 + _script_n * 110, "Writing the visual script again...",
                     )
                     retry, retry_repairs = scene_sheet.finish_script(retry_raw, sheet, required=hint_words)
                     if (len(retry.split()) > len(positive.split()) if short
                             else len(retry.split()) >= min(_min_words, len(positive.split()))):
                         positive, repairs = retry, retry_repairs
+                repairs = list(repairs) + [f"still hedged — {h}" for h in scene_sheet.hedges(positive)]
                 for note in repairs:
                     logger.warning("[refine] visual script: %s", note)
                     _put({"type": "think", "text": f"\n[check] {note}"})
