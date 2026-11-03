@@ -88,8 +88,15 @@ def sheet_prompt(
     reference_count: int = 1,
     combine: str = "merge",
     hints: dict[str, list[str]] | None = None,
+    stock_poses: bool = False,
 ) -> str:
     """Step 1: what the vision model is asked to fill in.
+
+    ``stock_poses`` (a restage is coming): the reader also names the subject
+    and the poses anyone would draw first for it. Handed to the shaping call
+    as a given list, it holds; written by the staging part itself, inside the
+    same answer that then picked one of them, it did not (2026-11-04: "pointing
+    at something on the desk" listed, then chosen, two runs out of two).
 
     ``hints`` are the references' top WD14 tags (``hint_tags``), given as a
     recommendation of what is distinctive — never as the description itself.
@@ -234,6 +241,15 @@ def sheet_prompt(
             "light in lighting, particles in effects. Every tag listed here goes into the "
             "sheet: into its box, or into \"other\" when no box fits. None is dropped and "
             "none is swapped for a milder or vaguer word.",
+        ]
+    if stock_poses:
+        lines += [
+            "",
+            "[Also, for the next step]",
+            "The people in this picture will be given a new pose. Add two keys to the JSON: "
+            "\"subject\" — what kind of scene this is, in a few words — and \"stock_poses\" — "
+            "at least five poses anyone would draw first for that subject, the first ideas "
+            "every such picture already has (the pose in this reference is one of them).",
         ]
     if instruction:
         lines += ["", "[User instruction — it overrides the reference where they differ]",
@@ -1076,7 +1092,9 @@ def script_prompt(
             "[Your last draft hedged — choose one each time]",
             "Each of these offers two things where the picture has one. Write the whole "
             "prompt again with only one of them, the one that fits this picture — the "
-            "image model draws a hedge as two half-things.",
+            "image model draws a hedge as two half-things. Where the sheet itself says it "
+            "this way, the sheet is wrong to hedge: this comes before writing every box as "
+            "it is.",
             *[f"- \"{h}\"" for h in hedged],
         ]
     if instruction:
@@ -1286,10 +1304,12 @@ def uncovered(script: str, sheet: dict, required: list[str] | None = None) -> li
             lines.append(f"{box}: {value}")
     people = sheet.get("subjects") or []
     for i, person in enumerate(people):
-        who = person.get("who") or f"person {i + 1}"
-        # Several people can share a "who" ("young woman, background"); the
-        # number keeps the line pointing at one of them.
-        label = f"person {i + 1}, {who}" if len(people) > 1 else who
+        # By number and by what can be seen — never by the "who" note: handed
+        # back to the writer, "(person 1, Female, appears late teens, warm and
+        # affectionate)" came out in the prompt as "the first woman, who is late
+        # teens and warm and affectionate" (2026-11-04).
+        looks = (person.get("appearance") or person.get("position") or "").split(",")[0].strip()
+        label = f"person {i + 1}" + (f", {looks}" if looks else "")
         # "who" is not checked: the writer always renames it ("female, young adult"
         # becomes "a young woman"), and the audit showed it flagged on every run.
         for box in _SUBJECT_FIELDS:
@@ -1960,7 +1980,8 @@ ONE_HAND_LINE = (
 
 
 def stage_rules(mode: str, *, locked: list[str] | None = None,
-                exclude: tuple[str, ...] = ()) -> list[str]:
+                exclude: tuple[str, ...] = (), avoid: list[str] | None = None,
+                subject: str = "") -> list[str]:
     """The staging job, as lines: how far, the pose, what a staged moment
     holds, which boxes. Shared by ``stage_prompt`` and the one-call
     ``shaping.shape_prompt``. ``exclude`` takes boxes away from staging when
@@ -1975,7 +1996,19 @@ def stage_rules(mode: str, *, locked: list[str] | None = None,
         "[The pose]",
         spec["pose"],
     ]
-    if mode == "restage":
+    if mode == "restage" and avoid:
+        # Given, not self-written: the reader named these before anything was
+        # staged, so they hold as a constraint (``sheet_prompt(stock_poses=)``).
+        lines += [
+            "",
+            f"[Poses not to use — the first ideas for {subject or 'this subject'}]",
+            *[f"- {a}" for a in avoid],
+            "None of these, and no near copy of one — the same gesture with other words is "
+            "the same pose. A pose that would be the first idea for this subject even though "
+            "it is not listed here is not allowed either; add it to \"stock_poses\" and "
+            "choose again.",
+        ]
+    elif mode == "restage":
         # Naming the stock poses first is what lets the model go past them:
         # told only "not a stock pose", it wrote "a classic laugh gesture"
         # (2026-11-03). The list stays in the ledger for the last look.
@@ -2022,9 +2055,13 @@ def stage_rules(mode: str, *, locked: list[str] | None = None,
     return lines
 
 
-def stage_answer_shape(mode: str, indent: str = "") -> list[str]:
+def stage_answer_shape(mode: str, indent: str = "", *, given: bool = False) -> list[str]:
+    """``given``: the stock poses came with the request, so only additions are
+    asked for."""
     lines = [f"{indent}{{"]
-    if mode == "restage":
+    if mode == "restage" and given:
+        lines.append(f'{indent}  "stock_poses": ["<any first-idea pose not listed above, or none>"],')
+    elif mode == "restage":
         lines.append(f'{indent}  "subject": "<what kind of scene this is, in a few words>",')
         lines.append(f'{indent}  "stock_poses": ["<a first-idea pose for that subject>", "...", "...", "..."],')
     lines += [
@@ -2112,7 +2149,7 @@ def rebuild_rules(*, staging: str = "read", reference_count: int = 1,
     """
     refs = ("the reference picture" if reference_count <= 1 else
             f"the {_NUMBER_WORDS.get(reference_count, reference_count)} reference pictures")
-    named = ("you named in \"stock_poses\" above" if same_call
+    named = ("under [Poses not to use] and in \"stock_poses\" above" if same_call
              else "the staging step named in its intent")
     steps = "the parts above" if same_call else "the steps"
     if staging == "restage":

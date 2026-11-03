@@ -76,6 +76,7 @@ def shape_prompt(
     instruction: str = "", locked: list[str] | None = None,
     reference_count: int = 1, earlier: list[dict] | None = None,
     script_model: str = "", paragraphs: int = 5,
+    avoid: list[str] | None = None, subject: str = "",
 ) -> str:
     """``earlier`` is the ledger's steps so far (a merge, a fusion), so the
     rebuild part knows what had already been changed before this call.
@@ -102,7 +103,8 @@ def shape_prompt(
             "picture it makes is people standing and posing — nothing happens in it. Turn "
             "it into a moment where something is happening.",
             "",
-            *scene_sheet.stage_rules(staging, locked=locked, exclude=_staging_exclude(active)),
+            *scene_sheet.stage_rules(staging, locked=locked, exclude=_staging_exclude(active),
+                                     avoid=avoid, subject=subject),
         ]
         if "objects" in active:
             lines.append("- The objects are the next job's: describe them there, not here.")
@@ -145,7 +147,8 @@ def shape_prompt(
         ]
     lines += ["", "Output only one JSON object, with one part per job:", "{"]
     if "staging" in active:
-        lines += ['  "staging":', *scene_sheet.stage_answer_shape(staging, indent="  ")]
+        lines += ['  "staging":', *scene_sheet.stage_answer_shape(staging, indent="  ",
+                                                                  given=bool(avoid))]
     if "objects" in active:
         lines += ['  "objects":', *props_pass.props_answer_shape(props_mode, indent="  ")]
     if "place" in active:

@@ -223,7 +223,7 @@ def test_the_rebuild_part_is_applied_last_through_the_last_looks_door():
     assert sheet["subjects"][0]["outfit"] == "a uniform"          # not the last look's to change
     assert "subjects.0.outfit" in report["rebuild"]["outside"]
     p = shaping.shape_prompt(_two(), staging="restage", props_mode="keep", tags=[])
-    assert "[Last job: one picture]" in p and 'you named in "stock_poses" above' in p
+    assert "[Last job: one picture]" in p and 'in "stock_poses" above' in p
 
 
 def test_a_hint_a_later_step_took_away_is_not_owed_to_the_script():

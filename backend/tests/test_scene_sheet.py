@@ -1308,7 +1308,7 @@ def test_what_the_writer_dropped_is_found_and_never_pasted():
     script, notes = ss.finish_script(text, sheet, required=["full moon"])
     assert script == text
     missing = ss.uncovered(script, sheet, ["full moon"])
-    assert "outfit (a girl): a torn white dress with a bare shoulder" in missing
+    assert "outfit (person 1): a torn white dress with a bare shoulder" in missing
     assert "other: a cracked mirror leaning on the far wall" in missing
     assert "also in the picture: star, full moon" in missing
     assert any("not in the script — outfit" in n for n in notes)
@@ -1323,14 +1323,16 @@ def test_a_joined_word_counts_as_written():
     assert ss.uncovered("An anime illustration of a girl with a gold hair clip.", sheet) == []
 
 
-def test_people_who_share_a_label_are_told_apart():
+def test_people_are_named_by_number_and_looks_never_by_the_who_note():
     sheet = ss.normalize_sheet({"medium": "anime illustration", "subjects": [
-        {"who": "young woman, background", "gaze": "the stalls across the street"},
-        {"who": "young woman, background", "gaze": "her friend beside her"},
+        {"who": "Female, appears late teens, warm and affectionate",
+         "appearance": "long wavy red hair, blue eyes", "gaze": "the stalls across the street"},
+        {"who": "Female, appears late teens, warm and affectionate", "gaze": "her friend beside her"},
     ]})
     missing = ss.uncovered("An anime illustration of two young women.", sheet)
-    assert "gaze (person 1, young woman, background): the stalls across the street" in missing
-    assert "gaze (person 2, young woman, background): her friend beside her" in missing
+    assert "gaze (person 1, long wavy red hair): the stalls across the street" in missing
+    assert "gaze (person 2): her friend beside her" in missing
+    assert not any("affectionate" in line for line in missing)
 
 
 def test_a_box_the_sheet_does_not_have_goes_to_other():
@@ -1398,10 +1400,10 @@ def test_a_dropped_action_box_is_found():
     })
     missing = ss.uncovered("An anime illustration of a girl on a pier, sprinting down the pier.", sheet)
     assert "situation: the ferry is pulling away from the pier" in missing
-    assert "gaze (a girl): the departing ferry" in missing
-    assert "legs_feet (a girl): mid-stride, one foot off the boards" in missing
+    assert "gaze (person 1): the departing ferry" in missing
+    assert "legs_feet (person 1): mid-stride, one foot off the boards" in missing
     p = ss.script_prompt(sheet, left_out=missing)
-    assert "[Your last draft left these out]" in p and "- gaze (a girl): the departing ferry" in p
+    assert "[Your last draft left these out]" in p and "- gaze (person 1): the departing ferry" in p
 
 
 class _StagingLLM(_LLM):
@@ -1677,3 +1679,63 @@ async def test_a_script_written_in_the_shaping_call_skips_the_writer(tmp_path):
     assert not any(p.startswith("Write the prompt") for p in llm.text_prompts)
     assert done["positive"].startswith("An anime illustration of a girl in a sailor dress")
     assert [row["step"] for row in done["timings"]] == ["readingScene", "shapingScene"]
+
+
+def test_the_reader_names_the_subjects_stock_poses_only_for_a_restage():
+    p = ss.sheet_prompt(stock_poses=True)
+    assert '"stock_poses"' in p and "at least five poses anyone would draw first" in p
+    assert "[Also, for the next step]" not in ss.sheet_prompt()
+
+
+def test_a_given_list_of_poses_is_a_constraint_in_the_shaping_call():
+    from backend.app.prompt import shaping
+    p = shaping.shape_prompt(_one_girl(), staging="restage", props_mode="keep", tags=[],
+                             avoid=["pointing at the book", "chin on hand"],
+                             subject="two students studying")
+    assert "[Poses not to use — the first ideas for two students studying]" in p
+    assert "- pointing at the book" in p and "the same gesture with other words is the same pose" in p
+    assert "any first-idea pose not listed above" in p
+    assert "under [Poses not to use]" in p
+    assert "Before you choose, name the subject" not in p
+
+
+class _RestageLLM(_StagingLLM):
+    async def generate_vlm_stream(self, prompt, images, **kw):
+        if "[Job: " in prompt or _is_rebuild(prompt):
+            async for e in super().generate_vlm_stream(prompt, images, **kw):
+                yield e
+            return
+        self.vlm_prompts.append(prompt)
+        yield {"type": "token", "text": json.dumps(
+            {"medium": "anime illustration", "setting": "a pier",
+             "subject": "a girl waiting on a pier",
+             "stock_poses": ["leaning on the railing", "waving at the ferry"],
+             "subjects": [{"who": "a girl", "pose_action": "standing", "outfit": "a sailor dress"}]})}
+
+
+@pytest.mark.asyncio
+async def test_the_readers_list_reaches_the_shaping_call_and_not_the_sheet(tmp_path):
+    from PIL import Image
+
+    from backend.app import runtime_config
+    from backend.app.jobs.runners import run_refine_prompt
+
+    runtime_config._cache = None
+    img = tmp_path / "ref.png"
+    Image.new("RGB", (64, 64)).save(img)
+    llm, q = _RestageLLM(), asyncio.Queue()
+    await run_refine_prompt(_Reporter(), _Cancel(), body_dict={
+        "sha256s": ["a"], "prompt_style": "detailed", "staging": "restage"},
+        db=_DB(img), ollama=llm, spooler=None, comfy=None, token_queue=q)
+    events = []
+    while not q.empty():
+        events.append(q.get_nowait())
+    assert '"stock_poses"' in llm.vlm_prompts[0]
+    shape = llm.shape_prompts[0]
+    assert "[Poses not to use — the first ideas for a girl waiting on a pier]" in shape
+    assert "- waving at the ferry" in shape
+    done = next(e for e in events if e and e["type"] == "done")
+    assert "stock" not in (done["sheet"].get("other") or "")
+    assert "subject" not in (done["sheet"].get("other") or "")
+    thinking = "".join(e["text"] for e in events if e and e["type"] == "think")
+    assert "[staging avoids — a girl waiting on a pier] leaning on the railing; waving at the ferry" in thinking

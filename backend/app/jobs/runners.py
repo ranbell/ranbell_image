@@ -1849,6 +1849,9 @@ async def run_refine_prompt(
             rebuilt_in_shaping = False
             # The visual script, when the shaping call already wrote it.
             drafted_script = ""
+            # A restage's poses not to use, named by the reader.
+            avoid_poses: list[str] = []
+            pose_subject = ""
             # The references actually read (0% is not read), for the last look.
             read_images = [
                 image_bytes_list[n] for n, idx in enumerate(tile_order)
@@ -1924,11 +1927,23 @@ async def run_refine_prompt(
                             reference_count=1,
                             combine=body.combine_mode,
                             hints=own_hints,
+                            stock_poses=body.staging == "restage",
                         ),
                         lo, hi, 400, text, as_think=True,
                         images=[image_bytes_list[n]],
                     )
                     data = _parse_json_from_llm(raw)
+                    # The restage's given list: taken off before the sheet is
+                    # normalised (a key the sheet does not have goes to "other").
+                    if isinstance(data, dict):
+                        if not pose_subject:
+                            pose_subject = scene_sheet._text(data.pop("subject", ""))
+                        else:
+                            data.pop("subject", None)
+                        for pose in scene_sheet.stock_poses(data):
+                            if pose not in avoid_poses:
+                                avoid_poses.append(pose)
+                        data.pop("stock_poses", None)
                     if not data.get("subjects") and not data.get("setting"):
                         # Not a usable sheet. Writing from it would invent the
                         # scene, so stop and say why rather than hand Krea 2 a guess.
@@ -2060,6 +2075,7 @@ async def run_refine_prompt(
                                              tags=pending_tags, instruction=nl_instruction,
                                              locked=body.locked, reference_count=len(read_images),
                                              earlier=ledger_steps or None, script_model=_shape_script,
+                                             avoid=avoid_poses or None, subject=pose_subject,
                                              paragraphs=clamp_prose_paragraphs(
                                                  getattr(body, "prose_paragraphs", 5))),
                         0.45, 0.80, 400 + 400 * len(shape_jobs) + (900 if _shape_script else 0),
@@ -2086,10 +2102,12 @@ async def run_refine_prompt(
                     if st is not None:
                         intent = ("the reference's action made into a moment" if body.staging == "move"
                                   else "the same people given a different, larger action")
-                        if st["stock"]:
+                        avoided = avoid_poses + [p for p in st["stock"] if p not in avoid_poses]
+                        if avoided:
                             # Kept for the last look: what this restage set out to avoid.
-                            intent += "; stock poses it set out to avoid: " + "; ".join(st["stock"])
-                            _put({"type": "think", "text": "\n[staging avoids] " + "; ".join(st["stock"])})
+                            intent += "; stock poses it set out to avoid: " + "; ".join(avoided)
+                            _put({"type": "think", "text":
+                                  f"\n[staging avoids — {pose_subject or 'the subject'}] " + "; ".join(avoided)})
                         ledger_steps.append(scene_sheet.ledger_step(
                             f"staging ({body.staging})", intent, st["changed"]))
                         for line in st["changed"]:
