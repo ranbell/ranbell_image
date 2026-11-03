@@ -2198,7 +2198,7 @@ async def run_refine_prompt(
                 )
                 rebuilt = _parse_json_from_llm(rebuilt_raw)
                 sheet, changed, refused, outside = scene_sheet.apply_reconstruction(
-                    sheet, rebuilt, body.locked)
+                    sheet, rebuilt, body.locked, opened=tuple(scene_sheet.hedged_boxes(sheet)))
                 for line in changed:
                     _put({"type": "think", "text": f"\n[reconstructed] {line}"})
                 for path in refused:

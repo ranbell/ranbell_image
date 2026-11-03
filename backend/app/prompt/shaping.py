@@ -135,6 +135,7 @@ def shape_prompt(
                                    same_call=True),
         "A box the rebuild leaves out stays as the parts above left it. If it all holds "
         "together, the rebuild is {\"set\": {}}.",
+        *scene_sheet.hedge_lines(scene_sheet.hedged_boxes(sheet)),
     ]
     if script_model:
         spec = scene_sheet._SCRIPT_MODELS.get(script_model, scene_sheet._SCRIPT_MODELS["krea2"])
@@ -189,6 +190,8 @@ def apply_shape(
     """
     active = jobs(staging=staging, props_mode=props_mode, tags=tags)
     report: dict = {}
+    # The boxes the prompt named as hedging (it was built from this sheet).
+    hedged = scene_sheet.hedged_boxes(sheet)
     if "staging" in active:
         part = _part(answer, "staging")
         new, changed, refused, outside = scene_sheet.apply_staging(
@@ -210,8 +213,9 @@ def apply_shape(
         sheet, placed, unclassified = scene_sheet.apply_placement(
             sheet, {"place": place if isinstance(place, list) else []}, tags)
         report["place"] = {"placed": placed, "unclassified": unclassified}
-    # Last, the whole read back as one picture, through the last look's door.
+    # Last, the whole read back as one picture, through the last look's door —
+    # with the boxes that hedged when the call was asked opened for the choice.
     sheet, changed, refused, outside = scene_sheet.apply_reconstruction(
-        sheet, _part(answer, "rebuild"), locked)
+        sheet, _part(answer, "rebuild"), locked, opened=tuple(hedged))
     report["rebuild"] = {"changed": changed, "refused": refused, "outside": outside}
     return sheet, report

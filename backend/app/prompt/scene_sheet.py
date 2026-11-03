@@ -182,6 +182,13 @@ def sheet_prompt(
         refs.rstrip("\n"),
         "Fill in this JSON and output only the JSON:",
         "{",
+        *([
+            # In the template, not in a note after it: told to "add two keys",
+            # the reader wrote them as markdown after the closing brace, where
+            # nothing reads them (2026-11-04, two runs out of two).
+            '  "subject": "what kind of scene this is, in a few words",',
+            '  "stock_poses": ["at least five poses anyone would draw first for that subject"],',
+        ] if stock_poses else []),
         '  "medium": "anime illustration / photograph / ...",',
         '  "rendering": "how it is drawn or shot: line work, shading, brushwork, grain",',
         '  "story": "one sentence: who is doing what, and what this picture is about",',
@@ -246,10 +253,11 @@ def sheet_prompt(
         lines += [
             "",
             "[Also, for the next step]",
-            "The people in this picture will be given a new pose. Add two keys to the JSON: "
-            "\"subject\" — what kind of scene this is, in a few words — and \"stock_poses\" — "
-            "at least five poses anyone would draw first for that subject, the first ideas "
-            "every such picture already has (the pose in this reference is one of them).",
+            "The people in this picture will be given a new pose. \"subject\" and "
+            "\"stock_poses\" are for that: what kind of scene this is, and at least five poses "
+            "anyone would draw first for it — the first ideas every such picture already has "
+            "(the pose in this reference is one of them). They go inside the JSON, like every "
+            "other key; nothing is written after it.",
         ]
     if instruction:
         lines += ["", "[User instruction — it overrides the reference where they differ]",
@@ -1308,7 +1316,14 @@ def uncovered(script: str, sheet: dict, required: list[str] | None = None) -> li
         # back to the writer, "(person 1, Female, appears late teens, warm and
         # affectionate)" came out in the prompt as "the first woman, who is late
         # teens and warm and affectionate" (2026-11-04).
-        looks = (person.get("appearance") or person.get("position") or "").split(",")[0].strip()
+        # The first few words, not the first comma: "Long, wavy, bright red hair"
+        # gave "(person 1, Long)".
+        words: list[str] = []
+        for clause in (person.get("appearance") or person.get("position") or "").split(","):
+            words += re.findall(r"[A-Za-z][A-Za-z-]*", clause)
+            if len(words) >= 3:
+                break
+        looks = " ".join(words[:6]).lower()
         label = f"person {i + 1}" + (f", {looks}" if looks else "")
         # "who" is not checked: the writer always renames it ("female, young adult"
         # becomes "a young woman"), and the audit showed it flagged on every run.
@@ -2216,6 +2231,7 @@ def reconstruct_prompt(
         "Rebuild it into one.",
         "",
         *rebuild_rules(staging=staging, reference_count=reference_count),
+        *hedge_lines(hedged_boxes(ledger.get("current") or {})),
         "",
         "Output only the boxes you change, as a patch on \"current\" — a box you leave out "
         "stays exactly as it is. People are addressed by their \"index\" in \"current\". "
@@ -2237,8 +2253,48 @@ _RECONSTRUCT_HELD_SCENE = ("medium", "rendering", "text_in_image")
 _RECONSTRUCT_HELD_PERSON = ("who", "appearance", "outfit")
 
 
+def hedged_boxes(sheet: dict) -> dict[str, list[str]]:
+    """Every box whose value hedges, as ``{path: [hedge, ...]}`` — paths in the
+    form the locks use ("setting", "subjects.1.appearance").
+
+    The last look may not touch who people are, how they look or what they
+    wear; but "silver/white hair" and "a jumper dress or pinafore" were read
+    into exactly those boxes, and the writer, told to write every box as it
+    is, kept them (2026-11-04). So a box that hedges is opened to the last
+    look — that box, and only while it hedges. Finding a hedge is text
+    matching; which of the two is meant is the model's to say.
+    """
+    out: dict[str, list[str]] = {}
+    for box in _SCENE_BOXES:
+        found = hedges(str(sheet.get(box) or ""))
+        if found:
+            out[box] = found
+    for i, person in enumerate(sheet.get("subjects") or []):
+        for box in _SUBJECT_FIELDS:
+            found = hedges(str(person.get(box) or ""))
+            if found:
+                out[f"subjects.{i}.{box}"] = found
+    return out
+
+
+def hedge_lines(hedged: dict[str, list[str]]) -> list[str]:
+    """For a prompt: the boxes that hedge, and the rule that opens them."""
+    if not hedged:
+        return []
+    return [
+        "",
+        "[These boxes hedge — decide each one]",
+        *[f"- {path}: " + "; ".join(f'"{h}"' for h in found) for path, found in hedged.items()],
+        "Rewrite each of these boxes with one of the two, the one this picture shows. Only "
+        "the hedge changes; the rest of the box stays word for word. These boxes are open to "
+        "you for this, even where who the person is, how they look or what they wear is "
+        "otherwise not yours to change.",
+    ]
+
+
 def apply_reconstruction(
     before: dict, answer: dict, locked: list[str] | None = None,
+    *, opened: list[str] | tuple[str, ...] = (),
 ) -> tuple[dict, list[str], list[str], list[str]]:
     """The model's patch → the sheet. Returns the sheet, what changed, what the
     user's locks refused, and what fell outside the last look's range.
@@ -2251,4 +2307,10 @@ def apply_reconstruction(
     scene = tuple(b for b in _SCENE_BOXES if b not in _RECONSTRUCT_HELD_SCENE)
     person = tuple(b for b in _SUBJECT_FIELDS if b not in _RECONSTRUCT_HELD_PERSON)
     locks = scope_locks(before, scene, person, locked)
+    # ``opened`` (``hedged_boxes``): held boxes that hedge, opened for the
+    # choice. The user's own locks are never opened.
+    user = set(locked or [])
+    open_paths = {p for p in opened if p not in user
+                  and ".".join(p.split(".")[:2]) not in user}
+    locks = [p for p in locks if p not in open_paths]
     return _apply_scoped(before, answer if isinstance(answer, dict) else {}, locks, locked)

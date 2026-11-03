@@ -1739,3 +1739,41 @@ async def test_the_readers_list_reaches_the_shaping_call_and_not_the_sheet(tmp_p
     assert "subject" not in (done["sheet"].get("other") or "")
     thinking = "".join(e["text"] for e in events if e and e["type"] == "think")
     assert "[staging avoids — a girl waiting on a pier] leaning on the railing; waving at the ferry" in thinking
+
+
+def test_the_stock_pose_keys_are_inside_the_readers_json_template():
+    p = ss.sheet_prompt(stock_poses=True)
+    template = p.split("Fill in this JSON and output only the JSON:")[1]
+    assert template.index('"subject"') < template.index('"medium"')
+    assert '"stock_poses"' in template.split('"medium"')[0]
+
+
+def test_a_hedging_box_is_opened_to_the_last_look_and_only_that_box():
+    sheet = ss.normalize_sheet({"medium": "anime illustration",
+                                "setting": "a sunlit classroom or study hall",
+                                "subjects": [
+                                    {"who": "a girl", "appearance": "long silver/white hair",
+                                     "outfit": "a navy jumper dress"},
+                                    {"who": "a girl", "appearance": "red hair",
+                                     "outfit": "a jumper dress or pinafore"}]})
+    hedged = ss.hedged_boxes(sheet)
+    assert hedged == {"setting": ["classroom or study"],
+                      "subjects.0.appearance": ["silver/white"],
+                      "subjects.1.outfit": ["dress or pinafore"]}
+    patch = {"set": {"setting": "a sunlit classroom"},
+             "subjects": [{"index": 0, "set": {"appearance": "long silver hair",
+                                                "outfit": "a raincoat"}},
+                          {"index": 1, "set": {"outfit": "a navy pinafore"}}]}
+    new, _, refused, outside = ss.apply_reconstruction(
+        sheet, patch, locked=["subjects.1.outfit"], opened=tuple(hedged))
+    assert new["setting"] == "a sunlit classroom"
+    assert new["subjects"][0]["appearance"] == "long silver hair"     # opened: it hedged
+    assert new["subjects"][0]["outfit"] == "a navy jumper dress"      # still held: no hedge
+    assert "subjects.0.outfit" in outside
+    assert new["subjects"][1]["outfit"] == "a jumper dress or pinafore"  # the user's lock wins
+    assert refused == ["subjects.1.outfit"]
+    lines = "\n".join(ss.hedge_lines(hedged))
+    assert '- subjects.0.appearance: "silver/white"' in lines
+    from backend.app.prompt import shaping
+    assert "[These boxes hedge — decide each one]" in shaping.shape_prompt(
+        sheet, staging="move", props_mode="keep", tags=[])
