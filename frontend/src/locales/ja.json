@@ -511,7 +511,8 @@
       "placingHints": "残りのタグを欄に割り付け中...",
       "buildingLayout": "レイアウトを配置中...",
       "stagingScene": "場面を演じさせています...",
-      "dressingProps": "場面に合わせて小道具を整えています..."
+      "dressingProps": "場面に合わせて小道具を整えています...",
+      "reconstructingScene": "元絵と台帳から一枚の画に組み直しています..."
     },
     "positiveNodePlaceholder": "例: 6",
     "negativeNodePlaceholder": "例: 7",
@@ -605,12 +606,14 @@
         "text_in_image": "画面の文字",
         "other": "その他（どの欄にも入らないもの）",
         "unclassified": "分類外のタグ",
+        "story": "この画の話（一文）",
         "situation": "場面で起きていること",
         "interaction": "人物どうし"
       },
       "person_box": {
         "who": "どんな人",
         "position": "位置",
+        "signature": "このポーズならではの所",
         "pose_action": "いま何をしている",
         "intent": "なぜ",
         "feeling": "気持ち",

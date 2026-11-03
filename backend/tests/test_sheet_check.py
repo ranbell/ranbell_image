@@ -1,6 +1,6 @@
 """Closing the loop: the finished picture, read back and compared with its sheet.
 
-Everything before this was open loop. `_cover_the_sheet` checks that the WRITER
+Everything before this was open loop. `uncovered` checks that the WRITER
 kept every box of the sheet; nothing checked whether the IMAGE MODEL did, so an
 intended right hand hooked over a window frame could be quietly absent and the
 run still reported success.

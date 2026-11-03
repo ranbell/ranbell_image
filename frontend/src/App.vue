@@ -537,7 +537,7 @@ const refineSheetDirty = computed(() =>
 const refineSheetChanges = ref([])
 // Also every tag the run left out, placed or kept unclassified — nothing the
 // tagger read leaves without being said (the Showrunner, 2026-10-31).
-const _SHEET_CHANGE_RE = /^\[(changed|fused|locked, not changed|ingredient not used|ingredients from [^\]]+|placed|unclassified[^\]]*|WD14 left out|WD14 hints not used by the reader|left out of the fusion|removed by the conflict check|check|staged|staging[^\]]*|props[^\]]*)\]/
+const _SHEET_CHANGE_RE = /^\[(changed|fused|locked, not changed|ingredient not used|ingredients from [^\]]+|placed|unclassified[^\]]*|WD14 left out|WD14 hints not used by the reader|left out of the fusion|removed by the conflict check|check|staged|staging[^\]]*|props[^\]]*|reconstructed|reconstruction[^\]]*|not in the script[^\]]*)\]/
 // The steps of the Krea card, numbered as they are shown.
 const kreaStepNo = key => {
   const steps = ['medium', ...(selectedCount.value >= 2 ? ['combine'] : []), 'world', 'staging', 'props', 'hints',
@@ -745,6 +745,10 @@ const refineStepOrder = computed(() => {
       if (refineProps.value !== 'keep') o.push('dressingProps')
     }
     if (refineSheetMode.value === 'retake') o.push('patchingScene')
+    // The last look runs only when some step changed the sheet.
+    if ((refineSheetMode.value === 'read' && (refineReadCount.value > 1 || refineWd14Hints.value
+        || refineWorldMode.value === 'fuse' || refineStaging.value !== 'read'
+        || refineProps.value !== 'keep')) || refineSheetMode.value === 'retake') o.push('reconstructingScene')
     o.push(refineMossLayout.value ? 'buildingLayout' : 'writingDescription')
   } else {
     o.push('generatingPrompt')

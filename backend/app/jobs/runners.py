@@ -638,7 +638,7 @@ async def run_sheet_check(
     box, with the scene sheet its prompt was written from.
 
     Everything before this was open loop: the sheet was read, the script was
-    written, the picture came out and nobody looked. `_cover_the_sheet` checks
+    written, the picture came out and nobody looked. `uncovered` checks
     that the WRITER kept every box; it cannot know whether the IMAGE MODEL did.
 
     This lives on the EVALUATION lane on purpose. That lane is auto-paused
@@ -952,6 +952,7 @@ async def run_generation(
                 inspire_context=InspireContext(**inspire_raw) if inspire_raw else None,
                 seed=creation_meta.get("seed"),
                 scene_sheet=creation_meta.get("scene_sheet"),
+                scene_ledger=creation_meta.get("scene_ledger"),
                 moss_format=creation_meta.get("moss_format", ""),
                 wd14_hints=bool(creation_meta.get("wd14_hints")),
                 staging=creation_meta.get("staging", ""),
@@ -1714,6 +1715,9 @@ async def run_refine_prompt(
     # 4. Ollama call(s) → token_queue
     context_story = ""
     scene_sheet_out: dict | None = None  # detailed style: the sheet the script came from
+    # Detailed style: what was read, what each later step changed and why
+    # (scene_sheet.reconstruct_prompt reads it back with the reference).
+    scene_ledger_out: dict | None = None
     cat_tags: dict[str, list[str]] = {f: [] for f in _REFINE_CAT_FIELDS}
     _all_must = _build_all_must(wd14_analysis)
 
@@ -1814,11 +1818,21 @@ async def run_refine_prompt(
             # Hints handed over this run; the script must carry every one.
             hint_words: list[str] = []
             sheet_notes_out: list[str] = []
+            # The ledger: the sheet as read, then each step's changes. Only the
+            # lines the thinking pane already shows are kept — nothing judged.
+            ledger_steps: list[dict] = []
+            sheet_read: dict | None = None
+            # The references actually read (0% is not read), for the last look.
+            read_images = [
+                image_bytes_list[n] for n, idx in enumerate(tile_order)
+                if (weights[idx] if idx < len(weights) else 0.0) > 0
+            ] or list(image_bytes_list)
             if body.sheet:
                 # Edited on screen: the picture is not read again. The sheet's
                 # own medium stands — the user may have changed it there.
                 sheet = scene_sheet.normalize_sheet(body.sheet, literal_texts=literal_texts,
                                                     notes=sheet_notes_out)
+                sheet_read = dict(sheet)
             else:
                 # Each tag's WD14 confidence (the highest over the references), for
                 # the Showrunner's floor on hints and on fusion ingredients alike.
@@ -1906,6 +1920,12 @@ async def run_refine_prompt(
                 sheet, provenance = scene_sheet.merge_sheets(sheets, mix_plan)
                 for line in provenance:
                     _put({"type": "think", "text": f"[from] {line}\n"})
+                sheet_read = dict(sheet)
+                if len(sheets) > 1:
+                    # Several readings put side by side: the merge itself is a step
+                    # the last look has to know about.
+                    ledger_steps.append(scene_sheet.ledger_step(
+                        "merge", "several references made into one sheet", provenance))
                 if len(sheets) > 1:
                     # The merge is exact where the weights decided and silent
                     # where they did not: one person may be wearing two worlds'
@@ -1919,6 +1939,8 @@ async def run_refine_prompt(
                     ))
                     if patch:
                         sheet, changed, refused = scene_sheet.apply_patch(sheet, patch, locks)
+                        ledger_steps.append(scene_sheet.ledger_step(
+                            "reconcile", "the merged references made consistent", changed))
                         for line in changed:
                             _put({"type": "think", "text": f"[reconciled] {line}\n"})
                         for path in refused:
@@ -1941,6 +1963,8 @@ async def run_refine_prompt(
                         except Exception:
                             placement = {}
                         sheet, placed, unclassified = scene_sheet.apply_placement(sheet, placement, unused)
+                        ledger_steps.append(scene_sheet.ledger_step(
+                            "place hints", "the tagger's leftover tags put into boxes", placed))
                         for line in placed:
                             _put({"type": "think", "text": f"\n[placed] {line}"})
                         if unclassified:
@@ -1994,6 +2018,8 @@ async def run_refine_prompt(
                         if not fusion:
                             raise RuntimeError("The fusion could not be read as a change to the scene")
                         sheet, changed, refused = scene_sheet.apply_fusion(sheet, fusion, body.locked)
+                        ledger_steps.append(scene_sheet.ledger_step(
+                            "fuse", "another world's ingredients worked into the scene", changed))
                         for line in changed:
                             _put({"type": "think", "text": f"\n[fused] {line}"})
                         for word in scene_sheet.unused_ingredients(sheet, ingredients):
@@ -2021,6 +2047,10 @@ async def run_refine_prompt(
                     else:
                         sheet, changed, refused, outside = scene_sheet.apply_staging(
                             sheet, staging, body.staging, body.locked)
+                        ledger_steps.append(scene_sheet.ledger_step(
+                            f"staging ({body.staging})",
+                            "the reference's action made into a moment" if body.staging == "move"
+                            else "the same people given a different, larger action", changed))
                         for line in changed:
                             _put({"type": "think", "text": f"\n[staged] {line}"})
                         for path in refused:
@@ -2050,6 +2080,10 @@ async def run_refine_prompt(
                     else:
                         sheet, changed, refused, dropped_props = props_pass.apply_props(
                             sheet, props_answer, body.props_mode, body.locked)
+                        ledger_steps.append(scene_sheet.ledger_step(
+                            f"objects ({body.props_mode})",
+                            "only the objects the scene needs kept" if body.props_mode == "simplify"
+                            else "the objects fitted to the place and moment, a few added", changed))
                         for line in changed:
                             _put({"type": "think", "text": f"\n[props] {line}"})
                         for path in refused:
@@ -2073,12 +2107,39 @@ async def run_refine_prompt(
                     # taken and ignored.
                     raise RuntimeError("The retake could not be read as a change to the scene")
                 sheet, changed, refused = scene_sheet.apply_patch(sheet, patch, body.locked)
+                ledger_steps.append(scene_sheet.ledger_step(
+                    "retake", f"the user asked: {body.sheet_instruction.strip()}", changed))
                 for line in changed:
                     _put({"type": "think", "text": f"\n[changed] {line}"})
                 for path in refused:
                     _put({"type": "think", "text": f"\n[locked, not changed] {path}"})
                 if not changed:
                     _put({"type": "think", "text": "\n[the retake changed nothing in the scene]"})
+            if sheet_read is not None and any(st["changes"] for st in ledger_steps):
+                # The last look: each step changed only its own boxes, so the
+                # reference and the ledger are read back into one picture. The
+                # model decides; code keeps the shape and the user's locks.
+                _phase("reconstructingScene", 0.52, "Rebuilding the scene as one picture...")
+                scene_ledger = {"read": sheet_read, "steps": ledger_steps, "current": sheet}
+                rebuilt_raw = await _stream_vlm(
+                    scene_sheet.reconstruct_prompt(
+                        scene_ledger, staging=body.staging, instruction=nl_instruction,
+                        reference_count=len(read_images)),
+                    0.52, 0.55, 900, "Rebuilding the scene as one picture...", as_think=True,
+                    images=read_images,
+                )
+                sheet, changed, rebuild_notes = scene_sheet.apply_reconstruction(
+                    sheet, _parse_json_from_llm(rebuilt_raw), body.locked)
+                for line in changed:
+                    _put({"type": "think", "text": f"\n[reconstructed] {line}"})
+                for note in rebuild_notes:
+                    _put({"type": "think", "text": f"\n[reconstruction] {note}"})
+                if not changed and not rebuild_notes:
+                    _put({"type": "think", "text": "\n[reconstruction changed nothing — the sheet already held together]"})
+                ledger_steps.append(scene_sheet.ledger_step(
+                    "reconstruct", "the reference and this ledger read back into one picture", changed))
+            if sheet_read is not None:
+                scene_ledger_out = {"read": sheet_read, "steps": ledger_steps, "current": sheet}
             for note in sheet_notes_out:
                 _put({"type": "think", "text": f"\n[check] {note}"})
             scene_sheet_out = sheet
@@ -2162,6 +2223,23 @@ async def run_refine_prompt(
                     retry, retry_repairs = scene_sheet.finish_script(retry_raw, sheet, required=hint_words)
                     if len(retry.split()) > len(positive.split()):
                         positive, repairs = retry, retry_repairs
+                missing = scene_sheet.uncovered(positive, sheet, hint_words)
+                if missing:
+                    # Written back by the writer, as sentences of the picture —
+                    # not pasted on the end as fragments.
+                    _put({"type": "think", "text":
+                          "\n[not in the script — asking the writer once more] "
+                          + "; ".join(missing) + "\n"})
+                    _phase("writingDescription", 0.85, "Writing the missing parts back in...")
+                    again_raw = await _stream_text(
+                        scene_sheet.script_prompt(sheet, instruction=nl_instruction, paragraphs=_script_n,
+                                                  model=_script_model, emphasise=_emphasise,
+                                                  left_out=missing),
+                        0.85, 0.90, 300 + _script_n * 110, "Writing the missing parts back in...",
+                    )
+                    again, again_repairs = scene_sheet.finish_script(again_raw, sheet, required=hint_words)
+                    if len(again.split()) >= min(_min_words, len(positive.split())):
+                        positive, repairs = again, again_repairs
                 for note in repairs:
                     logger.warning("[refine] visual script: %s", note)
                     _put({"type": "think", "text": f"\n[check] {note}"})
@@ -2267,6 +2345,7 @@ async def run_refine_prompt(
         "mutation_tags": mutation_tags,
         "variants": variants,
         "sheet": scene_sheet_out,
+        "ledger": scene_ledger_out,
         **cat_tags,
     })
 
@@ -2280,6 +2359,7 @@ async def run_refine_prompt(
             _phase("queuingGeneration", 0.97, "Queuing generation job...")
             gen_job_id = _submit_gen_direct(spooler, comfy, db, body, positive, negative,
                                             seed=seed_for_gen, scene_sheet=scene_sheet_out,
+                                            scene_ledger=scene_ledger_out,
                                             ollama=ollama, group_id=group_id)
             _put({"type": "comfy_job_id", "job_id": gen_job_id})
         except Exception as exc:
@@ -2299,7 +2379,8 @@ async def run_refine_prompt(
 
 
 def _submit_gen_direct(spooler, comfy, db, body, positive: str, negative: str, seed: int | None = None,
-                       scene_sheet: dict | None = None, ollama=None, group_id: str = "") -> str:
+                       scene_sheet: dict | None = None, ollama=None, group_id: str = "",
+                       scene_ledger: dict | None = None) -> str:
     """Submit a ComfyUI job to the GENERATION lane and return its job_id (no request object needed).
 
     ``spooler`` and ``ollama`` ride along so the render can queue the sheet
@@ -2360,6 +2441,7 @@ def _submit_gen_direct(spooler, comfy, db, body, positive: str, negative: str, s
             "temperature": body.temperature,
             "num_ctx": body.num_ctx,
             "scene_sheet": scene_sheet,
+            "scene_ledger": scene_ledger,
             "workflow_name": body.workflow_name,
             "batch_count": body.batch_count,
             "positive_prompt": positive,

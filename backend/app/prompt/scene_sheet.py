@@ -47,7 +47,7 @@ _NUMBER_WORDS = {
 }
 
 _SHEET_FIELDS = (
-    "medium", "rendering", "subject_count", "subjects", "situation", "interaction", "setting",
+    "medium", "rendering", "story", "subject_count", "subjects", "situation", "interaction", "setting",
     "layers", "props", "effects", "lighting", "camera", "palette_mood", "text_in_image", "other",
     "unclassified",
 )
@@ -59,8 +59,8 @@ _META_KEYS = {"subject_count", "subjects", "index", "takes_from"}
 # look at, and what their hands, legs and the motion are doing each have a box
 # — without a box, it is not written.
 _SUBJECT_FIELDS = (
-    "who", "position", "pose_action", "intent", "feeling", "expression", "gaze", "hands",
-    "legs_feet", "motion", "holding", "appearance", "outfit", "details",
+    "who", "position", "signature", "pose_action", "intent", "feeling", "expression", "gaze",
+    "hands", "legs_feet", "motion", "holding", "appearance", "outfit", "details",
 )
 # The boxes that say what a person does, as opposed to how they look.
 _ACTION_BOXES = ("pose_action", "intent", "feeling", "expression", "gaze", "hands",
@@ -152,6 +152,13 @@ def sheet_prompt(
         "hands, the legs and the motion are read as they are; the reason, the feeling and "
         "the situation are read from the posture, the face and the place — write the most "
         "likely one.",
+        "- A pose is what most easily turns ordinary on the way to the picture: a writer who "
+        "only knows \"sitting\" or \"leaning\" draws the stock version of it. So each person's "
+        "\"signature\" says what makes THIS pose their own — what touches what, which side "
+        "carries the weight, what is asymmetric, how the line of the body runs, how it sits "
+        "against the frame. Only what you can see in this picture.",
+        "- \"story\" is one sentence: who is doing what, and what this picture is about. "
+        "Everything else on the sheet is part of that one moment.",
         "- \"subject_count\" must equal the number of entries in \"subjects\". Count the "
         "people you can actually see.",
         "- Without a stated medium the image model drifts to a photograph. "
@@ -169,11 +176,14 @@ def sheet_prompt(
         "{",
         '  "medium": "anime illustration / photograph / ...",',
         '  "rendering": "how it is drawn or shot: line work, shading, brushwork, grain",',
+        '  "story": "one sentence: who is doing what, and what this picture is about",',
         '  "subject_count": 0,',
         '  "subjects": [',
         '    {',
         '      "who": "who this is: gender, apparent age, and role in the scene",',
         '      "position": "where in the frame: center front, back left, ...",',
+        '      "signature": "what makes this pose this person\'s own and not a stock pose: what '
+        'touches what, where the weight goes, what is asymmetric, the line of the body",',
         '      "pose_action": "what they are doing right now, as a verb phrase caught in the '
         'middle of the movement",',
         '      "intent": "why they are doing it: what they want, or what made them do it",',
@@ -247,6 +257,7 @@ def _clean_hint_words(
         word = key.replace("_", " ")
         score = score_of.get(key)
         reason = ("quality" if is_quality_tag(key) else
+                  "rating" if key in _RATING_TAGS else
                   "person count" if key in skip else
                   f"confidence {score:.2f}" if score is not None and score < min_score else "")
         if reason:
@@ -485,8 +496,8 @@ def normalize_sheet(
     says so.
     """
     sheet: dict = {k: "" for k in _SHEET_FIELDS}
-    for key in ("medium", "rendering", "situation", "interaction", "setting", "layers", "props",
-                "effects", "lighting", "camera", "palette_mood", "other"):
+    for key in ("medium", "rendering", "story", "situation", "interaction", "setting", "layers",
+                "props", "effects", "lighting", "camera", "palette_mood", "other"):
         sheet[key] = _text(data.get(key))
     moved: list[str] = []
     for key, value in data.items():
@@ -554,7 +565,7 @@ MERGE_SCENE_BOXES = ("setting", "lighting", "palette_mood", "rendering")
 _MERGE_ADDITIVE_TEXT = ("props", "other")
 _MERGE_ADDITIVE_LIST = ("text_in_image", "unclassified")
 #: The heaviest sheet that has anything to say wins.
-_MERGE_WINNER_TAKES = ("situation", "interaction", "layers", "effects", "camera")
+_MERGE_WINNER_TAKES = ("story", "situation", "interaction", "layers", "effects", "camera")
 
 
 def _merge_ranked(sheets: list[tuple[int, dict]], plan: dict) -> list[dict]:
@@ -760,8 +771,8 @@ def reconcile_prompt(
 # becomes a patch on the sheet — only the boxes it names change — and the
 # script is written again from the patched sheet.
 
-_SCENE_BOXES = ("medium", "rendering", "situation", "interaction", "setting", "layers", "props",
-                "effects", "other", "lighting", "camera", "palette_mood")
+_SCENE_BOXES = ("medium", "rendering", "story", "situation", "interaction", "setting", "layers",
+                "props", "effects", "other", "lighting", "camera", "palette_mood")
 
 
 def patch_prompt(sheet: dict, instruction: str, locked: list[str] | None = None) -> str:
@@ -947,6 +958,7 @@ _SCRIPT_MODELS = {
 def script_prompt(
     sheet: dict, *, instruction: str = "", paragraphs: int = DEFAULT_PROSE_PARAGRAPHS,
     model: str = "krea2", emphasise: list[str] | None = None,
+    left_out: list[str] | None = None,
 ) -> str:
     """Step 2: what the writer is asked to turn the sheet into.
 
@@ -980,6 +992,12 @@ def script_prompt(
         "the face, the feeling it shows, and what the eyes are on; then how they look and "
         "what they wear.",
         "- Then what the people are doing to or with each other.",
+        "- \"story\" is what the picture is about: the opening says it, and every paragraph "
+        "serves it. Someone who is not its centre gets a sentence or two, not a paragraph of "
+        "their own reasons.",
+        "- Each person's \"signature\" is what makes the pose their own. Write it out "
+        "concretely — what touches what, where the weight goes, what is asymmetric. "
+        "Paraphrased into a general word, the image model draws the stock pose instead.",
         "- Write it the way a good caption describes a picture: flowing, specific "
         "sentences, not the sheet read out box by box. Turn the sheet's comma-separated "
         "labels into natural noun phrases rather than copying them. A box that is empty "
@@ -1021,6 +1039,15 @@ def script_prompt(
             *[f"- {line}" for line in emphasise],
             "Do not pad the rest of the prompt to compensate, and do not drop anything "
             "else to make room: say these plainly and carry on with the sheet.",
+        ]
+    if left_out:
+        lines += [
+            "",
+            "[Your last draft left these out]",
+            "Write the whole prompt again, and this time give each of these its place in the "
+            "picture — inside the sentences about that person or that part of the scene, in "
+            "the story's flow. Not as a list, and not tacked onto the end.",
+            *[f"- {line}" for line in left_out],
         ]
     if instruction:
         lines += ["", "[User instruction — already applied in the sheet; keep it]", instruction]
@@ -1103,8 +1130,8 @@ def finish_script(
         if f'"{t}"' not in script:
             script += f'\n\nThe words "{t}" appear in the image.'
             notes.append(f'text "{t}" was missing — added')
-    script, more = _cover_the_sheet(script, sheet, required or [])
-    return script, notes + more
+    notes += [f"not in the script — {line}" for line in uncovered(script, sheet, required)]
+    return script, notes
 
 
 # ── Nothing on the sheet is lost on the way to the prompt ────────────────────
@@ -1143,46 +1170,62 @@ def _missing_share(text: str, script_stems: set[str]) -> float:
     return sum(_stem(w) not in script_stems for w in words) / len(words)
 
 
-def _cover_the_sheet(script: str, sheet: dict, required: list[str]) -> tuple[str, list[str]]:
-    notes: list[str] = []
-    stems = {_stem(w) for w in re.findall(r"[a-z]+", script.lower())}
-    added: list[str] = []
+def uncovered(script: str, sheet: dict, required: list[str] | None = None) -> list[str]:
+    """What the sheet says that the script does not, one line per box — for the
+    writer to be asked again (``script_prompt(emphasise=...)``).
+
+    **Detection only.** It used to paste each missing box onto the end of the
+    script ("A girl: the departing ferry."), and on a crowd that became a
+    paragraph of fragments under one repeated label — "Young woman, background:"
+    three times, nobody could tell whose (the Showrunner, 2026-11-03: the story
+    falls apart). A box goes back into the picture as a sentence the writer
+    wrote, or not at all; what is still missing after the retry is said, not
+    pasted.
+
+    ``story`` is not matched: it is what the script is about, never a phrase to
+    find in it.
+    """
+    stems = {_stem(w) for w in re.findall(r"[a-z]+", (script or "").lower())}
+    compact = re.sub(r"[^a-z]", "", (script or "").lower())
+    lines: list[str] = []
     for box in ("situation", "interaction", "rendering", "setting", "layers", "props", "effects",
                 "lighting", "camera", "palette_mood", "other"):
         value = sheet.get(box) or ""
         if value and _missing_share(value, stems) > 0.5:
-            added.append(value[:1].upper() + value[1:].rstrip(". ") + ".")
-            notes.append(f'box "{box}" was dropped by the writer — added')
-    for i, person in enumerate(sheet.get("subjects") or []):
+            lines.append(f"{box}: {value}")
+    people = sheet.get("subjects") or []
+    for i, person in enumerate(people):
         who = person.get("who") or f"person {i + 1}"
+        # Several people can share a "who" ("young woman, background"); the
+        # number keeps the line pointing at one of them.
+        label = f"person {i + 1}, {who}" if len(people) > 1 else who
         # "who" is not checked: the writer always renames it ("female, young adult"
         # becomes "a young woman"), and the audit showed it flagged on every run.
         for box in _SUBJECT_FIELDS:
             value = person.get(box) or ""
             if box != "who" and value and _missing_share(value, stems) > 0.5:
-                added.append(f"{who[:1].upper() + who[1:]}: {value.rstrip('. ')}.")
-                notes.append(f'person {i + 1} "{box}" was dropped by the writer — added')
-    if added:
-        script += "\n\n" + " ".join(added)
-        stems |= {_stem(w) for w in re.findall(r"[a-z]+", " ".join(added).lower())}
-    # Tags that had no box, and hints handed to the reader: every one is written in.
+                lines.append(f"{box} ({label}): {value}")
     tags: list[str] = []
-    for tag in list(sheet.get("unclassified") or []) + list(required):
+    for tag in list(sheet.get("unclassified") or []) + list(required or []):
         core = re.sub(r"\s*\([^)]*\)", "", str(tag)).replace("_", " ").strip()
         if core and core not in tags:
             tags.append(core)
-    missing = [t for t in tags if any(_stem(w) not in stems for w in _content(t, 3))
-               or not _content(t, 3) and t.lower() not in script.lower()]
+    missing = [
+        t for t in tags
+        # "hairclip" is in a script that says "hair clip".
+        if re.sub(r"[^a-z]", "", t.lower()) not in compact
+        and (any(_stem(w) not in stems for w in _content(t, 3))
+             or not _content(t, 3) and t.lower() not in (script or "").lower())
+    ]
     if missing:
-        script += "\n\nThe picture also shows: " + ", ".join(missing) + "."
-        notes.append(f"tags missing from the script — added: {', '.join(missing)}")
-    return script, notes
+        lines.append("also in the picture: " + ", ".join(missing))
+    return lines
 
 
 # ── Checking the picture against the sheet it was written from ───────────────
 #
 # Everything up to here is open loop: the sheet is read, the script is written,
-# the picture comes out, and nobody looks. `_cover_the_sheet` checks that the
+# the picture comes out, and nobody looks. `uncovered` checks that the
 # WRITER kept every box; it cannot know whether the IMAGE MODEL did. So an
 # intended right hand hooked over a window frame can be quietly absent and the
 # run still reports success.
@@ -1232,7 +1275,7 @@ def compare_sheets(
     turns up under "pose_action" — and comparing box to box reports those as
     losses. So the whole read-back is flattened and each intended box is asked
     only whether its words are *anywhere* in it, by the same stem test and the
-    same calibrated threshold `_cover_the_sheet` already uses on the script.
+    same calibrated threshold `uncovered` already uses on the script.
     """
     stems = {_stem(w) for w in re.findall(r"[a-z]+", _sheet_text(got).lower())}
     missed: list[dict] = []
@@ -1251,7 +1294,7 @@ def compare_sheets(
             continue
         who = str(person.get("who") or f"person {i + 1}")
         for box in _SUBJECT_FIELDS:
-            # "who" is never checked, for the reason _cover_the_sheet gives: the
+            # "who" is never checked, for the reason `uncovered` gives: the
             # reader always renames it, so it flagged on every single run.
             if box == "who":
                 continue
@@ -1508,6 +1551,7 @@ def pick_ingredients(
             if not word:
                 continue
             reason = ("quality" if is_quality_tag(key) else
+                      "rating" if key in _RATING_TAGS else
                       "person count" if key in skip else
                       f"confidence {score_of[key]:.2f}" if score_of.get(key, 1.0) < min_score else "")
             if reason:
@@ -1765,22 +1809,33 @@ def apply_direction(
 
 STAGING_SCOPES: dict[str, dict] = {
     "move": {
-        "scene": ("situation", "interaction", "effects", "props"),
+        "scene": ("story", "situation", "interaction", "effects", "props"),
         "person": _ACTION_BOXES,
         "how": (
             "Keep what the reference shows them doing and where. Make it the instant in "
             "the middle of that action — not the pose before or after it — and give it its "
             "reason, its body and its movement."
         ),
+        "pose": (
+            "Each person's \"signature\" is what makes the reference's pose its own, and it "
+            "is not yours to change: the reason, the gaze and the movement you add have to fit "
+            "that exact pose. Swapping it for an easier, more ordinary one loses the picture."
+        ),
     },
     "restage": {
-        "scene": ("situation", "interaction", "effects", "props", "camera", "layers"),
-        "person": _ACTION_BOXES + ("position",),
+        "scene": ("story", "situation", "interaction", "effects", "props", "camera", "layers"),
+        "person": _ACTION_BOXES + ("position", "signature"),
         "how": (
             "Keep the same people, their clothes and the place, but give them a different "
             "action and situation, with large, visible movement: what these people, in this "
             "place, would be caught in the middle of doing. Where they stand and the camera "
             "may change to show it."
+        ),
+        "pose": (
+            "The new pose must be one only these people, in this place, could take: what each "
+            "body touches, which side carries the weight, what is asymmetric. Rewrite "
+            "\"signature\" to say exactly that. The first pose that comes to mind is the one "
+            "every picture already has, and is not staging."
         ),
     },
 }
@@ -1803,6 +1858,9 @@ def stage_prompt(sheet: dict, mode: str, *, instruction: str = "",
         "[How far]",
         spec["how"],
         "",
+        "[The pose]",
+        spec["pose"],
+        "",
         "What a staged moment holds:",
         "- What each person is doing, as a verb in the middle of happening. A held pose, a "
         "stance or a mood word is a picture where nothing happens.",
@@ -1813,8 +1871,11 @@ def stage_prompt(sheet: dict, mode: str, *, instruction: str = "",
         "is doing and touching.",
         "- The face shows the feeling, and the eyes are on something or someone in the scene.",
         "- Movement that can be seen: hair, cloth and air moving, the direction of the momentum.",
-        "- With several people, what they are doing to or with each other.",
+        "- With several people, what they are doing to or with each other — and one moment "
+        "for all of them: who it is about, and how the others take part in it. Not a separate "
+        "scene for each person.",
         "- \"situation\": what is happening, what has just happened and what is about to.",
+        "- \"story\": one sentence of what the picture is about once it is staged.",
         "- Write it plainly, as it would be seen. Nothing softened or blurred into a vaguer word.",
         "- The people stay who they are: face, hair, body and clothing do not change, and "
         "nobody is added or removed.",
@@ -1845,3 +1906,143 @@ def apply_staging(
     look and what they wear never change, and no one is added or removed."""
     spec = STAGING_SCOPES[mode]
     return _apply_scoped(sheet, patch, scope_locks(sheet, spec["scene"], spec["person"], locked), locked)
+
+
+# ── Reconstruction: the ledger and the reference, read back into one picture ─
+#
+# The Showrunner (2026-11-03), on a girl watching shooting stars from a pier:
+# the steps each worked — the objects were good — but the prompt no longer
+# held together. Four women in the opening, "all three" two paragraphs later;
+# both hands on her chin while she leant on the railing; a pier "or" a dock
+# over water with no word for which side of the railing she stood on, so she
+# was drawn floating on the water; every passer-by given a reason and a
+# gesture of their own, so the picture had no centre. And the reference's own
+# pose — the thing that made it worth reading — staged into an ordinary one.
+#
+# Every step after the reading changes only its own boxes, and nothing looked
+# at the whole sheet against the picture. Refine is not Muse: the sheet does
+# not drift over a conversation, it is built once, so the cure is not a code
+# rule per failure (each one misfires on the picture that does not fit it) but
+# one last read: the reference, plus the ledger of what was read and what each
+# step changed and why, handed to the vision model to rebuild as one picture.
+# The model decides; code only keeps the shape and the user's locks.
+
+def ledger_step(step: str, intent: str, changes: list[str]) -> dict:
+    """One line of the ledger: which step, what it was for, what it changed —
+    the same lines the thinking pane already shows."""
+    return {"step": step, "intent": intent, "changes": list(changes)}
+
+
+def reconstruct_prompt(
+    ledger: dict, *, staging: str = "read", instruction: str = "", reference_count: int = 1,
+) -> str:
+    """What the vision model is asked: the ledger → one coherent sheet."""
+    refs = ("the reference picture" if reference_count <= 1 else
+            f"the {_NUMBER_WORDS.get(reference_count, reference_count)} reference pictures, in order")
+    if staging == "restage":
+        pose = (
+            "- The pose was changed on purpose (the user asked for a different action). Keep the "
+            "new one. Check that each \"signature\" is as specific as a real picture's would "
+            "be — what touches what, where the weight goes, what is asymmetric — and sharpen it "
+            "where it has gone general. The first pose that comes to mind is not a fix."
+        )
+    else:
+        pose = (
+            f"- Look at {refs}: each person's pose there is what made it worth reading, and "
+            "\"signature\" says what makes it their own. Where a later step drifted from it, "
+            "bring it back. Turning a particular pose into a more ordinary one is a loss, "
+            "never a correction."
+        )
+    lines = [
+        f"You are given {refs} and the ledger of a scene sheet made from it: \"read\" is "
+        "what a vision model saw, \"steps\" is what each later step changed and why, "
+        "\"current\" is the sheet as it stands. Each step changed only its own boxes and "
+        "none of them looked at the whole, so \"current\" may no longer be one picture. "
+        "Rebuild it into one.",
+        "",
+        "What one picture needs:",
+        "- One \"story\": a sentence saying who is doing what and what the picture is about. "
+        "Every box serves it. The people who are not its centre take part in that moment "
+        "briefly; they do not each get a scene of their own.",
+        "- One count: the people are the same people as in \"current\" — nobody added, "
+        "nobody removed — and nothing anywhere on the sheet says a different number.",
+        "- One body each: each hand does one thing at a time, and what a person leans on, "
+        "holds or touches uses a hand or an arm. The pose, the hands, what they hold and "
+        "the legs all describe the same body.",
+        "- Footing: say what each person stands, sits or lies on, and which side of any "
+        "railing, table, wall or edge they are on, as the camera sees it. Nobody floats "
+        "unless the picture means them to.",
+        "- One place: the setting is one place, said as one — not a choice between two.",
+        "- The camera can show what the sheet describes of the people.",
+        pose,
+        "- What the steps added (the objects, the staged action) stays where it fits the "
+        "story. Where it does not, move it or reshape it so that it does.",
+        "- Everything else stays exactly as it is. Do not soften, blur or shorten a box, "
+        "and do not swap a word for a milder or vaguer one. Who the people are, how they "
+        "look and what they wear do not change, and neither does the medium.",
+        "",
+        "Output only the whole sheet, every box, in the same JSON shape as \"current\".",
+    ]
+    if instruction:
+        lines += ["", "[User instruction — the sheet already follows it; keep it]", instruction]
+    lines += ["", "[Ledger]", json.dumps(ledger, ensure_ascii=False, indent=2)]
+    return "\n".join(lines)
+
+
+def sheet_changes(before: dict, after: dict) -> list[str]:
+    """Readable lines for what differs between two sheets, the way the patch
+    steps report theirs."""
+    out: list[str] = []
+    for box in _SCENE_BOXES + ("text_in_image",):
+        a, b = before.get(box) or "", after.get(box) or ""
+        if a != b:
+            out.append(f"{box}: {_short(str(a))} → {_short(str(b))}")
+    pa, pb = before.get("subjects") or [], after.get("subjects") or []
+    if len(pa) != len(pb):
+        out.append(f"people: {len(pa)} → {len(pb)}")
+    for i, (x, y) in enumerate(zip(pa, pb)):
+        for box in _SUBJECT_FIELDS:
+            if (x.get(box) or "") != (y.get(box) or ""):
+                out.append(f"person {i + 1} {box}: {_short(x.get(box))} → {_short(y.get(box))}")
+    return out
+
+
+def apply_reconstruction(
+    before: dict, answer: dict, locked: list[str] | None = None,
+) -> tuple[dict, list[str], list[str]]:
+    """The model's rebuilt sheet → the sheet. Returns the sheet, what changed,
+    and notes (why something was not taken).
+
+    No judgement of the content here — that was the point of asking. Only the
+    shape (``normalize_sheet``), the medium, the visible text the user asked
+    for, and the user's own locks are held.
+    """
+    if not isinstance(answer, dict) or not (answer.get("subjects") or answer.get("setting")):
+        return before, [], ["the rebuilt sheet could not be read — written from the sheet as it stood"]
+    locked = list(locked or [])
+    data = dict(answer)
+    if "unclassified" not in data:
+        data["unclassified"] = list(before.get("unclassified") or [])
+    new = normalize_sheet(data, medium=before.get("medium") or "",
+                          literal_texts=list(before.get("text_in_image") or []))
+    if before.get("subjects") and not new.get("subjects"):
+        return before, [], ["the rebuilt sheet lost its people — written from the sheet as it stood"]
+    person_locks = [p for p in locked if p.startswith("subjects.")]
+    if person_locks and len(new["subjects"]) != len(before.get("subjects") or []):
+        # The locks name people by number; with a different list they would
+        # point at someone else.
+        return before, [], ["the rebuilt sheet changed the people while some were locked — "
+                            "written from the sheet as it stood"]
+    for path in locked:
+        parts = path.split(".")
+        if parts[0] == "subjects" and len(parts) >= 2 and parts[1].isdigit():
+            i = int(parts[1])
+            if i >= len(new["subjects"]) or i >= len(before.get("subjects") or []):
+                continue
+            if len(parts) == 2:
+                new["subjects"][i] = dict(before["subjects"][i])
+            elif parts[2] in _SUBJECT_FIELDS:
+                new["subjects"][i][parts[2]] = before["subjects"][i].get(parts[2], "")
+        elif path in before:
+            new[path] = before[path]
+    return new, sheet_changes(before, new), []

@@ -167,7 +167,7 @@ def props_prompt(sheet: dict, mode: str, *, instruction: str = "") -> str:
     ledger's `for_model`: a box the model is not shown is a box it cannot fill)."""
     items = split_items(sheet.get("props") or "")
     held = held_items(sheet) if mode == "elaborate" else []
-    scene = {k: sheet.get(k) for k in ("medium", "setting", "situation", "layers",
+    scene = {k: sheet.get(k) for k in ("medium", "story", "setting", "situation", "layers",
                                         "lighting", "palette_mood", "effects")
              if sheet.get(k)}
     people = [

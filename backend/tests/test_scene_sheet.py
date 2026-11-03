@@ -144,14 +144,36 @@ class _DB:
         return {}
 
 
+def _is_rebuild(prompt: str) -> bool:
+    return prompt.startswith("You are given the ") and "[Ledger]" in prompt
+
+
+def _rebuilt(prompt: str) -> str:
+    """An identity reconstruction: the sheet handed back as it stands. Fakes
+    that read a canned sheet would otherwise answer the last look with the
+    reading and undo every step."""
+    return json.dumps(json.loads(prompt.split("[Ledger]\n", 1)[1])["current"])
+
+
+def _writes(llm) -> list[str]:
+    """The writer's calls, minus the one that asks for what it left out (a
+    fake script leaves most of the sheet out)."""
+    return [p for p in llm.text_prompts if "[Your last draft left these out]" not in p]
+
+
 class _LLM:
     """Answers the sheet step with a five-girl sheet and the script step with
     a script that still has tag syntax and a dropped article in it."""
 
     def __init__(self):
         self.vlm_prompts, self.text_prompts, self.embeds = [], [], 0
+        self.rebuild_prompts = []
 
     async def generate_vlm_stream(self, prompt, images, **kw):
+        if _is_rebuild(prompt):
+            self.rebuild_prompts.append(prompt)
+            yield {"type": "token", "text": _rebuilt(prompt)}
+            return
         self.vlm_prompts.append(prompt)
         sheet = {"medium": "photograph", "subject_count": 2, "props": "empty",
                  "subjects": [{"who": f"girl {i}", "holding": "none"} for i in range(5)],
@@ -209,6 +231,10 @@ class _TwoRefLLM(_LLM):
         self.images_seen = []
 
     async def generate_vlm_stream(self, prompt, images, **kw):
+        if _is_rebuild(prompt):
+            self.rebuild_prompts.append(prompt)
+            yield {"type": "token", "text": _rebuilt(prompt)}
+            return
         self.vlm_prompts.append(prompt)
         self.images_seen.append(list(images))
         n = len(self.vlm_prompts)
@@ -483,7 +509,9 @@ async def test_an_edited_sheet_is_not_read_again(tmp_path):
     events = await _run({"sheet": _stage()}, llm, tmp_path)
     done = next(e for e in events if e["type"] == "done")
     assert llm.vlm_prompts == []
-    assert len(llm.text_prompts) == 1
+    assert len(_writes(llm)) == 1
+    # Nothing changed the sheet, so there is nothing to rebuild.
+    assert llm.rebuild_prompts == []
     assert done["sheet"]["subject_count"] == 3
 
 
@@ -498,8 +526,10 @@ async def test_a_retake_patches_the_sheet_and_respects_the_locks(tmp_path):
     assert done["sheet"]["subjects"][0]["outfit"] == _stage()["subjects"][0]["outfit"]
     thinking = "".join(e["text"] for e in events if e["type"] == "think")
     assert "[changed] setting" in thinking and "[locked, not changed] subjects.0.outfit" in thinking
-    # one call for the patch, one for the script, none for the picture
-    assert len(llm.text_prompts) == 2 and llm.vlm_prompts == []
+    # one call for the patch, one for the script, none to read the picture again —
+    # only the last look, which rebuilds the patched sheet with the reference
+    assert len(_writes(llm)) == 2 and llm.vlm_prompts == []
+    assert len(llm.rebuild_prompts) == 1 and '"step": "retake"' in llm.rebuild_prompts[0]
     # the patch never reaches the prompt pane
     assert not any(e["type"] == "token" and '"set"' in e["text"] for e in events)
 
@@ -771,7 +801,7 @@ def test_an_image_the_tagger_had_nothing_for_gets_no_hints():
 
 # ── Checking the finished picture against its sheet ──────────────────────────
 #
-# _cover_the_sheet checks that the WRITER kept every box; nothing checked that
+# `uncovered` checks that the WRITER kept every box; nothing checked that
 # the IMAGE MODEL did. A check that cries wolf is worse than no check, so the
 # calibration below (a faithful render reported clean) is the real test.
 
@@ -930,7 +960,7 @@ def test_the_script_prompt_calls_out_what_the_last_picture_dropped():
 import random as _random
 
 
-def test_ingredients_leave_out_only_quality_counts_and_the_floor_and_grow_with_chaos():
+def test_ingredients_leave_out_only_quality_ratings_counts_and_the_floor_and_grow_with_chaos():
     # The Showrunner (2026-10-31): only quality, person-count and under-the-floor
     # tags are left out of a fusion; unknown words, ratings and the rest are used.
     pools = {"the first image": ["1girl", "general", "snow", "ice_crystal", "feathers", "watermark",
@@ -941,10 +971,11 @@ def test_ingredients_leave_out_only_quality_counts_and_the_floor_and_grow_with_c
     high = ss.pick_ingredients(pools, 1.0, skip={"1girl"}, rng=_random.Random(1),
                                scores={"sword": 0.4, "snow": 0.9}, min_score=0.5, dropped=dropped)
     assert all(len(w) == 2 for w in low.values())
-    assert sorted(high["the first image"]) == ["feathers", "general", "ice crystal", "snow", "watermark"]
+    assert sorted(high["the first image"]) == ["feathers", "ice crystal", "snow", "watermark"]
     assert sorted(high["the second image"]) == ["bookshelf", "candle", "ink bottle", "library"]
-    assert sorted(dropped) == [("1girl", "person count"), ("masterpiece", "quality"),
-                               ("sword", "confidence 0.40")]
+    # A rating says how the file is rated, not what the picture shows.
+    assert sorted(dropped) == [("1girl", "person count"), ("general", "rating"),
+                               ("masterpiece", "quality"), ("sword", "confidence 0.40")]
 
 
 def test_the_fuse_prompt_asks_for_transformation_not_addition():
@@ -1048,14 +1079,14 @@ async def test_a_short_script_is_asked_for_once_more(tmp_path):
     llm = _ShortThenLongLLM()
     events = await _run({"sheet": _stage()}, llm, tmp_path)
     done = next(e for e in events if e["type"] == "done")
-    assert len(llm.text_prompts) == 2
+    assert len(_writes(llm)) == 2
     assert len(done["positive"].split()) > 100 and done["prose_missing"] is False
     assert any(e["type"] == "think" and "came back short" in e["text"] for e in events)
 
 
 # ── WD14 hints: the references' top tags, handed to the sheet reader ─────────
 
-def test_hint_tags_leave_out_only_quality_and_counts():
+def test_hint_tags_leave_out_only_quality_ratings_and_counts():
     analysis = {
         "common_tags": ["witch_hat", "1girl", "general", "masterpiece"],
         "unique_by_image": {
@@ -1064,9 +1095,10 @@ def test_hint_tags_leave_out_only_quality_and_counts():
         },
     }
     hints, dropped = ss.hint_tags(analysis, skip={"1girl"})
-    assert dropped == [("1girl", "person count"), ("masterpiece", "quality"), ("score 9", "quality")]
+    assert dropped == [("1girl", "person count"), ("general", "rating"), ("masterpiece", "quality"),
+                       ("score 9", "quality")]
     assert hints == {
-        "in every image": ["witch hat", "general"],
+        "in every image": ["witch hat"],
         "the first image": ["orange hair"],
         "the second image": ["lace trim", "simple background", "hatsune miku", "star (symbol)", "no humans"],
     }
@@ -1128,7 +1160,11 @@ async def test_wd14_hints_reach_the_sheet_reader_and_unused_ones_are_said(tmp_pa
     assert "[unclassified — written into the prompt] night sky, lens flare" in thinking
     done = next(e for e in events if e and e["type"] == "done")
     assert done["sheet"]["unclassified"] == ["night sky", "lens flare"]
-    assert "The picture also shows: night sky, lens flare." in done["positive"]
+    # Missing from the script, they go back to the writer — not pasted on.
+    assert "The picture also shows" not in done["positive"]
+    again = next(p for p in llm.text_prompts if "[Your last draft left these out]" in p)
+    assert "also in the picture: night sky, lens flare" in again
+    assert "[not in the script — asking the writer once more]" in thinking
     # The tag under the floor never reaches anything.
     assert "drinking" not in "".join(llm.text_prompts)
 
@@ -1249,22 +1285,42 @@ def test_placement_appends_and_never_rewrites_and_keeps_the_rest():
     assert unclassified == ["star (symbol)", "sword"] == new["unclassified"]
 
 
-def test_the_writer_cannot_drop_a_box_or_a_tag():
+def test_what_the_writer_dropped_is_found_and_never_pasted():
+    """The Showrunner (2026-11-03): pasted fragments broke the story. What is
+    missing is found and handed back to the writer; the script is left as
+    written."""
     sheet = ss.normalize_sheet({
         "medium": "anime illustration", "setting": "a ruined cathedral",
         "other": "a cracked mirror leaning on the far wall", "unclassified": ["star (symbol)"],
         "subjects": [{"who": "a girl", "outfit": "a torn white dress with a bare shoulder"}],
     })
-    script, notes = ss.finish_script(
-        "An anime illustration of a girl in a ruined cathedral.", sheet, required=["full moon"])
-    assert "A girl: a torn white dress with a bare shoulder." in script
-    assert "A cracked mirror leaning on the far wall." in script
-    assert script.endswith("The picture also shows: star, full moon.")
-    assert any('"outfit" was dropped by the writer' in n for n in notes)
-    # a script that keeps everything gets nothing added
+    text = "An anime illustration of a girl in a ruined cathedral."
+    script, notes = ss.finish_script(text, sheet, required=["full moon"])
+    assert script == text
+    missing = ss.uncovered(script, sheet, ["full moon"])
+    assert "outfit (a girl): a torn white dress with a bare shoulder" in missing
+    assert "other: a cracked mirror leaning on the far wall" in missing
+    assert "also in the picture: star, full moon" in missing
+    assert any("not in the script — outfit" in n for n in notes)
+    # a script that keeps everything has nothing missing
     full = ("An anime illustration of a girl in a torn white dress with a bare shoulder, in a "
             "ruined cathedral; a cracked mirror leans on the far wall under a full moon and a star.")
-    assert ss.finish_script(full, sheet, required=["full moon"])[0] == full
+    assert ss.uncovered(full, sheet, ["full moon"]) == []
+
+
+def test_a_joined_word_counts_as_written():
+    sheet = ss.normalize_sheet({"medium": "anime illustration", "unclassified": ["hairclip"]})
+    assert ss.uncovered("An anime illustration of a girl with a gold hair clip.", sheet) == []
+
+
+def test_people_who_share_a_label_are_told_apart():
+    sheet = ss.normalize_sheet({"medium": "anime illustration", "subjects": [
+        {"who": "young woman, background", "gaze": "the stalls across the street"},
+        {"who": "young woman, background", "gaze": "her friend beside her"},
+    ]})
+    missing = ss.uncovered("An anime illustration of two young women.", sheet)
+    assert "gaze (person 1, young woman, background): the stalls across the street" in missing
+    assert "gaze (person 2, young woman, background): her friend beside her" in missing
 
 
 def test_a_box_the_sheet_does_not_have_goes_to_other():
@@ -1324,24 +1380,28 @@ def test_the_writer_starts_with_what_is_happening_and_ends_with_the_mood():
     assert "a sentence that is only atmosphere names nothing the picture can show" in p
 
 
-def test_a_dropped_action_box_is_written_back():
+def test_a_dropped_action_box_is_found():
     sheet = ss.normalize_sheet({
         "medium": "anime illustration", "situation": "the ferry is pulling away from the pier",
         "subjects": [{"who": "a girl", "pose_action": "sprinting down the pier",
                       "gaze": "the departing ferry", "legs_feet": "mid-stride, one foot off the boards"}],
     })
-    script, notes = ss.finish_script(
-        "An anime illustration of a girl on a pier, sprinting down the pier.", sheet)
-    assert "The ferry is pulling away from the pier." in script
-    assert "A girl: the departing ferry." in script
-    assert "A girl: mid-stride, one foot off the boards." in script
-    assert any('"gaze"' in n for n in notes) and any('"situation"' in n for n in notes)
+    missing = ss.uncovered("An anime illustration of a girl on a pier, sprinting down the pier.", sheet)
+    assert "situation: the ferry is pulling away from the pier" in missing
+    assert "gaze (a girl): the departing ferry" in missing
+    assert "legs_feet (a girl): mid-stride, one foot off the boards" in missing
+    p = ss.script_prompt(sheet, left_out=missing)
+    assert "[Your last draft left these out]" in p and "- gaze (a girl): the departing ferry" in p
 
 
 class _StagingLLM(_LLM):
     """Reads one girl; stages her; writes a script."""
 
     async def generate_vlm_stream(self, prompt, images, **kw):
+        if _is_rebuild(prompt):
+            self.rebuild_prompts.append(prompt)
+            yield {"type": "token", "text": _rebuilt(prompt)}
+            return
         self.vlm_prompts.append(prompt)
         yield {"type": "token", "text": json.dumps(
             {"medium": "anime illustration", "setting": "a pier",
@@ -1397,3 +1457,101 @@ async def test_staging_is_skipped_when_read_or_when_the_sheet_was_edited(tmp_pat
     assert not any("Stage it" in p for p in llm.text_prompts)
     llm, _ = await _staging_run({"sheet": _one_girl()}, tmp_path)
     assert not any("Stage it" in p for p in llm.text_prompts)
+
+
+# ── Reconstruction: the ledger and the reference, read back into one picture ─
+
+def _pier():
+    return ss.normalize_sheet({
+        "medium": "anime illustration", "setting": "a wooden pier or dock over water",
+        "props": "a coiled rope on the railing",
+        "subjects": [
+            {"who": "a girl, the centre", "signature": "chin in her right palm, left forearm "
+             "flat on the railing, hips cocked back", "hands": "both hands under her chin",
+             "outfit": "a yellow dress"},
+            {"who": "a woman, background", "pose_action": "walking past", "outfit": "a white t-shirt"},
+        ],
+    })
+
+
+def test_the_sheet_reader_is_asked_for_the_pose_and_the_story():
+    p = ss.sheet_prompt()
+    assert '"signature"' in p and '"story"' in p
+    assert "what makes THIS pose their own" in p
+
+
+def test_staging_keeps_the_signature_on_move_and_earns_a_new_one_on_restage():
+    move = ss.stage_prompt(_pier(), "move")
+    assert "[The pose]" in move and "is not yours to change" in move
+    assert "signature" not in move.split("Person boxes:")[1].split(".")[0]
+    restage = ss.stage_prompt(_pier(), "restage")
+    assert "Rewrite \"signature\"" in restage
+    assert "signature" in ss.STAGING_SCOPES["restage"]["person"]
+    # a staged signature on "move" is refused: it is the reference's pose
+    new, _, _, outside = ss.apply_staging(
+        _pier(), {"subjects": [{"index": 0, "set": {"signature": "standing straight"}}]}, "move")
+    assert new["subjects"][0]["signature"].startswith("chin in her right palm")
+    assert "subjects.0.signature" in outside
+
+
+def test_the_reconstruct_prompt_carries_the_ledger_and_the_pose():
+    sheet = _pier()
+    ledger = {"read": sheet, "steps": [ss.ledger_step("objects (elaborate)", "fitted", ["props: a → b"])],
+              "current": sheet}
+    p = ss.reconstruct_prompt(ledger, staging="move")
+    assert p.startswith("You are given the reference picture")
+    assert '"read"' in p and '"steps"' in p and '"current"' in p
+    assert "chin in her right palm" in p
+    assert "never a correction" in p
+    assert "has gone general" in ss.reconstruct_prompt(ledger, staging="restage")
+    assert "the two reference pictures" in ss.reconstruct_prompt(ledger, reference_count=2)
+
+
+def test_a_rebuilt_sheet_is_taken_as_the_model_wrote_it_except_the_locks():
+    before = _pier()
+    answer = json.loads(json.dumps(before))
+    answer["setting"] = "a wooden pier over the harbour, beside a night market"
+    answer["subjects"][0]["hands"] = "right palm under her chin, left forearm on the railing"
+    answer["subjects"][1]["outfit"] = "a raincoat"
+    answer["medium"] = "photograph"
+    new, changed, notes = ss.apply_reconstruction(before, answer, locked=["subjects.1.outfit"])
+    assert new["setting"] == "a wooden pier over the harbour, beside a night market"
+    assert new["subjects"][0]["hands"].startswith("right palm")
+    assert new["subjects"][1]["outfit"] == "a white t-shirt"   # locked by the user
+    assert new["medium"] == "anime illustration"                 # the medium is not the model's
+    assert any(c.startswith("setting:") for c in changed) and not notes
+
+
+def test_an_unreadable_rebuild_keeps_the_sheet_as_it_stood():
+    before = _pier()
+    for answer in ({}, {"medium": "x"}, {"setting": "a pier", "subjects": []}):
+        new, changed, notes = ss.apply_reconstruction(before, answer)
+        assert new is before and not changed and notes
+
+
+def test_a_rebuild_that_changes_the_people_under_a_person_lock_is_not_taken():
+    before = _pier()
+    answer = json.loads(json.dumps(before))
+    answer["subjects"] = answer["subjects"][:1]
+    new, _, notes = ss.apply_reconstruction(before, answer, locked=["subjects.0"])
+    assert new is before and "locked" in notes[0]
+
+
+@pytest.mark.asyncio
+async def test_a_staged_run_is_rebuilt_once_with_the_reference(tmp_path):
+    llm, events = await _staging_run({}, tmp_path)
+    assert len(llm.rebuild_prompts) == 1
+    p = llm.rebuild_prompts[0]
+    assert '"step": "staging (move)"' in p and "pose_action" in p
+    done = next(e for e in events if e["type"] == "done")
+    assert done["ledger"]["read"]["subjects"][0]["pose_action"] == "standing"
+    assert done["ledger"]["current"] == done["sheet"]
+    assert [st["step"] for st in done["ledger"]["steps"]] == ["staging (move)", "reconstruct"]
+
+
+@pytest.mark.asyncio
+async def test_nothing_is_rebuilt_when_no_step_changed_the_sheet(tmp_path):
+    llm, events = await _staging_run({"staging": "read"}, tmp_path)
+    assert llm.rebuild_prompts == []
+    done = next(e for e in events if e["type"] == "done")
+    assert done["ledger"]["steps"] == []

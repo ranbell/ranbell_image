@@ -511,7 +511,8 @@
       "placingHints": "Placing the remaining tags...",
       "buildingLayout": "Placing the layout...",
       "stagingScene": "Staging the scene...",
-      "dressingProps": "Fitting the objects to the scene..."
+      "dressingProps": "Fitting the objects to the scene...",
+      "reconstructingScene": "Rebuilding the scene as one picture..."
     },
     "positiveNodePlaceholder": "e.g. 6",
     "negativeNodePlaceholder": "e.g. 7",
@@ -605,12 +606,14 @@
         "text_in_image": "Text in image",
         "other": "Other (what no box holds)",
         "unclassified": "Unclassified tags",
+        "story": "What the picture is about",
         "situation": "What is happening",
         "interaction": "Between them"
       },
       "person_box": {
         "who": "Who",
         "position": "Position",
+        "signature": "What makes the pose its own",
         "pose_action": "Doing now",
         "intent": "Why",
         "feeling": "Feeling",

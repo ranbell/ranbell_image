@@ -19,13 +19,13 @@ const emit = defineEmits(['update:modelValue', 'update:locked'])
 const { t } = useI18n()
 
 const SCENE_GROUPS = [
-  { key: 'story', boxes: ['situation', 'interaction'] },
+  { key: 'story', boxes: ['story', 'situation', 'interaction'] },
   { key: 'look',  boxes: ['medium', 'rendering', 'palette_mood'] },
   { key: 'stage', boxes: ['setting', 'layers', 'props', 'effects', 'other'] },
   { key: 'shot',  boxes: ['lighting', 'camera'] },
 ]
 // What they do first, how they look last (the Showrunner, 2026-11-01).
-const PERSON_BOXES = ['who', 'position', 'pose_action', 'intent', 'feeling', 'expression', 'gaze',
+const PERSON_BOXES = ['who', 'position', 'signature', 'pose_action', 'intent', 'feeling', 'expression', 'gaze',
                       'hands', 'legs_feet', 'motion', 'holding', 'appearance', 'outfit', 'details']
 
 const subjects = computed(() => props.modelValue.subjects || [])

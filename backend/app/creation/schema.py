@@ -52,6 +52,9 @@ class CreationRecord(BaseModel):
     # Detailed style (Krea 2): the scene sheet the prompt was written from,
     # so a later run can start from it (edit it, or breed from rated images).
     scene_sheet: dict | None = None
+    # Detailed style: what was read, what each step changed, and the sheet the
+    # script was finally written from ({"read", "steps", "current"}).
+    scene_ledger: dict | None = None
     # MOSS-Image style: "caption" / "layout" / "tags" ("" for other styles).
     moss_format: str = ""
     # Detailed style: the references' top WD14 tags were handed to the sheet reader.
