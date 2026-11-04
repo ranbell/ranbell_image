@@ -37,6 +37,7 @@ from __future__ import annotations
 import json
 import re
 
+from . import mix as mix_pass
 from . import props as props_pass
 from . import scene_sheet
 
@@ -45,7 +46,7 @@ SCRIPT_MARKER = "=== PROMPT ==="
 
 
 #: The parts of a shaping answer, each readable on its own.
-PART_KEYS = ("staging", "objects", "place", "rebuild")
+PART_KEYS = ("mix", "staging", "objects", "place", "rebuild")
 
 
 def _balanced(text: str, start: int) -> str:
@@ -129,9 +130,12 @@ def split_answer(raw: str) -> tuple[str, str]:
     return head, tail.strip()
 
 
-def jobs(*, staging: str, props_mode: str, tags: list[str]) -> list[str]:
-    """Which parts this run asks for, in the order they are applied."""
+def jobs(*, staging: str, props_mode: str, tags: list[str], mix: bool = False) -> list[str]:
+    """Which parts this run asks for, in the order they are applied. The mix
+    comes first: the moment is staged with the people as mixed."""
     out: list[str] = []
+    if mix:
+        out.append("mix")
     if staging in scene_sheet.STAGING_SCOPES:
         out.append("staging")
     if props_mode in ("simplify", "elaborate"):
@@ -153,16 +157,20 @@ def shape_prompt(
     reference_count: int = 1, earlier: list[dict] | None = None,
     script_model: str = "", paragraphs: int = 5,
     avoid: list[str] | None = None, subject: str = "",
+    mix: dict | None = None,
 ) -> str:
     """``earlier`` is the ledger's steps so far (a merge, a fusion), so the
     rebuild part knows what had already been changed before this call.
     ``script_model`` ("krea2" / "moss") asks for the visual script after the
-    JSON, behind ``SCRIPT_MARKER``."""
-    active = jobs(staging=staging, props_mode=props_mode, tags=tags)
+    JSON, behind ``SCRIPT_MARKER``. ``mix`` (several references):
+    ``{"recipe", "base", "base_share", "others", "combine"}`` — see
+    ``prompt/mix.py``."""
+    active = jobs(staging=staging, props_mode=props_mode, tags=tags, mix=bool(mix))
+    recipe = (mix or {}).get("recipe") or []
     indexed = dict(sheet)
     indexed["subjects"] = [{"index": i, **s} for i, s in enumerate(sheet.get("subjects") or [])]
-    names = {"staging": "stage the moment", "objects": "fit the objects to it",
-             "place": "place the tagger's leftover tags"}
+    names = {"mix": "mix the references by their features", "staging": "stage the moment",
+             "objects": "fit the objects to it", "place": "place the tagger's leftover tags"}
     refs = ("the reference picture" if reference_count <= 1 else
             f"{reference_count} reference pictures")
     lines = [
@@ -171,6 +179,14 @@ def shape_prompt(
         "other: " + "; ".join(names[j] for j in active)
         + "; and last, look at the whole sheet as one picture and fix what does not hold.",
     ]
+    if "mix" in active:
+        lines += [
+            "",
+            "[Job: mix the references by their features]",
+            *mix_pass.mix_rules(recipe, base=mix["base"], base_share=mix["base_share"],
+                                others=mix.get("others") or [],
+                                combine=mix.get("combine") or "merge"),
+        ]
     if "staging" in active:
         lines += [
             "",
@@ -208,10 +224,12 @@ def shape_prompt(
         "Each job above changes only its own boxes. Read the whole sheet as it stands after "
         "them, against the reference, and patch what does not hold together.",
         *scene_sheet.rebuild_rules(staging=staging, reference_count=reference_count,
-                                   same_call=True),
+                                   same_call=True,
+                                   pose_from=(mix or {}).get("base") or ""),
         "A box the rebuild leaves out stays as the parts above left it. If it all holds "
         "together, the rebuild is {\"set\": {}}.",
         *scene_sheet.hedge_lines(scene_sheet.hedged_boxes(sheet)),
+        *mix_pass.keep_lines(recipe),
     ]
     if script_model:
         spec = scene_sheet._SCRIPT_MODELS.get(script_model, scene_sheet._SCRIPT_MODELS["krea2"])
@@ -223,6 +241,8 @@ def shape_prompt(
             *scene_sheet.script_rules(sheet, paragraphs=paragraphs, model=script_model),
         ]
     lines += ["", "Output only one JSON object, with one part per job:", "{"]
+    if "mix" in active:
+        lines.append('  "mix": ' + scene_sheet.REBUILD_ANSWER_SHAPE + ",")
     if "staging" in active:
         lines += ['  "staging":', *scene_sheet.stage_answer_shape(staging, indent="  ",
                                                                   given=bool(avoid))]
@@ -251,12 +271,13 @@ def _part(answer: dict, key: str) -> dict:
 
 def apply_shape(
     sheet: dict, answer: dict, *, staging: str, props_mode: str, tags: list[str],
-    locked: list[str] | None = None,
+    locked: list[str] | None = None, mix: dict | None = None,
 ) -> tuple[dict, dict]:
     """Each part of the answer through its own door, in order. Returns the new
     sheet and a report per job — the same lines the separate calls gave:
 
-    ``{"staging": {"changed", "refused", "outside", "stock", "read"},
+    ``{"mix": {"changed", "refused", "outside", "read"},
+       "staging": {"changed", "refused", "outside", "stock", "read"},
        "objects": {"changed", "refused", "dropped", "read"},
        "place": {"placed", "unclassified"},
        "rebuild": {"changed", "refused", "outside"}}``
@@ -264,10 +285,16 @@ def apply_shape(
     ``read`` is False when that job's part was missing or empty: said, so
     the run can say it, never silently taken as "nothing to change".
     """
-    active = jobs(staging=staging, props_mode=props_mode, tags=tags)
+    active = jobs(staging=staging, props_mode=props_mode, tags=tags, mix=bool(mix))
     report: dict = {}
     # The boxes the prompt named as hedging (it was built from this sheet).
     hedged = scene_sheet.hedged_boxes(sheet)
+    if "mix" in active:
+        part = _part(answer, "mix")
+        sheet, changed, refused, outside = mix_pass.apply_mix(
+            sheet, part, combine=(mix or {}).get("combine") or "merge", locked=locked)
+        report["mix"] = {"changed": changed, "refused": refused, "outside": outside,
+                         "read": bool(part)}
     if "staging" in active:
         part = _part(answer, "staging")
         new, changed, refused, outside = scene_sheet.apply_staging(

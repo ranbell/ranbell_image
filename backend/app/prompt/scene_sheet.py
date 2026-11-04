@@ -693,99 +693,12 @@ def merge_sheets(
     return out, prov
 
 
-def merge_locks(
-    merged: dict, plan: dict, *, locked: list[str] | None = None,
-) -> list[str]:
-    """Paths the reconcile step may not touch.
-
-    This is what makes the dial unbreakable. Before, the mix was a paragraph of
-    English a model could quietly average away; here the boxes the weights
-    assigned are locked, so the only thing left to negotiate is what the
-    weights did not decide.
-    """
-    out = list(locked or [])
-    out += [b for b in MERGE_SCENE_BOXES if b not in out]
-    n_people = len(merged.get("subjects") or [])
-    combine = plan.get("combine") or "merge"
-    # In a merge one person carries the identity; in coexist everyone keeps
-    # their own, because nobody was merged away.
-    people = range(n_people) if combine == "coexist" else range(min(1, n_people))
-    for i in people:
-        for box in MERGE_IDENTITY_BOXES:
-            out.append(f"subjects.{i}.{box}")
-    return out
-
-
-def reconcile_prompt(
-    merged: dict, plan: dict, *, locked: list[str] | None = None,
-) -> str:
-    """What the text model is asked after the sheets are merged, as a patch.
-
-    The merge is exact where the weights decided, and silent everywhere they
-    did not: a merged person can be wearing two worlds' clothes, two sheets'
-    props can be the same object twice, and nothing has said what the combined
-    cast is doing to each other. That is this call's whole job.
-    """
-    combine = plan.get("combine") or "merge"
-    locked = list(locked or [])
-    indexed = dict(merged)
-    indexed["subjects"] = [{"index": i, **s} for i, s in enumerate(merged.get("subjects") or [])]
-
-    lines = [
-        "Below is a scene sheet assembled from several reference images, one box "
-        "at a time. Make it read as ONE coherent picture and return the result "
-        "as a patch on the sheet.",
-        "",
-        "What was already decided and is not yours to change: who the people are "
-        "and how they look, and the place, the light and the palette. Those boxes "
-        "came from the references the user weighted for them, and they are locked.",
-        "",
-        "What is left for you:",
-    ]
-    if combine == "coexist":
-        lines += [
-            '- "position": the people came from different pictures and each one '
-            "thinks it is alone in the frame. Place them in one space, in the "
-            "order the sheet lists them — the first is the most prominent, the "
-            "last the least — and say where each one stands.",
-            '- "interaction": say what this cast is doing to or with each other. '
-            "They have never been in the same picture before.",
-        ]
-    else:
-        lines += [
-            '- "outfit" and "details": the person may be wearing pieces from two '
-            "different worlds. Make it ONE outfit a person could actually wear — "
-            "pick the pieces that go together, or carry one world's colour, "
-            "pattern or material into the other's garment. Both outfits worn on "
-            "top of each other is not an answer.",
-            '- "interaction": empty it if there is only one person.',
-        ]
-    lines += [
-        '- "props": the same object may be listed twice in different words, and a '
-        "prop may already be in somebody's hands. One object, named once, in one "
-        "place.",
-        '- "situation": say what is happening, now that the people and the place '
-        "are settled.",
-        "- Write every new value as a plain English phrase, concrete and visible, "
-        "in the sheet's own style. Never soften or blur a value into a vaguer word.",
-        "- Change nothing you were not asked to. A box that already reads well is "
-        "left out of the patch.",
-    ]
-    if locked:
-        lines.append("- Also locked by the user: " + ", ".join(locked)
-                     + " (\"subjects.N\" is the whole person N).")
-    lines += [
-        "",
-        "Output only JSON in this shape, leaving out any part you do not need:",
-        "{",
-        '  "set": {"<scene box>": "<new value>"},',
-        '  "subjects": [{"index": 0, "set": {"<person box>": "<new value>"}}]',
-        "}",
-        "",
-        "[Scene sheet]",
-        json.dumps(indexed, ensure_ascii=False, indent=2),
-    ]
-    return "\n".join(lines)
+# The reconcile call that used to follow the merge (``merge_locks`` /
+# ``reconcile_prompt``) is retired (2026-11-05): it saw only the merged sheet,
+# so the lighter reference it was told to blend in was not there to blend. Its
+# jobs — one outfit from two worlds, placing a cast that never met — are the
+# shaping call's mix part now, with the other references' features and sheets
+# in front of it (prompt/mix.py).
 
 
 # ── Saying it again: a Japanese line edits the sheet, not the prose ─────────
@@ -2153,7 +2066,7 @@ def ledger_step(step: str, intent: str, changes: list[str]) -> dict:
 
 
 def rebuild_rules(*, staging: str = "read", reference_count: int = 1,
-                  same_call: bool = False) -> list[str]:
+                  same_call: bool = False, pose_from: str = "") -> list[str]:
     """What one picture needs, as lines. Shared by ``reconstruct_prompt`` (the
     last look as a call of its own) and ``shaping.shape_prompt`` (the last part
     of the shaping call, after the parts that changed the sheet).
@@ -2178,8 +2091,12 @@ def rebuild_rules(*, staging: str = "read", reference_count: int = 1,
             "The first pose that comes to mind is not a fix."
         )
     else:
+        # With several references the people — and their poses — came from one
+        # of them; "the reference pictures" pulled toward whichever pose looked
+        # most like a pose.
+        source = f"{pose_from}, the picture the people were taken from" if pose_from else refs
         pose = (
-            f"- Look at {refs}: each person's pose there is what made it worth reading, and "
+            f"- Look at {source}: each person's pose there is what made it worth reading, and "
             f"\"signature\" says what makes it their own. Where {steps} drifted from it, "
             "bring it back. Turning a particular pose into a more ordinary one is a loss, "
             "never a correction."

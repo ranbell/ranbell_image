@@ -1852,6 +1852,8 @@ async def run_refine_prompt(
             # A restage's poses not to use, named by the reader.
             avoid_poses: list[str] = []
             pose_subject = ""
+            # Several references: the features the weights mix in (prompt/mix.py).
+            mix_spec: dict | None = None
             # The references actually read (0% is not read), for the last look.
             read_images = [
                 image_bytes_list[n] for n, idx in enumerate(tile_order)
@@ -1969,30 +1971,51 @@ async def run_refine_prompt(
                     ledger_steps.append(scene_sheet.ledger_step(
                         "merge", "several references made into one sheet", provenance))
                 if len(sheets) > 1:
-                    # The merge is exact where the weights decided and silent
-                    # where they did not: one person may be wearing two worlds'
-                    # clothes, and nothing has said what a combined cast does.
-                    # The locks are what stop this call undoing the mix.
-                    _phase("mergingSheets", 0.48, "Reconciling the references...")
-                    locks = scene_sheet.merge_locks(sheet, mix_plan, locked=body.locked)
-                    patch = _parse_json_from_llm(await _stream_text(
-                        scene_sheet.reconcile_prompt(sheet, mix_plan, locked=body.locked),
-                        0.48, 0.50, 250, "Reconciling the references...", as_think=True,
-                    ))
-                    if patch:
-                        sheet, changed, refused = scene_sheet.apply_patch(sheet, patch, locks)
-                        ledger_steps.append(scene_sheet.ledger_step(
-                            "reconcile", "the merged references made consistent", changed))
-                        for line in changed:
-                            _put({"type": "think", "text": f"[reconciled] {line}\n"})
-                        for path in refused:
-                            _put({"type": "think", "text": f"[the mix held] {path}\n"})
+                    # The mix, by features (prompt/mix.py): the weighted WD14 analysis
+                    # the tag styles force in, used as a recipe. The merged sheet has
+                    # the heavier reference's people, place and light; the recipe is
+                    # what the others bring, counted by their weights. The shaping
+                    # call writes it in — the old reconcile call, which saw only the
+                    # merged sheet, is gone.
+                    from ..prompt import mix as mix_pass
+                    _labels = {str(idx): scene_sheet.panel_label(n, len(tile_order))
+                               for n, idx in enumerate(tile_order)}
+                    _shares = {str(tile_order[p["n"]]): p["share"]
+                               for p in mix_plan.get("panels") or [] if p["n"] < len(tile_order)}
+                    _left_out: list[tuple[str, str]] = []
+                    mix_recipe = mix_pass.build_recipe(
+                        wd14_analysis, labels=_labels, shares=_shares,
+                        skip=set(_PERSON_COUNT_TAGS), scores=tag_scores, min_score=min_score,
+                        staging=body.staging, props_mode=body.props_mode, dropped=_left_out,
+                    )
+                    _base_n = (mix_plan.get("palette_panel") if body.combine_mode == "coexist"
+                               else mix_plan.get("identity_panel"))
+                    _base_n = _base_n if _base_n is not None else sheets[0][0]
+                    _pct = {p["n"]: p["pct"] for p in mix_plan.get("panels") or []}
+                    mix_spec = {
+                        "recipe": mix_recipe,
+                        "base": scene_sheet.panel_label(_base_n, len(tile_order)),
+                        "base_share": _pct.get(_base_n, 0),
+                        "others": [(scene_sheet.panel_label(n, len(tile_order)), _pct.get(n, 0), sh)
+                                   for n, sh in sheets if n != _base_n],
+                        "combine": body.combine_mode,
+                    }
+                    for f in mix_recipe:
+                        where = f["source"] if f["share"] is None else f"{f['source']} {f['share']}%"
+                        _put({"type": "think", "text": f"[mix] {f['group']}: {f['word']} ← {where}\n"})
+                    if _left_out:
+                        _put({"type": "think", "text":
+                              "[left out of the mix] " + ", ".join(f"{w} ({why})" for w, why in _left_out) + "\n"})
+                    if not mix_recipe:
+                        _put({"type": "think", "text": "[no WD14 features to mix — the references are joined as read]\n"})
                 # Tags the reader did not use: placed in the one shaping call
                 # below, with the staging and the objects (prompt/shaping.py).
                 pending_tags: list[str] = []
                 if hints:
                     hint_words = [w for words in hints.values() for w in words]
-                    pending_tags = scene_sheet.unused_ingredients(sheet, hints)
+                    # With a mix the hints are in the recipe already (both come from
+                    # the same weighted analysis), so they are not placed twice.
+                    pending_tags = [] if mix_spec else scene_sheet.unused_ingredients(sheet, hints)
                     if pending_tags:
                         # Not dropped: the shaping call places each into a box, and
                         # what still has none is kept as unclassified.
@@ -2057,7 +2080,11 @@ async def run_refine_prompt(
 
                 from ..prompt import shaping
                 shape_jobs = shaping.jobs(staging=body.staging, props_mode=body.props_mode,
-                                          tags=pending_tags)
+                                          tags=pending_tags,
+                                          mix=bool(mix_spec))
+                # Run even with no features to force: placing people who came from
+                # different pictures (coexist) and joining two places is still its job.
+                _mix = mix_spec
                 if shape_jobs:
                     # Staging (people posing → a moment), the objects and the
                     # leftover tags, asked in ONE call: three calls each thought
@@ -2076,6 +2103,7 @@ async def run_refine_prompt(
                                              locked=body.locked, reference_count=len(read_images),
                                              earlier=ledger_steps or None, script_model=_shape_script,
                                              avoid=avoid_poses or None, subject=pose_subject,
+                                             mix=_mix,
                                              paragraphs=clamp_prose_paragraphs(
                                                  getattr(body, "prose_paragraphs", 5))),
                         0.45, 0.80, 400 + 400 * len(shape_jobs) + (900 if _shape_script else 0),
@@ -2114,7 +2142,21 @@ async def run_refine_prompt(
                         _put({"type": "think", "text": "\n[the shaping answer could not be read — written from the sheet as read]"})
                     sheet, shape_report = shaping.apply_shape(
                         sheet, shape_answer, staging=body.staging, props_mode=body.props_mode,
-                        tags=pending_tags, locked=body.locked)
+                        tags=pending_tags, locked=body.locked, mix=_mix)
+
+                    mx = shape_report.get("mix")
+                    if mx is not None:
+                        ledger_steps.append(scene_sheet.ledger_step(
+                            "mix", "the other references' features written in by their weights",
+                            mx["changed"]))
+                        for line in mx["changed"]:
+                            _put({"type": "think", "text": f"\n[mixed] {line}"})
+                        for path in mx["refused"]:
+                            _put({"type": "think", "text": f"\n[locked, not changed] {path}"})
+                        if mx["outside"]:
+                            _put({"type": "think", "text": f"\n[mix outside its range, not used] {', '.join(mx['outside'])}"})
+                        if not mx["read"]:
+                            _put({"type": "think", "text": "\n[the mix part could not be read — the features are forced in below]"})
 
                     st = shape_report.get("staging")
                     if st is not None:
@@ -2178,6 +2220,17 @@ async def run_refine_prompt(
                               f"\n[reconstruction outside its range, not used] {', '.join(rb['outside'])}"})
                     # A restage staged on its own leaves the last look to its own call.
                     rebuilt_in_shaping = not restaged_alone
+
+                if _mix:
+                    # The check: every feature the weights chose is on the sheet. One
+                    # that is not goes to "unclassified", which the writer must write
+                    # — the WD14 styles' forced must-tags, for a sheet.
+                    sheet, forced = mix_pass.force_in(_mix["recipe"], sheet)
+                    if forced:
+                        _put({"type": "think", "text": "\n[mix — not on the sheet, forced in] " + ", ".join(forced)})
+                    # And the script is held to all of them.
+                    hint_words = list(dict.fromkeys(
+                        list(hint_words) + [f["word"] for f in _mix["recipe"]]))
 
             if body.sheet_instruction.strip():
                 # A spoken retake becomes a patch: only the boxes it names change.

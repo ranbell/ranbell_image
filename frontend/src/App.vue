@@ -537,7 +537,7 @@ const refineSheetDirty = computed(() =>
 const refineSheetChanges = ref([])
 // Also every tag the run left out, placed or kept unclassified — nothing the
 // tagger read leaves without being said (the Showrunner, 2026-10-31).
-const _SHEET_CHANGE_RE = /^\[(changed|fused|locked, not changed|ingredient not used|ingredients from [^\]]+|placed|unclassified[^\]]*|WD14 left out|WD14 hints not used by the reader|left out of the fusion|removed by the conflict check|check|staged|staging[^\]]*|props[^\]]*|reconstructed|reconstruction[^\]]*|not in the script[^\]]*)\]/
+const _SHEET_CHANGE_RE = /^\[(changed|fused|locked, not changed|ingredient not used|ingredients from [^\]]+|placed|unclassified[^\]]*|WD14 left out|WD14 hints not used by the reader|left out of the fusion|removed by the conflict check|check|staged|staging[^\]]*|props[^\]]*|mix[^\]]*|mixed|reconstructed|reconstruction[^\]]*|not in the script[^\]]*)\]/
 // The steps of the Krea card, numbered as they are shown.
 const kreaStepNo = key => {
   const steps = ['medium', ...(selectedCount.value >= 2 ? ['combine'] : []), 'world', 'staging', 'props', 'hints',
@@ -738,15 +738,16 @@ const refineStepOrder = computed(() => {
   } else if (refineKrea.value) {
     if (refineSheetMode.value === 'read') {
       o.push('readingScene')
-      if (refineReadCount.value > 1) o.push('mergingSheets')
       if (refineWorldMode.value === 'fuse') o.push('fusingWorlds')
     }
     if (refineSheetMode.value === 'retake') o.push('patchingScene')
     // Staging, the objects, the leftover tags and the last look are one call
     // (prompt/shaping.py). The last look runs alone only when something else —
     // a merge, a fusion, a retake — changed the sheet.
+    // Several references are mixed by their features in the same call (prompt/mix.py).
     const shaping = refineSheetMode.value === 'read'
-      && (refineWd14Hints.value || refineStaging.value !== 'read' || refineProps.value !== 'keep')
+      && (refineReadCount.value > 1 || refineWd14Hints.value || refineStaging.value !== 'read'
+          || refineProps.value !== 'keep')
     if (shaping) o.push('shapingScene')
     else if ((refineSheetMode.value === 'read' && (refineReadCount.value > 1 || refineWorldMode.value === 'fuse'))
       || refineSheetMode.value === 'retake') o.push('reconstructingScene')

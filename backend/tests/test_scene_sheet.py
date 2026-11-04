@@ -330,15 +330,63 @@ async def test_a_zero_weight_reference_is_never_even_read(tmp_path):
     assert not any("return the result as a patch" in p for p in llm.text_prompts)
 
 
+class _TwoTagDB(_DB):
+    """Each reference with its own WD14 tags, as the gallery stores them."""
+
+    TAGS = {
+        "a": (["1girl", "silver_hair", "long_hair", "school_uniform", "classroom", "sunlight"],
+              [0.95, 0.9, 0.85, 0.8, 0.75, 0.7]),
+        "b": (["1girl", "black_hair", "hair_ribbon", "night_sky", "lantern", "yukata"],
+              [0.95, 0.9, 0.85, 0.8, 0.75, 0.7]),
+    }
+
+    async def get(self, sha):
+        tags, scores = self.TAGS[sha]
+        return {"path": str(self.path), "wd14_tags": tags, "wd14_tags_scores": scores}
+
+
+class _MixLLM(_TwoRefLLM):
+    def shape_answer(self, prompt: str) -> str:
+        return json.dumps({"mix": {"subjects": [{"index": 0, "set": {
+            "appearance": "long silver hair tied with a red hair ribbon", "who": "a boy"}}]}})
+
+
 @pytest.mark.asyncio
-async def test_the_reconcile_step_cannot_undo_the_mix(tmp_path):
-    llm, events = await _two_ref_run({"sha256s": ["a", "b"], "weights": [0.8, 0.2]}, tmp_path)
+async def test_two_references_are_mixed_by_their_weighted_features(tmp_path):
+    from PIL import Image
+
+    from backend.app import runtime_config
+    from backend.app.jobs.runners import run_refine_prompt
+
+    runtime_config._cache = None
+    img = tmp_path / "ref.png"
+    Image.new("RGB", (64, 64)).save(img)
+    llm, q = _MixLLM(), asyncio.Queue()
+    await run_refine_prompt(_Reporter(), _Cancel(), body_dict={
+        "sha256s": ["a", "b"], "weights": [0.6, 0.4], "prompt_style": "detailed",
+        "visual_medium": "anime", "staging": "read", "combine_mode": "merge"},
+        db=_TwoTagDB(img), ollama=llm, spooler=None, comfy=None, token_queue=q)
+    events = []
+    while not q.empty():
+        events.append(q.get_nowait())
     done = next(e for e in events if e and e["type"] == "done")
-    assert any("return the result as a patch" in p for p in llm.text_prompts)
-    # It was allowed what the weights did not decide...
-    assert done["sheet"]["situation"] == "a quiet moment"
-    # ...and the owned boxes stand.
-    assert done["sheet"]["subjects"][0]["appearance"] == "silver hair"
+    thinking = "".join(e["text"] for e in events if e and e["type"] == "think")
+    # no separate reconcile call: the mix is the shaping call's first part
+    assert not any("return the result as a patch" in p for p in llm.text_prompts)
+    shape = llm.shape_prompts[0]
+    assert "[Job: mix the references by their features]" in shape
+    assert "hair ribbon (the second image, 40%)" in shape
+    # of the two hair colours the lighter reference's is dropped (the WD14 merge's rule)
+    assert "black hair" not in shape.split("[The features, by the weights]")[1].split("[the second image")[0]
+    assert "[mix] clothing: hair ribbon ← the second image 40%" in thinking
+    # the mix part went through its door: looks changed, "who" held
+    person = done["sheet"]["subjects"][0]
+    assert person["appearance"] == "long silver hair tied with a red hair ribbon"
+    assert person["who"] == "a girl"
+    # what the mix did not write is forced in, and the script is held to it
+    assert "lantern" in done["sheet"]["unclassified"] and "night sky" in done["sheet"]["unclassified"]
+    assert "[mix — not on the sheet, forced in]" in thinking
+    assert [st["step"] for st in done["ledger"]["steps"]][:2] == ["merge", "mix"]
 
 
 @pytest.mark.asyncio
@@ -754,42 +802,16 @@ def test_a_zero_share_reference_contributes_nothing_to_the_merge():
     assert "RAMEN" not in merged["text_in_image"]
 
 
-def test_the_reconcile_patch_cannot_break_the_mix():
-    # The lock is what makes the dial unbreakable: before, the mix was English
-    # a model could average away.
-    plan = ss.build_mix_plan([0.7, 0.3], roles=["both", "style"], combine="merge")
-    merged, _ = ss.merge_sheets([(0, _A), (1, _B)], plan)
-    locks = ss.merge_locks(merged, plan)
-    patch = {"set": {"setting": "somewhere else", "situation": "a quiet moment"},
-             "subjects": [{"index": 0, "set": {"appearance": "blonde hair",
-                                               "outfit": "one coherent parka"}}]}
-    out, changed, refused = ss.apply_patch(merged, patch, locks)
-    # Refused: the boxes the weights assigned.
-    assert out["setting"] == "a neon alley"
-    assert out["subjects"][0]["appearance"] == "silver hair, violet eyes"
-    assert "setting" in refused and "subjects.0.appearance" in refused
-    # Allowed: what the weights did not decide.
-    assert out["situation"] == "a quiet moment"
-    assert out["subjects"][0]["outfit"] == "one coherent parka"
-
-
-def test_coexist_locks_every_persons_identity():
-    plan = ss.build_mix_plan([0.7, 0.3], combine="coexist")
-    merged, _ = ss.merge_sheets([(0, _A), (1, _B)], plan)
-    locks = ss.merge_locks(merged, plan)
-    assert "subjects.0.appearance" in locks and "subjects.1.appearance" in locks
-
-
-def test_the_reconcile_prompt_asks_for_what_the_weights_did_not_decide():
-    plan = ss.build_mix_plan([0.7, 0.3], combine="merge")
-    merged, _ = ss.merge_sheets([(0, _A), (1, _B)], plan)
-    p = ss.reconcile_prompt(merged, plan)
-    assert "they are locked" in p
-    assert "ONE outfit a person could actually wear" in p
-    assert '"index": 0' in p
-    # coexist has a different job: placing a cast that has never met.
-    c = ss.reconcile_prompt(merged, ss.build_mix_plan([0.7, 0.3], combine="coexist"))
-    assert "never been in the same picture" in c and "most prominent" in c
+def test_the_mix_part_carries_the_old_reconcile_jobs():
+    from backend.app.prompt import mix
+    merged = mix.mix_rules([], base="the first image", base_share=70,
+                           others=[("the second image", 30, _B)])
+    text = "\n".join(merged)
+    assert "ONE that carries both" in text and "the tagger gave no features to mix" in text
+    assert '"neon alley"' in text or "neon alley" in text      # the other sheet, as material
+    coexist = "\n".join(mix.mix_rules([], base="the first image", base_share=70,
+                                       others=[("the second image", 30, _B)], combine="coexist"))
+    assert "never been in the same picture" in coexist and "most prominent" in coexist
 
 
 def test_hints_for_an_image_are_its_own_tags_plus_the_shared_ones():
@@ -1841,3 +1863,46 @@ async def test_a_lost_staging_part_is_staged_alone_and_the_rest_runs_on_its_own(
     assert any(p.startswith("Write the prompt") for p in llm.text_prompts)  # and the writer
     thinking = "".join(e["text"] for e in events if e and e["type"] == "think")
     assert "[part of the shaping answer could not be read: staging]" in thinking
+
+
+def test_the_recipe_counts_by_weight_and_leaves_poses_to_the_staging():
+    from backend.app.prompt import mix
+    analysis = {"common_tags": ["indoors"], "unique_by_image": {
+        "0": {"must": ["silver_hair", "head_rest", "smile"], "ref": ["classroom"], "weight": 0.7},
+        "1": {"must": ["hair_ribbon", "lantern"], "ref": ["masterpiece", "general"], "weight": 0.3},
+        "2": {"must": ["sword"], "ref": [], "weight": 0.0},
+    }}
+    labels = {"0": "the first image", "1": "the second image", "2": "the third image"}
+    shares = {"0": 0.7, "1": 0.3, "2": 0.0}
+    dropped = []
+    read = mix.build_recipe(analysis, labels=labels, shares=shares, dropped=dropped)
+    words = [f["word"] for f in read]
+    assert words == ["silver hair", "head rest", "smile", "classroom", "hair ribbon", "lantern", "indoors"]
+    assert "sword" not in words                      # a reference at 0% brings nothing
+    assert ("general", "rating") in dropped and ("masterpiece", "quality") in dropped
+    assert read[4] == {"word": "hair ribbon", "group": "clothing", "source": "the second image", "share": 30}
+    assert read[-1]["share"] is None and read[-1]["source"] == "every image"
+    moved = [f["word"] for f in mix.build_recipe(analysis, labels=labels, shares=shares,
+                                                 staging="restage")]
+    assert "head rest" not in moved and "smile" not in moved and "hair ribbon" in moved
+    simple = [f["word"] for f in mix.build_recipe(analysis, labels=labels, shares=shares,
+                                                  props_mode="simplify")]
+    assert "lantern" not in simple
+
+
+def test_the_mix_may_change_looks_but_never_who_and_coexisting_people_keep_theirs():
+    from backend.app.prompt import mix
+    sheet = ss.normalize_sheet({"medium": "anime illustration", "subjects": [
+        {"who": "a girl", "appearance": "red hair", "outfit": "a uniform"}]})
+    patch = {"set": {"medium": "photograph", "setting": "a night festival"},
+             "subjects": [{"index": 0, "set": {"who": "a boy", "appearance": "silver hair"}}]}
+    new, _, _, outside = mix.apply_mix(sheet, patch)
+    assert new["setting"] == "a night festival" and new["subjects"][0]["appearance"] == "silver hair"
+    assert new["subjects"][0]["who"] == "a girl" and new["medium"] == "anime illustration"
+    assert {"medium", "subjects.0.who"} <= set(outside)
+    kept, *_ = mix.apply_mix(sheet, patch, combine="coexist")
+    assert kept["subjects"][0]["appearance"] == "red hair"
+    recipe = [{"word": "silver hair", "group": "hair", "source": "x", "share": 40},
+              {"word": "lantern", "group": "other", "source": "x", "share": 40}]
+    forced_sheet, forced = mix.force_in(recipe, new)
+    assert forced == ["lantern"] and forced_sheet["unclassified"] == ["lantern"]
