@@ -1165,9 +1165,15 @@ async def ai_status(request: Request):
         if j["lane"] == "embed" and j["state"] in ("running", "cancelling", "queued")
     ]
     pipeline_info = embed_jobs[0] if embed_jobs else {"running": False}
+    routes = await ollama.routes()
+    if (routes.get("refine") or {}).get("backend") == "ollama":
+        # The screen names the model the forging studio runs on, as it does
+        # for the external server.
+        from ..runtime_config import get_runtime_config, refine_model
+        routes["refine"]["model"] = refine_model(await get_runtime_config(db))
     return {
         "ollama_ok": await ollama.health(),
-        "llm_routes": await ollama.routes(),
+        "llm_routes": routes,
         "vector_count": vector_count,
         "vector_sync_needed": False,
         "pipeline": pipeline_info,

@@ -48,6 +48,8 @@ class ConfigBody(BaseModel):
     # Muse's defaults (empty means the screen asks to choose)
     muse_model: str | None = None
     muse_workflow: str | None = None
+    # The forging studio's Ollama model (empty uses vlm_model)
+    refine_model: str | None = None
     frozenset_classification: bool | None = None
     # GPU priority control
     auto_pause_on_generation: bool | None = None

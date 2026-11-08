@@ -51,6 +51,10 @@ _defaults = {
     # (when `muse_model` is empty, `vlm_model` is consulted).
     "muse_model":    "",
     "muse_workflow": "",
+    # The forging studio's Ollama model (2026-11-09). Empty uses `vlm_model`, so
+    # saved configs keep working as before. Only used when Refine runs on
+    # Ollama; on the external server its own model setting applies.
+    "refine_model":  "",
     "frozenset_classification": True,
     # Invoke / Genesis
     "invoke_gold_frame_threshold":     0.85,
@@ -118,6 +122,11 @@ def set_cache(cache: RuntimeConfigCache) -> None:
 def invalidate_cache() -> None:
     if _cache is not None:
         _cache.invalidate()
+
+
+def refine_model(cfg: dict) -> str:
+    """The Ollama model the forging studio uses: its own when set, else the VLM model."""
+    return str(cfg.get("refine_model") or "").strip() or cfg["vlm_model"]
 
 
 async def get_runtime_config(db) -> dict:

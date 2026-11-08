@@ -654,7 +654,8 @@ async def run_sheet_check(
     from ..runtime_config import get_runtime_config
 
     cfg = await get_runtime_config(db)
-    model = cfg["vlm_model"]
+    from ..runtime_config import refine_model
+    model = refine_model(cfg)
     checked_n = 0
     skipped = 0
     total = len(sha256s or [])
@@ -1287,7 +1288,7 @@ async def run_refine_directions(
     from ..ai.json_util import parse_json_object
     from ..api.ai import DirectionsRequest
     from ..prompt import scene_sheet
-    from ..runtime_config import get_runtime_config
+    from ..runtime_config import get_runtime_config, refine_model
 
     body = DirectionsRequest(**body_dict)
 
@@ -1308,7 +1309,7 @@ async def run_refine_directions(
 
     async def _stream(prompt: str, options: dict) -> str:
         tokens: list[str] = []
-        async for event in ollama.generate_text_stream(prompt, model=cfg["vlm_model"], options=options):
+        async for event in ollama.generate_text_stream(prompt, model=refine_model(cfg), options=options):
             if _abort.is_set():
                 raise JobCancelled()
             _put({**event, "type": "think"} if event["type"] == "token" else event)
@@ -1446,7 +1447,7 @@ async def run_refine_prompt(
     from ..ai.tile_image import create_tile_image
     from ..prompt import moss as moss_prompt
     from ..prompt.visual_spec import clamp_prose_paragraphs
-    from ..runtime_config import get_runtime_config
+    from ..runtime_config import get_runtime_config, refine_model
     from ..spooler.models import JobLane
 
     body = RefineRequest(**body_dict)
@@ -1554,7 +1555,7 @@ async def run_refine_prompt(
         if body.instruction_mode == "enhanced" and nl_instruction:
             _phase("translatingInstruction", 0.05, "Analyzing instruction...")
             _, nl_instruction, _ = await _translate_and_classify(
-                nl_instruction, ollama, model=cfg["vlm_model"]
+                nl_instruction, ollama, model=refine_model(cfg)
             )
 
     # 3b. conflict tag suppression: identify WD14 tags that contradict user instruction
@@ -1572,7 +1573,7 @@ async def run_refine_prompt(
         if all_source_tags:
             _phase("analyzingConflicts", 0.08, "Analyzing tag conflicts...")
             conflict_tags = await _find_conflict_tags(
-                nl_instruction, all_source_tags, db, ollama, cfg["vlm_model"]
+                nl_instruction, all_source_tags, db, ollama, refine_model(cfg)
             )
             if conflict_tags:
                 # The Showrunner turned this on; every tag it removes is said.
@@ -1713,7 +1714,7 @@ async def run_refine_prompt(
         return await _consume(
             ollama.generate_vlm_stream(
                 prompt, images_for_vlm if images is None else images,
-                model=cfg["vlm_model"], options=options
+                model=refine_model(cfg), options=options
             ),
             phase_start, phase_end, expected_tokens, phase_text, as_think,
         )
@@ -1731,7 +1732,7 @@ async def run_refine_prompt(
         ``as_think`` as in ``_stream_vlm``."""
         return await _consume(
             ollama.generate_text_stream(
-                prompt, model=cfg["vlm_model"], options=options_override or options
+                prompt, model=refine_model(cfg), options=options_override or options
             ),
             phase_start, phase_end, expected_tokens, phase_text, as_think,
         )

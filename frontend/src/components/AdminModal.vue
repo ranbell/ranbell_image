@@ -1619,6 +1619,24 @@ watch(() => props.jobs?.find(j => j.title === 'backup')?.state, (state) => {
                     class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
                   <p class="text-[10px] text-gray-600 mt-1">{{ $t('admin.config.utilityModelHint') }}</p>
                 </div>
+                <div>
+                  <label class="text-xs text-gray-500 flex items-center gap-1.5 mb-1">
+                    {{ $t('admin.config.refineModel') }}
+                  </label>
+                  <select v-if="ollamaModels.length" v-model="adminConfig.refine_model"
+                    class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500">
+                    <option value="">{{ $t('admin.config.refineModelFallback') }}</option>
+                    <option v-for="m in ollamaModels" :key="m" :value="m">{{ m }}</option>
+                    <option v-if="adminConfig.refine_model && !ollamaModels.includes(adminConfig.refine_model)"
+                      :value="adminConfig.refine_model">{{ adminConfig.refine_model }}</option>
+                  </select>
+                  <input v-else v-model="adminConfig.refine_model" type="text"
+                    class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
+                  <p class="text-[10px] text-gray-600 mt-1">{{ $t('admin.config.refineModelHint') }}</p>
+                  <p v-if="adminConfig.refine_llm_backend === 'openai'" class="text-[10px] text-amber-400 mt-1">
+                    ⚠ {{ $t('admin.config.refineModelExternal') }}
+                  </p>
+                </div>
               </div>
               <div>
                 <label class="text-xs text-gray-500 flex justify-between mb-1">

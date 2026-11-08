@@ -4598,7 +4598,10 @@ onUnmounted(() => {
                         {{ $t('refine.externalControl') }}
                         <span class="text-[9px] text-sky-400 normal-case font-normal font-mono">{{ refineRoute.model || refineRoute.vision_model }}</span>
                       </template>
-                      <template v-else>{{ $t('refine.ollamaControl') }}</template>
+                      <template v-else>
+                        {{ $t('refine.ollamaControl') }}
+                        <span v-if="refineRoute.model" class="text-[9px] text-sky-400 normal-case font-normal font-mono">{{ refineRoute.model }}</span>
+                      </template>
                       <span v-if="refineDirectPrompt !== null" class="text-[9px] text-cyan-600 normal-case font-normal">{{ $t('refine.directSkipping') }}</span>
                       <span v-else-if="ollamaOffline && !refineExternal" class="text-[9px] text-amber-500 normal-case font-normal flex items-center gap-1">
                         <span class="w-1 h-1 rounded-full bg-amber-500 animate-pulse inline-block"></span>

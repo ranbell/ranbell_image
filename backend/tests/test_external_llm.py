@@ -311,3 +311,14 @@ def test_no_temperature_means_none_is_sent():
     from backend.app.ai.openai_compat import OpenAICompatClient
     p = OpenAICompatClient._payload([], "m", {"num_ctx": 16384}, None, None, stream=True)
     assert "temperature" not in p
+
+
+def test_the_forging_studio_has_its_own_ollama_model_falling_back_to_the_vlm_model():
+    from backend.app.api.admin import ConfigBody
+    from backend.app.runtime_config import _defaults, refine_model
+
+    assert _defaults["refine_model"] == ""                     # saved configs keep working
+    assert refine_model({"vlm_model": "gemma4:26b", "refine_model": ""}) == "gemma4:26b"
+    assert refine_model({"vlm_model": "gemma4:26b", "refine_model": "  "}) == "gemma4:26b"
+    assert refine_model({"vlm_model": "gemma4:26b", "refine_model": "qwen3-vl:8b"}) == "qwen3-vl:8b"
+    assert ConfigBody(refine_model="qwen3-vl:8b").model_dump(exclude_none=True) == {"refine_model": "qwen3-vl:8b"}
