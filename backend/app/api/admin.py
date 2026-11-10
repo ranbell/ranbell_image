@@ -88,7 +88,17 @@ def _config_for_browser(cfg: dict) -> dict:
     # The key stays on the server; the screen only learns whether one is saved.
     out["external_llm_api_key_set"] = bool(out.get("external_llm_api_key"))
     out["external_llm_api_key"] = ""
+    out["lora_export_dir_status"] = lora_export_dir_status(str(out.get("lora_export_dir") or ""))
     return out
+
+
+def lora_export_dir_status(path: str) -> str:
+    """"ok", "missing" (not mounted) or "readonly" — shown under the setting,
+    so a missing mount is seen before the first export fails."""
+    p = Path(path.strip() or "/mnt/lora_export")
+    if not p.is_dir():
+        return "missing"
+    return "ok" if os.access(p, os.W_OK) else "readonly"
 
 
 @router.get("/config")

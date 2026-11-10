@@ -1235,7 +1235,12 @@
     },
     "loraSection": "LoRA バケット",
     "loraExportDir": "書き出し先フォルダ（コンテナ内のパス）",
-    "loraCaptionModel": "キャプション用モデル（空なら VLM モデル）"
+    "loraCaptionModel": "キャプション用モデル（空なら VLM モデル）",
+    "loraExportDirStatus": {
+      "ok": "書き込めます",
+      "missing": "フォルダがありません。docker-compose.override.yml の backend にマウントを追加してください",
+      "readonly": "フォルダはありますが書き込めません（:ro になっていないか確認してください）"
+    }
   },
   "colorPick": {
     "label": "カラー",

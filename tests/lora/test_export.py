@@ -106,3 +106,19 @@ async def test_zip_holds_the_same_folder(tmp_path):
             assert sorted(zf.namelist()) == ["red/aa.png", "red/aa.txt", "red/meta.json"]
     finally:
         path.unlink()
+
+
+def test_admin_shows_whether_the_export_folder_is_usable(tmp_path):
+    from app.api.admin import lora_export_dir_status
+
+    assert lora_export_dir_status(str(tmp_path)) == "ok"
+    assert lora_export_dir_status(str(tmp_path / "not-mounted")) == "missing"
+    ro = tmp_path / "ro"
+    ro.mkdir()
+    ro.chmod(0o555)
+    try:
+        import os
+        expected = "ok" if os.geteuid() == 0 else "readonly"  # root writes anyway
+        assert lora_export_dir_status(str(ro)) == expected
+    finally:
+        ro.chmod(0o755)

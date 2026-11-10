@@ -215,7 +215,7 @@ async function saveAdminConfig() {
   adminLoading.value = 'config'
   adminError.value = ''
   try {
-    const { source_images_dir, generated_images_dir, thumbnails_dir, external_llm_api_key_set, ...body } = adminConfig.value
+    const { source_images_dir, generated_images_dir, thumbnails_dir, external_llm_api_key_set, lora_export_dir_status, ...body } = adminConfig.value
     if (externalKeyClear.value) body.external_llm_api_key_clear = true
     const r = await fetch('/api/admin/config', {
       method: 'PUT',
@@ -1657,6 +1657,11 @@ watch(() => props.jobs?.find(j => j.title === 'backup')?.state, (state) => {
                   </label>
                   <input v-model="adminConfig.lora_export_dir" type="text" placeholder="/mnt/lora_export"
                     class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
+                  <p v-if="adminConfig.lora_export_dir_status" class="text-[10px] mt-1"
+                    :class="adminConfig.lora_export_dir_status === 'ok' ? 'text-emerald-400' : 'text-amber-400'">
+                    {{ adminConfig.lora_export_dir_status === 'ok' ? '✓' : '⚠' }}
+                    {{ $t(`admin.loraExportDirStatus.${adminConfig.lora_export_dir_status}`) }}
+                  </p>
                 </div>
               </div>
               <div>

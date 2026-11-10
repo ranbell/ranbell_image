@@ -1235,7 +1235,12 @@
     },
     "loraSection": "LoRA buckets",
     "loraExportDir": "Export folder (path inside the container)",
-    "loraCaptionModel": "Caption model (empty uses the VLM model)"
+    "loraCaptionModel": "Caption model (empty uses the VLM model)",
+    "loraExportDirStatus": {
+      "ok": "Writable",
+      "missing": "Folder not found — add a mount to the backend in docker-compose.override.yml",
+      "readonly": "Folder exists but is not writable (check it is not mounted :ro)"
+    }
   },
   "colorPick": {
     "label": "Color",
