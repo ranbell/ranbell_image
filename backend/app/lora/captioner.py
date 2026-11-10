@@ -77,8 +77,13 @@ def strip_prompt(full_caption: str, targets: list[str]) -> str:
         "for a style: the words that describe that style; for an object or outfit: its "
         "parts, colours and materials). Whatever the caption does not describe is what "
         "the trigger word will absorb.",
+        "- A style target about colour, shading or lines (\"flat colors\", \"cel shading\", "
+        "\"solid colors\") is about how the picture is rendered, not the colours of things in "
+        "it. Keep \"dark brown hair\", \"a blue sweater\", \"a white leotard\" as they are; "
+        "remove only the words that describe the rendering.",
         "- Keep everything else exactly as written: pose, action, the other people and "
-        "things, setting, composition, light. Do not add anything.",
+        "things, colours of hair, eyes, clothes and objects, setting, composition, light. "
+        "Do not add anything.",
         "- Keep the sentences grammatical; replace a removed subject with a neutral word "
         "(\"a woman\", \"the character\", \"the outfit\") rather than leaving a hole.",
         "- Do not mention that anything was removed. Answer with the caption only.",
