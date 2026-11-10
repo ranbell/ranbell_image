@@ -63,6 +63,12 @@ services:
       # survives losing Qdrant entirely.
       # - /your/backup:/mnt/backup
 
+      # LoRA dataset export (optional). A LoRA bucket is written here as a
+      # folder of pictures + same-name .txt captions + meta.json, for a trainer
+      # outside ranbell to read (e.g. mounted read-only into a musubi-tuner
+      # container). The admin setting "lora_export_dir" must match this path.
+      # - /your/lora/datasets:/mnt/lora_export
+
 # ./qdrant_snapshots needs no setup on a standard install: docker creates the
 # bind-mount source as root:root, and the qdrant image runs as root (its config
 # declares User "0:0"), so it can write there. Same as ./qdrant_data already is.

@@ -6,6 +6,7 @@ import { saveAndSyncToken, getToken } from './apiToken.js'
 import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide } from 'd3-force'
 import AnalyzerModal from './components/AnalyzerModal.vue'
 import AdminModal from './components/AdminModal.vue'
+import LoraBucket from './components/LoraBucket.vue'
 import InspirePanel from './components/InspirePanel.vue'
 import InvokePanel from './components/InvokePanel.vue'
 import SceneSheetEditor from './components/refine/SceneSheetEditor.vue'
@@ -3190,6 +3191,13 @@ function copyToClipboard(text) {
 
 // ── Analyzer ──────────────────────────────────────────────────────────────────
 const showAnalyzer = ref(false)
+// LoRA buckets: the selection goes in, captions come out, a folder is handed over.
+const showLora = ref(false)
+const loraIncoming = ref([])
+function openLoraFromTray() {
+  loraIncoming.value = [...selectedIds.value]
+  showLora.value = true
+}
 
 function openAnalyzer() { showAnalyzer.value = true }
 
@@ -6280,6 +6288,10 @@ onUnmounted(() => {
                   class="flex items-center gap-1.5 px-3 py-1.5 bg-purple-800/60 hover:bg-purple-700/80 border border-purple-500/40 hover:border-purple-400/60 rounded-xl text-xs font-medium text-purple-200 transition-all duration-150">
                   {{ $t('tray.refine') }}
                 </button>
+                <button @click="openLoraFromTray"
+                  class="flex items-center gap-1.5 px-3 py-1.5 bg-amber-900/50 hover:bg-amber-800/70 border border-amber-500/40 hover:border-amber-400/60 rounded-xl text-xs font-medium text-amber-200 transition-all duration-150">
+                  {{ $t('tray.lora') }}
+                </button>
                 <button @click="clearSelection"
                   class="flex items-center gap-1.5 px-3 py-1.5 bg-gray-800/60 hover:bg-gray-700/80 border border-gray-600/50 rounded-xl text-xs text-gray-400 hover:text-gray-200 transition-all duration-150">
                   {{ $t('tray.clear') }}
@@ -6291,6 +6303,15 @@ onUnmounted(() => {
         </div>
       </div>
     </Teleport>
+
+    <!-- ── LoRA buckets ── -->
+    <LoraBucket
+      :show="showLora"
+      :incoming-shas="loraIncoming"
+      @close="showLora = false; loraIncoming = []"
+      @added="loraIncoming = []"
+      @toast="showToast($event.msg, $event.type)"
+    />
 
     <!-- ── Analyzer Modal ── -->
     <AnalyzerModal

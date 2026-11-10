@@ -1637,6 +1637,27 @@ watch(() => props.jobs?.find(j => j.title === 'backup')?.state, (state) => {
                     ⚠ {{ $t('admin.config.refineModelExternal') }}
                   </p>
                 </div>
+                <div>
+                  <label class="text-xs text-gray-500 flex items-center gap-1.5 mb-1">
+                    📦 {{ $t('admin.loraCaptionModel') }}
+                  </label>
+                  <select v-if="ollamaModels.length" v-model="adminConfig.lora_caption_model"
+                    class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500">
+                    <option value="">{{ $t('admin.config.refineModelFallback') }}</option>
+                    <option v-for="m in ollamaModels" :key="m" :value="m">{{ m }}</option>
+                    <option v-if="adminConfig.lora_caption_model && !ollamaModels.includes(adminConfig.lora_caption_model)"
+                      :value="adminConfig.lora_caption_model">{{ adminConfig.lora_caption_model }}</option>
+                  </select>
+                  <input v-else v-model="adminConfig.lora_caption_model" type="text"
+                    class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
+                </div>
+                <div>
+                  <label class="text-xs text-gray-500 flex items-center gap-1.5 mb-1">
+                    📦 {{ $t('admin.loraExportDir') }}
+                  </label>
+                  <input v-model="adminConfig.lora_export_dir" type="text" placeholder="/mnt/lora_export"
+                    class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200 font-mono focus:outline-none focus:border-purple-500" />
+                </div>
               </div>
               <div>
                 <label class="text-xs text-gray-500 flex justify-between mb-1">

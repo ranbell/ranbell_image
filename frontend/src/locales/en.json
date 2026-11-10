@@ -7,7 +7,8 @@
     "inspire": "🔮 Inspire",
     "refine": "✨ Refine",
     "aiProcess": "AI Process",
-    "clear": "✕ Clear"
+    "clear": "✕ Clear",
+    "lora": "📦 LoRA bucket"
   },
   "inspire": {
     "copySuccess": "Copied",
@@ -1231,7 +1232,10 @@
       "blockNsfw": "Stop sexual content",
       "blockNsfwDesc": "The manager lets nudity, exposure and sexual direction go by. Turn it off to allow them.",
       "alwaysNote": "Whatever this is set to, anyone under age and anyone who has not or cannot agree are always stopped, as are lines that deny who she is."
-    }
+    },
+    "loraSection": "LoRA buckets",
+    "loraExportDir": "Export folder (path inside the container)",
+    "loraCaptionModel": "Caption model (empty uses the VLM model)"
   },
   "colorPick": {
     "label": "Color",
@@ -1356,7 +1360,9 @@
     "scan_sync": "Sync Changes",
     "schema_apply": "Schema Apply",
     "tag_taxonomy": "Tag Taxonomy",
-    "umap_analyze": "UMAP Analysis"
+    "umap_analyze": "UMAP Analysis",
+    "lora_caption": "LoRA captions",
+    "lora_export": "LoRA dataset export"
   },
   "invoke": {
     "subtitle": "— Summon seeds from nothing",
@@ -2149,5 +2155,61 @@
     "decided": "Settled",
     "nextSegment": "This one is fine — next ({n}/{total})",
     "reopen": "Change"
+  },
+  "lora": {
+    "title": "📦 LoRA buckets",
+    "subtitle": "Gather pictures and the VLM captions them. Name what the LoRA should learn and that is taken out of the captions. When it is ready, export a folder; training happens outside.",
+    "close": "Close",
+    "newBucket": "New bucket name",
+    "create": "Create",
+    "createWith": "Create with {n}",
+    "empty": "No buckets yet",
+    "loading": "Loading…",
+    "pick": "Pick a bucket on the left, or create one",
+    "countLine": "{n} pictures",
+    "doneN": "done {n}",
+    "pendingN": "pending {n}",
+    "captioningN": "captioning {n}",
+    "errorsN": "errors {n}",
+    "staleN": "hand-edited before the keyword change {n}",
+    "staleOne": "hand edit predates the keyword change",
+    "trigger": "Trigger word",
+    "triggerHint": "e.g. rnbl_girl",
+    "folder": "Folder",
+    "targets": "Learn",
+    "targetsHint": "Type a keyword and press Enter (commas ok)",
+    "targetsHelp": "What you list here (a person's face or hair, a style, an outfit) is removed from the captions. What the captions leave undescribed is what the trigger word absorbs.",
+    "saveSettings": "Save and apply",
+    "resume": "Resume",
+    "retryErrors": "Retry errors",
+    "overwriteStale": "Rebuild hand-edited too",
+    "addSelected": "Add {n} selected",
+    "addedN": "Added {n} pictures",
+    "export": "Export folder",
+    "zip": "Download zip",
+    "delete": "Delete",
+    "deleteConfirm": "Really delete (exported folder stays)",
+    "exportQueued": "Export started: {path}",
+    "noExportDir": "Export folder missing: {path} (check the admin setting and the mount)",
+    "lastExport": "Last export: {when} → {path}",
+    "noItems": "No pictures yet. Select some in the gallery and use \"LoRA bucket\".",
+    "showFull": "Full",
+    "hideFull": "Hide full",
+    "redescribe": "Describe again",
+    "remove": "Remove",
+    "captionPlaceholder": "Caption (editable once written)",
+    "status": {
+      "pending_describe": "to describe",
+      "pending_strip": "to strip",
+      "done": "done",
+      "edited": "hand-edited",
+      "error": "error"
+    },
+    "blocker": {
+      "empty": "No pictures",
+      "pending": "Some pictures are still pending",
+      "error": "Some pictures failed",
+      "blank_caption": "A caption is empty"
+    }
   }
 }

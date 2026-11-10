@@ -7,7 +7,8 @@
     "inspire": "🔮 インスピレーション",
     "refine": "✨ 錬成",
     "aiProcess": "AI処理",
-    "clear": "✕ 解除"
+    "clear": "✕ 解除",
+    "lora": "📦 LoRA バケット"
   },
   "inspire": {
     "copySuccess": "コピーしました",
@@ -1231,7 +1232,10 @@
       "blockNsfw": "性的表現を止める",
       "blockNsfwDesc": "裸・露出・性的な指示をマネージャーが流します。切ると通ります。",
       "alwaysNote": "この設定に関わらず、未成年と、同意していない／できない相手は常に止まります。人格を否定する言葉も同じです。"
-    }
+    },
+    "loraSection": "LoRA バケット",
+    "loraExportDir": "書き出し先フォルダ（コンテナ内のパス）",
+    "loraCaptionModel": "キャプション用モデル（空なら VLM モデル）"
   },
   "colorPick": {
     "label": "カラー",
@@ -1356,7 +1360,9 @@
     "scan_sync": "変更の取り込み",
     "schema_apply": "スキーマの適用",
     "tag_taxonomy": "タグの分類",
-    "umap_analyze": "UMAP 分析"
+    "umap_analyze": "UMAP 分析",
+    "lora_caption": "LoRA キャプション",
+    "lora_export": "LoRA データ書き出し"
   },
   "invoke": {
     "subtitle": "— 無から種を召喚する",
@@ -2149,5 +2155,61 @@
     "decided": "決まったこと",
     "nextSegment": "この区切りはOK、次へ（{n}/{total}）",
     "reopen": "直す"
+  },
+  "lora": {
+    "title": "📦 LoRA バケット",
+    "subtitle": "画像を溜めると VLM がキャプションを書きます。学習させたい対象をキーワードで指定すると、その描写をキャプションから抜きます。仕上がったらフォルダに書き出し、学習は外で行います。",
+    "close": "閉じる",
+    "newBucket": "新しいバケット名",
+    "create": "作成",
+    "createWith": "作成して{n}枚追加",
+    "empty": "バケットはまだありません",
+    "loading": "読み込み中…",
+    "pick": "左からバケットを選ぶか、新しく作ってください",
+    "countLine": "{n}枚",
+    "doneN": "済 {n}",
+    "pendingN": "未処理 {n}",
+    "captioningN": "キャプション作成中 {n}",
+    "errorsN": "エラー {n}",
+    "staleN": "手直し済みでキーワード変更後のまま {n}",
+    "staleOne": "キーワード変更前の手直しのまま",
+    "trigger": "トリガーワード",
+    "triggerHint": "例: rnbl_girl",
+    "folder": "フォルダ名",
+    "targets": "学習対象",
+    "targetsHint": "キーワードを入れて Enter（カンマ区切り可）",
+    "targetsHelp": "ここに入れたもの（人物の顔や髪、画風、衣装など）はキャプションから抜かれます。描写されないものがトリガーワードに吸い込まれます。",
+    "saveSettings": "保存して適用",
+    "resume": "続きを処理",
+    "retryErrors": "エラーをやり直す",
+    "overwriteStale": "手直し分も作り直す",
+    "addSelected": "選択中の{n}枚を追加",
+    "addedN": "{n}枚を追加しました",
+    "export": "フォルダに書き出す",
+    "zip": "zip で落とす",
+    "delete": "削除",
+    "deleteConfirm": "本当に削除（書き出し済みフォルダは残ります）",
+    "exportQueued": "書き出しを始めました: {path}",
+    "noExportDir": "書き出し先フォルダがありません: {path}（管理画面の設定とマウントを確認してください）",
+    "lastExport": "最終書き出し: {when} → {path}",
+    "noItems": "まだ画像がありません。ギャラリーで画像を選んで「LoRA バケット」から追加してください。",
+    "showFull": "全文",
+    "hideFull": "全文を閉じる",
+    "redescribe": "描写し直す",
+    "remove": "外す",
+    "captionPlaceholder": "キャプション（作成後に編集できます）",
+    "status": {
+      "pending_describe": "描写待ち",
+      "pending_strip": "抜き取り待ち",
+      "done": "済",
+      "edited": "手直し済",
+      "error": "エラー"
+    },
+    "blocker": {
+      "empty": "画像がありません",
+      "pending": "未処理の画像があります",
+      "error": "エラーの画像があります",
+      "blank_caption": "空のキャプションがあります"
+    }
   }
 }

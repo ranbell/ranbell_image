@@ -55,6 +55,11 @@ _defaults = {
     # saved configs keep working as before. Only used when Refine runs on
     # Ollama; on the external server its own model setting applies.
     "refine_model":  "",
+    # LoRA buckets (2026-11-10). ranbell only gathers, captions and hands the
+    # set over as a folder; training lives outside (e.g. /villa/apps/docker-musubi).
+    # Empty caption model uses `vlm_model`.
+    "lora_export_dir":    "/mnt/lora_export",
+    "lora_caption_model": "",
     "frozenset_classification": True,
     # Invoke / Genesis
     "invoke_gold_frame_threshold":     0.85,

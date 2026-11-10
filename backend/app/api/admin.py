@@ -50,6 +50,9 @@ class ConfigBody(BaseModel):
     muse_workflow: str | None = None
     # The forging studio's Ollama model (empty uses vlm_model)
     refine_model: str | None = None
+    # LoRA buckets: where the dataset folder is written, and the captioning model
+    lora_export_dir: str | None = None
+    lora_caption_model: str | None = None
     frozenset_classification: bool | None = None
     # GPU priority control
     auto_pause_on_generation: bool | None = None
