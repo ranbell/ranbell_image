@@ -8,6 +8,7 @@ from typing import AsyncGenerator
 import httpx
 
 from ..config import settings
+from .vlm_image import to_vlm_images
 
 logger = logging.getLogger(__name__)
 
@@ -287,7 +288,7 @@ class OllamaClient:
         think: bool | str | None = None,
         system: str | None = None,
     ) -> str:
-        images_b64 = [base64.b64encode(b).decode() for b in image_bytes_list]
+        images_b64 = [base64.b64encode(b).decode() for b in await to_vlm_images(image_bytes_list)]
         payload = self._with_think(
             {
                 "model": model or settings.vlm_model,
@@ -318,7 +319,7 @@ class OllamaClient:
         system: str | None = None,
         with_done: bool = False,
     ) -> AsyncGenerator[dict, None]:
-        images_b64 = [base64.b64encode(b).decode() for b in image_bytes_list]
+        images_b64 = [base64.b64encode(b).decode() for b in await to_vlm_images(image_bytes_list)]
         model_name = model or settings.vlm_model
         # num_predict=-1 for the same reason generate_text sets it: without it a
         # Modelfile default (often 128–512) truncates the answer, and a model

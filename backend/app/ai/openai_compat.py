@@ -39,6 +39,7 @@ import httpx
 
 from ..config import settings
 from .ollama import _THINK_BLOCK_RE, StreamParser
+from .vlm_image import to_vlm_images
 
 logger = logging.getLogger(__name__)
 
@@ -312,8 +313,9 @@ class OpenAICompatClient:
         options: dict | None = None, think: bool | str | None = None,
         system: str | None = None,
     ) -> str:
+        images = await to_vlm_images(image_bytes_list)
         return await self._complete(self._payload(
-            self._messages(prompt, system, image_bytes_list), model, options, None, think,
+            self._messages(prompt, system, images), model, options, None, think,
             stream=False,
         ))
 
@@ -331,8 +333,9 @@ class OpenAICompatClient:
         options: dict | None = None, think: bool | str | None = None,
         system: str | None = None, with_done: bool = False,
     ) -> AsyncGenerator[dict, None]:
+        images = await to_vlm_images(image_bytes_list)
         payload = self._payload(
-            self._messages(prompt, system, image_bytes_list), model, options, None, think,
+            self._messages(prompt, system, images), model, options, None, think,
             stream=True,
         )
         async for ev in self._stream(payload, with_done=with_done):
