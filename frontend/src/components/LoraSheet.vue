@@ -37,11 +37,26 @@ const form = ref(blankForm())
 function blankForm() {
   return {
     name: '', target_model: 'krea2', models: { unet: '', clip: '', vae: '' },
-    prompt: '', seed: randomSeed(), width: 1024, height: 1024, steps: 8, cfg: 1.0,
+    prompt: '', seed: randomSeed(), aspect_w: 1, aspect_h: 1, megapixels: 1, steps: 8, cfg: 1.0,
     sampler: 'euler', scheduler: 'simple', rows: [], no_trigger_column: false, bucket_id: '',
   }
 }
 function randomSeed() { return Math.floor(Math.random() * 2 ** 48) }
+
+// Size = aspect ratio × megapixels (1 MP = 1024×1024, as ComfyUI counts it),
+// each side snapped to 16 and kept inside what the backend accepts.
+const MP = 1024 * 1024
+function sizeFor(aw, ah, mp) {
+  const r = aw > 0 && ah > 0 ? aw / ah : 1
+  const area = Math.max(0.05, Number(mp) || 1) * MP
+  const snap = v => Math.min(4096, Math.max(64, Math.round(v / 16) * 16))
+  return { width: snap(Math.sqrt(area * r)), height: snap(Math.sqrt(area / r)) }
+}
+function reduceRatio(w, h) {
+  const g = (a, b) => (b ? g(b, a % b) : a)
+  const d = g(Math.round(w), Math.round(h)) || 1
+  return [Math.round(w) / d, Math.round(h) / d]
+}
 
 async function api(path, opts = {}) {
   const resp = await fetch(path, {
@@ -89,6 +104,11 @@ const estimate = computed(() => {
   const total = Math.round(s * pictureCount.value)
   return total < 90 ? t('loraSheet.estimateSec', { n: total }) : t('loraSheet.estimateMin', { n: Math.round(total / 60) })
 })
+const size = computed(() => sizeFor(form.value.aspect_w, form.value.aspect_h, form.value.megapixels))
+function swapAspect() {
+  const f = form.value
+  ;[f.aspect_w, f.aspect_h] = [f.aspect_h, f.aspect_w]
+}
 const canCreate = computed(() => form.value.rows.length && form.value.prompt.trim()
   && form.value.models.unet && form.value.models.clip && form.value.models.vae
   && strengths.value.length && !busy.value)
@@ -109,7 +129,8 @@ function remember() {
   const f = form.value
   try {
     localStorage.setItem(LS_KEY, JSON.stringify({
-      models: f.models, width: f.width, height: f.height, steps: f.steps, cfg: f.cfg,
+      models: f.models, aspect_w: f.aspect_w, aspect_h: f.aspect_h, megapixels: f.megapixels,
+      steps: f.steps, cfg: f.cfg,
       sampler: f.sampler, scheduler: f.scheduler, strengths: strengthText.value,
     }))
   } catch {}
@@ -123,11 +144,19 @@ async function startNew() {
   confirmDelete.value = false
   const f = blankForm()
   const tgt = (options.value?.targets || [])[0]
-  if (tgt) Object.assign(f, { target_model: tgt.id }, tgt.defaults)
+  if (tgt) {
+    const { width, height, ...rest } = tgt.defaults || {}
+    Object.assign(f, { target_model: tgt.id }, rest)
+    if (width && height) {
+      ;[f.aspect_w, f.aspect_h] = reduceRatio(width, height)
+      f.megapixels = Math.round((width * height / MP) * 100) / 100
+    }
+  }
   const last = recall()
   if (last) {
-    Object.assign(f, { width: last.width, height: last.height, steps: last.steps, cfg: last.cfg,
-      sampler: last.sampler, scheduler: last.scheduler })
+    Object.assign(f, { steps: last.steps, cfg: last.cfg, sampler: last.sampler, scheduler: last.scheduler })
+    if (last.megapixels) f.megapixels = last.megapixels
+    if (last.aspect_w && last.aspect_h) [f.aspect_w, f.aspect_h] = [last.aspect_w, last.aspect_h]
     f.models = { ...f.models, ...(last.models || {}) }
   }
   strengthText.value = last?.strengths || (options.value?.default_strengths || [0, 0.25, 0.5, 0.75, 1, 1.25]).join(', ')
@@ -137,8 +166,12 @@ async function startNew() {
   if (p?.sha256) {
     try {
       const pre = await api(`/api/lora/sheet-prefill/${p.sha256}`)
-      for (const k of ['prompt', 'seed', 'width', 'height', 'steps', 'cfg', 'sampler', 'scheduler']) {
+      for (const k of ['prompt', 'seed', 'steps', 'cfg', 'sampler', 'scheduler']) {
         if (pre[k] !== undefined) f[k] = pre[k]
+      }
+      // The picture's own shape; the megapixels stay the user's choice.
+      if (pre.source_width && pre.source_height) {
+        ;[f.aspect_w, f.aspect_h] = reduceRatio(pre.source_width, pre.source_height)
       }
       f.models = { ...f.models, ...(pre.models || {}) }
     } catch (e) { toast(e.message, 'error') }
@@ -162,7 +195,8 @@ async function create() {
   busy.value = true
   try {
     const f = form.value
-    const body = { ...f, strengths: strengths.value, seed: f.seed === '' ? null : Number(f.seed) }
+    const { aspect_w, aspect_h, megapixels, ...rest } = f
+    const body = { ...rest, ...size.value, strengths: strengths.value, seed: f.seed === '' ? null : Number(f.seed) }
     const s = await api('/api/lora/sheets', { method: 'POST', body })
     remember()
     toast(t('loraSheet.queued', { n: s.pictures }), 'info')
@@ -344,9 +378,17 @@ onBeforeUnmount(() => { clearTimeout(pollTimer); window.removeEventListener('key
           <label class="flex flex-col gap-1 text-[11px] text-gray-400">
             {{ t('loraSheet.size') }}
             <span class="flex items-center gap-1">
-              <input v-model.number="form.width" type="number" step="16" class="w-20 px-2 py-1 rounded-lg bg-gray-900 border border-gray-700 text-xs" />
-              ×
-              <input v-model.number="form.height" type="number" step="16" class="w-20 px-2 py-1 rounded-lg bg-gray-900 border border-gray-700 text-xs" />
+              <input v-model.number="form.aspect_w" type="number" min="1" :title="t('loraSheet.aspect')"
+                class="w-16 px-2 py-1 rounded-lg bg-gray-900 border border-gray-700 text-xs" />
+              :
+              <input v-model.number="form.aspect_h" type="number" min="1" :title="t('loraSheet.aspect')"
+                class="w-16 px-2 py-1 rounded-lg bg-gray-900 border border-gray-700 text-xs" />
+              <button type="button" class="px-1.5 rounded-lg bg-gray-800 hover:bg-gray-700" :title="t('loraSheet.swapAspect')"
+                @click="swapAspect">⇄</button>
+              <input v-model.number="form.megapixels" type="number" min="0.25" max="16" step="0.25" :title="t('loraSheet.megapixels')"
+                class="w-16 px-2 py-1 rounded-lg bg-gray-900 border border-gray-700 text-xs" />
+              <span class="text-gray-500">MP</span>
+              <span class="font-mono text-gray-300">→ {{ size.width }}×{{ size.height }}</span>
             </span>
           </label>
           <label class="flex flex-col gap-1 text-[11px] text-gray-400 flex-1 min-w-48">

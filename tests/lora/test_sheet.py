@@ -373,3 +373,27 @@ async def test_model_lists_come_from_models_or_object_info():
 def test_default_name_is_the_folder_or_the_file():
     assert sh.new_sheet(_body())["name"] == "my_style"
     assert sh.new_sheet(_body(rows=[{"lora": "x/a.safetensors"}, {"lora": "b.safetensors"}]))["name"] == "a"
+
+
+def test_prefill_takes_the_shape_from_the_picture_itself():
+    # The latent said 1024x1024, but the picture on disk is 832x1216 (cropped,
+    # or drawn by a graph whose size node ranbell cannot read): the file wins.
+    doc = {"raw_metadata": {"content": {
+        "1": {"class_type": "EmptyLatentImage", "inputs": {"width": 1024, "height": 1024}}}}}
+    p = prefill_from_doc(doc, (832, 1216))
+    assert (p["source_width"], p["source_height"]) == (832, 1216)
+    # Without the file the latent size is the fallback; without either, nothing.
+    p = prefill_from_doc(doc)
+    assert (p["source_width"], p["source_height"]) == (1024, 1024)
+    assert "source_width" not in prefill_from_doc({})
+
+
+def test_prefill_reads_the_pixel_size_from_the_file_header(tmp_path):
+    from PIL import Image
+
+    from app.lora.sheet_api import _pixel_size
+
+    path = tmp_path / "x.png"
+    Image.new("RGB", (640, 960)).save(path)
+    assert _pixel_size(str(path)) == (640, 960)
+    assert _pixel_size(str(tmp_path / "missing.png")) is None

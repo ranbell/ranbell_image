@@ -2271,6 +2271,9 @@
     "baseCol": "0 (none)",
     "noTriggerCol": "{s} · no trigger",
     "waiting": "waiting",
-    "arrows": "←→↑↓ to move / Esc to close"
+    "arrows": "←→↑↓ to move / Esc to close",
+    "aspect": "Aspect ratio (the source picture's, when there is one)",
+    "swapAspect": "Swap width and height",
+    "megapixels": "Pixel count (1 MP = 1024×1024)"
   }
 }

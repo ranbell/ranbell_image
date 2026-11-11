@@ -118,9 +118,13 @@ def _resolve(graph: dict, value: Any, depth: int = 0) -> Any:
     return None
 
 
-def prefill_from_doc(doc: dict) -> dict:
+def prefill_from_doc(doc: dict, image_size: tuple[int, int] | None = None) -> dict:
     """Sheet settings taken from a gallery picture: its prompt and seed, and —
-    when its own ComfyUI graph is stored — the model files and sampling."""
+    when its own ComfyUI graph is stored — the model files and sampling.
+
+    ``image_size`` is the picture's own pixel size. It is what the sheet's
+    aspect ratio follows (an upscaled or cropped picture still has the shape
+    it was meant to have); the graph's latent size is only a fallback."""
     cr = doc.get("creation_record") or {}
     mi = doc.get("model_info") or {}
     out: dict[str, Any] = {
@@ -154,7 +158,25 @@ def prefill_from_doc(doc: dict) -> dict:
                 v = _resolve(graph, inp.get(side))
                 if isinstance(v, (int, float)):
                     out[side] = int(v)
+    if image_size and image_size[0] > 0 and image_size[1] > 0:
+        out["source_width"], out["source_height"] = image_size
+    elif out.get("width") and out.get("height"):
+        out["source_width"], out["source_height"] = out["width"], out["height"]
     return {k: v for k, v in out.items() if v not in (None, "")}
+
+
+def _pixel_size(path: str) -> tuple[int, int] | None:
+    """Width and height from the file header (no decode). EXIF-rotated photos
+    report their stored size; ranbell's own pictures carry no rotation."""
+    from PIL import Image
+
+    from ..scanner.walk import PIL_FORMATS
+
+    try:
+        with Image.open(path, formats=PIL_FORMATS) as im:
+            return im.size
+    except Exception:
+        return None
 
 
 @router.get("/sheet-prefill/{sha256}")
@@ -162,7 +184,10 @@ async def sheet_prefill(sha256: str, request: Request):
     doc = await _db(request).get(sha256)
     if not doc:
         raise HTTPException(404, "picture not found")
-    return prefill_from_doc(doc)
+    size = None
+    if doc.get("path"):
+        size = await asyncio.get_running_loop().run_in_executor(None, _pixel_size, doc["path"])
+    return prefill_from_doc(doc, size)
 
 
 @router.get("/sheets")

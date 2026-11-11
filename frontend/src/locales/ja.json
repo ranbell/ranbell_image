@@ -2271,6 +2271,9 @@
     "baseCol": "0（なし）",
     "noTriggerCol": "{s}・トリガーなし",
     "waiting": "待ち",
-    "arrows": "←→↑↓ で移動 / Esc で閉じる"
+    "arrows": "←→↑↓ で移動 / Esc で閉じる",
+    "aspect": "縦横比（参照元の絵があればその比率）",
+    "swapAspect": "縦横を入れ替える",
+    "megapixels": "画素数（1 MP = 1024×1024）"
   }
 }
