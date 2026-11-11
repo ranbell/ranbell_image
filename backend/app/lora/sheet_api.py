@@ -118,13 +118,20 @@ def _resolve(graph: dict, value: Any, depth: int = 0) -> Any:
     return None
 
 
-def prefill_from_doc(doc: dict, image_size: tuple[int, int] | None = None) -> dict:
+def prefill_from_doc(doc: dict, image_size: tuple[int, int] | None = None,
+                     clip_type: str = "") -> dict:
     """Sheet settings taken from a gallery picture: its prompt and seed, and —
     when its own ComfyUI graph is stored — the model files and sampling.
 
     ``image_size`` is the picture's own pixel size. It is what the sheet's
     aspect ratio follows (an upscaled or cropped picture still has the shape
-    it was meant to have); the graph's latent size is only a fallback."""
+    it was meant to have); the graph's latent size is only a fallback.
+
+    ``clip_type`` is the sheet target's CLIPLoader type. When the picture's
+    graph loads no text encoder of that type, it was drawn by another model
+    (an Anima picture opened for a Krea2 sheet): its model files and sampling
+    would build a graph that cannot run, so only the prompt, seed and shape
+    are taken, and ``foreign`` says why the rest was left alone."""
     cr = doc.get("creation_record") or {}
     mi = doc.get("model_info") or {}
     out: dict[str, Any] = {
@@ -134,14 +141,29 @@ def prefill_from_doc(doc: dict, image_size: tuple[int, int] | None = None) -> di
     }
     graph = (doc.get("raw_metadata") or {}).get("content")
     if not isinstance(graph, dict):
-        return out
+        return _with_shape(out, image_size)
+    if clip_type:
+        types = [str((n.get("inputs") or {}).get("type") or "") for n in graph.values()
+                 if isinstance(n, dict) and n.get("class_type") == "CLIPLoader"]
+        if clip_type not in types:
+            for node in graph.values():
+                if isinstance(node, dict) and str(node.get("class_type", "")).startswith(
+                        ("EmptyLatent", "EmptySD3")):
+                    _latent_size(graph, node, out)
+                elif (isinstance(node, dict) and out["seed"] is None
+                      and node.get("class_type") in ("KSampler", "KSamplerAdvanced")):
+                    inp = node.get("inputs") or {}
+                    out["seed"] = _resolve(graph, inp.get("seed", inp.get("noise_seed")))
+            out["foreign"] = {"clip_types": [t for t in types if t]}
+            return _with_shape(out, image_size)
     for node in graph.values():
         if not isinstance(node, dict):
             continue
         ct, inp = node.get("class_type", ""), node.get("inputs") or {}
         if ct == "UNETLoader" and isinstance(inp.get("unet_name"), str):
             out["models"]["unet"] = inp["unet_name"]
-        elif ct == "CLIPLoader" and isinstance(inp.get("clip_name"), str):
+        elif (ct == "CLIPLoader" and isinstance(inp.get("clip_name"), str)
+              and (not clip_type or inp.get("type") == clip_type)):
             out["models"]["clip"] = inp["clip_name"]
         elif ct == "VAELoader" and isinstance(inp.get("vae_name"), str):
             out["models"]["vae"] = inp["vae_name"]
@@ -153,11 +175,19 @@ def prefill_from_doc(doc: dict, image_size: tuple[int, int] | None = None) -> di
                     out[dst] = v
             if out["seed"] is None:
                 out["seed"] = _resolve(graph, inp.get("seed", inp.get("noise_seed")))
-        elif ct.startswith("EmptyLatent") or ct == "EmptySD3LatentImage":
-            for side in ("width", "height"):
-                v = _resolve(graph, inp.get(side))
-                if isinstance(v, (int, float)):
-                    out[side] = int(v)
+        elif ct.startswith(("EmptyLatent", "EmptySD3")):
+            _latent_size(graph, node, out)
+    return _with_shape(out, image_size)
+
+
+def _latent_size(graph: dict, node: dict, out: dict) -> None:
+    for side in ("width", "height"):
+        v = _resolve(graph, (node.get("inputs") or {}).get(side))
+        if isinstance(v, (int, float)):
+            out[side] = int(v)
+
+
+def _with_shape(out: dict, image_size: tuple[int, int] | None) -> dict:
     if image_size and image_size[0] > 0 and image_size[1] > 0:
         out["source_width"], out["source_height"] = image_size
     elif out.get("width") and out.get("height"):
@@ -180,14 +210,14 @@ def _pixel_size(path: str) -> tuple[int, int] | None:
 
 
 @router.get("/sheet-prefill/{sha256}")
-async def sheet_prefill(sha256: str, request: Request):
+async def sheet_prefill(sha256: str, request: Request, target: str = ""):
     doc = await _db(request).get(sha256)
     if not doc:
         raise HTTPException(404, "picture not found")
     size = None
     if doc.get("path"):
         size = await asyncio.get_running_loop().run_in_executor(None, _pixel_size, doc["path"])
-    return prefill_from_doc(doc, size)
+    return prefill_from_doc(doc, size, target_models.get(target).clip_type)
 
 
 @router.get("/sheets")

@@ -397,3 +397,29 @@ def test_prefill_reads_the_pixel_size_from_the_file_header(tmp_path):
     Image.new("RGB", (640, 960)).save(path)
     assert _pixel_size(str(path)) == (640, 960)
     assert _pixel_size(str(tmp_path / "missing.png")) is None
+
+
+def test_prefill_from_another_models_picture_keeps_only_prompt_seed_and_shape():
+    # An Anima picture opened for a Krea2 sheet: taking its text encoder made
+    # ComfyUI fail ("expects 12x2560 features but got 1024").
+    graph = {
+        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "anima.safetensors"}},
+        "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": "qwen_3_06b.safetensors",
+                                                      "type": "stable_diffusion"}},
+        "3": {"class_type": "VAELoader", "inputs": {"vae_name": "qwen_image_vae.safetensors"}},
+        "4": {"class_type": "KSampler", "inputs": {"seed": 77, "steps": 30, "cfg": 4.5,
+                                                   "sampler_name": "er_sde", "scheduler": "sgm_uniform"}},
+        "5": {"class_type": "EmptyLatentImage", "inputs": {"width": 896, "height": 1152}},
+    }
+    doc = {"positive_prompt": "a girl", "raw_metadata": {"content": graph}}
+    p = prefill_from_doc(doc, None, "krea2")
+    assert p["foreign"] == {"clip_types": ["stable_diffusion"]}
+    assert (p["prompt"], p["seed"], p["source_width"], p["source_height"]) == ("a girl", 77, 896, 1152)
+    assert not p.get("models")
+    assert not {"steps", "cfg", "sampler", "scheduler"} & p.keys()
+    # The same picture, opened with no target in mind, still gives everything.
+    assert prefill_from_doc(doc)["models"]["clip"] == "qwen_3_06b.safetensors"
+    # A Krea2 picture is not foreign.
+    graph["2"]["inputs"]["type"] = "krea2"
+    p = prefill_from_doc(doc, None, "krea2")
+    assert "foreign" not in p and p["cfg"] == 4.5

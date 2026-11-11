@@ -165,7 +165,12 @@ async function startNew() {
   const p = props.prefill
   if (p?.sha256) {
     try {
-      const pre = await api(`/api/lora/sheet-prefill/${p.sha256}`)
+      const pre = await api(`/api/lora/sheet-prefill/${p.sha256}?target=${encodeURIComponent(f.target_model)}`)
+      // Drawn by another model: only its prompt, seed and shape carry over.
+      if (pre.foreign) {
+        const types = (pre.foreign.clip_types || []).join(', ')
+        toast(types ? t('loraSheet.foreignSource', { types }) : t('loraSheet.foreignSourceUnknown'), 'info')
+      }
       for (const k of ['prompt', 'seed', 'steps', 'cfg', 'sampler', 'scheduler']) {
         if (pre[k] !== undefined) f[k] = pre[k]
       }
@@ -516,11 +521,11 @@ onBeforeUnmount(() => { clearTimeout(pollTimer); window.removeEventListener('key
                       class="w-44 rounded-lg object-cover bg-gray-900"
                       :style="{ aspectRatio: `${current.width} / ${current.height}` }" />
                   </button>
-                  <div v-else class="w-44 rounded-lg flex items-center justify-center text-[11px] p-2 text-center"
+                  <div v-else class="w-44 rounded-lg flex items-center justify-center text-[11px] p-2 text-center break-words overflow-hidden"
                     :style="{ aspectRatio: `${current.width} / ${current.height}` }"
                     :class="render(key).status === 'error' ? 'bg-red-950/50 text-red-300' : 'bg-gray-900 text-gray-500 motion-safe:animate-pulse'"
                     :title="render(key).error || ''">
-                    {{ render(key).status === 'error' ? `⚠ ${render(key).error}`.slice(0, 120) : t('loraSheet.waiting') }}
+                    {{ render(key).status === 'error' ? `⚠ ${render(key).error}`.slice(0, 220) : t('loraSheet.waiting') }}
                   </div>
                 </td>
               </tr>

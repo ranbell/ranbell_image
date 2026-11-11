@@ -36,6 +36,10 @@ class Target:
     build_graph: Callable[..., dict] | None = None
     #: Sheet settings a new sheet starts from: how this model is run at inference.
     sheet_defaults: dict[str, Any] = field(default_factory=dict)
+    #: The CLIPLoader ``type`` its graphs use. A gallery picture whose graph
+    #: loads its text encoder with another type was drawn by another model, so
+    #: its model files and sampling must not seed a sheet for this one.
+    clip_type: str = ""
 
 
 def _hints(stored_prompt: str, tags: list[str]) -> list[str]:
@@ -79,6 +83,7 @@ TARGETS: dict[str, Target] = {
         id="krea2", label="Krea 2", caption_style="prose", available=True,
         describe=_prose_describe("krea2"),
         build_graph=sheet_graph.build_krea2,
+        clip_type=sheet_graph.KREA2_CLIP_TYPE,
         # Turbo, as the LoRA is used (Krea: train on Raw, infer on Turbo).
         sheet_defaults={"steps": 8, "cfg": 1.0, "sampler": "euler", "scheduler": "simple",
                         "width": 1024, "height": 1024},

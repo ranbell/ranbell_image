@@ -23,6 +23,7 @@ CORE_NODES = frozenset({
 })
 
 SAVE_PREFIX = "lora_sheet"
+KREA2_CLIP_TYPE = "krea2"
 
 
 class SheetGraphError(ValueError):
@@ -68,7 +69,7 @@ def build_krea2(*, models: Models, sampling: Sampling, prompt: str,
         "1": {"class_type": "UNETLoader",
               "inputs": {"unet_name": models.unet, "weight_dtype": "default"}},
         "2": {"class_type": "CLIPLoader",
-              "inputs": {"clip_name": models.clip, "type": "krea2", "device": "default"}},
+              "inputs": {"clip_name": models.clip, "type": KREA2_CLIP_TYPE, "device": "default"}},
         "3": {"class_type": "VAELoader", "inputs": {"vae_name": models.vae}},
         "4": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["2", 0]}},
         "5": {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["4", 0]}},
