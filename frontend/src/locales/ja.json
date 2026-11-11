@@ -2180,6 +2180,7 @@
     "staleOne": "キーワード変更前の手直しのまま",
     "trigger": "トリガーワード",
     "triggerHint": "例: rnbl_girl",
+    "noTriggerWarning": "トリガーが空です。キャプションから消した特徴を受け止める言葉がないので、効きの弱い LoRA になります。造語を1つ入れてください。",
     "folder": "フォルダ名",
     "targets": "学習対象",
     "targetsHint": "キーワードを入れて Enter（カンマ区切り可）",

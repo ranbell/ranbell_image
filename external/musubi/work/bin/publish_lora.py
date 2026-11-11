@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Make a copy of a LoRA that is fit to publish (Civitai etc.).
 
-    docker compose exec musubi publish flt_style                # final LoRA of the latest flt_style run
-    docker compose exec musubi publish flt_style --epoch 20     # that epoch instead
+    docker compose exec musubi publish my_style                # final LoRA of the latest my_style run
+    docker compose exec musubi publish my_style --epoch 20     # that epoch instead
     docker compose exec musubi publish /work/output/<run>/<file>.safetensors
-    docker compose exec musubi publish flt_style --all          # drop every metadata field
+    docker compose exec musubi publish my_style --all          # drop every metadata field
 
 The weights are copied byte for byte; only the safetensors header's
 ``__metadata__`` changes. By default the training settings stay (rank, lr,

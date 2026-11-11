@@ -154,6 +154,16 @@ def ensure_job(spooler, *, db, ollama, bucket: dict) -> str | None:
         raise
 
 
+async def resume_all(spooler, *, db, ollama) -> int:
+    """At startup: a restart drops queued jobs, so pick up every bucket that
+    still has pictures waiting. Returns how many jobs were queued."""
+    n = 0
+    for bucket in bk.pending_buckets(await bk.list_all(db)):
+        if ensure_job(spooler, db=db, ollama=ollama, bucket=bucket):
+            n += 1
+    return n
+
+
 async def _caption_model(db) -> str:
     from ..runtime_config import get_runtime_config
 

@@ -2,7 +2,7 @@
 """How a training run is going, in the terminal.
 
     docker compose exec musubi status                 # latest run
-    docker compose exec musubi status flt_style       # latest run of that dataset
+    docker compose exec musubi status my_style       # latest run of that dataset
     docker compose exec musubi status --list          # every run
     docker compose exec musubi status -w 60           # refresh every 60 s (Ctrl-C to leave)
 

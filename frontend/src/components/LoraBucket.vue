@@ -387,6 +387,8 @@ onBeforeUnmount(() => { clearTimeout(pollTimer); clearTimeout(exportTimer) })
               </select>
               <span class="text-[11px] text-gray-500">{{ t('lora.folder') }}: {{ current.slug }}</span>
             </div>
+            <p v-if="!settings.trigger.trim() && settings.targets.length"
+              class="text-[11px] text-amber-300">⚠ {{ t('lora.noTriggerWarning') }}</p>
             <div class="flex flex-wrap items-center gap-1.5">
               <label class="text-xs text-gray-400" :title="t('lora.targetsHelp')">{{ t('lora.targets') }}</label>
               <span v-for="(tg, i) in settings.targets" :key="tg"

@@ -30,12 +30,12 @@ def _run(st, name, log=""):
 
 def test_dataset_name_picks_its_latest_run(st):
     import os, time
-    a = _run(st, "flt_style-20261111-0035")
-    b = _run(st, "flt_style-20261111-0040")
+    a = _run(st, "my_style-20261111-0035")
+    b = _run(st, "my_style-20261111-0040")
     _run(st, "other-20261111-0100")
     os.utime(a, (time.time() - 100,) * 2)
-    assert st.pick("flt_style") == b
-    assert st.pick("flt_style-20261111-0035") == a
+    assert st.pick("my_style") == b
+    assert st.pick("my_style-20261111-0035") == a
 
 
 def test_progress_and_settings_come_from_the_log(st):

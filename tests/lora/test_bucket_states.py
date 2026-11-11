@@ -127,3 +127,17 @@ def test_export_waits_for_every_picture():
 def test_hand_correction_needs_a_known_picture():
     with pytest.raises(bk.BucketError):
         bk.set_caption(_bucket(), "nope", "x")
+
+
+def test_a_hand_correction_during_describe_is_kept():
+    """Edited while the VLM was still looking: the late description must not
+    send the picture on to strip (which would overwrite the hand's words)."""
+    b = bk.new_bucket("x", slug="x", trigger="t", targets=["red hair"])
+    bk.add_items(b, ["a"])
+    bk.set_caption(b, "a", "t, my own words")
+    bk.apply_described(b, "a", "a woman with red hair")
+    it = b["items"][0]
+    assert (it["status"], it["caption"], it["edited"]) == (bk.DONE, "t, my own words", True)
+    assert it["full_caption"] == "a woman with red hair"  # kept for a later forced recompute
+    bk.apply_error(b, "a", "boom")
+    assert it["status"] == bk.DONE and not it["error"]

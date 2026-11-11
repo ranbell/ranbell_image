@@ -260,6 +260,15 @@ async def lifespan(app: FastAPI):
     spooler.submit(JobLane.SYNC, "scan_heal", run_scan_heal,
                    db=db, ollama=ollama, spooler=spooler)
 
+    # LoRA buckets whose captioning was cut off by the restart carry on.
+    from .lora.captioner import resume_all as resume_lora_captions
+    try:
+        resumed = await resume_lora_captions(spooler, db=db, ollama=ollama)
+        if resumed:
+            logger.info("[lora] resumed captioning for %d bucket(s)", resumed)
+    except Exception as exc:  # never block startup on this
+        logger.warning("[lora] could not resume captioning: %s", exc)
+
     yield
 
     watcher.stop()

@@ -68,7 +68,7 @@ Set both at the top of the bucket screen and press **"Save and apply"**.
 ### Trigger word
 
 The word that calls the LoRA; it goes in front of every caption.
-Use a **made-up word** (`flt_style`, `rnbl_girl`). A real word mixes with what the model already knows.
+Use a **made-up word** (`zqx_style`, `rnbl_girl`). A real word mixes with what the model already knows.
 
 ### Targets (keywords)
 
@@ -106,10 +106,14 @@ Hand edits are never overwritten by a recompute. To rebuild them after changing 
 
 ```
 <export folder>/<bucket>/
-  <sha>.png   picture (a copy of the original)
+  <sha>.png   picture, converted to PNG with every bit of metadata removed
   <sha>.txt   caption
-  meta.json   model, trigger, targets, where each picture came from
+  meta.json   model, trigger, targets, each picture's size
 ```
+
+JPEG and WebP pictures become PNG too. The prompt, the ComfyUI workflow, EXIF and colour
+profiles are all dropped (orientation and colour are applied to the pixels first, so nothing
+looks different). Nothing says where the originals live, so the dataset can be handed on as it is.
 
 The trainer reads the model from `meta.json` and picks that model's recipe.
 

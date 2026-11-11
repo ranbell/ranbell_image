@@ -2180,6 +2180,7 @@
     "staleOne": "hand edit predates the keyword change",
     "trigger": "Trigger word",
     "triggerHint": "e.g. rnbl_girl",
+    "noTriggerWarning": "The trigger is empty. Nothing will take on the features removed from the captions, so the LoRA comes out weak. Add one made-up word.",
     "folder": "Folder",
     "targets": "Learn",
     "targetsHint": "Type a keyword and press Enter (commas ok)",

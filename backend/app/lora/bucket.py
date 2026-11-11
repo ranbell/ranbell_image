@@ -238,6 +238,9 @@ def apply_described(bucket: dict, sha: str, full_caption: str) -> None:
     if it is None:  # removed while it was being read
         return
     it["full_caption"] = full_caption.strip()
+    if it["edited"]:
+        # Corrected by hand while the VLM was still looking: the hand wins.
+        return
     it["status"], it["error"] = PENDING_STRIP, ""
 
 
@@ -252,7 +255,7 @@ def apply_stripped(bucket: dict, sha: str, caption: str, *, expected_full: str) 
 
 def apply_error(bucket: dict, sha: str, message: str) -> None:
     it = find_item(bucket, sha)
-    if it is not None:
+    if it is not None and not it["edited"]:
         it["status"], it["error"] = ERROR, message
 
 
@@ -279,6 +282,11 @@ def export_blockers(bucket: dict) -> list[str]:
     if any(it["status"] == DONE and not it["caption"] for it in bucket["items"]):
         reasons.append("blank_caption")
     return reasons
+
+
+def pending_buckets(rows: list[dict]) -> list[dict]:
+    """Buckets with pictures still waiting for a caption step."""
+    return [b for b in rows if pending_count(b)]
 
 
 def summary(bucket: dict) -> dict[str, Any]:

@@ -13,12 +13,12 @@ BIN = Path(__file__).resolve().parents[1] / "work" / "bin" / "publish_lora.py"
 
 META = {
     "ss_network_dim": "32", "ss_learning_rate": "0.0001", "ss_num_epochs": "30",
-    "modelspec.title": "flt_style", "modelspec.date": "2026-11-11T00:47:52",
+    "modelspec.title": "my_style", "modelspec.date": "2026-11-11T00:47:52",
     "ss_training_started_at": "1794325257.5", "ss_training_finished_at": "1794325672.6",
     "ss_session_id": "1727652873", "ss_sd_model_name": "raw.safetensors",
     "ss_vae_name": "qwen_image_vae.safetensors",
-    "ss_tag_frequency": json.dumps({"flt_style": {"a girl": 3}}),
-    "ss_datasets": json.dumps([{"resolution": [1024, 1024], "image_directory": "flt_style",
+    "ss_tag_frequency": json.dumps({"my_style": {"a girl": 3}}),
+    "ss_datasets": json.dumps([{"resolution": [1024, 1024], "image_directory": "my_style",
                                 "num_repeats": 1}]),
 }
 
@@ -55,7 +55,7 @@ def test_weights_are_copied_byte_for_byte(pub, tmp_path):
 
 def test_settings_stay_and_identifying_fields_go(pub):
     meta, removed = pub.clean_metadata(META, drop_all=False)
-    assert meta["ss_network_dim"] == "32" and meta["modelspec.title"] == "flt_style"
+    assert meta["ss_network_dim"] == "32" and meta["modelspec.title"] == "my_style"
     for gone in ("modelspec.date", "ss_training_started_at", "ss_session_id",
                  "ss_sd_model_name", "ss_vae_name", "ss_tag_frequency"):
         assert gone not in meta
@@ -74,11 +74,11 @@ def test_all_drops_every_field(pub, tmp_path):
 
 
 def test_run_name_and_epoch_pick_the_file(pub, tmp_path):
-    run = pub.OUTPUT / "flt_style-20261111-0040"
+    run = pub.OUTPUT / "my_style-20261111-0040"
     run.mkdir(parents=True)
-    for f in ("flt_style.safetensors", "flt_style-000020.safetensors"):
+    for f in ("my_style.safetensors", "my_style-000020.safetensors"):
         (run / f).write_bytes(b"")
-    assert pub.resolve("flt_style", None).name == "flt_style.safetensors"
-    assert pub.resolve("flt_style", 20).name == "flt_style-000020.safetensors"
+    assert pub.resolve("my_style", None).name == "my_style.safetensors"
+    assert pub.resolve("my_style", 20).name == "my_style-000020.safetensors"
     with pytest.raises(SystemExit, match="000007"):
-        pub.resolve("flt_style", 7)
+        pub.resolve("my_style", 7)

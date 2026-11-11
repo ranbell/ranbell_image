@@ -175,3 +175,27 @@ def test_one_job_per_bucket():
         assert submitted[0][0].value == "eval"
     finally:
         captioner._active.discard(b["id"])
+
+
+@pytest.mark.asyncio
+async def test_startup_resumes_every_bucket_with_waiting_pictures(monkeypatch):
+    submitted = []
+
+    class Spooler:
+        def submit(self, lane, title, func, meta=None, **kw):
+            submitted.append(kw["bucket_id"])
+            return f"eval-{len(submitted)}"
+
+    waiting = bk.new_bucket("w", slug="w")
+    bk.add_items(waiting, ["a"])
+    finished = bk.new_bucket("f", slug="f")
+
+    async def list_all(db):
+        return [waiting, finished]
+
+    monkeypatch.setattr(bk, "list_all", list_all)
+    try:
+        assert await captioner.resume_all(Spooler(), db=None, ollama=None) == 1
+        assert submitted == [waiting["id"]]
+    finally:
+        captioner._active.discard(waiting["id"])

@@ -47,13 +47,14 @@ async def test_folder_has_picture_caption_pairs_and_meta(tmp_path):
     final = export.write_folder(entries, out, b["slug"])
 
     assert sorted(p.name for p in final.iterdir()) == [
-        "aa.png", "aa.txt", "bb.txt", "bb.webp", "meta.json"]
+        "aa.png", "aa.txt", "bb.png", "bb.txt", "meta.json"]
     assert (final / "aa.txt").read_text() == "rnbl, a woman aa\n"
     meta = json.loads((final / "meta.json").read_text())
     assert meta["format"] == export.FORMAT
     assert meta["trigger"] == "rnbl" and meta["targets"] == ["red hair"]
     assert (meta["target_model"], meta["caption_style"]) == ("krea2", "prose")
     assert meta["items"][1]["width"] == 10 and meta["items"][1]["height"] == 20
+    assert str(src) not in (final / "meta.json").read_text()  # no host paths
     assert [p.name for p in out.iterdir()] == ["red"]  # no temp dirs left behind
 
 
@@ -123,3 +124,48 @@ def test_admin_shows_whether_the_export_folder_is_usable(tmp_path):
         assert lora_export_dir_status(str(ro)) == expected
     finally:
         ro.chmod(0o755)
+
+
+def test_pictures_are_bare_pngs(tmp_path):
+    """Prompt chunks, EXIF and ICC never leave; orientation is baked in."""
+    from PIL import Image, PngImagePlugin
+
+    png = tmp_path / "a.png"
+    info = PngImagePlugin.PngInfo()
+    info.add_text("prompt", '{"secret": "workflow"}')
+    info.add_text("parameters", "a secret prompt")
+    Image.new("RGBA", (8, 4), (255, 0, 0, 128)).save(png, pnginfo=info)
+
+    jpg = tmp_path / "b.jpg"
+    exif = Image.Exif()
+    exif[0x0112] = 6  # rotate 90° on display
+    exif[0x010F] = "SomeCamera"
+    Image.new("RGB", (8, 4), (0, 0, 255)).save(jpg, exif=exif)
+
+    for src, mode, size in ((png, "RGBA", (8, 4)), (jpg, "RGB", (4, 8))):
+        data = export.clean_png(src)
+        out = tmp_path / "out.png"
+        out.write_bytes(data)
+        with Image.open(out) as im:
+            assert im.format == "PNG" and im.mode == mode and im.size == size
+            assert not im.text and "exif" not in im.info and "icc_profile" not in im.info
+        assert b"secret" not in data and b"SomeCamera" not in data
+        assert export._image_size(src) == size
+
+
+@pytest.mark.asyncio
+async def test_zip_pictures_are_bare_pngs_too(tmp_path):
+    from PIL import Image, PngImagePlugin
+
+    src = tmp_path / "one.png"
+    info = PngImagePlugin.PngInfo()
+    info.add_text("prompt", "secret")
+    Image.new("RGB", (4, 4)).save(src, pnginfo=info)
+    entries = await export.plan(FakeDb({"aa": {"path": str(src)}}), _ready_bucket(["aa"]))
+    path = export.write_zip(entries, "red")
+    try:
+        with zipfile.ZipFile(path) as zf:
+            assert b"secret" not in zf.read("red/aa.png")
+            assert str(tmp_path) not in zf.read("red/meta.json").decode()
+    finally:
+        path.unlink()
