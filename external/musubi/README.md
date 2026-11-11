@@ -188,9 +188,24 @@ The dataset's `meta.json` names its `target_model`; that picks what gets trained
 
 A dataset for a `target_model` without a recipe stops before anything runs and lists the supported ones.
 
-**About Anima (as of 2026-11):** the musubi-tuner commit pinned here has no Anima training scripts. Supporting
-it means waiting for musubi (bump `MUSUBI_COMMIT` in `setup.sh`) or a Recipe that uses another trainer.
-Anima was trained on tag-style prompts, so its ranbell Target would likely use `caption_style="tags"`.
+**About Anima (looked into 2026-11; not supported for now):**
+
+- musubi-tuner has no Anima support (no training script on main either). Anima trains with
+  **kohya-ss/sd-scripts' `anima_train_network.py`** (documented) or the author's diffusion-pipe. A Recipe for
+  it would need recipes to own their dataset-config and command building per trainer (sd-scripts uses a
+  different dataset TOML and caches through options of the training command).
+- Files: the **Base** DiT (`anima-base-v1.0.safetensors` — the model card says to train LoRAs on Base),
+  the text encoder `qwen_3_06b_base.safetensors` (Qwen3 0.6B), and the same `qwen_image_vae.safetensors` as Krea 2.
+- Notes: **do not train the LLM adapter** (it degrades easily); keep the learning rate low (the card: 2e-5 for
+  rank 32); `--fp8_base` is unsupported, but at 2B bf16 should fit; `sigmoid` timesteps, shift 1.0.
+- Captions mix Danbooru-style tags (lowercase, spaces, a fixed order) and prose; the ranbell Target would use
+  `caption_style="tags"`, with each picture's WD14 tags passed as recommendations.
+- License: **CircleStone Labs Non-Commercial** (+ NVIDIA Open Model License) — the model and LoRAs are
+  non-commercial; generated images are not restricted.
+
+Why it was set aside: Krea 2 Turbo is faster and follows prompts better. **To get an Anima look, gather pictures
+made with an Anima model into a bucket and keep the target model at Krea 2.** (The source model of the
+pictures is unrelated to the target. Check the output terms of any fine-tune you take pictures from.)
 
 ## Tests
 

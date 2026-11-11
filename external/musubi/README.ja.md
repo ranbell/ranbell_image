@@ -189,9 +189,23 @@ docker compose exec musubi publish <bucket> --all        # メタデータを全
 
 知らない `target_model` のデータセットを渡すと、学習は走り出す前に止まり、対応しているモデルの一覧を出します。
 
-**Anima について（2026-11 時点）：** ここで固定している musubi-tuner のコミットには、Anima 用の学習スクリプトがありません。
-対応するときは、musubi の更新（`setup.sh` の `MUSUBI_COMMIT`）を待つか、別の学習器を使う Recipe を足すことになります。
-Anima はタグ中心のプロンプトで学習されたモデルなので、ranbell 側の Target は `caption_style="tags"` の描写指示になる見込みです。
+**Anima について（2026-11 時点の調査。対応は見送り）：**
+
+- musubi-tuner は Anima に対応していません（main にも学習スクリプトがない）。学習するなら
+  **kohya-ss/sd-scripts の `anima_train_network.py`**（公式ドキュメントあり）か、作者の diffusion-pipe。
+  Recipe を足すなら「学習器ごとに設定ファイルとコマンドの組み立てを持つ」形に広げることになる
+  （sd-scripts はデータセット TOML の書式が違い、キャッシュも学習コマンドのオプションで行う）
+- 必要なファイル：DiT は **Base 版**（`anima-base-v1.0.safetensors`。モデルカードが「LoRA は Base で学習」と明記）、
+  テキストエンコーダ `qwen_3_06b_base.safetensors`（Qwen3 0.6B）、VAE は Krea 2 と同じ `qwen_image_vae.safetensors`
+- 注意点：**LLM アダプタは学習させない**（壊れやすい）。学習率は低め（モデルカードは rank 32 で 2e-5 から）。
+  `--fp8_base` は使えないが 2B なので bf16 のままで収まる見込み。タイムステップは `sigmoid`、shift 1.0
+- キャプションは Danbooru 式タグ（小文字・スペース区切り・決まった並び順）と文章の混在。ranbell 側の
+  Target は `caption_style="tags"` にして、各画像の WD14 タグを推薦として渡すのが合う
+- ライセンスは **CircleStone Labs Non-Commercial**（＋NVIDIA Open Model License）。モデルと LoRA は非商用。生成画像は対象外
+
+見送った理由：Krea 2 Turbo のほうが速く、プロンプトへの追従もよい。**Anima の絵柄が欲しいときは、
+Anima 系モデルで作った画像をバケットに集め、対象モデル Krea 2 のまま LoRA にする**ほうが実用的。
+（元画像がどのモデル製でも、対象モデルとは関係ない。配布されている派生モデルは、出力の利用条件を個別に確認すること）
 
 ## テスト
 
