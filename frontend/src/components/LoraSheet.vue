@@ -19,6 +19,9 @@ const emit = defineEmits(['close', 'toast'])
 const { t } = useI18n()
 
 const LS_KEY = 'ranbell.loraSheet.last'
+// The form as it was left — prompt, rows, triggers and all — so closing the
+// screen (or opening it from a picture) does not throw the work away.
+const LS_DRAFT = 'ranbell.loraSheet.draft'
 
 const options = ref(null)       // /api/lora/sheet-options
 const sheets = ref([])
@@ -139,7 +142,23 @@ function recall() {
   try { return JSON.parse(localStorage.getItem(LS_KEY) || 'null') } catch { return null }
 }
 
-async function startNew() {
+function saveDraft() {
+  if (current.value) return
+  try {
+    localStorage.setItem(LS_DRAFT, JSON.stringify({
+      form: form.value, strengths: strengthText.value, newTrigger: newTrigger.value,
+    }))
+  } catch {}
+}
+function recallDraft() {
+  try { return JSON.parse(localStorage.getItem(LS_DRAFT) || 'null') } catch { return null }
+}
+async function resetForm() {
+  try { localStorage.removeItem(LS_DRAFT) } catch {}
+  await startNew({ fresh: true })
+}
+
+async function startNew({ fresh = false } = {}) {
   current.value = null
   confirmDelete.value = false
   const f = blankForm()
@@ -162,6 +181,14 @@ async function startNew() {
   strengthText.value = last?.strengths || (options.value?.default_strengths || [0, 0.25, 0.5, 0.75, 1, 1.25]).join(', ')
   newTrigger.value = ''
   loraFilter.value = ''
+  const draft = fresh ? null : recallDraft()
+  if (draft?.form) {
+    const { target_model, ...kept } = draft.form
+    Object.assign(f, kept, { models: { ...f.models, ...(kept.models || {}) } })
+    if (draft.strengths) strengthText.value = draft.strengths
+    newTrigger.value = draft.newTrigger || ''
+  }
+  // A picture or a bucket brings its own part; the rest of the draft stays.
   const p = props.prefill
   if (p?.sha256) {
     try {
@@ -297,6 +324,8 @@ function onKey(e) {
   e.preventDefault()
   lightbox.value = { r: (lb.r + move[0] + rows) % rows, c: (lb.c + move[1] + cols) % cols }
 }
+
+watch([form, strengthText, newTrigger], saveDraft, { deep: true })
 
 watch(() => props.show, async (open) => {
   if (!open) { clearTimeout(pollTimer); lightbox.value = null; return }
@@ -466,6 +495,8 @@ onBeforeUnmount(() => { clearTimeout(pollTimer); window.removeEventListener('key
           <span class="text-xs text-gray-400">
             {{ t('loraSheet.count', { n: pictureCount }) }}<template v-if="estimate"> · {{ estimate }}</template>
           </span>
+          <button type="button" :title="t('loraSheet.resetHelp')" @click="resetForm"
+            class="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-xs">{{ t('loraSheet.reset') }}</button>
           <button type="button" :disabled="!canCreate" @click="create"
             class="ml-auto px-4 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-sm text-black font-semibold disabled:opacity-40">
             {{ t('loraSheet.start') }}

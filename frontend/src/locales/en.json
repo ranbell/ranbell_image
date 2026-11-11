@@ -2275,7 +2275,9 @@
     "aspect": "Aspect ratio (the source picture's, when there is one)",
     "swapAspect": "Swap width and height",
     "megapixels": "Pixel count (1 MP = 1024×1024)",
-    "foreignSource": "This picture was drawn by another model (text encoder: {types}), so only its prompt, seed and aspect ratio carry over. Models and sampling are this sheet's defaults.",
-    "foreignSourceUnknown": "This picture's graph has no Krea2 text encoder, so only its prompt, seed and aspect ratio carry over. Models and sampling are this sheet's defaults."
+    "foreignSource": "This picture was drawn by another model (text encoder: {types}), so only its prompt, seed and aspect ratio carry over. Models and sampling stay as they were.",
+    "foreignSourceUnknown": "This picture's graph has no Krea2 text encoder, so only its prompt, seed and aspect ratio carry over. Models and sampling stay as they were.",
+    "reset": "Reset",
+    "resetHelp": "Drop what is filled in and start from the defaults"
   }
 }
