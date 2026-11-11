@@ -34,6 +34,9 @@ const strengthText = ref('')
 const showSampling = ref(false)
 const lightbox = ref(null)      // { r, c }
 let pollTimer = null
+let previewTimer = null
+// The picture being drawn right now: its cell and its newest in-flight frame.
+const live = ref({ sheet: '', key: '', url: '', seq: '' })
 
 const form = ref(blankForm())
 
@@ -249,10 +252,41 @@ async function openSheet(id) {
   poll()
 }
 
+function clearLive() {
+  clearTimeout(previewTimer)
+  if (live.value.url) URL.revokeObjectURL(live.value.url)
+  live.value = { sheet: '', key: '', url: '', seq: '' }
+}
+
+// Frames come in faster than the sheet changes, so they have their own loop.
+function pollPreview() {
+  clearTimeout(previewTimer)
+  const s = current.value
+  if (!s?.drawing || !props.show) { clearLive(); return }
+  previewTimer = setTimeout(async () => {
+    try {
+      const resp = await fetch(`/api/lora/sheets/${s.id}/preview`, { cache: 'no-store' })
+      if (current.value?.id !== s.id) return
+      const key = resp.headers.get('X-Sheet-Key') || ''
+      const seq = resp.headers.get('X-Preview-Seq') || ''
+      if (resp.status === 200 && seq !== live.value.seq) {
+        const url = URL.createObjectURL(await resp.blob())
+        if (live.value.url) URL.revokeObjectURL(live.value.url)
+        live.value = { sheet: s.id, key, url, seq }
+      } else if (key !== live.value.key) {
+        if (live.value.url) URL.revokeObjectURL(live.value.url)
+        live.value = { sheet: s.id, key, url: '', seq }
+      }
+    } catch {}
+    pollPreview()
+  }, 600)
+}
+
 function poll() {
   clearTimeout(pollTimer)
   const s = current.value
-  if (!s || !(s.drawing || false)) return
+  if (s?.drawing && live.value.sheet !== s.id) { clearLive(); live.value.sheet = s.id; pollPreview() }
+  if (!s || !(s.drawing || false)) { clearLive(); return }
   pollTimer = setTimeout(async () => {
     if (!props.show || current.value?.id !== s.id) return
     try {
@@ -328,7 +362,7 @@ function onKey(e) {
 watch([form, strengthText, newTrigger], saveDraft, { deep: true })
 
 watch(() => props.show, async (open) => {
-  if (!open) { clearTimeout(pollTimer); lightbox.value = null; return }
+  if (!open) { clearTimeout(pollTimer); clearLive(); lightbox.value = null; return }
   window.addEventListener('keydown', onKey, true)
   try {
     await Promise.all([loadOptions(), loadList()])
@@ -338,7 +372,7 @@ watch(() => props.show, async (open) => {
 }, { immediate: true })
 watch(() => props.show, (open) => { if (!open) window.removeEventListener('keydown', onKey, true) })
 
-onBeforeUnmount(() => { clearTimeout(pollTimer); window.removeEventListener('keydown', onKey, true) })
+onBeforeUnmount(() => { clearTimeout(pollTimer); clearLive(); window.removeEventListener('keydown', onKey, true) })
 </script>
 
 <template>
@@ -552,11 +586,17 @@ onBeforeUnmount(() => { clearTimeout(pollTimer); window.removeEventListener('key
                       class="w-44 rounded-lg object-cover bg-gray-900"
                       :style="{ aspectRatio: `${current.width} / ${current.height}` }" />
                   </button>
+                  <div v-else-if="live.key === key && live.url" class="relative">
+                    <img :src="live.url" class="w-44 rounded-lg object-cover ring-2 ring-amber-500/70"
+                      :style="{ aspectRatio: `${current.width} / ${current.height}` }" />
+                    <span class="absolute bottom-1 left-1 px-1.5 rounded bg-black/60 text-[10px] text-amber-200">{{ t('loraSheet.drawingNow') }}</span>
+                  </div>
                   <div v-else class="w-44 rounded-lg flex items-center justify-center text-[11px] p-2 text-center break-words overflow-hidden"
                     :style="{ aspectRatio: `${current.width} / ${current.height}` }"
                     :class="render(key).status === 'error' ? 'bg-red-950/50 text-red-300' : 'bg-gray-900 text-gray-500 motion-safe:animate-pulse'"
                     :title="render(key).error || ''">
-                    {{ render(key).status === 'error' ? `⚠ ${render(key).error}`.slice(0, 220) : t('loraSheet.waiting') }}
+                    {{ render(key).status === 'error' ? `⚠ ${render(key).error}`.slice(0, 220)
+                      : live.key === key ? t('loraSheet.drawingNow') : t('loraSheet.waiting') }}
                   </div>
                 </td>
               </tr>

@@ -221,6 +221,31 @@ async def test_job_draws_every_picture_and_a_failure_does_not_stop_it(store, mon
 
 
 @pytest.mark.asyncio
+async def test_in_flight_frames_are_kept_per_cell_and_dropped_at_the_end(store, monkeypatch):
+    import app.jobs.render as render
+
+    s = sh.new_sheet(_body())
+    store[s["id"]] = s
+    seen = []
+
+    async def fake_render(reporter, cancel, **kw):
+        # Before the first frame the cell is already known (shown as drawing).
+        before = sh.latest_preview(s["id"])
+        await kw["preview"](b"jpeg-1")
+        await kw["preview"](b"jpeg-2")
+        now = sh.latest_preview(s["id"])
+        seen.append((before["key"], before["jpeg"], now["key"], now["jpeg"]))
+        return {"sha256s": [f"sha{len(seen)}"]}
+
+    monkeypatch.setattr(render, "run_render", fake_render)
+    await sh.run_lora_sheet(_reporter(), _cancel(), db=None, comfy=None, sheet_id=s["id"])
+    keys = [k for k, *_ in seen]
+    assert len(set(keys)) == len(keys) == len(s["renders"])
+    assert all(b == b"" and k == k2 and j == b"jpeg-2" for k, b, k2, j in seen)
+    assert sh.latest_preview(s["id"]) is None
+
+
+@pytest.mark.asyncio
 async def test_comfy_gone_leaves_the_rest_waiting(store, monkeypatch):
     import httpx
 

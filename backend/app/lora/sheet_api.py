@@ -63,6 +63,7 @@ def _view(sheet: dict) -> dict:
         "columns_spec": sh.columns(sheet),
         "grid": sh.grid(sheet),
         "drawing": sh.is_drawing(sheet["id"]),
+        "drawing_key": (sh.latest_preview(sheet["id"]) or {}).get("key", ""),
     }
 
 
@@ -274,6 +275,20 @@ async def duplicate_sheet(sheet_id: str, body: DuplicateBody, request: Request):
         await sh.save(_db(request), copy)
     job_id = _start(request, copy) if body.start else None
     return _view(copy) | {"job_id": job_id}
+
+
+@router.get("/sheets/{sheet_id}/preview")
+async def sheet_preview(sheet_id: str):
+    """The newest in-flight frame of the picture being drawn (a JPEG), with the
+    cell it belongs to in ``X-Sheet-Key``; 204 when nothing is in flight."""
+    p = sh.latest_preview(sheet_id)
+    headers = {"Cache-Control": "no-store"}
+    if not p:
+        return Response(status_code=204, headers=headers)
+    headers |= {"X-Sheet-Key": p["key"], "X-Preview-Seq": str(p["seq"])}
+    if not p["jpeg"]:
+        return Response(status_code=204, headers=headers)
+    return Response(p["jpeg"], media_type="image/jpeg", headers=headers)
 
 
 @router.get("/sheets/{sheet_id}/grid.png")

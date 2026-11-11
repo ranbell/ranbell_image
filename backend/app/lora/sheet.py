@@ -323,10 +323,24 @@ async def delete(db, sheet_id: str) -> None:
 
 #: Sheets with a drawing job queued or running.
 _active: set[str] = set()
+#: The newest in-flight frame per sheet being drawn: {"key", "jpeg", "seq"}.
+#: Memory only — a frame is worthless once the picture lands.
+_previews: dict[str, dict] = {}
 
 
 def is_drawing(sheet_id: str) -> bool:
     return sheet_id in _active
+
+
+def latest_preview(sheet_id: str) -> dict | None:
+    return _previews.get(sheet_id)
+
+
+def _preview_sink(sheet_id: str, key: str):
+    async def _publish(jpeg: bytes) -> None:
+        seq = (_previews.get(sheet_id) or {}).get("seq", 0) + 1
+        _previews[sheet_id] = {"key": key, "jpeg": jpeg, "seq": seq}
+    return _publish
 
 
 def submit(spooler, *, db, comfy, sheet: dict) -> str | None:
@@ -374,6 +388,8 @@ async def run_lora_sheet(
                             f"{done_before}/{total}", key="images", done=done_before, total=total)
 
             started = time.monotonic()
+            _previews[sheet_id] = {"key": spec["key"], "jpeg": b"",
+                                   "seq": (_previews.get(sheet_id) or {}).get("seq", 0) + 1}
             try:
                 graph = build(sheet, spec)
                 result = await run_render(
@@ -383,6 +399,7 @@ async def run_lora_sheet(
                     width=sheet["width"], height=sheet["height"],
                     steps=sheet["steps"], cfg=sheet["cfg"],
                     subdir=SUBDIR, prefix="lora_sheet", method="lora_sheet",
+                    preview=_preview_sink(sheet_id, spec["key"]),
                     payload_extra={"lora_sheet": {
                         "sheet_id": sheet_id, "lora": spec["lora"], "strength": spec["strength"],
                         "trigger_on": spec["trigger_on"],
@@ -415,6 +432,7 @@ async def run_lora_sheet(
                     await save(db, sheet)
     finally:
         _active.discard(sheet_id)
+        _previews.pop(sheet_id, None)
 
     reporter.update(1.0, f"{drawn}", key="imagesGenerated", n=drawn)
     return {"sheet_id": sheet_id, "drawn": drawn, "errors": errors}

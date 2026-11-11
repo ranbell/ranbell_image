@@ -2278,6 +2278,7 @@
     "foreignSource": "This picture was drawn by another model (text encoder: {types}), so only its prompt, seed and aspect ratio carry over. Models and sampling stay as they were.",
     "foreignSourceUnknown": "This picture's graph has no Krea2 text encoder, so only its prompt, seed and aspect ratio carry over. Models and sampling stay as they were.",
     "reset": "Reset",
-    "resetHelp": "Drop what is filled in and start from the defaults"
+    "resetHelp": "Drop what is filled in and start from the defaults",
+    "drawingNow": "Drawing…"
   }
 }
