@@ -448,3 +448,23 @@ def test_prefill_from_another_models_picture_keeps_only_prompt_seed_and_shape():
     graph["2"]["inputs"]["type"] = "krea2"
     p = prefill_from_doc(doc, None, "krea2")
     assert "foreign" not in p and p["cfg"] == 4.5
+
+
+def test_a_sheet_whose_job_left_the_spooler_is_not_drawing():
+    # Cancelled while still queued: the runner never starts, so its `finally`
+    # never clears the sheet. The spooler's registry is the truth.
+    class Spooler:
+        def __init__(self):
+            self._registry = {}
+
+        def submit(self, lane, title, func, meta=None, **kw):
+            self._registry["job-1"] = object()
+            return "job-1"
+
+    sp = Spooler()
+    s = sh.new_sheet(_body())
+    assert sh.submit(sp, db=None, comfy=None, sheet=s) == "job-1"
+    assert sh.is_drawing(s["id"]) and sh.active_job(s["id"]) == "job-1"
+    assert sh.submit(sp, db=None, comfy=None, sheet=s) is None  # one job per sheet
+    sp._registry.clear()
+    assert not sh.is_drawing(s["id"]) and sh.active_job(s["id"]) is None

@@ -265,6 +265,15 @@ async def render_sheet(sheet_id: str, request: Request):
     return _view(sheet) | {"job_id": _start(request, sheet)}
 
 
+@router.post("/sheets/{sheet_id}/cancel")
+async def cancel_sheet(sheet_id: str, request: Request):
+    """Stop drawing. The picture in flight is interrupted; what is drawn stays,
+    and 'draw the rest' picks up from there."""
+    job_id = sh.active_job(sheet_id)
+    ok = bool(job_id) and await request.app.state.spooler.cancel(job_id)
+    return {"ok": ok, "job_id": job_id}
+
+
 @router.post("/sheets/{sheet_id}/duplicate")
 async def duplicate_sheet(sheet_id: str, body: DuplicateBody, request: Request):
     try:

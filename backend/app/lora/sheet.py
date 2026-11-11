@@ -322,14 +322,31 @@ async def delete(db, sheet_id: str) -> None:
 # ── Job ───────────────────────────────────────────────────────────────────────
 
 #: Sheets with a drawing job queued or running.
-_active: set[str] = set()
+#: sheet id -> (job id, spooler) of the job drawing it.
+_active: dict[str, tuple[str | None, Any]] = {}
 #: The newest in-flight frame per sheet being drawn: {"key", "jpeg", "seq"}.
 #: Memory only — a frame is worthless once the picture lands.
 _previews: dict[str, dict] = {}
 
 
 def is_drawing(sheet_id: str) -> bool:
-    return sheet_id in _active
+    return active_job(sheet_id) is not None or (sheet_id in _active)
+
+
+def active_job(sheet_id: str) -> str | None:
+    """The job drawing this sheet. A job cancelled while still queued never
+    runs, so nothing would clear it; one the spooler no longer holds as active
+    is dropped here instead of leaving the sheet 'drawing' for good."""
+    entry = _active.get(sheet_id)
+    if entry is None:
+        return None
+    job_id, spooler = entry
+    registry = getattr(spooler, "_registry", None)
+    if job_id and isinstance(registry, dict) and job_id not in registry:
+        _active.pop(sheet_id, None)
+        _previews.pop(sheet_id, None)
+        return None
+    return job_id
 
 
 def latest_preview(sheet_id: str) -> dict | None:
@@ -347,18 +364,21 @@ def submit(spooler, *, db, comfy, sheet: dict) -> str | None:
     """Queue the drawing job unless one is already on this sheet."""
     from ..spooler.models import JobLane
 
-    if sheet["id"] in _active or not counts(sheet)[PENDING]:
+    if is_drawing(sheet["id"]) or not counts(sheet)[PENDING]:
         return None
-    _active.add(sheet["id"])
+    _active[sheet["id"]] = (None, spooler)
     try:
-        return spooler.submit(
+        job_id = spooler.submit(
             JobLane.GENERATION, "lora_sheet", run_lora_sheet,
             meta={"sheet_id": sheet["id"], "sheet_name": sheet["name"]},
             db=db, comfy=comfy, sheet_id=sheet["id"],
         )
     except Exception:
-        _active.discard(sheet["id"])
+        _active.pop(sheet["id"], None)
         raise
+    if sheet["id"] in _active:  # an instant job may already have finished
+        _active[sheet["id"]] = (job_id, spooler)
+    return job_id
 
 
 async def run_lora_sheet(
@@ -431,7 +451,7 @@ async def run_lora_sheet(
                     r.update(outcome)
                     await save(db, sheet)
     finally:
-        _active.discard(sheet_id)
+        _active.pop(sheet_id, None)
         _previews.pop(sheet_id, None)
 
     reporter.update(1.0, f"{drawn}", key="imagesGenerated", n=drawn)

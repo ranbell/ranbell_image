@@ -2279,6 +2279,9 @@
     "foreignSourceUnknown": "This picture's graph has no Krea2 text encoder, so only its prompt, seed and aspect ratio carry over. Models and sampling stay as they were.",
     "reset": "Reset",
     "resetHelp": "Drop what is filled in and start from the defaults",
-    "drawingNow": "Drawing…"
+    "drawingNow": "Drawing…",
+    "stop": "Stop",
+    "stopping": "Stopping. What is drawn stays; 'Draw the rest' picks it up again.",
+    "samplingReset": "Back to defaults ({d})"
   }
 }

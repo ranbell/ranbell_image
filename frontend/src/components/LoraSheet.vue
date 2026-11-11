@@ -31,7 +31,6 @@ const confirmDelete = ref(false)
 const loraFilter = ref('')
 const newTrigger = ref('')
 const strengthText = ref('')
-const showSampling = ref(false)
 const lightbox = ref(null)      // { r, c }
 let pollTimer = null
 let previewTimer = null
@@ -111,6 +110,25 @@ const estimate = computed(() => {
   return total < 90 ? t('loraSheet.estimateSec', { n: total }) : t('loraSheet.estimateMin', { n: Math.round(total / 60) })
 })
 const size = computed(() => sizeFor(form.value.aspect_w, form.value.aspect_h, form.value.megapixels))
+// The target's own sampling (Turbo for Krea2): fields off it are marked.
+const SAMPLING_KEYS = ['steps', 'cfg', 'sampler', 'scheduler']
+const samplingDefaults = computed(() => {
+  const tg = (options.value?.targets || []).find(x => x.id === form.value.target_model)
+  return tg?.defaults || {}
+})
+function offDefault(k) {
+  const d = samplingDefaults.value[k]
+  return d !== undefined && d !== form.value[k] ? 'border-amber-500 text-amber-200' : 'border-gray-700'
+}
+const samplingDiffers = computed(() => SAMPLING_KEYS.some(k =>
+  samplingDefaults.value[k] !== undefined && samplingDefaults.value[k] !== form.value[k]))
+const samplingDefaultsText = computed(() => {
+  const d = samplingDefaults.value
+  return `${d.steps} steps · cfg ${d.cfg} · ${d.sampler}/${d.scheduler}`
+})
+function resetSampling() {
+  for (const k of SAMPLING_KEYS) if (samplingDefaults.value[k] !== undefined) form.value[k] = samplingDefaults.value[k]
+}
 function swapAspect() {
   const f = form.value
   ;[f.aspect_w, f.aspect_h] = [f.aspect_h, f.aspect_w]
@@ -312,6 +330,15 @@ async function drawRest() {
   } catch (e) { toast(e.message, 'error') } finally { busy.value = false }
 }
 
+async function stopDrawing() {
+  busy.value = true
+  try {
+    await api(`/api/lora/sheets/${current.value.id}/cancel`, { method: 'POST' })
+    toast(t('loraSheet.stopping'), 'info')
+    poll()
+  } catch (e) { toast(e.message, 'error') } finally { busy.value = false }
+}
+
 async function duplicateNewSeed() {
   busy.value = true
   try {
@@ -466,23 +493,28 @@ onBeforeUnmount(() => { clearTimeout(pollTimer); clearLive(); window.removeEvent
           <label class="flex items-center gap-1.5 text-[11px] text-gray-300" :title="t('loraSheet.noTriggerHelp')">
             <input v-model="form.no_trigger_column" type="checkbox" /> {{ t('loraSheet.noTriggerColumn') }}
           </label>
-          <button type="button" class="text-[11px] text-gray-400 hover:text-gray-200 underline" @click="showSampling = !showSampling">
-            {{ t('loraSheet.sampling') }} {{ showSampling ? '▴' : '▾' }}
-          </button>
         </div>
-        <div v-if="showSampling" class="flex flex-wrap gap-3 text-[11px] text-gray-400">
+        <!-- Always in view: a picture from another model can bring settings
+             that are wrong for this one (cfg 4.5 on Turbo). -->
+        <div class="flex flex-wrap items-end gap-3 text-[11px] text-gray-400">
+          <span class="self-center text-gray-300">{{ t('loraSheet.sampling') }}</span>
           <label class="flex flex-col gap-1">steps
-            <input v-model.number="form.steps" type="number" min="1" class="w-16 px-2 py-1 rounded-lg bg-gray-900 border border-gray-700 text-xs" /></label>
+            <input v-model.number="form.steps" type="number" min="1" :class="offDefault('steps')"
+              class="w-16 px-2 py-1 rounded-lg bg-gray-900 border text-xs" /></label>
           <label class="flex flex-col gap-1">cfg
-            <input v-model.number="form.cfg" type="number" step="0.1" class="w-16 px-2 py-1 rounded-lg bg-gray-900 border border-gray-700 text-xs" /></label>
+            <input v-model.number="form.cfg" type="number" step="0.1" :class="offDefault('cfg')"
+              class="w-16 px-2 py-1 rounded-lg bg-gray-900 border text-xs" /></label>
           <label class="flex flex-col gap-1">sampler
-            <select v-model="form.sampler" class="px-2 py-1 rounded-lg bg-gray-900 border border-gray-700 text-xs text-gray-200">
+            <select v-model="form.sampler" :class="offDefault('sampler')" class="px-2 py-1 rounded-lg bg-gray-900 border text-xs text-gray-200">
               <option v-for="s in (options?.samplers?.length ? options.samplers : [form.sampler])" :key="s" :value="s">{{ s }}</option>
             </select></label>
           <label class="flex flex-col gap-1">scheduler
-            <select v-model="form.scheduler" class="px-2 py-1 rounded-lg bg-gray-900 border border-gray-700 text-xs text-gray-200">
+            <select v-model="form.scheduler" :class="offDefault('scheduler')" class="px-2 py-1 rounded-lg bg-gray-900 border text-xs text-gray-200">
               <option v-for="s in (options?.schedulers?.length ? options.schedulers : [form.scheduler])" :key="s" :value="s">{{ s }}</option>
             </select></label>
+          <button v-if="samplingDiffers" type="button" @click="resetSampling"
+            class="px-2 py-1 rounded-lg bg-amber-800/60 hover:bg-amber-700 text-amber-100 text-xs">
+            {{ t('loraSheet.samplingReset', { d: samplingDefaultsText }) }}</button>
           <p class="self-end text-gray-500">{{ t('loraSheet.samplingHelp') }}</p>
         </div>
 
@@ -546,6 +578,8 @@ onBeforeUnmount(() => { clearTimeout(pollTimer); clearLive(); window.removeEvent
             <span class="text-[11px] text-gray-500">{{ current.done }}/{{ current.pictures }}</span>
             <span v-if="current.drawing" class="text-[11px] text-amber-300 motion-safe:animate-pulse">{{ t('loraSheet.drawing') }}</span>
             <div class="ml-auto flex flex-wrap gap-1.5">
+              <button v-if="current.drawing" type="button" :disabled="busy" @click="stopDrawing"
+                class="px-2.5 py-1 rounded-lg bg-red-800/70 hover:bg-red-700 text-xs">■ {{ t('loraSheet.stop') }}</button>
               <button v-if="!current.drawing && (current.pending || current.errors)" type="button" :disabled="busy" @click="drawRest"
                 class="px-2.5 py-1 rounded-lg bg-amber-700/70 hover:bg-amber-600 text-xs">{{ t('loraSheet.drawRest') }}</button>
               <button type="button" :disabled="busy" @click="duplicateNewSeed"
