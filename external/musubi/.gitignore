@@ -1,0 +1,9 @@
+.env
+work/venv
+work/musubi-tuner
+work/models/*
+!work/models/README.md
+work/cache
+work/output
+work/*.log
+__pycache__/

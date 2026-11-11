@@ -1,0 +1,3 @@
+#!/bin/bash
+# `train <bucket> [options]` — see train_krea2.py --help
+exec python3 /work/bin/train_krea2.py "$@"

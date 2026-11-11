@@ -199,6 +199,7 @@ Ranbell Image は**完全ローカル動作**のアプリケーションです�
 | **召喚（Invoke）** | [クリエイターガイド →](docs/guide/invoke.ja.md) | 近日公開 |
 | **インスパイア & ブレスト** | [クリエイターガイド →](docs/guide/inspire-brainstorm.ja.md) | [技術リファレンス →](docs/tech/inspire-brainstorm.ja.md) |
 | **プロンプト錬成** | [クリエイターガイド →](docs/guide/prompt-alchemy.ja.md) | [技術リファレンス →](docs/tech/prompt-alchemy.ja.md) |
+| **LoRA バケット** | [LoRA の作り方 →](docs/guide/lora.ja.md) | [学習コンテナ（external/musubi）→](external/musubi/README.ja.md) |
 
 **クリエイターガイド** は、各モードの使い方・使い分け・入出力の関係を図解で説明します。実装の詳細には踏み込みません。
 

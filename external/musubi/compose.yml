@@ -1,0 +1,27 @@
+services:
+  musubi:
+    build: .
+    image: musubi
+    container_name: musubi
+    tty: true
+    stdin_open: true
+    ipc: host
+    shm_size: 24G
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ./work:/work
+      # LoRA datasets written by ranbell (the host folder mounted as its
+      # lora_export_dir). Read-only here: the trainer never edits what ranbell
+      # handed over. Set LORA_DATASETS_DIR in .env.
+      - ${LORA_DATASETS_DIR:?set LORA_DATASETS_DIR in .env}:/work/datasets:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    deploy:
+      resources:
+        reservations:
+          devices:
+           - driver: nvidia
+             count: all
+             capabilities: [gpu, utility]

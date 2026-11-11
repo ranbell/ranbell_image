@@ -1,0 +1,3 @@
+#!/bin/bash
+# `status [run] [-w SEC] [--list]` — see train_status.py
+exec /work/venv/bin/python /work/bin/train_status.py "$@"

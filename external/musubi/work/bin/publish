@@ -1,0 +1,3 @@
+#!/bin/bash
+# `publish <dataset|run|file> [--epoch N] [--all]` — see publish_lora.py
+exec python3 /work/bin/publish_lora.py "$@"

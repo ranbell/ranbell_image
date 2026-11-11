@@ -220,6 +220,7 @@ Each feature has two kinds of docs. Pick the door that matches what you need.
 | **Invoke**                  | [Creator's Guide →](docs/guide/invoke.md) | Coming soon                                              |
 | **Inspire & Brainstorm**    | [Creator's Guide →](docs/guide/inspire-brainstorm.md)                       | [Technical Reference →](docs/tech/inspire-brainstorm.md) |
 | **Prompt Alchemy**          | [Creator's Guide →](docs/guide/prompt-alchemy.md)                           | [Technical Reference →](docs/tech/prompt-alchemy.md)     |
+| **LoRA buckets**            | [Making a LoRA →](docs/guide/lora.md)                                       | [Trainer container (external/musubi) →](external/musubi/README.md) |
 
 
 The **Creator's Guides** cover how to use each mode, when to pick it, and how inputs map to outputs — with diagrams, no implementation details.
