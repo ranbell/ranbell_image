@@ -8,7 +8,8 @@
     "refine": "✨ 錬成",
     "aiProcess": "AI処理",
     "clear": "✕ 解除",
-    "lora": "📦 LoRA バケット"
+    "lora": "📦 LoRA バケット",
+    "loraSheet": "📊 LoRA 比較"
   },
   "inspire": {
     "copySuccess": "コピーしました",
@@ -1367,7 +1368,8 @@
     "tag_taxonomy": "タグの分類",
     "umap_analyze": "UMAP 分析",
     "lora_caption": "LoRA キャプション",
-    "lora_export": "LoRA データ書き出し"
+    "lora_export": "LoRA データ書き出し",
+    "lora_sheet": "LoRA 比較シート"
   },
   "invoke": {
     "subtitle": "— 無から種を召喚する",
@@ -2223,6 +2225,52 @@
     "exporting": "書き出し中…",
     "exportDone": "書き出しが完了しました（{n}枚）: {path}",
     "exportFailed": "書き出しに失敗しました: {error}",
-    "exportCancelled": "書き出しを中止しました"
+    "exportCancelled": "書き出しを中止しました",
+    "compareSheet": "📊 このバケットの LoRA を比べる"
+  },
+  "loraSheet": {
+    "title": "📊 LoRA 比較シート",
+    "subtitle": "シードとプロンプトを固定して、LoRA ごとに strength を振って描き比べます。0 の列は LoRA なし（素のモデル）です。",
+    "new": "新しいシート",
+    "comfyDown": "ComfyUI に繋がりません。モデルの一覧が出せません（{error}）",
+    "modelUnet": "DiT（diffusion_models）",
+    "modelClip": "テキストエンコーダ",
+    "modelVae": "VAE",
+    "prompt": "プロンプト",
+    "promptHint": "トリガーは各行の分が先頭に付きます。ここには書かないでください",
+    "seed": "シード（固定）",
+    "reseed": "シードを振り直す",
+    "size": "サイズ",
+    "strengths": "strength（カンマ区切り）",
+    "noTriggerColumn": "トリガーなし列",
+    "noTriggerHelp": "strength 1.0 でトリガーを外した列を足します。トリガーなしでも効いてしまう（効きすぎ）かを見ます",
+    "sampling": "描画設定",
+    "samplingHelp": "既定は Krea2 Turbo の設定（8 steps / cfg 1）です",
+    "filter": "LoRA を絞り込む",
+    "triggerForNew": "追加する行のトリガー",
+    "noLoras": "ComfyUI の loras フォルダに LoRA がありません",
+    "rootFolder": "（直下）",
+    "addAll": "全部追加（{n}）",
+    "rows": "比べる LoRA（{n}）",
+    "rowsHint": "左の一覧から選んでください。epoch 違いはフォルダごと追加できます",
+    "trigger": "トリガー",
+    "name": "シート名（空なら LoRA 名）",
+    "count": "{n} 枚",
+    "estimateSec": "約 {n} 秒",
+    "estimateMin": "約 {n} 分",
+    "start": "描き始める",
+    "queued": "{n} 枚の描画を予約しました",
+    "done": "比較シートが描けました（{n} 枚）",
+    "doneWithErrors": "比較シートを描き終えました（{n} 枚、失敗 {e} 枚）",
+    "drawing": "描画中…",
+    "drawRest": "続きを描く",
+    "newSeed": "シードを変えて複製",
+    "savePng": "PNG で保存",
+    "delete": "削除",
+    "confirmDelete": "もう一度押すと削除（描いた絵は残ります）",
+    "baseCol": "0（なし）",
+    "noTriggerCol": "{s}・トリガーなし",
+    "waiting": "待ち",
+    "arrows": "←→↑↓ で移動 / Esc で閉じる"
   }
 }

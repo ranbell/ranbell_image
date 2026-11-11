@@ -31,43 +31,8 @@ PreviewFn = Callable[[bytes], Awaitable[None]]
 PREVIEW_MIN_INTERVAL = 0.4
 
 
-async def run_render(
-    reporter: ProgressReporter,
-    cancel: CancelToken,
-    *,
-    db,
-    comfy,
-    workflow_name: str,
-    positive: str,
-    negative: str = "",
-    width: int | None = None,
-    height: int | None = None,
-    steps: int | None = None,
-    cfg: float | None = None,
-    seed: int | None = None,
-    batch_count: int = 1,
-    subdir: str = "",
-    prefix: str = "gen",
-    method: str = "muse",
-    payload_extra: dict[str, Any] | None = None,
-    attach: AttachFn | None = None,
-    preview: PreviewFn | None = None,
-    reference_image: bytes | None = None,
-) -> dict:
-    """Render one image and hand the sha256 back to ``attach``.
-
-    Returns ``{"sha256s", "seed", "prompt_id", "unpatched"}``. ``unpatched``
-    lists the knobs this workflow had nowhere to put — a draft asked for at
-    2 steps that silently rendered at 30 is the single most confusing failure
-    in this pipeline, so it is reported rather than swallowed.
-
-    Optional ``reference_image``: when the workflow has an OpenPose / DWPose
-    preprocessor fed by LoadImage, the still is uploaded and wired in.
-    """
-    reporter.indeterminate()
-    if seed is None:
-        seed = random.randint(0, (1 << 64) - 1)
-
+async def _load_and_patch(comfy, workflow_name, positive, negative, *, batch_count, seed,
+                          width, height, steps, cfg, prefix, reference_image):
     wf = comfy.load_workflow(workflow_name)
 
     requested = {"steps": steps, "cfg": cfg, "width": width, "height": height}
@@ -104,6 +69,61 @@ async def run_render(
         seed=seed, width=width, height=height, steps=steps, cfg=cfg,
         append_negative=True,
     )
+    return patched, unpatched, openpose_info
+
+
+async def run_render(
+    reporter: ProgressReporter,
+    cancel: CancelToken,
+    *,
+    db,
+    comfy,
+    workflow_name: str,
+    positive: str,
+    negative: str = "",
+    width: int | None = None,
+    height: int | None = None,
+    steps: int | None = None,
+    cfg: float | None = None,
+    seed: int | None = None,
+    batch_count: int = 1,
+    subdir: str = "",
+    prefix: str = "gen",
+    method: str = "muse",
+    payload_extra: dict[str, Any] | None = None,
+    attach: AttachFn | None = None,
+    preview: PreviewFn | None = None,
+    reference_image: bytes | None = None,
+    workflow: dict | None = None,
+) -> dict:
+    """Render one image and hand the sha256 back to ``attach``.
+
+    Returns ``{"sha256s", "seed", "prompt_id", "unpatched"}``. ``unpatched``
+    lists the knobs this workflow had nowhere to put — a draft asked for at
+    2 steps that silently rendered at 30 is the single most confusing failure
+    in this pipeline, so it is reported rather than swallowed.
+
+    Optional ``reference_image``: when the workflow has an OpenPose / DWPose
+    preprocessor fed by LoadImage, the still is uploaded and wired in.
+
+    Optional ``workflow``: a graph built complete by the caller (the LoRA
+    comparison sheet). It is queued as it is — not read from disk, not
+    patched — and ``workflow_name`` is only recorded.
+    """
+    reporter.indeterminate()
+    if seed is None:
+        seed = random.randint(0, (1 << 64) - 1)
+
+    if workflow is not None:
+        patched = workflow
+        unpatched: list[str] = []
+        openpose_info: dict[str, Any] = {}
+    else:
+        patched, unpatched, openpose_info = await _load_and_patch(
+            comfy, workflow_name, positive, negative, batch_count=batch_count, seed=seed,
+            width=width, height=height, steps=steps, cfg=cfg, prefix=prefix,
+            reference_image=reference_image,
+        )
 
     # **A clientId for this render alone.** They used to share one, so on a retake a
     # second connection came in on the same id and ComfyUI dropped the older one.

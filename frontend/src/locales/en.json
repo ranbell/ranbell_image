@@ -8,7 +8,8 @@
     "refine": "✨ Refine",
     "aiProcess": "AI Process",
     "clear": "✕ Clear",
-    "lora": "📦 LoRA bucket"
+    "lora": "📦 LoRA bucket",
+    "loraSheet": "📊 Compare LoRAs"
   },
   "inspire": {
     "copySuccess": "Copied",
@@ -1367,7 +1368,8 @@
     "tag_taxonomy": "Tag Taxonomy",
     "umap_analyze": "UMAP Analysis",
     "lora_caption": "LoRA captions",
-    "lora_export": "LoRA dataset export"
+    "lora_export": "LoRA dataset export",
+    "lora_sheet": "LoRA comparison sheet"
   },
   "invoke": {
     "subtitle": "— Summon seeds from nothing",
@@ -2223,6 +2225,52 @@
     "exporting": "Exporting…",
     "exportDone": "Export finished ({n} pictures): {path}",
     "exportFailed": "Export failed: {error}",
-    "exportCancelled": "Export cancelled"
+    "exportCancelled": "Export cancelled",
+    "compareSheet": "📊 Compare this bucket's LoRAs"
+  },
+  "loraSheet": {
+    "title": "📊 LoRA comparison sheet",
+    "subtitle": "Fixed seed and prompt; each LoRA drawn across strengths. The 0 column is the model with no LoRA.",
+    "new": "New sheet",
+    "comfyDown": "Cannot reach ComfyUI, so the model lists are empty ({error})",
+    "modelUnet": "DiT (diffusion_models)",
+    "modelClip": "Text encoder",
+    "modelVae": "VAE",
+    "prompt": "Prompt",
+    "promptHint": "Each row's trigger goes in front; do not write it here",
+    "seed": "Seed (fixed)",
+    "reseed": "New seed",
+    "size": "Size",
+    "strengths": "Strengths (comma separated)",
+    "noTriggerColumn": "No-trigger column",
+    "noTriggerHelp": "Adds a column at strength 1.0 without the trigger, to see whether the LoRA acts even without it (overbaked)",
+    "sampling": "Sampling",
+    "samplingHelp": "Defaults are Krea2 Turbo's (8 steps / cfg 1)",
+    "filter": "Filter LoRAs",
+    "triggerForNew": "Trigger for added rows",
+    "noLoras": "No LoRAs in ComfyUI's loras folder",
+    "rootFolder": "(top level)",
+    "addAll": "Add all ({n})",
+    "rows": "LoRAs to compare ({n})",
+    "rowsHint": "Pick from the list on the left. Epochs can be added a whole folder at once",
+    "trigger": "Trigger",
+    "name": "Sheet name (LoRA name if empty)",
+    "count": "{n} pictures",
+    "estimateSec": "about {n} s",
+    "estimateMin": "about {n} min",
+    "start": "Start drawing",
+    "queued": "{n} pictures queued",
+    "done": "Comparison sheet drawn ({n} pictures)",
+    "doneWithErrors": "Comparison sheet finished ({n} pictures, {e} failed)",
+    "drawing": "Drawing…",
+    "drawRest": "Draw the rest",
+    "newSeed": "Duplicate with a new seed",
+    "savePng": "Save PNG",
+    "delete": "Delete",
+    "confirmDelete": "Press again to delete (pictures stay)",
+    "baseCol": "0 (none)",
+    "noTriggerCol": "{s} · no trigger",
+    "waiting": "waiting",
+    "arrows": "←→↑↓ to move / Esc to close"
   }
 }

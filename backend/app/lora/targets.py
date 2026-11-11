@@ -11,10 +11,11 @@ planned can sit here with ``available=False`` and is refused for new buckets.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Callable
+from dataclasses import dataclass, field
+from typing import Any, Callable
 
 from ..prompt.scene_sheet import _SCRIPT_MODELS
+from . import sheet_graph
 
 _HINT_PROMPT_CHARS = 1500
 _HINT_TAGS = 40
@@ -30,6 +31,11 @@ class Target:
     available: bool
     #: Builds the describe prompt: (stored_prompt, tags) -> prompt.
     describe: Callable[[str, list[str]], str]
+    #: Builds one comparison-sheet cell's ComfyUI graph (see sheet_graph); None
+    #: when sheets cannot be drawn for this model yet.
+    build_graph: Callable[..., dict] | None = None
+    #: Sheet settings a new sheet starts from: how this model is run at inference.
+    sheet_defaults: dict[str, Any] = field(default_factory=dict)
 
 
 def _hints(stored_prompt: str, tags: list[str]) -> list[str]:
@@ -72,6 +78,10 @@ TARGETS: dict[str, Target] = {
     "krea2": Target(
         id="krea2", label="Krea 2", caption_style="prose", available=True,
         describe=_prose_describe("krea2"),
+        build_graph=sheet_graph.build_krea2,
+        # Turbo, as the LoRA is used (Krea: train on Raw, infer on Turbo).
+        sheet_defaults={"steps": 8, "cfg": 1.0, "sampler": "euler", "scheduler": "simple",
+                        "width": 1024, "height": 1024},
     ),
 }
 

@@ -13,7 +13,7 @@ const props = defineProps({
   // The gallery selection the screen was opened with; offered for adding.
   incomingShas: { type: Array, default: () => [] },
 })
-const emit = defineEmits(['close', 'toast', 'added'])
+const emit = defineEmits(['close', 'toast', 'added', 'compare'])
 const { t } = useI18n()
 
 const buckets = ref([])
@@ -438,6 +438,10 @@ onBeforeUnmount(() => { clearTimeout(pollTimer); clearTimeout(exportTimer) })
                 {{ exporting ? t('lora.exporting') : t('lora.export') }}
               </button>
               <a v-if="canExport" :href="zipUrl()" class="px-3 py-1 rounded-lg bg-gray-800 hover:bg-gray-700">{{ t('lora.zip') }}</a>
+              <button type="button" class="px-3 py-1 rounded-lg bg-gray-800 hover:bg-gray-700"
+                @click="emit('compare', { bucket_id: current.id, slug: current.slug, trigger: current.trigger })">
+                {{ t('lora.compareSheet') }}
+              </button>
               <button type="button" @click="deleteBucket"
                 class="px-2 py-1 rounded-lg" :class="confirmDelete ? 'bg-red-700 text-white' : 'bg-gray-800 text-gray-400 hover:text-red-300'">
                 {{ confirmDelete ? t('lora.deleteConfirm') : t('lora.delete') }}

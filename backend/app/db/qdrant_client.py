@@ -83,6 +83,7 @@ MUSE_VIDEO_COLLECTION = "muse_video_talks"
 # LoRA buckets: pictures gathered for a LoRA, with the captions written for
 # them (`app/lora`). Payload-only; images are referenced by sha256, never copied.
 LORA_BUCKETS_COLLECTION = "lora_buckets"
+LORA_SHEETS_COLLECTION = "lora_sheets"
 # What the scanner saw last time, one point per directory: its mtime when it
 # was last reconciled. A directory whose mtime has not moved has had nothing
 # added, removed or renamed in it, so a heal does not list it. Payload-only and
@@ -1023,6 +1024,7 @@ class QdrantDBClient:
         await self.ensure_muse_handpost_collection()
         await self.ensure_muse_video_collection()
         await self.ensure_lora_buckets_collection()
+        await self.ensure_lora_sheets_collection()
 
         count = await self.total_count()
         logger.info("Qdrant ready: %d images", count)
@@ -2397,6 +2399,17 @@ class QdrantDBClient:
             on_disk_payload=True,
         )
         logger.info("Created collection: %s", LORA_BUCKETS_COLLECTION)
+
+    async def ensure_lora_sheets_collection(self) -> None:
+        """LoRA comparison sheets — settings, and which picture each cell drew."""
+        if await self._qc.collection_exists(LORA_SHEETS_COLLECTION):
+            return
+        await self._qc.create_collection(
+            collection_name=LORA_SHEETS_COLLECTION,
+            vectors_config={},
+            on_disk_payload=True,
+        )
+        logger.info("Created collection: %s", LORA_SHEETS_COLLECTION)
 
     async def total_count(self, *, exclude_drafts: bool = False) -> int:
         result = await self._qc.count(

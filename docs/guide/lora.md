@@ -149,18 +149,30 @@ judge quality by the pictures.**
 
 ---
 
-## 6. Compare in ComfyUI
+## 6. Compare on a sheet
 
-When training ends, resume the GEN lane and copy LoRAs from `output/<bucket>-<time>/` into ComfyUI's loras folder.
-Start with 3–4 spaced apart (e.g. epochs 10, 20, 30).
+When training ends, resume the GEN lane and copy LoRAs from `output/<bucket>-<time>/` into
+ComfyUI's loras folder. To compare epochs, keep them **in a subfolder**
+(`loras/my_style/my_style-000010.safetensors`). Start with 3–4 spaced apart (e.g. epochs 10, 20, 30).
 
-With the same seed and prompt, put these side by side (strength 0.8–1.0 to start):
+ranbell's **📊 LoRA comparison sheet** draws them with one seed and one prompt, each LoRA across strengths.
 
-1. no LoRA
-2. LoRA, without the trigger word in the prompt
-3. LoRA, with the trigger word
+- Three ways in:
+  - "📊 Compare this bucket's LoRAs" on the bucket screen (LoRAs filtered by the bucket name, its trigger filled in)
+  - select one picture in the gallery, then "📊 Compare LoRAs" in the tray (its prompt, seed, models and size carry over)
+  - open it with nothing selected and set it up from scratch
+- **Rows are LoRAs, columns are strengths** (0 / 0.25 / 0.5 / 0.75 / 1 / 1.25 by default). **The 0 column has no LoRA**:
+  it is the bare model, the baseline. Rows with the same trigger share one 0 picture
+- Each row's trigger goes in front of the prompt (do not write it in the prompt box)
+- "No-trigger column" adds strength 1 without the trigger, to spot an overbaked LoRA
+- ranbell builds the graph from ComfyUI's core nodes (no saved workflow needed; the LoRA goes in through
+  `LoraLoaderModelOnly`). Pick the DiT, text encoder and VAE from ComfyUI's folders; sampling defaults to Turbo (8 steps / cfg 1)
+- Cells are drawn through the job scheduler and fill in as they finish. Stopping keeps what is drawn; "Draw the rest" finishes it
+- "🎲 Duplicate with a new seed" makes the same sheet on another seed, so one lucky seed does not decide
+- "⬇ Save PNG" gives one labelled picture (no metadata; fine to post)
 
-Also try subjects that were not in the training set (cars, food, streets) to see whether it generalizes.
+Anyone's Krea2 LoRAs in the loras folder can sit on the same sheet.
+Another sheet with a prompt unlike the training set (cars, food, streets) shows whether it generalizes.
 
 | you see | then |
 |---|---|

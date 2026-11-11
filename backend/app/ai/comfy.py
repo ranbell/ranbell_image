@@ -754,6 +754,53 @@ class ComfyUIClient:
             return f"{sub}/{name}"
         return name
 
+    #: Model folder → (loader node, input) whose choices list the same files.
+    #: The fallback for a ComfyUI that predates `GET /models/{folder}`.
+    _MODEL_FOLDER_NODES = {
+        "loras": ("LoraLoaderModelOnly", "lora_name"),
+        "diffusion_models": ("UNETLoader", "unet_name"),
+        "text_encoders": ("CLIPLoader", "clip_name"),
+        "vae": ("VAELoader", "vae_name"),
+    }
+
+    async def _node_choices(self, node: str, field: str) -> list[str]:
+        r = await self._http.get(f"{settings.comfyui_url}/object_info/{node}", timeout=10.0)
+        r.raise_for_status()
+        spec = ((r.json() or {}).get(node) or {}).get("input") or {}
+        entry = (spec.get("required") or {}).get(field) or (spec.get("optional") or {}).get(field)
+        if not entry:
+            return []
+        first = entry[0]
+        if isinstance(first, list):  # classic: [[choices...], {...}]
+            return [str(x) for x in first]
+        if first == "COMBO" and len(entry) > 1:  # newer: ["COMBO", {"options": [...]}]
+            return [str(x) for x in (entry[1] or {}).get("options") or []]
+        return []
+
+    async def list_models(self, folder: str) -> list[str]:
+        """File names in one of ComfyUI's model folders (subfolders as `a/b.safetensors`).
+
+        Read only: ranbell never places or moves model files.
+        """
+        if folder not in self._MODEL_FOLDER_NODES:
+            raise ValueError(f"unknown model folder: {folder}")
+        try:
+            r = await self._http.get(f"{settings.comfyui_url}/models/{folder}", timeout=10.0)
+            if r.status_code == 200 and isinstance(r.json(), list):
+                return sorted(str(x) for x in r.json())
+        except httpx.HTTPError:
+            raise
+        except Exception:
+            pass
+        return sorted(await self._node_choices(*self._MODEL_FOLDER_NODES[folder]))
+
+    async def sampler_choices(self) -> dict[str, list[str]]:
+        """The sampler and scheduler names this ComfyUI's KSampler accepts."""
+        return {
+            "samplers": await self._node_choices("KSampler", "sampler_name"),
+            "schedulers": await self._node_choices("KSampler", "scheduler"),
+        }
+
     async def fetch_image(self, filename: str, subfolder: str = "", type_: str = "output") -> bytes:
         r = await self._http.get(
             f"{settings.comfyui_url}/view",

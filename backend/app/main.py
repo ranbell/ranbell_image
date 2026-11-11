@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 from .muse.lounge_api import router as muse_lounge_router
 from .muse.video_api import router as muse_video_router
 from .lora.api import router as lora_router
+from .lora.sheet_api import router as lora_sheet_router
 
 
 def _abort(msg: str) -> None:
@@ -327,6 +328,7 @@ app.include_router(characters_router)
 app.include_router(muse_lounge_router)
 app.include_router(muse_video_router)
 app.include_router(lora_router)
+app.include_router(lora_sheet_router)
 app.include_router(muse_router)
 
 
