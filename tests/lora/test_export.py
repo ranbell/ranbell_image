@@ -52,6 +52,7 @@ async def test_folder_has_picture_caption_pairs_and_meta(tmp_path):
     meta = json.loads((final / "meta.json").read_text())
     assert meta["format"] == export.FORMAT
     assert meta["trigger"] == "rnbl" and meta["targets"] == ["red hair"]
+    assert (meta["target_model"], meta["caption_style"]) == ("krea2", "prose")
     assert meta["items"][1]["width"] == 10 and meta["items"][1]["height"] == 20
     assert [p.name for p in out.iterdir()] == ["red"]  # no temp dirs left behind
 

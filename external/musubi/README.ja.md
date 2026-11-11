@@ -1,7 +1,7 @@
-# external/musubi — Krea 2 LoRA の学習コンテナ
+# external/musubi — LoRA の学習コンテナ（今は Krea 2）
 
 ranbell が書き出した LoRA データセット（画像＋同名 `.txt`＋`meta.json`）を読んで、
-[kohya-ss/musubi-tuner](https://github.com/kohya-ss/musubi-tuner) で Krea 2 の LoRA を作るための
+[kohya-ss/musubi-tuner](https://github.com/kohya-ss/musubi-tuner) で LoRA を作るための
 **外部リソースの設定例**です。ranbell 本体はこのコンテナを呼びません。接点は書き出しフォルダだけです。
 
 使い方の流れ（バケット → キャプション → 書き出し → 学習 → 比較 → 公開）は
@@ -49,16 +49,39 @@ docker compose up -d --build
 docker compose exec musubi musubi-setup   # venv と musubi-tuner（固定コミット）
 ```
 
-モデルは `work/models/` に置きます（[work/models/README.md](work/models/README.md)）。
+## ファイルの配置（Krea 2）
+
+```
+docker-musubi/                      ← このフォルダをコピーした場所
+├── .env                            LORA_DATASETS_DIR、ComfyUI / Ollama の URL
+└── work/
+    ├── models/
+    │   └── krea2/                  ← 学習に使うモデル（自分で取得して置く）
+    │       ├── raw.safetensors               Krea 2 Raw の DiT（bf16、約26GB）
+    │       ├── qwen3vl_4b_bf16.safetensors   テキストエンコーダ（bf16、単一ファイル、約8.9GB）
+    │       └── qwen_image_vae.safetensors    VAE（約250MB）
+    ├── venv/  musubi-tuner/        musubi-setup が作る
+    ├── cache/<bucket>/             latent とテキストエンコーダ出力のキャッシュ
+    └── output/<bucket>-<日時>/     学習結果（epoch ごとの LoRA、train.log、summary.json）
+
+<LORA_DATASETS_DIR>/<bucket>/       ranbell が書き出す（コンテナからは /work/datasets、読み取り専用）
+    <sha>.png  <sha>.txt  meta.json
+
+ComfyUI/models/loras/               選んだ LoRA を手でコピーする先
+```
 
 | ファイル | 取得元 |
 |---|---|
-| `raw.safetensors` | huggingface.co/krea/Krea-2-Raw（gated、bf16） |
+| `raw.safetensors` | huggingface.co/krea/Krea-2-Raw（gated。ライセンスに同意してから取得） |
 | `qwen3vl_4b_bf16.safetensors` | huggingface.co/Comfy-Org/Qwen3-VL の `text_encoders/` |
-| `qwen_image_vae.safetensors` | Comfy-Org/Qwen-Image-Edit_ComfyUI の `split_files/vae/` |
+| `qwen_image_vae.safetensors` | huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI の `split_files/vae/` |
 
-**ComfyUI 用の fp8_scaled 版は使えません。** musubi は bf16 を読んで自分で量子化します。
-fp8 のファイルを渡すとスケールを掛けずに読まれ、エラーにならずに重みが壊れます。
+- **ComfyUI 用の fp8_scaled 版は使えません。** musubi は bf16 を読んで自分で量子化します。
+  fp8 のファイルを渡すとスケールを掛けずに読まれ、エラーにならずに重みが壊れます。
+- テキストエンコーダは HuggingFace のフォルダ形式ではなく、**単一の `.safetensors`** が必要です。
+- `work/models/` 直下に3つを置いた古い配置もそのまま使えます。別の場所に置くなら `.env` の
+  `KREA2_DIT` / `KREA2_TE` / `KREA2_VAE` でファイルごとに指定できます。
+- RAM は 64GB 以上が推奨です（ブロック退避で DiT の一部を CPU 側に置くため）。
 
 ## 学習
 
@@ -154,6 +177,21 @@ docker compose exec musubi publish <bucket> --all        # メタデータを全
 - **消す**：学習した日時、セッション ID、ベースモデル・VAE のファイル名、データセットのフォルダ名
 - キャプションとタグは musubi がそもそも書きません。他のツールで作った LoRA を渡したとき用に、
   `ss_tag_frequency` などがあれば消します
+
+## ターゲットモデルを増やすには
+
+学習するモデルは、書き出された `meta.json` の `target_model` で決まります。モデルを1つ増やすには、両側に1件ずつ足します。
+
+1. **ranbell 側：** `backend/app/lora/targets.py` の `TARGETS` に1件。キャプションの書き方（文章かタグか）と、
+   VLM への描写の指示をここで決めます。`available=True` にするとバケット画面で選べるようになります。
+2. **学習側：** `work/bin/train_lora.py` の `RECIPES` に `Recipe` を1件。モデルファイル、musubi のスクリプト名、
+   `network_module`、そのモデル専用の学習フラグ、プリセットを書きます。
+
+知らない `target_model` のデータセットを渡すと、学習は走り出す前に止まり、対応しているモデルの一覧を出します。
+
+**Anima について（2026-11 時点）：** ここで固定している musubi-tuner のコミットには、Anima 用の学習スクリプトがありません。
+対応するときは、musubi の更新（`setup.sh` の `MUSUBI_COMMIT`）を待つか、別の学習器を使う Recipe を足すことになります。
+Anima はタグ中心のプロンプトで学習されたモデルなので、ranbell 側の Target は `caption_style="tags"` の描写指示になる見込みです。
 
 ## テスト
 

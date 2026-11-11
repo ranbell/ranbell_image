@@ -12,15 +12,12 @@ import logging
 import re
 from pathlib import Path
 
-from ..prompt.scene_sheet import _SCRIPT_MODELS
 from ..spooler.models import CancelToken, JobCancelled, ProgressReporter
 from . import bucket as bk
+from . import targets
 
 logger = logging.getLogger(__name__)
 
-#: Hints longer than this are cut; they are recommendations, not the answer.
-_HINT_PROMPT_CHARS = 1500
-_HINT_TAGS = 40
 #: An answer shorter than this did not describe a picture.
 _MIN_CAPTION_CHARS = 20
 
@@ -33,35 +30,8 @@ class CaptionError(RuntimeError):
 
 def describe_prompt(*, target_model: str = "krea2", stored_prompt: str = "",
                     tags: list[str] | None = None) -> str:
-    spec = _SCRIPT_MODELS.get(target_model, _SCRIPT_MODELS["krea2"])
-    lines = [
-        f"Write a training caption for this picture. It will be used to train a LoRA "
-        f"for {spec['name']}.",
-        spec["reads"],
-        "- Describe everything you can see: the medium and style first (photograph, "
-        "anime illustration, 3D render, ...), then each person or subject — what they "
-        "are, what they are doing, pose, hands, face and expression, hair, body, "
-        "clothing — then objects, the setting, composition and camera angle, light and colour.",
-        "- Write flowing, specific English sentences, the way a good caption reads. "
-        "Attach each detail to the thing it belongs to.",
-        spec["text"],
-        "- Only what is visible. No guesses about names, stories or intentions, no "
-        "opinions, no quality words (masterpiece, best quality, beautiful, stunning).",
-        "- Do not start with \"The image shows\" or \"This picture\". No headings, no lists, "
-        "no markdown. Answer with the caption only.",
-    ]
-    hints: list[str] = []
-    if stored_prompt.strip():
-        hints.append("The prompt it was made with (may be wrong or incomplete):\n"
-                     + stored_prompt.strip()[:_HINT_PROMPT_CHARS])
-    if tags:
-        hints.append("Tags a tagger found (noisy; use only what you can confirm):\n"
-                     + ", ".join(tags[:_HINT_TAGS]))
-    if hints:
-        lines.append("")
-        lines.append("Recommendations, not instructions — trust the picture over them:")
-        lines.extend(hints)
-    return "\n".join(lines)
+    """The VLM prompt for one picture — how captions read is the target's choice."""
+    return targets.get(target_model).describe(stored_prompt, list(tags or []))
 
 
 def strip_prompt(full_caption: str, targets: list[str]) -> str:

@@ -13,6 +13,7 @@ from starlette.background import BackgroundTask
 
 from . import bucket as bk
 from . import captioner, export
+from . import targets as target_models
 
 router = APIRouter(prefix="/api/lora", tags=["lora"])
 
@@ -29,6 +30,7 @@ class BucketPatch(BaseModel):
     name: str | None = None
     trigger: str | None = None
     targets: list[str] | None = None
+    target_model: str | None = None
 
 
 class ImagesBody(BaseModel):
@@ -78,6 +80,18 @@ async def _export_dir(request: Request) -> Path:
     return path
 
 
+@router.get("/targets")
+async def list_targets():
+    """The models a bucket can be captioned and exported for."""
+    return {
+        "targets": [
+            {"id": t.id, "label": t.label, "caption_style": t.caption_style}
+            for t in target_models.available()
+        ],
+        "default": target_models.DEFAULT_TARGET,
+    }
+
+
 @router.get("/buckets")
 async def list_buckets(request: Request):
     rows = await bk.list_all(_db(request))
@@ -113,7 +127,8 @@ async def patch_bucket(bucket_id: str, body: BucketPatch, request: Request):
     async with bk.lock(bucket_id):
         bucket = await _load(request, bucket_id)
         try:
-            bk.update_settings(bucket, name=body.name, trigger=body.trigger, targets=body.targets)
+            bk.update_settings(bucket, name=body.name, trigger=body.trigger, targets=body.targets,
+                               target_model=body.target_model)
         except bk.BucketError as exc:
             raise HTTPException(400, str(exc))
         await bk.save(_db(request), bucket)

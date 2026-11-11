@@ -25,6 +25,7 @@ from pathlib import Path
 
 from ..spooler.models import CancelToken, ProgressReporter
 from . import bucket as bk
+from . import targets as target_models
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +100,8 @@ async def plan(db, bucket: dict) -> list[Entry]:
         "slug": bucket["slug"],
         "trigger": bucket["trigger"],
         "targets": bucket["targets"],
-        "target_model": bucket.get("target_model") or "krea2",
+        "target_model": target_models.get(bucket.get("target_model")).id,
+        "caption_style": target_models.get(bucket.get("target_model")).caption_style,
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "count": len(meta_items),
         "items": meta_items,

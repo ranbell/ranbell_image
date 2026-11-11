@@ -26,7 +26,11 @@ const settings = ref({ name: '', trigger: '', targets: [] })
 const drafts = ref({})           // sha → caption being edited
 const openFull = ref(new Set())  // sha whose full description is unfolded
 const confirmDelete = ref(false)
+const targetModels = ref([])     // [{id, label, caption_style}] the trainer side supports
+const newTarget = ref('')
+const exporting = ref(false)
 let pollTimer = null
+let exportTimer = null
 
 const incoming = computed(() => props.incomingShas.filter(Boolean))
 const incomingNew = computed(() => {
@@ -37,6 +41,7 @@ const settingsDirty = computed(() => {
   const b = current.value
   if (!b) return false
   return settings.value.name !== b.name || settings.value.trigger !== b.trigger
+    || settings.value.target_model !== b.target_model
     || JSON.stringify(settings.value.targets) !== JSON.stringify(b.targets)
 })
 const counts = computed(() => {
@@ -72,6 +77,16 @@ async function api(path, opts = {}) {
 
 function toast(msg, type = 'info') { emit('toast', { msg, type }) }
 
+async function loadTargets() {
+  const data = await api('/api/lora/targets')
+  targetModels.value = data.targets || []
+  if (!newTarget.value) newTarget.value = data.default || targetModels.value[0]?.id || ''
+}
+
+function targetLabel(id) {
+  return targetModels.value.find(x => x.id === id)?.label || id
+}
+
 async function loadList() {
   const data = await api('/api/lora/buckets')
   buckets.value = data.buckets || []
@@ -79,7 +94,10 @@ async function loadList() {
 
 function adopt(bucket) {
   current.value = bucket
-  settings.value = { name: bucket.name, trigger: bucket.trigger, targets: [...bucket.targets] }
+  settings.value = {
+    name: bucket.name, trigger: bucket.trigger, targets: [...bucket.targets],
+    target_model: bucket.target_model,
+  }
   // Keep a caption that is being typed; drop drafts the server already has.
   const next = {}
   for (const it of bucket.items) {
@@ -122,7 +140,9 @@ async function createBucket() {
   if (!name) return
   busy.value = true
   try {
-    const b = await api('/api/lora/buckets', { method: 'POST', body: { name, sha256s: incoming.value } })
+    const b = await api('/api/lora/buckets', {
+      method: 'POST', body: { name, sha256s: incoming.value, target_model: newTarget.value || undefined },
+    })
     newName.value = ''
     if (incoming.value.length) emit('added', incoming.value.length)
     adopt(b)
@@ -205,12 +225,41 @@ async function exportFolder() {
   busy.value = true
   try {
     const r = await api(`/api/lora/buckets/${current.value.id}/export`, { method: 'POST' })
-    toast(t('lora.exportQueued', { path: r.path }), 'success')
-    setTimeout(refresh, 2500)
+    toast(t('lora.exportQueued', { path: r.path }), 'info')
+    watchExport(r.job_id, r.path, current.value.id)
   } catch (e) {
     const d = e.detail
     toast(d?.error === 'no_export_dir' ? t('lora.noExportDir', { path: d.path }) : e.message, 'error')
   } finally { busy.value = false }
+}
+
+// The export runs as a job; follow it until it ends and say how it went.
+// Keeps watching after the screen is closed, so the toast still arrives.
+function watchExport(jobId, path, bucketId) {
+  clearTimeout(exportTimer)
+  exporting.value = true
+  const started = Date.now()
+  const tick = async () => {
+    try {
+      const data = await api('/api/jobs')
+      const job = (data.jobs || []).find(j => j.id === jobId)
+      if (job && ['succeeded', 'failed', 'cancelled'].includes(job.state)) {
+        exporting.value = false
+        if (job.state === 'succeeded') {
+          toast(t('lora.exportDone', { path: job.result?.path || path, n: job.result?.count ?? '' }), 'success')
+        } else if (job.state === 'failed') {
+          toast(t('lora.exportFailed', { error: job.error || '' }), 'error')
+        } else {
+          toast(t('lora.exportCancelled'), 'info')
+        }
+        if (current.value?.id === bucketId) refresh()
+        return
+      }
+    } catch {}
+    if (Date.now() - started > 30 * 60 * 1000) { exporting.value = false; return }
+    exportTimer = setTimeout(tick, 1500)
+  }
+  exportTimer = setTimeout(tick, 1000)
 }
 
 function zipUrl() {
@@ -253,14 +302,14 @@ function fmtDate(v) {
 watch(() => props.show, async (open) => {
   if (!open) { clearTimeout(pollTimer); return }
   try {
-    await loadList()
+    await Promise.all([loadList(), loadTargets()])
     // Opened with a selection and a single bucket → that one; else the latest.
     if (!current.value && buckets.value.length) await openBucket(buckets.value[0].id)
     else if (current.value) await refresh()
   } catch (e) { toast(e.message, 'error') }
 }, { immediate: true })
 
-onBeforeUnmount(() => clearTimeout(pollTimer))
+onBeforeUnmount(() => { clearTimeout(pollTimer); clearTimeout(exportTimer) })
 </script>
 
 <template>
@@ -278,6 +327,12 @@ onBeforeUnmount(() => clearTimeout(pollTimer))
         <h3 id="lora-title" class="font-bold text-amber-200">{{ t('lora.title') }}</h3>
         <p class="text-[11px] text-gray-500 leading-snug">{{ t('lora.subtitle') }}</p>
 
+        <label v-if="targetModels.length" class="flex items-center gap-2 text-[11px] text-gray-400">
+          {{ t('lora.targetModel') }}
+          <select v-model="newTarget" class="flex-1 px-2 py-1 rounded-lg bg-gray-900 border border-gray-700 text-xs text-gray-200">
+            <option v-for="m in targetModels" :key="m.id" :value="m.id">{{ m.label }}</option>
+          </select>
+        </label>
         <form class="flex gap-1" @submit.prevent="createBucket">
           <input v-model="newName" :placeholder="t('lora.newBucket')"
             class="flex-1 min-w-0 px-2 py-1.5 rounded-lg bg-gray-900 border border-gray-700 text-sm" />
@@ -294,7 +349,9 @@ onBeforeUnmount(() => clearTimeout(pollTimer))
             <img v-if="b.cover" :src="`/api/thumbnails/${b.cover}.webp`" class="w-9 h-9 rounded-lg object-cover" loading="lazy" />
             <div v-else class="w-9 h-9 rounded-lg bg-gray-800" />
             <div class="min-w-0">
-              <div class="text-sm truncate">{{ b.name }}</div>
+              <div class="text-sm truncate">{{ b.name }}
+                <span class="ml-1 text-[10px] px-1.5 rounded bg-gray-800 text-gray-400">{{ targetLabel(b.target_model) }}</span>
+              </div>
               <div class="text-[10px] text-gray-500">
                 {{ t('lora.countLine', { n: b.count }) }}
                 <span v-if="b.pending" class="text-amber-300"> · {{ t('lora.pendingN', { n: b.pending }) }}</span>
@@ -320,6 +377,14 @@ onBeforeUnmount(() => clearTimeout(pollTimer))
               <label class="text-xs text-gray-400">{{ t('lora.trigger') }}</label>
               <input v-model="settings.trigger" :placeholder="t('lora.triggerHint')"
                 class="w-40 px-2 py-1 rounded-lg bg-gray-900 border border-gray-700 text-sm font-mono" />
+              <label class="text-xs text-gray-400" :title="t('lora.targetModelHelp')">{{ t('lora.targetModel') }}</label>
+              <select v-model="settings.target_model"
+                class="px-2 py-1 rounded-lg bg-gray-900 border border-gray-700 text-sm">
+                <option v-for="m in targetModels" :key="m.id" :value="m.id">{{ m.label }}</option>
+                <option v-if="!targetModels.some(m => m.id === settings.target_model)" :value="settings.target_model">
+                  {{ settings.target_model }}
+                </option>
+              </select>
               <span class="text-[11px] text-gray-500">{{ t('lora.folder') }}: {{ current.slug }}</span>
             </div>
             <div class="flex flex-wrap items-center gap-1.5">
@@ -338,6 +403,9 @@ onBeforeUnmount(() => clearTimeout(pollTimer))
               </button>
             </div>
             <p class="text-[11px] text-gray-500">{{ t('lora.targetsHelp') }}</p>
+            <p v-if="settings.target_model !== current.target_model" class="text-[11px] text-amber-300">
+              {{ t('lora.targetModelChange') }}
+            </p>
           </div>
 
           <!-- Status and actions -->
@@ -362,10 +430,10 @@ onBeforeUnmount(() => clearTimeout(pollTimer))
                 class="px-3 py-1 rounded-lg bg-purple-800/70 hover:bg-purple-700 disabled:opacity-40">
                 {{ t('lora.addSelected', { n: incomingNew.length }) }}
               </button>
-              <button type="button" :disabled="busy || !canExport" @click="exportFolder"
+              <button type="button" :disabled="busy || exporting || !canExport" @click="exportFolder"
                 :title="(current.blockers || []).map(b => t(`lora.blocker.${b}`)).join(' / ')"
                 class="px-3 py-1 rounded-lg bg-emerald-700 hover:bg-emerald-600 font-semibold disabled:opacity-40">
-                {{ t('lora.export') }}
+                {{ exporting ? t('lora.exporting') : t('lora.export') }}
               </button>
               <a v-if="canExport" :href="zipUrl()" class="px-3 py-1 rounded-lg bg-gray-800 hover:bg-gray-700">{{ t('lora.zip') }}</a>
               <button type="button" @click="deleteBucket"

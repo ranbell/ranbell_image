@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""Train a Krea 2 LoRA from a dataset folder ranbell exported.
+"""Train a LoRA from a dataset folder ranbell exported.
 
     docker compose exec musubi train <bucket> [--preset 16gb] [--epochs N] [--dry-run]
 
+The dataset's meta.json names its target model (``target_model``); the recipe
+for that model (RECIPES) decides the model files, the musubi scripts, the
+training flags and the presets. **A new target model is one Recipe.**
+
 What it does, in order:
-  1. check   — the dataset (meta.json, every picture has its .txt) and the three models
+  1. check   — the dataset (meta.json, every picture has its .txt) and the model files
   2. free    — ask ComfyUI and Ollama to let go of the card (same GPU), then
                check that enough VRAM is actually free
   3. toml    — write the musubi dataset config for this run
@@ -42,38 +46,79 @@ OUTPUT = WORK / "output"
 MUSUBI = WORK / "musubi-tuner"
 VENV_BIN = WORK / "venv" / "bin"
 
-MODEL_FILES = {
-    "dit": os.environ.get("KREA2_DIT", str(MODELS / "raw.safetensors")),
-    "vae": os.environ.get("KREA2_VAE", str(MODELS / "qwen_image_vae.safetensors")),
-    "text_encoder": os.environ.get("KREA2_TE", str(MODELS / "qwen3vl_4b_bf16.safetensors")),
-}
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
 FORMAT = "ranbell-lora-dataset/1"
 
-# Measured on an RTX 4060 Ti 16 GB (PCIe x8), 2026-11-10 — see README.ja.md.
+
+@dataclass(frozen=True)
+class Recipe:
+    """How one target model is trained with musubi-tuner."""
+    id: str
+    label: str
+    #: role -> (env var that overrides it, file name under models/<id>/)
+    models: dict[str, tuple[str, str]]
+    #: musubi scripts under src/musubi_tuner/
+    latents_script: str
+    te_script: str
+    train_script: str
+    network_module: str
+    #: flags only this model's training takes
+    train_flags: tuple[str, ...]
+    presets: dict[str, dict]
+    default_preset: str
+
+
+# Krea 2 — measured on an RTX 4060 Ti 16 GB (PCIe x8), 2026-11-10/11; see README.
 # VRAM and speed are set by how many blocks are swapped (~0.45 GiB each);
 # resolution matters little under gradient checkpointing, so 1024 (what Raw
 # was trained up to) is the default. Long captions cost VRAM too (Krea 2 puts
-# the text tokens in the same sequence): swap 16 fit 10 one-line captions at
-# 13.6 GiB but ran out with real VLM captions, so the default is 20, and an
-# out-of-memory run is retried with 4 more swapped blocks. Swap 14 measured 14.6 GiB at the same
-# speed as 16, and swap 10 at 768 ran out of memory.
-PRESETS: dict[str, dict] = {
-    "16gb": {             # default: margin for long captions and the desktop (~1 GiB)
-        "resolution": 1024,
-        "blocks_to_swap": 20,
-        "fp8": True,
-        "gc_cpu_offload": False,
-        "min_free_gb": 14.0,
+# the text tokens in the same sequence): swap 16 fit one-line captions at
+# 13.6 GiB but ran out with real VLM captions, so the default is 20 (15.5 GiB,
+# 15.3 s/step with 18 pictures), and an out-of-memory run is retried with 4
+# more swapped blocks.
+KREA2 = Recipe(
+    id="krea2",
+    label="Krea 2",
+    models={
+        "dit": ("KREA2_DIT", "raw.safetensors"),
+        "vae": ("KREA2_VAE", "qwen_image_vae.safetensors"),
+        "text_encoder": ("KREA2_TE", "qwen3vl_4b_bf16.safetensors"),
     },
-    "16gb-safe": {        # 8.4 GiB peak, 16.7 s/step — when something must stay on the card
-        "resolution": 1024,
-        "blocks_to_swap": 26,
-        "fp8": True,
-        "gc_cpu_offload": True,
-        "min_free_gb": 9.0,
+    latents_script="krea2_cache_latents.py",
+    te_script="krea2_cache_text_encoder_outputs.py",
+    train_script="krea2_train_network.py",
+    network_module="networks.lora_krea2",
+    # Buckets give mixed shapes, and the preset may not be 1024: let the
+    # shift follow the resolution instead of the fixed 2.5 tuned for 1024².
+    train_flags=("--timestep_sampling", "krea2_shift", "--weighting_scheme", "none"),
+    presets={
+        "16gb": {             # default: margin for long captions and the desktop (~1 GiB)
+            "resolution": 1024, "blocks_to_swap": 20, "fp8": True,
+            "gc_cpu_offload": False, "min_free_gb": 14.0,
+        },
+        "16gb-safe": {        # 8.4 GiB peak, 16.7 s/step — when something must stay on the card
+            "resolution": 1024, "blocks_to_swap": 26, "fp8": True,
+            "gc_cpu_offload": True, "min_free_gb": 9.0,
+        },
     },
-}
+    default_preset="16gb",
+)
+
+RECIPES: dict[str, Recipe] = {KREA2.id: KREA2}
+ALL_PRESETS = sorted({name for r in RECIPES.values() for name in r.presets})
+
+
+def model_files(recipe: Recipe) -> dict[str, str]:
+    """Where each model file is: the env override, else models/<target>/<file>,
+    else models/<file> (the flat layout of the first Krea 2 setup)."""
+    out: dict[str, str] = {}
+    for role, (env, name) in recipe.models.items():
+        if os.environ.get(env):
+            out[role] = os.environ[env]
+            continue
+        nested, flat = MODELS / recipe.id / name, MODELS / name
+        out[role] = str(flat if not nested.is_file() and flat.is_file() else nested)
+    return out
 
 
 class Stop(RuntimeError):
@@ -89,6 +134,7 @@ class Plan:
     output_name: str
     meta: dict
     settings: dict
+    recipe: Recipe = KREA2
     commands: list[tuple[str, list[str]]] = field(default_factory=list)
     te_hash: str = ""
 
@@ -106,8 +152,10 @@ def read_dataset(dataset_dir: Path) -> tuple[dict, list[Path]]:
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
     if meta.get("format") != FORMAT:
         raise Stop(f"unknown dataset format {meta.get('format')!r} (expected {FORMAT})")
-    if meta.get("target_model", "krea2") != "krea2":
-        raise Stop(f"this dataset is for {meta.get('target_model')!r}, not krea2")
+    target = meta.get("target_model", "krea2")
+    if target not in RECIPES:
+        raise Stop(f"this dataset is for {target!r}, which this trainer has no recipe for "
+                   f"(supported: {', '.join(RECIPES)})")
 
     images = sorted(p for p in dataset_dir.iterdir() if p.suffix.lower() in IMAGE_EXTS)
     if not images:
@@ -124,12 +172,14 @@ def read_dataset(dataset_dir: Path) -> tuple[dict, list[Path]]:
     return meta, images
 
 
-def check_models() -> None:
-    missing = [f"{k}: {p}" for k, p in MODEL_FILES.items() if not Path(p).is_file()]
+def check_models(recipe: Recipe = KREA2) -> None:
+    missing = [f"{k}: {p}" for k, p in model_files(recipe).items() if not Path(p).is_file()]
     if missing:
-        raise Stop("model files missing (see README.ja.md for where to get them):\n  " + "\n  ".join(missing))
-    if not (MUSUBI / "src" / "musubi_tuner" / "krea2_train_network.py").is_file():
-        raise Stop("musubi-tuner is not installed — run `musubi-setup` first")
+        raise Stop(f"{recipe.label} model files missing (see README for where to get them):\n  "
+                   + "\n  ".join(missing))
+    if not (MUSUBI / "src" / "musubi_tuner" / recipe.train_script).is_file():
+        raise Stop(f"musubi-tuner has no {recipe.train_script} — run `musubi-setup` "
+                   "(or update the pinned commit)")
 
 
 def captions_hash(images: list[Path]) -> str:
@@ -163,36 +213,36 @@ def dataset_toml(dataset_dir: Path, cache_dir: Path, *, resolution: int, repeats
 
 def build_commands(plan: Plan, *, te_cached: bool) -> list[tuple[str, list[str]]]:
     s = plan.settings
+    r = plan.recipe
+    files = model_files(r)
     py = str(VENV_BIN / "python")
     src = MUSUBI / "src" / "musubi_tuner"
     toml = str(plan.run_dir / "dataset.toml")
 
     cmds: list[tuple[str, list[str]]] = [
-        ("latents", [py, str(src / "krea2_cache_latents.py"),
-                     "--dataset_config", toml, "--vae", MODEL_FILES["vae"],
+        ("latents", [py, str(src / r.latents_script),
+                     "--dataset_config", toml, "--vae", files["vae"],
                      "--skip_existing", "--keep_cache"]),
     ]
     if not te_cached:
-        cmds.append(("text_encoder", [py, str(src / "krea2_cache_text_encoder_outputs.py"),
+        cmds.append(("text_encoder", [py, str(src / r.te_script),
                                       "--dataset_config", toml,
-                                      "--text_encoder", MODEL_FILES["text_encoder"],
+                                      "--text_encoder", files["text_encoder"],
                                       "--batch_size", "1", "--keep_cache"]))
 
     train = [
         str(VENV_BIN / "accelerate"), "launch",
         "--num_processes", "1", "--num_machines", "1", "--dynamo_backend", "no",
         "--num_cpu_threads_per_process", "1", "--mixed_precision", "bf16",
-        str(src / "krea2_train_network.py"),
-        "--dit", MODEL_FILES["dit"], "--vae", MODEL_FILES["vae"],
+        str(src / r.train_script),
+        "--dit", files["dit"], "--vae", files["vae"],
         "--dataset_config", toml,
         "--sdpa", "--mixed_precision", "bf16",
-        # Buckets give mixed shapes, and the preset may not be 1024: let the
-        # shift follow the resolution instead of the fixed 2.5 tuned for 1024².
-        "--timestep_sampling", "krea2_shift", "--weighting_scheme", "none",
+        *r.train_flags,
         "--optimizer_type", "adamw8bit", "--learning_rate", str(s["lr"]),
         "--gradient_checkpointing",
         "--max_data_loader_n_workers", "2", "--persistent_data_loader_workers",
-        "--network_module", "networks.lora_krea2",
+        "--network_module", r.network_module,
         "--network_dim", str(s["rank"]), "--network_alpha", str(s["alpha"]),
         "--max_train_epochs", str(s["epochs"]), "--save_every_n_epochs", str(s["save_every"]),
         "--seed", str(s["seed"]),
@@ -213,14 +263,18 @@ def make_plan(args) -> Plan:
     slug = args.bucket.strip("/").split("/")[-1]
     dataset_dir = DATASETS / slug
     meta, images = read_dataset(dataset_dir)
+    recipe = RECIPES[meta.get("target_model", "krea2")]
+    preset_name = args.preset or recipe.default_preset
+    if preset_name not in recipe.presets:
+        raise Stop(f"{recipe.label} has no preset {preset_name!r} (has: {', '.join(recipe.presets)})")
 
-    preset = dict(PRESETS[args.preset])
+    preset = dict(recipe.presets[preset_name])
     for key in ("resolution", "blocks_to_swap", "min_free_gb"):
         v = getattr(args, key)
         if v is not None:
             preset[key] = v
     settings = preset | {
-        "preset": args.preset,
+        "preset": preset_name, "target": recipe.id,
         "epochs": args.epochs, "repeats": args.repeats, "rank": args.rank,
         "alpha": args.alpha if args.alpha is not None else args.rank,
         "lr": args.lr, "seed": args.seed, "save_every": args.save_every,
@@ -229,7 +283,7 @@ def make_plan(args) -> Plan:
     plan = Plan(
         slug=slug, dataset_dir=dataset_dir, cache_dir=CACHE / slug,
         run_dir=OUTPUT / f"{slug}-{stamp}", output_name=args.name or slug,
-        meta=meta, settings=settings, te_hash=captions_hash(images),
+        meta=meta, settings=settings, te_hash=captions_hash(images), recipe=recipe,
     )
     marker = plan.cache_dir / "te.hash"
     te_cached = marker.is_file() and marker.read_text().strip() == plan.te_hash
@@ -370,9 +424,11 @@ class Runner:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="train", description="Train a Krea 2 LoRA from a ranbell dataset folder.")
+    ap = argparse.ArgumentParser(prog="train", description="Train a LoRA from a ranbell dataset folder "
+                                 f"(targets: {', '.join(r.label for r in RECIPES.values())}).")
     ap.add_argument("bucket", nargs="?", help="dataset folder name under /work/datasets")
-    ap.add_argument("--preset", choices=sorted(PRESETS), default="16gb")
+    ap.add_argument("--preset", choices=ALL_PRESETS, default=None,
+                    help="default: the target model's own default preset")
     ap.add_argument("--epochs", type=int, default=16)
     ap.add_argument("--repeats", type=int, default=1, help="times each picture is seen per epoch")
     ap.add_argument("--rank", type=int, default=32)
@@ -401,12 +457,13 @@ def main(argv: list[str] | None = None) -> int:
     try:
         plan = make_plan(args)
         if not args.dry_run:
-            check_models()
+            check_models(plan.recipe)
     except Stop as exc:
         print(f"✋ {exc}", file=sys.stderr)
         return 2
 
     s = plan.settings
+    print(f"target   {plan.recipe.label}")
     print(f"dataset  {plan.dataset_dir}  ({s['images']} pictures, trigger {plan.meta.get('trigger')!r}, "
           f"targets {plan.meta.get('targets')})")
     print(f"preset   {s['preset']}: {s['resolution']}px, fp8={s['fp8']}, swap={s['blocks_to_swap']}, "
@@ -417,7 +474,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.dry_run:
         try:
-            check_models()
+            check_models(plan.recipe)
         except Stop as exc:
             print(f"(note) {exc}")
         print("\n" + dataset_toml(plan.dataset_dir, plan.cache_dir,

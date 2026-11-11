@@ -1,4 +1,4 @@
-# Making a LoRA — from the gallery to a Krea 2 LoRA
+# Making a LoRA — from the gallery to a LoRA (Krea 2 for now)
 
 Gather pictures you like from the gallery into a **bucket**, and a VLM writes training captions for them.
 When the set is ready, export it as a folder; training happens outside ranbell, in the trainer container
@@ -23,8 +23,18 @@ ranbell's part ends at the export. Starting and watching a training run are comm
 2. **Check it in the admin screen.** Among the model settings, the two 📦 fields: under "export folder"
    it should say "✓ Writable". The other, "caption model", falls back to the VLM model when empty —
    if you pick one, pick a **model that can read images**.
-3. **Prepare the trainer.** Follow [external/musubi's README](../../external/musubi/README.md): build the
-   container and put the three models in place (Krea 2 Raw, text encoder, VAE — all bf16).
+3. **Prepare the trainer.** Follow [external/musubi's README](../../external/musubi/README.md) to build the
+   container, and put the three models Krea 2 training needs in place:
+
+   ```
+   docker-musubi/work/models/krea2/
+     raw.safetensors               Krea 2 Raw (bf16, ~26 GB; accept the license on Hugging Face first)
+     qwen3vl_4b_bf16.safetensors   text encoder (bf16, single file)
+     qwen_image_vae.safetensors    VAE
+   ```
+
+   ComfyUI's fp8 files (`*_fp8_scaled`) **do not work** — the trainer reads bf16 and quantizes on its own.
+   The full layout and download sources are in [external/musubi, "File layout"](../../external/musubi/README.md#file-layout-krea-2).
 
 ---
 
@@ -32,7 +42,8 @@ ranbell's part ends at the export. Starting and watching a training run are comm
 
 Select pictures in the gallery and press **"📦 LoRA bucket"** in the tray at the bottom.
 
-- For a new bucket, type a name at the top left and press "Create with N".
+- For a new bucket, pick the **model** at the top left, type a name and press "Create with N".
+  The model is which image model the LoRA is for (Krea 2 only for now); captions read differently per model.
 - To add to an existing one, pick it in the list and press "Add N selected". Pictures already in it are skipped.
 
 Captioning starts in the background as pictures come in (it pauses itself while a render runs).
@@ -52,6 +63,7 @@ If every picture shares a composition or a prop, that gets learned too.
 ## 2. Trigger word and targets
 
 Set both at the top of the bucket screen and press **"Save and apply"**.
+(Changing the "Model" in the same row later describes every picture again; hand-edited rows are kept and marked.)
 
 ### Trigger word
 
@@ -96,9 +108,12 @@ Hand edits are never overwritten by a recompute. To rebuild them after changing 
 <export folder>/<bucket>/
   <sha>.png   picture (a copy of the original)
   <sha>.txt   caption
-  meta.json   trigger, targets, where each picture came from
+  meta.json   model, trigger, targets, where each picture came from
 ```
 
+The trainer reads the model from `meta.json` and picks that model's recipe.
+
+- When it is done, "Export finished (N pictures)" pops up.
 - Pending or failed pictures block the export (hover the button for the reason).
 - Exporting again replaces the whole folder. "Download zip" gives the same as a zip.
 

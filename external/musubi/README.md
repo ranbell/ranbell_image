@@ -1,7 +1,7 @@
-# external/musubi — Krea 2 LoRA training container
+# external/musubi — LoRA training container (Krea 2 for now)
 
 An **example setup for an external resource**: it reads the LoRA datasets ranbell exports
-(pictures + same-name `.txt` + `meta.json`) and trains a Krea 2 LoRA with
+(pictures + same-name `.txt` + `meta.json`) and trains a LoRA with
 [kohya-ss/musubi-tuner](https://github.com/kohya-ss/musubi-tuner). ranbell itself never calls this
 container — the only thing they share is the export folder.
 
@@ -49,16 +49,39 @@ docker compose up -d --build
 docker compose exec musubi musubi-setup   # venv and musubi-tuner (pinned commit)
 ```
 
-Put the models in `work/models/` ([work/models/README.md](work/models/README.md)):
+## File layout (Krea 2)
+
+```
+docker-musubi/                      ← where you copied this folder
+├── .env                            LORA_DATASETS_DIR, ComfyUI / Ollama URLs
+└── work/
+    ├── models/
+    │   └── krea2/                  ← training models (fetch and place them yourself)
+    │       ├── raw.safetensors               Krea 2 Raw DiT (bf16, ~26 GB)
+    │       ├── qwen3vl_4b_bf16.safetensors   text encoder (bf16, single file, ~8.9 GB)
+    │       └── qwen_image_vae.safetensors    VAE (~250 MB)
+    ├── venv/  musubi-tuner/        made by musubi-setup
+    ├── cache/<bucket>/             latent and text-encoder caches
+    └── output/<bucket>-<time>/     results (a LoRA per epoch, train.log, summary.json)
+
+<LORA_DATASETS_DIR>/<bucket>/       written by ranbell (/work/datasets in the container, read-only)
+    <sha>.png  <sha>.txt  meta.json
+
+ComfyUI/models/loras/               where you copy the LoRA you pick
+```
 
 | file | source |
 |---|---|
-| `raw.safetensors` | huggingface.co/krea/Krea-2-Raw (gated, bf16) |
+| `raw.safetensors` | huggingface.co/krea/Krea-2-Raw (gated — accept the license first) |
 | `qwen3vl_4b_bf16.safetensors` | huggingface.co/Comfy-Org/Qwen3-VL `text_encoders/` |
-| `qwen_image_vae.safetensors` | Comfy-Org/Qwen-Image-Edit_ComfyUI `split_files/vae/` |
+| `qwen_image_vae.safetensors` | huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI `split_files/vae/` |
 
-**ComfyUI's fp8_scaled files do not work.** musubi reads bf16 and quantizes on its own; an fp8 file
-is read without its scales — no error, broken weights.
+- **ComfyUI's fp8_scaled files do not work.** musubi reads bf16 and quantizes on its own; an fp8 file
+  is read without its scales — no error, broken weights.
+- The text encoder must be a **single `.safetensors`**, not a HuggingFace folder.
+- The older flat layout (all three directly in `work/models/`) still works. To keep a file elsewhere,
+  set `KREA2_DIT` / `KREA2_TE` / `KREA2_VAE` in `.env`.
+- 64 GB of RAM is recommended (block swapping keeps part of the DiT on the CPU side).
 
 ## Training
 
@@ -153,6 +176,21 @@ Writes `output/<run>/publish/`. The weights are copied byte for byte; only the m
 - **removed**: training times, session id, base model / VAE file names, dataset folder names
 - musubi never writes captions or tags; `ss_tag_frequency` and the like are removed in case a LoRA
   from another trainer is passed in
+
+## Adding a target model
+
+The dataset's `meta.json` names its `target_model`; that picks what gets trained. Adding a model is one entry on each side:
+
+1. **ranbell:** one entry in `TARGETS` in `backend/app/lora/targets.py` — how captions read (prose or tags) and
+   what the VLM is asked to describe. `available=True` makes it selectable in the bucket screen.
+2. **trainer:** one `Recipe` in `RECIPES` in `work/bin/train_lora.py` — model files, musubi scripts,
+   `network_module`, the model's own training flags, presets.
+
+A dataset for a `target_model` without a recipe stops before anything runs and lists the supported ones.
+
+**About Anima (as of 2026-11):** the musubi-tuner commit pinned here has no Anima training scripts. Supporting
+it means waiting for musubi (bump `MUSUBI_COMMIT` in `setup.sh`) or a Recipe that uses another trainer.
+Anima was trained on tag-style prompts, so its ranbell Target would likely use `caption_style="tags"`.
 
 ## Tests
 

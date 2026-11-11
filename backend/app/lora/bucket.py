@@ -30,6 +30,7 @@ from typing import Any
 from qdrant_client import models as qm
 
 from ..db.qdrant_client import LORA_BUCKETS_COLLECTION
+from . import targets as target_models
 
 # Item states.
 PENDING_DESCRIBE = "pending_describe"
@@ -37,8 +38,6 @@ PENDING_STRIP = "pending_strip"
 DONE = "done"
 ERROR = "error"
 PENDING = (PENDING_DESCRIBE, PENDING_STRIP)
-
-TARGET_MODELS = ("krea2",)
 
 _SLUG_RE = re.compile(r"[^a-z0-9_-]+")
 
@@ -78,8 +77,7 @@ def new_bucket(name: str, *, slug: str, trigger: str = "", targets: list[str] | 
     name = (name or "").strip()
     if not name:
         raise BucketError("name is required")
-    if target_model not in TARGET_MODELS:
-        raise BucketError(f"unknown target model: {target_model}")
+    _check_target(target_model)
     now = time.time()
     return {
         "id": str(uuid.uuid4()),
@@ -94,6 +92,13 @@ def new_bucket(name: str, *, slug: str, trigger: str = "", targets: list[str] | 
         "exported_at": None,
         "export_path": "",
     }
+
+
+def _check_target(target_model: str) -> None:
+    t = target_models.TARGETS.get(target_model)
+    if t is None or not t.available:
+        names = ", ".join(x.id for x in target_models.available())
+        raise BucketError(f"unknown or unavailable target model: {target_model} (available: {names})")
 
 
 def _item(sha: str) -> dict[str, Any]:
@@ -147,8 +152,16 @@ def set_caption(bucket: dict, sha: str, caption: str) -> dict:
 
 
 def update_settings(bucket: dict, *, name: str | None = None, trigger: str | None = None,
-                    targets: list[str] | None = None) -> bool:
-    """Apply a settings change. True when the captions need the strip step again."""
+                    targets: list[str] | None = None, target_model: str | None = None) -> bool:
+    """Apply a settings change. True when captions have to be recomputed.
+
+    A new target model changes how captions read, so every picture is
+    described again (hand edits are kept and marked stale). A new trigger or
+    new targets only re-run the strip step.
+    """
+    new_model = target_model is not None and target_model != bucket.get("target_model")
+    if new_model:
+        _check_target(target_model)  # before anything changes
     if name is not None:
         if not name.strip():
             raise BucketError("name is required")
@@ -162,6 +175,10 @@ def update_settings(bucket: dict, *, name: str | None = None, trigger: str | Non
         if new != bucket["targets"]:
             bucket["targets"] = new
             changed = True
+    if new_model:
+        bucket["target_model"] = target_model
+        request_recaption(bucket, None, step="describe", force=False)
+        return True
     if changed:
         _mark_for_strip(bucket, [it["sha256"] for it in bucket["items"]], force=False)
     return changed

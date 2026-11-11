@@ -2215,6 +2215,13 @@
       "pending": "Some pictures are still pending",
       "error": "Some pictures failed",
       "blank_caption": "A caption is empty"
-    }
+    },
+    "targetModel": "Model",
+    "targetModelHelp": "Which image model the LoRA is for. How captions read (prose or tags) depends on the model.",
+    "targetModelChange": "Changing the model describes every picture again (hand-edited rows are kept and marked).",
+    "exporting": "Exporting…",
+    "exportDone": "Export finished ({n} pictures): {path}",
+    "exportFailed": "Export failed: {error}",
+    "exportCancelled": "Export cancelled"
   }
 }

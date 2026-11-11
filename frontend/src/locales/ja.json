@@ -2215,6 +2215,13 @@
       "pending": "未処理の画像があります",
       "error": "エラーの画像があります",
       "blank_caption": "空のキャプションがあります"
-    }
+    },
+    "targetModel": "対象モデル",
+    "targetModelHelp": "どの画像モデル向けの LoRA か。キャプションの書き方（文章／タグ）がモデルごとに変わります。",
+    "targetModelChange": "対象モデルを変えると、全部の画像を描写し直します（手直し済みの行は残して印を付けます）。",
+    "exporting": "書き出し中…",
+    "exportDone": "書き出しが完了しました（{n}枚）: {path}",
+    "exportFailed": "書き出しに失敗しました: {error}",
+    "exportCancelled": "書き出しを中止しました"
   }
 }

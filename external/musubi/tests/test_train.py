@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-BIN = Path(__file__).resolve().parents[1] / "work" / "bin" / "train_krea2.py"
+BIN = Path(__file__).resolve().parents[1] / "work" / "bin" / "train_lora.py"
 
 
 @pytest.fixture
@@ -23,9 +23,9 @@ def tk(tmp_path, monkeypatch):
     monkeypatch.setenv("MUSUBI_WORK", str(tmp_path))
     for k in ("KREA2_DIT", "KREA2_VAE", "KREA2_TE"):
         monkeypatch.delenv(k, raising=False)
-    spec = importlib.util.spec_from_file_location("train_krea2", BIN)
+    spec = importlib.util.spec_from_file_location("train_lora", BIN)
     mod = importlib.util.module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, "train_krea2", mod)  # dataclasses look themselves up here
+    monkeypatch.setitem(sys.modules, "train_lora", mod)  # dataclasses look themselves up here
     spec.loader.exec_module(mod)
     (tmp_path / "datasets").mkdir()
     return mod
@@ -45,7 +45,7 @@ def _dataset(tk, slug="red", captions=("rnbl, a woman",)):
 def _args(tk, *extra):
     import argparse
     ns = argparse.Namespace(
-        bucket="red", preset="16gb", epochs=4, repeats=2, rank=16, alpha=None, lr=1e-4,
+        bucket="red", preset=None, epochs=4, repeats=2, rank=16, alpha=None, lr=1e-4,
         seed=1, save_every=1, resolution=None, blocks_to_swap=None, min_free_gb=None, name=None,
     )
     for kv in extra:
@@ -204,3 +204,41 @@ def test_retry_gives_up_at_the_swap_limit(tk, monkeypatch):
     with pytest.raises(RuntimeError):
         tk.run_train_with_retry(runner, tk.make_plan(_args(tk)))
     assert runner.swaps == [20, 24, 26]
+
+
+def test_unknown_target_model_is_refused_with_the_supported_list(tk):
+    d = _dataset(tk)
+    meta = json.loads((d / "meta.json").read_text())
+    (d / "meta.json").write_text(json.dumps(meta | {"target_model": "anima"}))
+    with pytest.raises(tk.Stop, match="no recipe for.*supported: krea2"):
+        tk.make_plan(_args(tk))
+
+
+def test_the_recipe_decides_scripts_and_flags(tk):
+    _dataset(tk)
+    plan = tk.make_plan(_args(tk))
+    assert plan.recipe.id == "krea2" and plan.settings["target"] == "krea2"
+    cmds = dict(plan.commands)
+    assert cmds["latents"][1].endswith("krea2_cache_latents.py")
+    assert "--timestep_sampling krea2_shift" in _flags(cmds["train"])
+
+
+def test_a_preset_the_target_does_not_have_stops(tk):
+    _dataset(tk)
+    with pytest.raises(tk.Stop, match="no preset 'nope'"):
+        tk.make_plan(_args(tk, ("preset", "nope")))
+
+
+def test_model_files_prefer_the_target_folder_and_accept_the_flat_layout(tk, monkeypatch):
+    for k in ("KREA2_DIT", "KREA2_VAE", "KREA2_TE"):
+        monkeypatch.delenv(k, raising=False)
+    files = tk.model_files(tk.KREA2)
+    assert files["dit"].endswith("models/krea2/raw.safetensors")       # nothing yet: the new place
+    tk.MODELS.mkdir(parents=True, exist_ok=True)
+    (tk.MODELS / "raw.safetensors").write_bytes(b"")                  # the first setup's flat layout
+    assert tk.model_files(tk.KREA2)["dit"].endswith("models/raw.safetensors")
+    (tk.MODELS / "krea2").mkdir()
+    (tk.MODELS / "krea2" / "raw.safetensors").write_bytes(b"")
+    assert tk.model_files(tk.KREA2)["dit"].endswith("models/krea2/raw.safetensors")
+    monkeypatch.setenv("KREA2_DIT", "/elsewhere/raw.safetensors")
+    assert tk.model_files(tk.KREA2)["dit"] == "/elsewhere/raw.safetensors"
