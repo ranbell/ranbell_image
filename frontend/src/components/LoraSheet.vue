@@ -5,9 +5,19 @@
  * ranbell builds the ComfyUI graph itself (core nodes only) and draws every
  * cell through the job scheduler. The LoRA files are read from ComfyUI's
  * loras folder — ranbell never places or moves them.
+ *
+ * This is the frame: the sheet list on the left, and on the right one of
+ * the new-sheet form, one sheet, several sheets stacked, or the compare board
+ * of pinned pictures (kept in the browser between visits).
  */
-import { ref, computed, watch, onBeforeUnmount } from 'vue'
+import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import LoraSheetList from './LoraSheetList.vue'
+import LoraSheetForm from './LoraSheetForm.vue'
+import LoraSheetGrid from './LoraSheetGrid.vue'
+import LoraSheetStack from './LoraSheetStack.vue'
+import LoraCompareBoard from './LoraCompareBoard.vue'
+import { api } from '../lora/sheetLabels.js'
 
 const props = defineProps({
   show: { type: Boolean, default: false },
@@ -18,394 +28,83 @@ const props = defineProps({
 const emit = defineEmits(['close', 'toast'])
 const { t } = useI18n()
 
-const LS_KEY = 'ranbell.loraSheet.last'
-// The form as it was left — prompt, rows, triggers and all — so closing the
-// screen (or opening it from a picture) does not throw the work away.
-const LS_DRAFT = 'ranbell.loraSheet.draft'
+const LS_BOARD = 'ranbell.loraSheet.board'
+const BOARD_MAX = 4
 
 const options = ref(null)       // /api/lora/sheet-options
 const sheets = ref([])
-const current = ref(null)       // full sheet view, or null while making one
-const busy = ref(false)
-const confirmDelete = ref(false)
-const loraFilter = ref('')
-const newTrigger = ref('')
-const strengthText = ref('')
-const lightbox = ref(null)      // { r, c }
-let pollTimer = null
-let previewTimer = null
-// The picture being drawn right now: its cell and its newest in-flight frame.
-const live = ref({ sheet: '', key: '', url: '', seq: '', step: 0, steps: 0 })
+const mode = ref('new')         // new | sheet | stack | board
+const currentId = ref('')
+const selected = ref([])
+const stackIds = ref([])
+const formKey = ref(0)
+const pins = ref(readPins())
+let backFromBoard = null
 
-const form = ref(blankForm())
-
-function blankForm() {
-  return {
-    name: '', target_model: 'krea2', models: { unet: '', clip: '', vae: '' },
-    prompt: '', seed: randomSeed(), aspect_w: 1, aspect_h: 1, megapixels: 1, steps: 8, cfg: 1.0,
-    sampler: 'euler', scheduler: 'simple', rows: [], no_trigger_column: false, bucket_id: '',
-  }
-}
-function randomSeed() { return Math.floor(Math.random() * 2 ** 48) }
-
-// Size = aspect ratio × megapixels (1 MP = 1024×1024, as ComfyUI counts it),
-// each side snapped to 16 and kept inside what the backend accepts.
-const MP = 1024 * 1024
-function sizeFor(aw, ah, mp) {
-  const r = aw > 0 && ah > 0 ? aw / ah : 1
-  const area = Math.max(0.05, Number(mp) || 1) * MP
-  const snap = v => Math.min(4096, Math.max(64, Math.round(v / 16) * 16))
-  return { width: snap(Math.sqrt(area * r)), height: snap(Math.sqrt(area / r)) }
-}
-function reduceRatio(w, h) {
-  const g = (a, b) => (b ? g(b, a % b) : a)
-  const d = g(Math.round(w), Math.round(h)) || 1
-  return [Math.round(w) / d, Math.round(h) / d]
-}
-
-async function api(path, opts = {}) {
-  const resp = await fetch(path, {
-    headers: opts.body ? { 'Content-Type': 'application/json' } : undefined,
-    ...opts,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  })
-  if (!resp.ok) {
-    let detail = ''
-    try { detail = (await resp.json()).detail } catch {}
-    throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail || resp.status))
-  }
-  return resp.json()
-}
 function toast(msg, type = 'info') { emit('toast', { msg, type }) }
+function onToast(e) { emit('toast', e) }
 
-// ── Making a sheet ────────────────────────────────────────────────────────────
-
-const strengths = computed(() => strengthText.value.split(/[\s,]+/).filter(Boolean)
-  .map(Number).filter(v => Number.isFinite(v)))
-
-const loraGroups = computed(() => {
-  const q = loraFilter.value.trim().toLowerCase()
-  const groups = {}
-  for (const f of options.value?.loras || []) {
-    if (q && !f.toLowerCase().includes(q)) continue
-    const i = f.lastIndexOf('/')
-    const dir = i >= 0 ? f.slice(0, i) : ''
-    ;(groups[dir] ||= []).push(f)
-  }
-  return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b))
-})
-
-// The count the backend will draw: rows sharing a trigger share the 0 column.
-const pictureCount = computed(() => {
-  const rows = form.value.rows
-  if (!rows.length) return 0
-  const nonzero = strengths.value.filter(s => s !== 0).length
-  const base = strengths.value.includes(0) ? new Set(rows.map(r => r.trigger.trim())).size : 0
-  return base + rows.length * (nonzero + (form.value.no_trigger_column ? 1 : 0))
-})
-const estimate = computed(() => {
-  const s = options.value?.seconds_per_picture
-  if (!s || !pictureCount.value) return ''
-  const total = Math.round(s * pictureCount.value)
-  return total < 90 ? t('loraSheet.estimateSec', { n: total }) : t('loraSheet.estimateMin', { n: Math.round(total / 60) })
-})
-const size = computed(() => sizeFor(form.value.aspect_w, form.value.aspect_h, form.value.megapixels))
-// The target's own sampling (Turbo for Krea2): fields off it are marked.
-const SAMPLING_KEYS = ['steps', 'cfg', 'sampler', 'scheduler']
-const samplingDefaults = computed(() => {
-  const tg = (options.value?.targets || []).find(x => x.id === form.value.target_model)
-  return tg?.defaults || {}
-})
-function offDefault(k) {
-  const d = samplingDefaults.value[k]
-  return d !== undefined && d !== form.value[k] ? 'border-amber-500 text-amber-200' : 'border-gray-700'
+function readPins() {
+  try { return JSON.parse(localStorage.getItem(LS_BOARD) || '[]').slice(0, BOARD_MAX) } catch { return [] }
 }
-const samplingDiffers = computed(() => SAMPLING_KEYS.some(k =>
-  samplingDefaults.value[k] !== undefined && samplingDefaults.value[k] !== form.value[k]))
-const samplingDefaultsText = computed(() => {
-  const d = samplingDefaults.value
-  return `${d.steps} steps · cfg ${d.cfg} · ${d.sampler}/${d.scheduler}`
-})
-function resetSampling() {
-  for (const k of SAMPLING_KEYS) if (samplingDefaults.value[k] !== undefined) form.value[k] = samplingDefaults.value[k]
+watch(pins, v => { try { localStorage.setItem(LS_BOARD, JSON.stringify(v)) } catch {} }, { deep: true })
+const isPinned = cell => pins.value.some(p => p.sha256 === cell.sha256)
+function togglePin(cell) {
+  if (isPinned(cell)) { pins.value = pins.value.filter(p => p.sha256 !== cell.sha256); return }
+  if (pins.value.length >= BOARD_MAX) { toast(t('loraSheet.boardFull', { n: BOARD_MAX }), 'info'); return }
+  const { sha256, label, sheet_id, key, w, h } = cell
+  pins.value = [...pins.value, { sha256, label, sheet_id, key, w, h }]
 }
-function swapAspect() {
-  const f = form.value
-  ;[f.aspect_w, f.aspect_h] = [f.aspect_h, f.aspect_w]
-}
-const canCreate = computed(() => form.value.rows.length && form.value.prompt.trim()
-  && form.value.models.unet && form.value.models.clip && form.value.models.vae
-  && strengths.value.length && !busy.value)
-
-function addRow(lora) {
-  if (form.value.rows.some(r => r.lora === lora)) return
-  form.value.rows.push({ lora, trigger: newTrigger.value.trim(), label: '' })
-}
-function addFolder(files) { files.forEach(addRow) }
-function moveRow(i, d) {
-  const rows = form.value.rows, j = i + d
-  if (j < 0 || j >= rows.length) return
-  ;[rows[i], rows[j]] = [rows[j], rows[i]]
-}
-function shortName(f) { return f.slice(f.lastIndexOf('/') + 1).replace(/\.safetensors$/, '') }
-
-function remember() {
-  const f = form.value
-  try {
-    localStorage.setItem(LS_KEY, JSON.stringify({
-      models: f.models, aspect_w: f.aspect_w, aspect_h: f.aspect_h, megapixels: f.megapixels,
-      steps: f.steps, cfg: f.cfg,
-      sampler: f.sampler, scheduler: f.scheduler, strengths: strengthText.value,
-    }))
-  } catch {}
-}
-function recall() {
-  try { return JSON.parse(localStorage.getItem(LS_KEY) || 'null') } catch { return null }
-}
-
-function saveDraft() {
-  if (current.value) return
-  try {
-    localStorage.setItem(LS_DRAFT, JSON.stringify({
-      form: form.value, strengths: strengthText.value, newTrigger: newTrigger.value,
-    }))
-  } catch {}
-}
-function recallDraft() {
-  try { return JSON.parse(localStorage.getItem(LS_DRAFT) || 'null') } catch { return null }
-}
-async function resetForm() {
-  try { localStorage.removeItem(LS_DRAFT) } catch {}
-  await startNew({ fresh: true })
-}
-
-async function startNew({ fresh = false } = {}) {
-  current.value = null
-  confirmDelete.value = false
-  const f = blankForm()
-  const tgt = (options.value?.targets || [])[0]
-  if (tgt) {
-    const { width, height, ...rest } = tgt.defaults || {}
-    Object.assign(f, { target_model: tgt.id }, rest)
-    if (width && height) {
-      ;[f.aspect_w, f.aspect_h] = reduceRatio(width, height)
-      f.megapixels = Math.round((width * height / MP) * 100) / 100
-    }
-  }
-  const last = recall()
-  if (last) {
-    Object.assign(f, { steps: last.steps, cfg: last.cfg, sampler: last.sampler, scheduler: last.scheduler })
-    if (last.megapixels) f.megapixels = last.megapixels
-    if (last.aspect_w && last.aspect_h) [f.aspect_w, f.aspect_h] = [last.aspect_w, last.aspect_h]
-    f.models = { ...f.models, ...(last.models || {}) }
-  }
-  strengthText.value = last?.strengths || (options.value?.default_strengths || [0, 0.25, 0.5, 0.75, 1, 1.25]).join(', ')
-  newTrigger.value = ''
-  loraFilter.value = ''
-  const draft = fresh ? null : recallDraft()
-  if (draft?.form) {
-    const { target_model, ...kept } = draft.form
-    Object.assign(f, kept, { models: { ...f.models, ...(kept.models || {}) } })
-    if (draft.strengths) strengthText.value = draft.strengths
-    newTrigger.value = draft.newTrigger || ''
-  }
-  // A picture or a bucket brings its own part; the rest of the draft stays.
-  const p = props.prefill
-  if (p?.sha256) {
-    try {
-      const pre = await api(`/api/lora/sheet-prefill/${p.sha256}?target=${encodeURIComponent(f.target_model)}`)
-      // Drawn by another model: only its prompt, seed and shape carry over.
-      if (pre.foreign) {
-        const types = (pre.foreign.clip_types || []).join(', ')
-        toast(types ? t('loraSheet.foreignSource', { types }) : t('loraSheet.foreignSourceUnknown'), 'info')
-      }
-      for (const k of ['prompt', 'seed', 'steps', 'cfg', 'sampler', 'scheduler']) {
-        if (pre[k] !== undefined) f[k] = pre[k]
-      }
-      // The picture's own shape; the megapixels stay the user's choice.
-      if (pre.source_width && pre.source_height) {
-        ;[f.aspect_w, f.aspect_h] = reduceRatio(pre.source_width, pre.source_height)
-      }
-      f.models = { ...f.models, ...(pre.models || {}) }
-    } catch (e) { toast(e.message, 'error') }
-  }
-  if (p?.bucket_id) {
-    f.bucket_id = p.bucket_id
-    newTrigger.value = p.trigger || ''
-    loraFilter.value = p.slug || ''
-  }
-  // Drop chosen files ComfyUI does not have (a remembered file since removed).
-  const o = options.value
-  if (o?.comfy) {
-    for (const [k, list] of [['unet', o.unets], ['clip', o.clips], ['vae', o.vaes]]) {
-      if (f.models[k] && !list.includes(f.models[k])) f.models[k] = ''
-    }
-  }
-  form.value = f
-}
-
-async function create() {
-  busy.value = true
-  try {
-    const f = form.value
-    const { aspect_w, aspect_h, megapixels, ...rest } = f
-    const body = { ...rest, ...size.value, strengths: strengths.value, seed: f.seed === '' ? null : Number(f.seed) }
-    const s = await api('/api/lora/sheets', { method: 'POST', body })
-    remember()
-    toast(t('loraSheet.queued', { n: s.pictures }), 'info')
-    current.value = s
-    await loadList()
-    poll()
-  } catch (e) { toast(e.message, 'error') } finally { busy.value = false }
-}
-
-// ── A sheet ───────────────────────────────────────────────────────────────────
 
 async function loadList() { sheets.value = (await api('/api/lora/sheets')).sheets || [] }
 async function loadOptions() { options.value = await api('/api/lora/sheet-options') }
 
-async function openSheet(id) {
-  confirmDelete.value = false
-  current.value = await api(`/api/lora/sheets/${id}`)
-  poll()
+function startNew() { mode.value = 'new'; currentId.value = ''; formKey.value++ }
+function openSheet(id) { currentId.value = id; mode.value = 'sheet' }
+async function onCreated(s) { await loadList(); openSheet(s.id) }
+async function onOpened(id) { await loadList(); openSheet(id) }
+async function onDeleted(id) {
+  selected.value = selected.value.filter(x => x !== id)
+  await loadList()
+  sheets.value.length ? openSheet(sheets.value[0].id) : startNew()
 }
-
-const stepText = computed(() => live.value.steps ? t('loraSheet.step', { v: live.value.step, m: live.value.steps }) : '')
-
-function clearLive() {
-  clearTimeout(previewTimer)
-  if (live.value.url) URL.revokeObjectURL(live.value.url)
-  live.value = { sheet: '', key: '', url: '', seq: '', step: 0, steps: 0 }
+function openStack() { stackIds.value = [...selected.value]; mode.value = 'stack' }
+function closeStack() {
+  if (currentId.value && sheets.value.some(s => s.id === currentId.value)) openSheet(currentId.value)
+  else if (sheets.value.length) openSheet(sheets.value[0].id)
+  else startNew()
 }
-
-// Frames come in faster than the sheet changes, so they have their own loop.
-function pollPreview() {
-  clearTimeout(previewTimer)
-  const s = current.value
-  if (!s?.drawing || !props.show) { clearLive(); return }
-  previewTimer = setTimeout(async () => {
-    try {
-      const resp = await fetch(`/api/lora/sheets/${s.id}/preview`, { cache: 'no-store' })
-      if (current.value?.id !== s.id) return
-      const key = resp.headers.get('X-Sheet-Key') || ''
-      const seq = resp.headers.get('X-Preview-Seq') || ''
-      const step = Number(resp.headers.get('X-Step') || 0)
-      const steps = Number(resp.headers.get('X-Steps') || 0)
-      if (resp.status === 200 && seq !== live.value.seq) {
-        const url = URL.createObjectURL(await resp.blob())
-        if (live.value.url) URL.revokeObjectURL(live.value.url)
-        live.value = { sheet: s.id, key, url, seq, step, steps }
-      } else if (key !== live.value.key) {
-        if (live.value.url) URL.revokeObjectURL(live.value.url)
-        live.value = { sheet: s.id, key, url: '', seq, step, steps }
-      } else {
-        live.value = { ...live.value, step, steps }
-      }
-    } catch {}
-    pollPreview()
-  }, 600)
+function openBoard() {
+  backFromBoard = { mode: mode.value, id: currentId.value }
+  mode.value = 'board'
 }
-
-function poll() {
-  clearTimeout(pollTimer)
-  const s = current.value
-  if (s?.drawing && live.value.sheet !== s.id) { clearLive(); live.value.sheet = s.id; pollPreview() }
-  if (!s || !(s.drawing || false)) { clearLive(); return }
-  pollTimer = setTimeout(async () => {
-    if (!props.show || current.value?.id !== s.id) return
-    try {
-      const fresh = await api(`/api/lora/sheets/${s.id}`)
-      if (current.value?.id !== s.id) return
-      current.value = fresh
-      if (!fresh.drawing) {
-        toast(fresh.errors ? t('loraSheet.doneWithErrors', { n: fresh.done, e: fresh.errors })
-          : t('loraSheet.done', { n: fresh.done }), fresh.errors ? 'error' : 'success')
-        loadList()
-        return
-      }
-    } catch {}
-    poll()
-  }, 2500)
+function closeBoard() {
+  const b = backFromBoard
+  if (b?.mode === 'sheet' && b.id) openSheet(b.id)
+  else if (b?.mode === 'stack' && stackIds.value.length) mode.value = 'stack'
+  else if (sheets.value.length) openSheet(sheets.value[0].id)
+  else startNew()
 }
-
-async function drawRest() {
-  busy.value = true
-  try {
-    current.value = await api(`/api/lora/sheets/${current.value.id}/render`, { method: 'POST' })
-    poll()
-  } catch (e) { toast(e.message, 'error') } finally { busy.value = false }
+async function deleteMany(ids) {
+  for (const id of ids) {
+    try { await api(`/api/lora/sheets/${id}`, { method: 'DELETE' }) } catch (e) { toast(e.message, 'error') }
+  }
+  selected.value = []
+  stackIds.value = stackIds.value.filter(id => !ids.includes(id))
+  await loadList()
+  if (ids.includes(currentId.value) || mode.value === 'stack') {
+    sheets.value.length ? openSheet(sheets.value[0].id) : startNew()
+  }
 }
-
-async function stopDrawing() {
-  busy.value = true
-  try {
-    await api(`/api/lora/sheets/${current.value.id}/cancel`, { method: 'POST' })
-    toast(t('loraSheet.stopping'), 'info')
-    poll()
-  } catch (e) { toast(e.message, 'error') } finally { busy.value = false }
-}
-
-async function duplicateNewSeed() {
-  busy.value = true
-  try {
-    current.value = await api(`/api/lora/sheets/${current.value.id}/duplicate`, { method: 'POST', body: {} })
-    toast(t('loraSheet.queued', { n: current.value.pictures }), 'info')
-    await loadList()
-    poll()
-  } catch (e) { toast(e.message, 'error') } finally { busy.value = false }
-}
-
-async function deleteSheet() {
-  if (!confirmDelete.value) { confirmDelete.value = true; return }
-  try {
-    await api(`/api/lora/sheets/${current.value.id}`, { method: 'DELETE' })
-    current.value = null
-    confirmDelete.value = false
-    await loadList()
-    if (sheets.value.length) await openSheet(sheets.value[0].id)
-    else await startNew()
-  } catch (e) { toast(e.message, 'error') }
-}
-
-function render(key) { return current.value?.renders?.[key] || {} }
-function colLabel(col) {
-  if (!col.trigger_on) return t('loraSheet.noTriggerCol', { s: col.strength })
-  return col.strength === 0 ? t('loraSheet.baseCol') : String(col.strength)
-}
-function rowLabel(row) { return row.label || shortName(row.lora) }
-
-// ── Lightbox: arrows move along the grid ─────────────────────────────────────
-const lbRender = computed(() => {
-  const lb = lightbox.value
-  if (!lb || !current.value) return null
-  return render(current.value.grid[lb.r]?.[lb.c])
-})
-function openCell(r, c) { if (render(current.value.grid[r][c]).sha256) lightbox.value = { r, c } }
-function onKey(e) {
-  const lb = lightbox.value
-  if (!lb || !current.value) return
-  const rows = current.value.grid.length, cols = current.value.grid[0]?.length || 0
-  const move = { ArrowLeft: [0, -1], ArrowRight: [0, 1], ArrowUp: [-1, 0], ArrowDown: [1, 0] }[e.key]
-  if (e.key === 'Escape') { lightbox.value = null; e.stopPropagation(); return }
-  if (!move) return
-  e.preventDefault()
-  lightbox.value = { r: (lb.r + move[0] + rows) % rows, c: (lb.c + move[1] + cols) % cols }
-}
-
-watch([form, strengthText, newTrigger], saveDraft, { deep: true })
 
 watch(() => props.show, async (open) => {
-  if (!open) { clearTimeout(pollTimer); clearLive(); lightbox.value = null; return }
-  window.addEventListener('keydown', onKey, true)
+  if (!open) return
   try {
     await Promise.all([loadOptions(), loadList()])
-    if (props.prefill || !sheets.value.length) await startNew()
-    else await openSheet(sheets.value[0].id)
+    if (props.prefill || !sheets.value.length) startNew()
+    else if (mode.value === 'new' || !sheets.value.some(s => s.id === currentId.value)) openSheet(sheets.value[0].id)
   } catch (e) { toast(e.message, 'error') }
 }, { immediate: true })
-watch(() => props.show, (open) => { if (!open) window.removeEventListener('keydown', onKey, true) })
-
-onBeforeUnmount(() => { clearTimeout(pollTimer); clearLive(); window.removeEventListener('keydown', onKey, true) })
 </script>
 
 <template>
@@ -416,248 +115,34 @@ onBeforeUnmount(() => { clearTimeout(pollTimer); clearLive(); window.removeEvent
       class="relative w-full max-w-7xl h-[92vh] flex flex-col md:flex-row rounded-2xl overflow-hidden
              bg-slate-950/95 border border-amber-500/30 shadow-2xl text-gray-200">
       <button type="button" :aria-label="t('lora.close')" @click="emit('close')"
-        class="absolute top-3 right-3 z-10 w-8 h-8 rounded-full bg-gray-800 hover:bg-gray-700 text-gray-300">✕</button>
+        class="absolute top-3 right-3 z-40 w-8 h-8 rounded-full bg-gray-800 hover:bg-gray-700 text-gray-300">✕</button>
 
-      <!-- Sheet list -->
-      <aside class="w-full md:w-60 shrink-0 border-b md:border-b-0 md:border-r border-gray-800 p-4 flex flex-col gap-3">
-        <h3 id="lora-sheet-title" class="font-bold text-amber-200">{{ t('loraSheet.title') }}</h3>
-        <p class="text-[11px] text-gray-500 leading-snug">{{ t('loraSheet.subtitle') }}</p>
-        <button type="button" @click="startNew"
-          class="px-2 py-1.5 rounded-lg bg-amber-700/70 hover:bg-amber-600 text-xs">＋ {{ t('loraSheet.new') }}</button>
-        <div class="flex-1 overflow-y-auto flex flex-col gap-1.5 min-h-0">
-          <button v-for="s in sheets" :key="s.id" type="button" @click="openSheet(s.id)"
-            class="flex items-center gap-2 p-1.5 rounded-lg text-left border"
-            :class="current?.id === s.id ? 'border-amber-500/60 bg-amber-950/40' : 'border-transparent hover:bg-gray-900'">
-            <img v-if="s.cover" :src="`/api/thumbnails/${s.cover}.webp`" class="w-9 h-9 rounded-lg object-cover" loading="lazy" />
-            <span v-else class="w-9 h-9 rounded-lg bg-gray-800 shrink-0" />
-            <span class="min-w-0">
-              <span class="block text-xs truncate">{{ s.name }}</span>
-              <span class="block text-[10px] text-gray-500">
-                {{ s.rows }}×{{ s.columns }} · {{ s.done }}/{{ s.pictures }}
-                <span v-if="s.drawing" class="text-amber-300 motion-safe:animate-pulse">●</span>
-                <span v-if="s.errors" class="text-red-400">⚠{{ s.errors }}</span>
-              </span>
-            </span>
-          </button>
-        </div>
-      </aside>
+      <LoraSheetList :sheets="sheets" :current-id="mode === 'sheet' ? currentId : ''" v-model:selected="selected"
+        @open="openSheet" @new="startNew" @compare="openStack" @delete-many="deleteMany" />
 
-      <!-- New sheet -->
-      <section v-if="!current" class="flex-1 min-w-0 overflow-y-auto p-4 pr-14 flex flex-col gap-4">
-        <p v-if="options && !options.comfy" class="text-xs text-amber-300">
-          ⚠ {{ t('loraSheet.comfyDown', { error: options.comfy_error || '' }) }}
-        </p>
+      <div class="flex-1 min-w-0 min-h-0 flex flex-col">
+        <LoraSheetForm v-if="mode === 'new' && options" :key="formKey" :options="options" :prefill="prefill"
+          @created="onCreated" @toast="onToast" />
+        <LoraSheetGrid v-else-if="mode === 'sheet' && currentId" :sheet-id="currentId" :is-pinned="isPinned"
+          @pin="togglePin" @toast="onToast" @changed="loadList" @deleted="onDeleted" @opened="onOpened" />
+        <LoraSheetStack v-else-if="mode === 'stack'" :ids="stackIds" :is-pinned="isPinned"
+          @pin="togglePin" @toast="onToast" @open="openSheet" @close="closeStack" />
+        <LoraCompareBoard v-else-if="mode === 'board'" :items="pins"
+          @remove="togglePin" @clear="pins = []" @close="closeBoard" />
 
-        <div class="grid md:grid-cols-3 gap-2">
-          <label v-for="[k, list, lbl] in [['unet', options?.unets, 'modelUnet'], ['clip', options?.clips, 'modelClip'], ['vae', options?.vaes, 'modelVae']]"
-            :key="k" class="flex flex-col gap-1 text-[11px] text-gray-400">
-            {{ t(`loraSheet.${lbl}`) }}
-            <select v-model="form.models[k]" class="px-2 py-1 rounded-lg bg-gray-900 border border-gray-700 text-xs text-gray-200">
-              <option value="">—</option>
-              <option v-for="f in list || []" :key="f" :value="f">{{ f }}</option>
-              <option v-if="form.models[k] && !(list || []).includes(form.models[k])" :value="form.models[k]">{{ form.models[k] }}</option>
-            </select>
-          </label>
-        </div>
-
-        <label class="flex flex-col gap-1 text-[11px] text-gray-400">
-          {{ t('loraSheet.prompt') }}
-          <textarea v-model="form.prompt" rows="3" :placeholder="t('loraSheet.promptHint')"
-            class="px-2 py-1.5 rounded-lg bg-gray-900 border border-gray-700 text-sm text-gray-200" />
-        </label>
-
-        <div class="flex flex-wrap items-end gap-3">
-          <label class="flex flex-col gap-1 text-[11px] text-gray-400">
-            {{ t('loraSheet.seed') }}
-            <span class="flex gap-1">
-              <input v-model.number="form.seed" type="number" min="0"
-                class="w-44 px-2 py-1 rounded-lg bg-gray-900 border border-gray-700 text-xs font-mono" />
-              <button type="button" class="px-2 rounded-lg bg-gray-800 hover:bg-gray-700" :title="t('loraSheet.reseed')"
-                @click="form.seed = randomSeed()">🎲</button>
-            </span>
-          </label>
-          <label class="flex flex-col gap-1 text-[11px] text-gray-400">
-            {{ t('loraSheet.size') }}
-            <span class="flex items-center gap-1">
-              <input v-model.number="form.aspect_w" type="number" min="1" :title="t('loraSheet.aspect')"
-                class="w-16 px-2 py-1 rounded-lg bg-gray-900 border border-gray-700 text-xs" />
-              :
-              <input v-model.number="form.aspect_h" type="number" min="1" :title="t('loraSheet.aspect')"
-                class="w-16 px-2 py-1 rounded-lg bg-gray-900 border border-gray-700 text-xs" />
-              <button type="button" class="px-1.5 rounded-lg bg-gray-800 hover:bg-gray-700" :title="t('loraSheet.swapAspect')"
-                @click="swapAspect">⇄</button>
-              <input v-model.number="form.megapixels" type="number" min="0.25" max="16" step="0.25" :title="t('loraSheet.megapixels')"
-                class="w-16 px-2 py-1 rounded-lg bg-gray-900 border border-gray-700 text-xs" />
-              <span class="text-gray-500">MP</span>
-              <span class="font-mono text-gray-300">→ {{ size.width }}×{{ size.height }}</span>
-            </span>
-          </label>
-          <label class="flex flex-col gap-1 text-[11px] text-gray-400 flex-1 min-w-48">
-            {{ t('loraSheet.strengths') }}
-            <input v-model="strengthText" class="px-2 py-1 rounded-lg bg-gray-900 border border-gray-700 text-xs font-mono" />
-          </label>
-          <label class="flex items-center gap-1.5 text-[11px] text-gray-300" :title="t('loraSheet.noTriggerHelp')">
-            <input v-model="form.no_trigger_column" type="checkbox" /> {{ t('loraSheet.noTriggerColumn') }}
-          </label>
-        </div>
-        <!-- Always in view: a picture from another model can bring settings
-             that are wrong for this one (cfg 4.5 on Turbo). -->
-        <div class="flex flex-wrap items-end gap-3 text-[11px] text-gray-400">
-          <span class="self-center text-gray-300">{{ t('loraSheet.sampling') }}</span>
-          <label class="flex flex-col gap-1">steps
-            <input v-model.number="form.steps" type="number" min="1" :class="offDefault('steps')"
-              class="w-16 px-2 py-1 rounded-lg bg-gray-900 border text-xs" /></label>
-          <label class="flex flex-col gap-1">cfg
-            <input v-model.number="form.cfg" type="number" step="0.1" :class="offDefault('cfg')"
-              class="w-16 px-2 py-1 rounded-lg bg-gray-900 border text-xs" /></label>
-          <label class="flex flex-col gap-1">sampler
-            <select v-model="form.sampler" :class="offDefault('sampler')" class="px-2 py-1 rounded-lg bg-gray-900 border text-xs text-gray-200">
-              <option v-for="s in (options?.samplers?.length ? options.samplers : [form.sampler])" :key="s" :value="s">{{ s }}</option>
-            </select></label>
-          <label class="flex flex-col gap-1">scheduler
-            <select v-model="form.scheduler" :class="offDefault('scheduler')" class="px-2 py-1 rounded-lg bg-gray-900 border text-xs text-gray-200">
-              <option v-for="s in (options?.schedulers?.length ? options.schedulers : [form.scheduler])" :key="s" :value="s">{{ s }}</option>
-            </select></label>
-          <button v-if="samplingDiffers" type="button" @click="resetSampling"
-            class="px-2 py-1 rounded-lg bg-amber-800/60 hover:bg-amber-700 text-amber-100 text-xs">
-            {{ t('loraSheet.samplingReset', { d: samplingDefaultsText }) }}</button>
-          <p class="self-end text-gray-500">{{ t('loraSheet.samplingHelp') }}</p>
-        </div>
-
-        <!-- LoRA rows -->
-        <div class="grid md:grid-cols-2 gap-3 min-h-0">
-          <div class="flex flex-col gap-1.5 min-h-0">
-            <div class="flex gap-1.5">
-              <input v-model="loraFilter" :placeholder="t('loraSheet.filter')"
-                class="flex-1 min-w-0 px-2 py-1 rounded-lg bg-gray-900 border border-gray-700 text-xs" />
-              <input v-model="newTrigger" :placeholder="t('loraSheet.triggerForNew')"
-                class="w-40 px-2 py-1 rounded-lg bg-gray-900 border border-gray-700 text-xs font-mono" />
-            </div>
-            <div class="max-h-72 overflow-y-auto rounded-lg border border-gray-800 p-1.5 text-xs">
-              <p v-if="!loraGroups.length" class="text-gray-500 p-2">{{ t('loraSheet.noLoras') }}</p>
-              <div v-for="[dir, files] in loraGroups" :key="dir" class="mb-1.5">
-                <div class="flex items-center justify-between text-[10px] text-gray-500 px-1">
-                  <span>📁 {{ dir || t('loraSheet.rootFolder') }}</span>
-                  <button v-if="files.length > 1" type="button" class="text-amber-300 hover:text-amber-100"
-                    @click="addFolder(files)">{{ t('loraSheet.addAll', { n: files.length }) }}</button>
-                </div>
-                <button v-for="f in files" :key="f" type="button" @click="addRow(f)"
-                  class="block w-full text-left px-2 py-0.5 rounded hover:bg-gray-800 truncate"
-                  :class="form.rows.some(r => r.lora === f) ? 'text-amber-300' : 'text-gray-300'">{{ shortName(f) }}</button>
-              </div>
-            </div>
+        <!-- Compare-board tray -->
+        <div v-if="pins.length && mode !== 'board'"
+          class="shrink-0 border-t border-gray-800 px-3 py-2 flex items-center gap-2 bg-slate-950">
+          <span class="text-[11px] text-gray-400">📌 {{ pins.length }}/{{ BOARD_MAX }}</span>
+          <div v-for="p in pins" :key="p.sha256" class="relative group">
+            <img :src="`/api/thumbnails/${p.sha256}.webp`" :title="p.label" class="w-10 h-10 rounded-md object-cover" />
+            <button type="button" :aria-label="t('loraSheet.unpin')" @click="togglePin(p)"
+              class="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-black/80 text-[9px] leading-4 text-gray-300 opacity-0 group-hover:opacity-100">✕</button>
           </div>
-          <div class="flex flex-col gap-1.5">
-            <p class="text-[11px] text-gray-400">{{ t('loraSheet.rows', { n: form.rows.length }) }}</p>
-            <p v-if="!form.rows.length" class="text-[11px] text-gray-500">{{ t('loraSheet.rowsHint') }}</p>
-            <div v-for="(r, i) in form.rows" :key="r.lora" class="flex items-center gap-1.5 text-xs">
-              <span class="flex-1 min-w-0 truncate" :title="r.lora">{{ shortName(r.lora) }}</span>
-              <input v-model="r.trigger" :placeholder="t('loraSheet.trigger')"
-                class="w-36 px-2 py-0.5 rounded-lg bg-gray-900 border border-gray-700 text-xs font-mono" />
-              <button type="button" class="text-gray-500 hover:text-gray-200" @click="moveRow(i, -1)">↑</button>
-              <button type="button" class="text-gray-500 hover:text-gray-200" @click="moveRow(i, 1)">↓</button>
-              <button type="button" class="text-gray-500 hover:text-red-300" @click="form.rows.splice(i, 1)">✕</button>
-            </div>
-          </div>
+          <button type="button" :disabled="pins.length < 2" @click="openBoard"
+            class="ml-auto px-3 py-1 rounded-lg bg-sky-700 hover:bg-sky-600 text-white text-xs disabled:opacity-40">
+            {{ t('loraSheet.boardOpen') }}</button>
         </div>
-
-        <div class="flex flex-wrap items-center gap-3 border-t border-gray-800 pt-3">
-          <input v-model="form.name" :placeholder="t('loraSheet.name')"
-            class="w-56 px-2 py-1 rounded-lg bg-gray-900 border border-gray-700 text-xs" />
-          <span class="text-xs text-gray-400">
-            {{ t('loraSheet.count', { n: pictureCount }) }}<template v-if="estimate"> · {{ estimate }}</template>
-          </span>
-          <button type="button" :title="t('loraSheet.resetHelp')" @click="resetForm"
-            class="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-xs">{{ t('loraSheet.reset') }}</button>
-          <button type="button" :disabled="!canCreate" @click="create"
-            class="ml-auto px-4 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-sm text-black font-semibold disabled:opacity-40">
-            {{ t('loraSheet.start') }}
-          </button>
-        </div>
-      </section>
-
-      <!-- A sheet -->
-      <section v-else class="flex-1 min-w-0 flex flex-col min-h-0">
-        <div class="p-4 pr-14 border-b border-gray-800 flex flex-col gap-1.5">
-          <div class="flex flex-wrap items-center gap-2">
-            <h4 class="font-semibold">{{ current.name }}</h4>
-            <span class="text-[11px] text-gray-500">{{ current.done }}/{{ current.pictures }}</span>
-            <span v-if="current.drawing" class="text-[11px] text-amber-300 motion-safe:animate-pulse">{{ t('loraSheet.drawing') }}</span>
-            <span v-if="current.drawing" class="text-[11px] text-amber-200 font-mono">
-              {{ t('loraSheet.progress', { done: (current.done || 0) + (current.errors || 0), total: current.pictures || 0 }) }}<template v-if="stepText"> · {{ stepText }}</template>
-            </span>
-            <div class="ml-auto flex flex-wrap gap-1.5">
-              <button v-if="current.drawing" type="button" :disabled="busy" @click="stopDrawing"
-                class="px-2.5 py-1 rounded-lg bg-red-800/70 hover:bg-red-700 text-xs">■ {{ t('loraSheet.stop') }}</button>
-              <button v-if="!current.drawing && (current.pending || current.errors)" type="button" :disabled="busy" @click="drawRest"
-                class="px-2.5 py-1 rounded-lg bg-amber-700/70 hover:bg-amber-600 text-xs">{{ t('loraSheet.drawRest') }}</button>
-              <button type="button" :disabled="busy" @click="duplicateNewSeed"
-                class="px-2.5 py-1 rounded-lg bg-gray-800 hover:bg-gray-700 text-xs">🎲 {{ t('loraSheet.newSeed') }}</button>
-              <a :href="`/api/lora/sheets/${current.id}/grid.png`" download
-                class="px-2.5 py-1 rounded-lg bg-gray-800 hover:bg-gray-700 text-xs">⬇ {{ t('loraSheet.savePng') }}</a>
-              <button type="button" @click="deleteSheet"
-                class="px-2.5 py-1 rounded-lg text-xs"
-                :class="confirmDelete ? 'bg-red-700 text-white' : 'bg-gray-800 hover:bg-gray-700'">
-                {{ confirmDelete ? t('loraSheet.confirmDelete') : t('loraSheet.delete') }}
-              </button>
-            </div>
-          </div>
-          <p class="text-[11px] text-gray-500 truncate" :title="current.prompt">
-            seed {{ current.seed }} · {{ current.models.unet }} · {{ current.steps }} steps · cfg {{ current.cfg }}
-            · {{ current.sampler }}/{{ current.scheduler }} · {{ current.width }}×{{ current.height }} — {{ current.prompt }}
-          </p>
-        </div>
-
-        <div class="flex-1 overflow-auto p-3">
-          <table class="border-separate border-spacing-1">
-            <thead>
-              <tr>
-                <th class="sticky top-0 left-0 z-20 bg-slate-950"></th>
-                <th v-for="(col, c) in current.columns_spec" :key="c"
-                  class="sticky top-0 z-10 bg-slate-950 text-xs font-semibold text-amber-200 px-1 py-1">{{ colLabel(col) }}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="(row, r) in current.rows" :key="r">
-                <th class="sticky left-0 z-10 bg-slate-950 text-left align-top text-xs font-normal pr-2 max-w-40">
-                  <span class="block break-all" :title="row.lora">{{ rowLabel(row) }}</span>
-                  <span v-if="row.trigger" class="block text-[10px] text-gray-500 font-mono break-all">{{ row.trigger }}</span>
-                </th>
-                <td v-for="(key, c) in current.grid[r]" :key="c" class="p-0">
-                  <button v-if="render(key).sha256" type="button" @click="openCell(r, c)" class="block">
-                    <img :src="`/api/thumbnails/${render(key).sha256}.webp`" loading="lazy"
-                      class="w-44 rounded-lg object-cover bg-gray-900"
-                      :style="{ aspectRatio: `${current.width} / ${current.height}` }" />
-                  </button>
-                  <div v-else-if="live.key === key && live.url" class="relative">
-                    <img :src="live.url" class="w-44 rounded-lg object-cover ring-2 ring-amber-500/70"
-                      :style="{ aspectRatio: `${current.width} / ${current.height}` }" />
-                    <span class="absolute bottom-1 left-1 px-1.5 rounded bg-black/60 text-[10px] text-amber-200 font-mono">{{ stepText || t('loraSheet.drawingNow') }}</span>
-                    <span v-if="live.steps" class="absolute bottom-0 left-0 h-0.5 rounded bg-amber-400 transition-all"
-                      :style="{ width: `${100 * live.step / live.steps}%` }"></span>
-                  </div>
-                  <div v-else class="w-44 rounded-lg flex items-center justify-center text-[11px] p-2 text-center break-words overflow-hidden"
-                    :style="{ aspectRatio: `${current.width} / ${current.height}` }"
-                    :class="render(key).status === 'error' ? 'bg-red-950/50 text-red-300' : 'bg-gray-900 text-gray-500 motion-safe:animate-pulse'"
-                    :title="render(key).error || ''">
-                    {{ render(key).status === 'error' ? `⚠ ${render(key).error}`.slice(0, 220)
-                      : live.key === key ? (stepText || t('loraSheet.drawingNow')) : t('loraSheet.waiting') }}
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <!-- Lightbox -->
-      <div v-if="lightbox && lbRender?.sha256" class="absolute inset-0 z-30 bg-black/90 flex flex-col items-center justify-center p-4"
-        @click.self="lightbox = null">
-        <p class="text-sm text-amber-200 mb-2">
-          {{ rowLabel(current.rows[lightbox.r]) }} · {{ colLabel(current.columns_spec[lightbox.c]) }}
-          <span class="text-gray-500 text-xs ml-2">{{ t('loraSheet.arrows') }}</span>
-        </p>
-        <img :src="`/api/originals/${lbRender.sha256}`" class="max-w-full max-h-[80vh] object-contain rounded-lg" />
       </div>
     </div>
   </div>

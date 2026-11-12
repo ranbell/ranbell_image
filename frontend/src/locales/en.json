@@ -2285,6 +2285,32 @@
     "stopping": "Stopping. What is drawn stays; 'Draw the rest' picks it up again.",
     "samplingReset": "Back to defaults ({d})",
     "step": "Step {v}/{m}",
-    "progress": "{done}/{total} pictures"
+    "progress": "{done}/{total} pictures",
+    "pin": "Pin to the compare board",
+    "unpin": "Unpin",
+    "rename": "Click to rename",
+    "stackTitle": "{n} sheets side by side",
+    "stackClose": "Close",
+    "stackCommon": "Shared",
+    "stackOpen": "Open \"{name}\"",
+    "search": "Search name, LoRA, model, prompt",
+    "groupBy": {
+      "lora": "LoRA",
+      "model": "Model",
+      "day": "Date"
+    },
+    "selected": "{n} selected",
+    "stackCompare": "Compare ({n})",
+    "confirmDeleteMany": "Delete {n}?",
+    "clearSelection": "Clear",
+    "noSheets": "No sheets",
+    "select": "Select \"{name}\"",
+    "boardTitle": "Compare board ({n})",
+    "boardHelp": "Wheel to zoom, drag to pan (all pictures move together), double-click to reset",
+    "boardFit": "Fit",
+    "boardClear": "Unpin all",
+    "boardEmpty": "Press 📌 on a cell to place it here (up to 4)",
+    "boardFull": "The compare board holds {n} pictures",
+    "boardOpen": "Open the compare board"
   }
 }

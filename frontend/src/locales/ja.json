@@ -2285,6 +2285,32 @@
     "stopping": "中止しています。描けた分は残ります。「続きを描く」で再開できます。",
     "samplingReset": "既定に戻す（{d}）",
     "step": "Step {v}/{m}",
-    "progress": "{done}/{total} 枚"
+    "progress": "{done}/{total} 枚",
+    "pin": "比較ボードに追加",
+    "unpin": "比較ボードから外す",
+    "rename": "クリックで名前を変更",
+    "stackTitle": "{n} 枚のシートを並べて比較",
+    "stackClose": "閉じる",
+    "stackCommon": "共通",
+    "stackOpen": "「{name}」を開く",
+    "search": "名前・LoRA・モデル・プロンプトで検索",
+    "groupBy": {
+      "lora": "LoRA",
+      "model": "モデル",
+      "day": "日付"
+    },
+    "selected": "{n} 件選択",
+    "stackCompare": "並べて比べる（{n}）",
+    "confirmDeleteMany": "{n} 件を削除する？",
+    "clearSelection": "選択解除",
+    "noSheets": "シートがありません",
+    "select": "「{name}」を選択",
+    "boardTitle": "比較ボード（{n} 枚）",
+    "boardHelp": "ホイールで拡大・ドラッグで移動（全部の絵が連動）・ダブルクリックで元に戻す",
+    "boardFit": "全体表示",
+    "boardClear": "全部外す",
+    "boardEmpty": "マスの 📌 を押すとここに並びます（最大 4 枚）",
+    "boardFull": "比較ボードは {n} 枚までです",
+    "boardOpen": "比較ボードを開く"
   }
 }

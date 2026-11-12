@@ -170,6 +170,12 @@ ranbell's **📊 LoRA comparison sheet** draws them with one seed and one prompt
 - Cells are drawn through the job scheduler and fill in as they finish. Stopping keeps what is drawn; "Draw the rest" finishes it
 - "🎲 Duplicate with a new seed" makes the same sheet on another seed, so one lucky seed does not decide
 - "⬇ Save PNG" gives one labelled picture (no metadata; fine to post)
+- The list on the left can be searched and grouped by LoRA, by model or by date. Click a sheet's title to rename it
+- **Side by side**: tick two or more sheets in the list and press "⇅ Compare". They stack on shared strength columns, and
+  each sheet's heading shows **only what differs** (model, seed, prompt…) — official Turbo against a merge, or one seed against another.
+  This view saves as a PNG too
+- **Compare board**: pin up to four cells with 📌 (or `P` in the full-size view) and open the board. They sit large side by side,
+  and zoom (wheel) and pan (drag) move all of them together, so hands or background details are compared in the same spot
 
 Anyone's Krea2 LoRAs in the loras folder can sit on the same sheet.
 Another sheet with a prompt unlike the training set (cars, food, streets) shows whether it generalizes.

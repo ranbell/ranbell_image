@@ -150,14 +150,41 @@ def _clean_strengths(values: list[float] | None) -> list[float]:
     return out
 
 
-def _default_name(rows: list[dict]) -> str:
-    """The LoRA's folder when the rows are its epochs, else the first file."""
+MODEL_NAME_CHARS = 30
+
+
+def file_stem(path: str) -> str:
+    """``Krea2/flt_style-000010.safetensors`` -> ``flt_style-000010``."""
+    name = (path or "").rsplit("/", 1)[-1]
+    return name.rsplit(".", 1)[0] if "." in name else name
+
+
+def short_model(path: str, limit: int = MODEL_NAME_CHARS) -> str:
+    stem = file_stem(path)
+    return stem if len(stem) <= limit else stem[: limit - 1] + "…"
+
+
+def _default_name(rows: list[dict], unet: str = "") -> str:
+    """'<LoRA> · <base model>'. The LoRA is its folder when several rows are
+    epochs in one folder; one file (even inside a shared folder such as
+    ``Krea2/``) is named by itself, so sheets do not all come out 'Krea2'."""
     first = rows[0]["lora"]
     folder = first.rsplit("/", 1)[0] if "/" in first else ""
-    if folder and all(r["lora"].startswith(folder + "/") for r in rows):
-        return folder.rsplit("/", 1)[-1]
-    name = first.rsplit("/", 1)[-1]
-    return name[:-12] if name.endswith(".safetensors") else name
+    if len(rows) > 1 and folder and all(r["lora"].startswith(folder + "/") for r in rows):
+        lora = folder.rsplit("/", 1)[-1]
+    else:
+        lora = file_stem(first)
+        if len(rows) > 1:
+            lora += f" +{len(rows) - 1}"
+    return f"{lora} · {short_model(unet)}" if unet else lora
+
+
+def rename(sheet: dict, name: str) -> dict:
+    name = str(name or "").strip()
+    if not name:
+        raise SheetError("the name is empty")
+    sheet["name"] = name[:120]
+    return sheet
 
 
 def new_sheet(body: dict[str, Any]) -> dict:
@@ -182,7 +209,7 @@ def new_sheet(body: dict[str, Any]) -> dict:
     now = time.time()
     sheet = {
         "id": str(uuid.uuid4()),
-        "name": str(body.get("name") or "").strip() or _default_name(rows),
+        "name": str(body.get("name") or "").strip() or _default_name(rows, str(models.get("unet") or "")),
         "target_model": target.id,
         "models": {k: str(models.get(k) or "").strip() for k in ("unet", "clip", "vae")},
         "prompt": str(body.get("prompt") or "").strip(),
@@ -255,6 +282,11 @@ def summary(sheet: dict) -> dict:
         "rows": len(sheet["rows"]), "columns": len(columns(sheet)),
         "pictures": len(sheet["renders"]), "done": c[DONE], "pending": c[PENDING],
         "errors": c[ERROR], "cover": first,
+        # for the list's search and grouping
+        "unet": short_model(sheet["models"].get("unet", "")),
+        "loras": sorted({file_stem(r["lora"]) for r in sheet["rows"]}),
+        "prompt": (sheet.get("prompt") or "")[:80],
+        "strengths": sheet["strengths"],
     }
 
 

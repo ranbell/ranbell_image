@@ -397,9 +397,68 @@ async def test_model_lists_come_from_models_or_object_info():
         comfy_mod.settings.comfyui_url = old
 
 
-def test_default_name_is_the_folder_or_the_file():
-    assert sh.new_sheet(_body())["name"] == "my_style"
-    assert sh.new_sheet(_body(rows=[{"lora": "x/a.safetensors"}, {"lora": "b.safetensors"}]))["name"] == "a"
+def test_default_name_is_the_lora_and_the_base_model():
+    unet = sh.short_model(MODELS["unet"])
+    # epochs in one folder: the folder
+    assert sh.new_sheet(_body())["name"] == f"my_style · {unet}"
+    # one file in a shared folder is named by itself, not 'Krea2'
+    one = sh.new_sheet(_body(rows=[{"lora": "Krea2/flt_style.safetensors"}]))
+    assert one["name"] == f"flt_style · {unet}"
+    # different LoRAs: the first, and how many more
+    two = sh.new_sheet(_body(rows=[{"lora": "x/a.safetensors"}, {"lora": "b.safetensors"}]))
+    assert two["name"] == f"a +1 · {unet}"
+    long = sh.new_sheet(_body(models=dict(MODELS, unet="Krea2/" + "D" * 50 + ".safetensors")))
+    assert long["name"] == "my_style · " + "D" * 29 + "…"
+
+
+def test_rename_and_list_summary():
+    s = sh.new_sheet(_body())
+    assert sh.rename(s, "  epochs  ")["name"] == "epochs"
+    with pytest.raises(sh.SheetError):
+        sh.rename(s, " ")
+    sm = sh.summary(s)
+    assert sm["loras"] == ["my_style", "my_style-000010"]
+    assert sm["unet"] == sh.short_model(MODELS["unet"]) and sm["strengths"] == [0, 0.5, 1.0]
+
+
+def test_stacked_sheets_name_only_what_differs():
+    from app.lora import sheet_compare as cmp
+
+    a = sh.new_sheet(_body())
+    b = sh.new_sheet(_body(seed=7, strengths=[0, 0.75], no_trigger_column=True))
+    c = sh.new_sheet(_body(models=dict(MODELS, unet="Krea2/dasiwa.safetensors")))
+    common, per = cmp.diff_fields([a, b])
+    assert per == [["seed 42"], ["seed 7"]]
+    assert any(x.startswith("model ") for x in common) and not any("seed" in x for x in common)
+    common, per = cmp.diff_fields([a, c])
+    assert per[1] == ["model dasiwa"] and any(x == "seed 42" for x in common)
+    assert cmp.diff_fields([a, a]) [1] == [[], []]
+    p = sh.new_sheet(_body(prompt="another"))
+    assert cmp.diff_fields([a, p])[1] == [["prompt a girl reading in a cafe"], ["prompt another"]]
+
+    cols = cmp.merged_columns([a, b])
+    assert [(c["strength"], c["trigger_on"]) for c in cols] == [
+        (0, True), (0.5, True), (0.75, True), (1.0, True), (1.0, False)]
+    g = cmp.aligned_grid(a, cols)
+    assert [k == "" for k in g[0]] == [False, False, True, False, True]
+    assert g[0][0] == sh.grid(a)[0][0]
+
+
+def test_stack_png_has_a_section_per_sheet():
+    import io
+
+    from PIL import Image
+
+    from app.lora import sheet_grid
+
+    a = sh.new_sheet(_body())
+    b = sh.new_sheet(_body(seed=7))
+    one = Image.open(io.BytesIO(sheet_grid.compose(a, lambda sha: None)))
+    both = Image.open(io.BytesIO(sheet_grid.compose_stack([a, b], lambda sha: None)))
+    cell_h = round(sheet_grid.CELL_W * a["height"] / a["width"])
+    assert both.width == one.width
+    assert both.height >= one.height + cell_h * len(b["rows"])
+    assert not both.info  # no metadata
 
 
 def test_prefill_takes_the_shape_from_the_picture_itself():
@@ -470,3 +529,32 @@ def test_a_sheet_whose_job_left_the_spooler_is_not_drawing():
     assert sh.submit(sp, db=None, comfy=None, sheet=s) is None  # one job per sheet
     sp._registry.clear()
     assert not sh.is_drawing(s["id"]) and sh.active_job(s["id"]) is None
+
+
+def test_rename_and_stack_png_routes(store, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.lora import sheet_api
+    from app.lora.sheet_api import router
+
+    # Other suites may re-import app.lora.sheet; patch the module the routes use.
+    monkeypatch.setattr(sheet_api.sh, "load", sh.load)
+    monkeypatch.setattr(sheet_api.sh, "save", sh.save)
+
+    class DB:
+        async def get(self, sha):
+            return None
+
+    app = FastAPI()
+    app.include_router(router)
+    app.state.db = DB()
+    a, b = sheet_api.sh.new_sheet(_body()), sheet_api.sh.new_sheet(_body(seed=7))
+    store[a["id"]], store[b["id"]] = a, b
+    client = TestClient(app)
+    r = client.patch(f"/api/lora/sheets/{a['id']}", json={"name": "epochs"})
+    assert r.status_code == 200 and store[a["id"]]["name"] == "epochs"
+    assert client.patch(f"/api/lora/sheets/{a['id']}", json={"name": ""}).status_code == 400
+    r = client.post("/api/lora/sheets/stack.png", json={"ids": [a["id"], b["id"]]})
+    assert r.status_code == 200 and r.content[:8] == b"\x89PNG\r\n\x1a\n"
+    assert client.post("/api/lora/sheets/stack.png", json={"ids": ["nope"]}).status_code == 404

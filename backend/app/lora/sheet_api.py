@@ -247,6 +247,22 @@ async def get_sheet(sheet_id: str, request: Request):
     return _view(await _load(request, sheet_id))
 
 
+class RenameBody(BaseModel):
+    name: str
+
+
+@router.patch("/sheets/{sheet_id}")
+async def rename_sheet(sheet_id: str, body: RenameBody, request: Request):
+    async with sh.lock(sheet_id):
+        sheet = await _load(request, sheet_id)
+        try:
+            sh.rename(sheet, body.name)
+        except sh.SheetError as exc:
+            raise HTTPException(400, str(exc))
+        await sh.save(_db(request), sheet)
+    return _view(sheet)
+
+
 @router.delete("/sheets/{sheet_id}")
 async def delete_sheet(sheet_id: str, request: Request):
     """The sheet only; the pictures it drew stay in the gallery."""
@@ -302,33 +318,56 @@ async def sheet_preview(sheet_id: str):
     return Response(p["jpeg"], media_type="image/jpeg", headers=headers)
 
 
-@router.get("/sheets/{sheet_id}/grid.png")
-async def sheet_png(sheet_id: str, request: Request):
-    sheet = await _load(request, sheet_id)
+async def _opener(request: Request, sheets: list[dict]):
+    """``open_image(sha)`` over the sheets' drawn pictures (read in a worker)."""
     db = _db(request)
     paths: dict[str, Path] = {}
-    for r in sheet["renders"].values():
-        if r.get("sha256"):
-            doc = await db.get(r["sha256"]) or {}
-            p = Path(doc.get("path") or "")
-            if p.name and p.is_file():
-                paths[r["sha256"]] = p
+    for sheet in sheets:
+        for r in sheet["renders"].values():
+            if r.get("sha256") and r["sha256"] not in paths:
+                doc = await db.get(r["sha256"]) or {}
+                p = Path(doc.get("path") or "")
+                if p.name and p.is_file():
+                    paths[r["sha256"]] = p
 
     def _open(sha: str):
         from PIL import Image
+
+        from ..scanner.walk import PIL_FORMATS
 
         p = paths.get(sha)
         if p is None:
             return None
         try:
-            from ..scanner.walk import PIL_FORMATS
-
             return Image.open(io.BytesIO(p.read_bytes()), formats=PIL_FORMATS)
         except Exception:
             return None
 
-    data = await asyncio.get_running_loop().run_in_executor(
-        None, sheet_grid.compose, sheet, _open)
-    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in sheet["name"])[:60] or "sheet"
+    return _open
+
+
+def _png(data: bytes, name: str) -> Response:
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in name)[:60] or "sheet"
     return Response(data, media_type="image/png",
                     headers={"Content-Disposition": f'attachment; filename="{safe}.png"'})
+
+
+@router.get("/sheets/{sheet_id}/grid.png")
+async def sheet_png(sheet_id: str, request: Request):
+    sheet = await _load(request, sheet_id)
+    data = await asyncio.get_running_loop().run_in_executor(
+        None, sheet_grid.compose, sheet, await _opener(request, [sheet]))
+    return _png(data, sheet["name"])
+
+
+class StackBody(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=12)
+
+
+@router.post("/sheets/stack.png")
+async def stack_png(body: StackBody, request: Request):
+    """Several sheets stacked on shared strength columns, as one picture."""
+    sheets = [await _load(request, i) for i in dict.fromkeys(body.ids)]
+    data = await asyncio.get_running_loop().run_in_executor(
+        None, sheet_grid.compose_stack, sheets, await _opener(request, sheets))
+    return _png(data, "lora_sheets_" + str(len(sheets)))

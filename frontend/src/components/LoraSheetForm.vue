@@ -1,0 +1,367 @@
+<script setup>
+/**
+ * The "new sheet" form of the LoRA comparison sheet. What is filled in is kept
+ * as a draft, so closing the screen (or opening it from a picture) does not
+ * throw the work away; a picture or a bucket only overrides its own part.
+ */
+import { ref, computed, watch, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { api, fileStem as shortName } from '../lora/sheetLabels.js'
+
+const props = defineProps({
+  options: { type: Object, default: null },   // /api/lora/sheet-options
+  // { sha256 } (a gallery picture) or { bucket_id, slug, trigger } (a bucket)
+  prefill: { type: Object, default: null },
+})
+const emit = defineEmits(['created', 'toast'])
+const { t } = useI18n()
+
+const LS_KEY = 'ranbell.loraSheet.last'
+const LS_DRAFT = 'ranbell.loraSheet.draft'
+
+const options = computed(() => props.options)
+const busy = ref(false)
+const loraFilter = ref('')
+const newTrigger = ref('')
+const strengthText = ref('')
+const ready = ref(false)
+
+const form = ref(blankForm())
+function blankForm() {
+  return {
+    name: '', target_model: 'krea2', models: { unet: '', clip: '', vae: '' },
+    prompt: '', seed: randomSeed(), aspect_w: 1, aspect_h: 1, megapixels: 1, steps: 8, cfg: 1.0,
+    sampler: 'euler', scheduler: 'simple', rows: [], no_trigger_column: false, bucket_id: '',
+  }
+}
+function randomSeed() { return Math.floor(Math.random() * 2 ** 48) }
+
+// Size = aspect ratio × megapixels (1 MP = 1024×1024, as ComfyUI counts it),
+// each side snapped to 16 and kept inside what the backend accepts.
+const MP = 1024 * 1024
+function sizeFor(aw, ah, mp) {
+  const r = aw > 0 && ah > 0 ? aw / ah : 1
+  const area = Math.max(0.05, Number(mp) || 1) * MP
+  const snap = v => Math.min(4096, Math.max(64, Math.round(v / 16) * 16))
+  return { width: snap(Math.sqrt(area * r)), height: snap(Math.sqrt(area / r)) }
+}
+function reduceRatio(w, h) {
+  const g = (a, b) => (b ? g(b, a % b) : a)
+  const d = g(Math.round(w), Math.round(h)) || 1
+  return [Math.round(w) / d, Math.round(h) / d]
+}
+function toast(msg, type = 'info') { emit('toast', { msg, type }) }
+const strengths = computed(() => strengthText.value.split(/[\s,]+/).filter(Boolean)
+  .map(Number).filter(v => Number.isFinite(v)))
+
+const loraGroups = computed(() => {
+  const q = loraFilter.value.trim().toLowerCase()
+  const groups = {}
+  for (const f of options.value?.loras || []) {
+    if (q && !f.toLowerCase().includes(q)) continue
+    const i = f.lastIndexOf('/')
+    const dir = i >= 0 ? f.slice(0, i) : ''
+    ;(groups[dir] ||= []).push(f)
+  }
+  return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b))
+})
+
+// The count the backend will draw: rows sharing a trigger share the 0 column.
+const pictureCount = computed(() => {
+  const rows = form.value.rows
+  if (!rows.length) return 0
+  const nonzero = strengths.value.filter(s => s !== 0).length
+  const base = strengths.value.includes(0) ? new Set(rows.map(r => r.trigger.trim())).size : 0
+  return base + rows.length * (nonzero + (form.value.no_trigger_column ? 1 : 0))
+})
+const estimate = computed(() => {
+  const s = options.value?.seconds_per_picture
+  if (!s || !pictureCount.value) return ''
+  const total = Math.round(s * pictureCount.value)
+  return total < 90 ? t('loraSheet.estimateSec', { n: total }) : t('loraSheet.estimateMin', { n: Math.round(total / 60) })
+})
+const size = computed(() => sizeFor(form.value.aspect_w, form.value.aspect_h, form.value.megapixels))
+// The target's own sampling (Turbo for Krea2): fields off it are marked.
+const SAMPLING_KEYS = ['steps', 'cfg', 'sampler', 'scheduler']
+const samplingDefaults = computed(() => {
+  const tg = (options.value?.targets || []).find(x => x.id === form.value.target_model)
+  return tg?.defaults || {}
+})
+function offDefault(k) {
+  const d = samplingDefaults.value[k]
+  return d !== undefined && d !== form.value[k] ? 'border-amber-500 text-amber-200' : 'border-gray-700'
+}
+const samplingDiffers = computed(() => SAMPLING_KEYS.some(k =>
+  samplingDefaults.value[k] !== undefined && samplingDefaults.value[k] !== form.value[k]))
+const samplingDefaultsText = computed(() => {
+  const d = samplingDefaults.value
+  return `${d.steps} steps · cfg ${d.cfg} · ${d.sampler}/${d.scheduler}`
+})
+function resetSampling() {
+  for (const k of SAMPLING_KEYS) if (samplingDefaults.value[k] !== undefined) form.value[k] = samplingDefaults.value[k]
+}
+function swapAspect() {
+  const f = form.value
+  ;[f.aspect_w, f.aspect_h] = [f.aspect_h, f.aspect_w]
+}
+const canCreate = computed(() => form.value.rows.length && form.value.prompt.trim()
+  && form.value.models.unet && form.value.models.clip && form.value.models.vae
+  && strengths.value.length && !busy.value)
+
+function addRow(lora) {
+  if (form.value.rows.some(r => r.lora === lora)) return
+  form.value.rows.push({ lora, trigger: newTrigger.value.trim(), label: '' })
+}
+function addFolder(files) { files.forEach(addRow) }
+function moveRow(i, d) {
+  const rows = form.value.rows, j = i + d
+  if (j < 0 || j >= rows.length) return
+  ;[rows[i], rows[j]] = [rows[j], rows[i]]
+}
+
+function remember() {
+  const f = form.value
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify({
+      models: f.models, aspect_w: f.aspect_w, aspect_h: f.aspect_h, megapixels: f.megapixels,
+      steps: f.steps, cfg: f.cfg,
+      sampler: f.sampler, scheduler: f.scheduler, strengths: strengthText.value,
+    }))
+  } catch {}
+}
+function recall() {
+  try { return JSON.parse(localStorage.getItem(LS_KEY) || 'null') } catch { return null }
+}
+function saveDraft() {
+  if (!ready.value) return
+  try {
+    localStorage.setItem(LS_DRAFT, JSON.stringify({
+      form: form.value, strengths: strengthText.value, newTrigger: newTrigger.value,
+    }))
+  } catch {}
+}
+function recallDraft() {
+  try { return JSON.parse(localStorage.getItem(LS_DRAFT) || 'null') } catch { return null }
+}
+async function resetForm() {
+  try { localStorage.removeItem(LS_DRAFT) } catch {}
+  await startNew({ fresh: true })
+}
+
+async function startNew({ fresh = false } = {}) {
+  ready.value = false
+  const f = blankForm()
+  const tgt = (options.value?.targets || [])[0]
+  if (tgt) {
+    const { width, height, ...rest } = tgt.defaults || {}
+    Object.assign(f, { target_model: tgt.id }, rest)
+    if (width && height) {
+      ;[f.aspect_w, f.aspect_h] = reduceRatio(width, height)
+      f.megapixels = Math.round((width * height / MP) * 100) / 100
+    }
+  }
+  const last = recall()
+  if (last) {
+    Object.assign(f, { steps: last.steps, cfg: last.cfg, sampler: last.sampler, scheduler: last.scheduler })
+    if (last.megapixels) f.megapixels = last.megapixels
+    if (last.aspect_w && last.aspect_h) [f.aspect_w, f.aspect_h] = [last.aspect_w, last.aspect_h]
+    f.models = { ...f.models, ...(last.models || {}) }
+  }
+  strengthText.value = last?.strengths || (options.value?.default_strengths || [0, 0.25, 0.5, 0.75, 1, 1.25]).join(', ')
+  newTrigger.value = ''
+  loraFilter.value = ''
+  const draft = fresh ? null : recallDraft()
+  if (draft?.form) {
+    const { target_model, ...kept } = draft.form
+    Object.assign(f, kept, { models: { ...f.models, ...(kept.models || {}) } })
+    if (draft.strengths) strengthText.value = draft.strengths
+    newTrigger.value = draft.newTrigger || ''
+  }
+  // A picture or a bucket brings its own part; the rest of the draft stays.
+  const p = props.prefill
+  if (p?.sha256) {
+    try {
+      const pre = await api(`/api/lora/sheet-prefill/${p.sha256}?target=${encodeURIComponent(f.target_model)}`)
+      // Drawn by another model: only its prompt, seed and shape carry over.
+      if (pre.foreign) {
+        const types = (pre.foreign.clip_types || []).join(', ')
+        toast(types ? t('loraSheet.foreignSource', { types }) : t('loraSheet.foreignSourceUnknown'), 'info')
+      }
+      for (const k of ['prompt', 'seed', 'steps', 'cfg', 'sampler', 'scheduler']) {
+        if (pre[k] !== undefined) f[k] = pre[k]
+      }
+      // The picture's own shape; the megapixels stay the user's choice.
+      if (pre.source_width && pre.source_height) {
+        ;[f.aspect_w, f.aspect_h] = reduceRatio(pre.source_width, pre.source_height)
+      }
+      f.models = { ...f.models, ...(pre.models || {}) }
+    } catch (e) { toast(e.message, 'error') }
+  }
+  if (p?.bucket_id) {
+    f.bucket_id = p.bucket_id
+    newTrigger.value = p.trigger || ''
+    loraFilter.value = p.slug || ''
+  }
+  // Drop chosen files ComfyUI does not have (a remembered file since removed).
+  const o = options.value
+  if (o?.comfy) {
+    for (const [k, list] of [['unet', o.unets], ['clip', o.clips], ['vae', o.vaes]]) {
+      if (f.models[k] && !list.includes(f.models[k])) f.models[k] = ''
+    }
+  }
+  form.value = f
+  ready.value = true
+}
+
+async function create() {
+  busy.value = true
+  try {
+    const f = form.value
+    const { aspect_w, aspect_h, megapixels, ...rest } = f
+    const body = { ...rest, ...size.value, strengths: strengths.value, seed: f.seed === '' ? null : Number(f.seed) }
+    const s = await api('/api/lora/sheets', { method: 'POST', body })
+    remember()
+    toast(t('loraSheet.queued', { n: s.pictures }), 'info')
+    emit('created', s)
+  } catch (e) { toast(e.message, 'error') } finally { busy.value = false }
+}
+
+watch([form, strengthText, newTrigger], saveDraft, { deep: true })
+onMounted(() => startNew())
+defineExpose({ startNew })
+</script>
+
+<template>
+<section class="flex-1 min-w-0 overflow-y-auto p-4 pr-14 flex flex-col gap-4">
+  <p v-if="options && !options.comfy" class="text-xs text-amber-300">
+    ⚠ {{ t('loraSheet.comfyDown', { error: options.comfy_error || '' }) }}
+  </p>
+
+  <div class="grid md:grid-cols-3 gap-2">
+    <label v-for="[k, list, lbl] in [['unet', options?.unets, 'modelUnet'], ['clip', options?.clips, 'modelClip'], ['vae', options?.vaes, 'modelVae']]"
+      :key="k" class="flex flex-col gap-1 text-[11px] text-gray-400">
+      {{ t(`loraSheet.${lbl}`) }}
+      <select v-model="form.models[k]" class="px-2 py-1 rounded-lg bg-gray-900 border border-gray-700 text-xs text-gray-200">
+        <option value="">—</option>
+        <option v-for="f in list || []" :key="f" :value="f">{{ f }}</option>
+        <option v-if="form.models[k] && !(list || []).includes(form.models[k])" :value="form.models[k]">{{ form.models[k] }}</option>
+      </select>
+    </label>
+  </div>
+
+  <label class="flex flex-col gap-1 text-[11px] text-gray-400">
+    {{ t('loraSheet.prompt') }}
+    <textarea v-model="form.prompt" rows="3" :placeholder="t('loraSheet.promptHint')"
+      class="px-2 py-1.5 rounded-lg bg-gray-900 border border-gray-700 text-sm text-gray-200" />
+  </label>
+
+  <div class="flex flex-wrap items-end gap-3">
+    <label class="flex flex-col gap-1 text-[11px] text-gray-400">
+      {{ t('loraSheet.seed') }}
+      <span class="flex gap-1">
+        <input v-model.number="form.seed" type="number" min="0"
+          class="w-44 px-2 py-1 rounded-lg bg-gray-900 border border-gray-700 text-xs font-mono" />
+        <button type="button" class="px-2 rounded-lg bg-gray-800 hover:bg-gray-700" :title="t('loraSheet.reseed')"
+          @click="form.seed = randomSeed()">🎲</button>
+      </span>
+    </label>
+    <label class="flex flex-col gap-1 text-[11px] text-gray-400">
+      {{ t('loraSheet.size') }}
+      <span class="flex items-center gap-1">
+        <input v-model.number="form.aspect_w" type="number" min="1" :title="t('loraSheet.aspect')"
+          class="w-16 px-2 py-1 rounded-lg bg-gray-900 border border-gray-700 text-xs" />
+        :
+        <input v-model.number="form.aspect_h" type="number" min="1" :title="t('loraSheet.aspect')"
+          class="w-16 px-2 py-1 rounded-lg bg-gray-900 border border-gray-700 text-xs" />
+        <button type="button" class="px-1.5 rounded-lg bg-gray-800 hover:bg-gray-700" :title="t('loraSheet.swapAspect')"
+          @click="swapAspect">⇄</button>
+        <input v-model.number="form.megapixels" type="number" min="0.25" max="16" step="0.25" :title="t('loraSheet.megapixels')"
+          class="w-16 px-2 py-1 rounded-lg bg-gray-900 border border-gray-700 text-xs" />
+        <span class="text-gray-500">MP</span>
+        <span class="font-mono text-gray-300">→ {{ size.width }}×{{ size.height }}</span>
+      </span>
+    </label>
+    <label class="flex flex-col gap-1 text-[11px] text-gray-400 flex-1 min-w-48">
+      {{ t('loraSheet.strengths') }}
+      <input v-model="strengthText" class="px-2 py-1 rounded-lg bg-gray-900 border border-gray-700 text-xs font-mono" />
+    </label>
+    <label class="flex items-center gap-1.5 text-[11px] text-gray-300" :title="t('loraSheet.noTriggerHelp')">
+      <input v-model="form.no_trigger_column" type="checkbox" /> {{ t('loraSheet.noTriggerColumn') }}
+    </label>
+  </div>
+  <!-- Always in view: a picture from another model can bring settings
+       that are wrong for this one (cfg 4.5 on Turbo). -->
+  <div class="flex flex-wrap items-end gap-3 text-[11px] text-gray-400">
+    <span class="self-center text-gray-300">{{ t('loraSheet.sampling') }}</span>
+    <label class="flex flex-col gap-1">steps
+      <input v-model.number="form.steps" type="number" min="1" :class="offDefault('steps')"
+        class="w-16 px-2 py-1 rounded-lg bg-gray-900 border text-xs" /></label>
+    <label class="flex flex-col gap-1">cfg
+      <input v-model.number="form.cfg" type="number" step="0.1" :class="offDefault('cfg')"
+        class="w-16 px-2 py-1 rounded-lg bg-gray-900 border text-xs" /></label>
+    <label class="flex flex-col gap-1">sampler
+      <select v-model="form.sampler" :class="offDefault('sampler')" class="px-2 py-1 rounded-lg bg-gray-900 border text-xs text-gray-200">
+        <option v-for="s in (options?.samplers?.length ? options.samplers : [form.sampler])" :key="s" :value="s">{{ s }}</option>
+      </select></label>
+    <label class="flex flex-col gap-1">scheduler
+      <select v-model="form.scheduler" :class="offDefault('scheduler')" class="px-2 py-1 rounded-lg bg-gray-900 border text-xs text-gray-200">
+        <option v-for="s in (options?.schedulers?.length ? options.schedulers : [form.scheduler])" :key="s" :value="s">{{ s }}</option>
+      </select></label>
+    <button v-if="samplingDiffers" type="button" @click="resetSampling"
+      class="px-2 py-1 rounded-lg bg-amber-800/60 hover:bg-amber-700 text-amber-100 text-xs">
+      {{ t('loraSheet.samplingReset', { d: samplingDefaultsText }) }}</button>
+    <p class="self-end text-gray-500">{{ t('loraSheet.samplingHelp') }}</p>
+  </div>
+
+  <!-- LoRA rows -->
+  <div class="grid md:grid-cols-2 gap-3 min-h-0">
+    <div class="flex flex-col gap-1.5 min-h-0">
+      <div class="flex gap-1.5">
+        <input v-model="loraFilter" :placeholder="t('loraSheet.filter')"
+          class="flex-1 min-w-0 px-2 py-1 rounded-lg bg-gray-900 border border-gray-700 text-xs" />
+        <input v-model="newTrigger" :placeholder="t('loraSheet.triggerForNew')"
+          class="w-40 px-2 py-1 rounded-lg bg-gray-900 border border-gray-700 text-xs font-mono" />
+      </div>
+      <div class="max-h-72 overflow-y-auto rounded-lg border border-gray-800 p-1.5 text-xs">
+        <p v-if="!loraGroups.length" class="text-gray-500 p-2">{{ t('loraSheet.noLoras') }}</p>
+        <div v-for="[dir, files] in loraGroups" :key="dir" class="mb-1.5">
+          <div class="flex items-center justify-between text-[10px] text-gray-500 px-1">
+            <span>📁 {{ dir || t('loraSheet.rootFolder') }}</span>
+            <button v-if="files.length > 1" type="button" class="text-amber-300 hover:text-amber-100"
+              @click="addFolder(files)">{{ t('loraSheet.addAll', { n: files.length }) }}</button>
+          </div>
+          <button v-for="f in files" :key="f" type="button" @click="addRow(f)"
+            class="block w-full text-left px-2 py-0.5 rounded hover:bg-gray-800 truncate"
+            :class="form.rows.some(r => r.lora === f) ? 'text-amber-300' : 'text-gray-300'">{{ shortName(f) }}</button>
+        </div>
+      </div>
+    </div>
+    <div class="flex flex-col gap-1.5">
+      <p class="text-[11px] text-gray-400">{{ t('loraSheet.rows', { n: form.rows.length }) }}</p>
+      <p v-if="!form.rows.length" class="text-[11px] text-gray-500">{{ t('loraSheet.rowsHint') }}</p>
+      <div v-for="(r, i) in form.rows" :key="r.lora" class="flex items-center gap-1.5 text-xs">
+        <span class="flex-1 min-w-0 truncate" :title="r.lora">{{ shortName(r.lora) }}</span>
+        <input v-model="r.trigger" :placeholder="t('loraSheet.trigger')"
+          class="w-36 px-2 py-0.5 rounded-lg bg-gray-900 border border-gray-700 text-xs font-mono" />
+        <button type="button" class="text-gray-500 hover:text-gray-200" @click="moveRow(i, -1)">↑</button>
+        <button type="button" class="text-gray-500 hover:text-gray-200" @click="moveRow(i, 1)">↓</button>
+        <button type="button" class="text-gray-500 hover:text-red-300" @click="form.rows.splice(i, 1)">✕</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="flex flex-wrap items-center gap-3 border-t border-gray-800 pt-3">
+    <input v-model="form.name" :placeholder="t('loraSheet.name')"
+      class="w-56 px-2 py-1 rounded-lg bg-gray-900 border border-gray-700 text-xs" />
+    <span class="text-xs text-gray-400">
+      {{ t('loraSheet.count', { n: pictureCount }) }}<template v-if="estimate"> · {{ estimate }}</template>
+    </span>
+    <button type="button" :title="t('loraSheet.resetHelp')" @click="resetForm"
+      class="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-xs">{{ t('loraSheet.reset') }}</button>
+    <button type="button" :disabled="!canCreate" @click="create"
+      class="ml-auto px-4 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-sm text-black font-semibold disabled:opacity-40">
+      {{ t('loraSheet.start') }}
+    </button>
+  </div>
+</section>
+</template>
