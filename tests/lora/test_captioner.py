@@ -123,7 +123,7 @@ async def test_job_walks_every_picture_to_done(store, tmp_path):
     store[b["id"]] = b
     llm = FakeLlm()
 
-    captioner._active.add(b["id"])
+    captioner._active.claim(b["id"], None)
     result = await captioner.run_lora_caption(
         _reporter(), _cancel(), db=db, ollama=llm, bucket_id=b["id"],
     )
@@ -149,7 +149,7 @@ async def test_job_stops_on_cancel_and_frees_the_bucket(store):
     bk.add_items(b, ["a"])
     store[b["id"]] = b
     cancel = _cancel(True)
-    captioner._active.add(b["id"])
+    captioner._active.claim(b["id"], None)
     with pytest.raises(JobCancelled):
         await captioner.run_lora_caption(
             _reporter(), cancel, db=FakeDb({}), ollama=FakeLlm(), bucket_id=b["id"],
@@ -174,7 +174,7 @@ def test_one_job_per_bucket():
         assert captioner.ensure_job(Spooler(), db=None, ollama=None, bucket=b) is None
         assert submitted[0][0].value == "eval"
     finally:
-        captioner._active.discard(b["id"])
+        captioner._active.drop(b["id"])
 
 
 @pytest.mark.asyncio
@@ -198,4 +198,77 @@ async def test_startup_resumes_every_bucket_with_waiting_pictures(monkeypatch):
         assert await captioner.resume_all(Spooler(), db=None, ollama=None) == 1
         assert submitted == [waiting["id"]]
     finally:
-        captioner._active.discard(waiting["id"])
+        captioner._active.drop(waiting["id"])
+
+
+@pytest.mark.asyncio
+async def test_ollama_unreachable_leaves_pictures_waiting_and_the_job_held(store):
+    import httpx
+
+    b = bk.new_bucket("x", slug="x")
+    bk.add_items(b, ["a"])
+    store[b["id"]] = b
+
+    class Down(FakeLlm):
+        async def generate_vlm_stream(self, prompt, images, **kw):
+            raise httpx.ConnectError("refused")
+            yield  # pragma: no cover
+
+    db = FakeDb({"a": {"path": __file__}})
+    captioner._active.claim(b["id"], None)
+    try:
+        with pytest.raises(httpx.ConnectError):
+            await captioner.run_lora_caption(_reporter(), _cancel(), db=db, ollama=Down(),
+                                             bucket_id=b["id"])
+        # The spooler will run the job again: the picture is not an error and
+        # the bucket still shows as captioning.
+        assert store[b["id"]]["items"][0]["status"] == bk.PENDING_DESCRIBE
+        assert captioner.is_captioning(b["id"])
+    finally:
+        captioner._active.drop(b["id"])
+
+
+def test_a_job_cancelled_while_queued_frees_the_bucket():
+    class Spooler:
+        def __init__(self):
+            self._registry = {}
+
+        def submit(self, lane, title, func, meta=None, **kw):
+            self._registry["eval-1"] = object()
+            return "eval-1"
+
+    sp = Spooler()
+    b = bk.new_bucket("x", slug="x")
+    bk.add_items(b, ["a"])
+    assert captioner.ensure_job(sp, db=None, ollama=None, bucket=b) == "eval-1"
+    assert captioner.is_captioning(b["id"])
+    sp._registry.clear()  # cancelled before it ever ran
+    assert not captioner.is_captioning(b["id"])
+
+
+@pytest.mark.asyncio
+async def test_a_model_that_cannot_see_is_refused_up_front(store):
+    b = bk.new_bucket("x", slug="x")
+    bk.add_items(b, ["a"])
+    store[b["id"]] = b
+
+    class TextOnly(FakeLlm):
+        async def vision_models(self):
+            return ["llava:latest"]
+
+    captioner._active.claim(b["id"], None)
+    with pytest.raises(captioner.CaptionError, match="cannot read images"):
+        await captioner.run_lora_caption(_reporter(), _cancel(), db=FakeDb({}), ollama=TextOnly(),
+                                         bucket_id=b["id"])
+    assert not captioner.is_captioning(b["id"])
+
+
+@pytest.mark.asyncio
+async def test_an_answer_cut_by_the_window_is_not_a_caption():
+    class Cut(FakeLlm):
+        async def generate_vlm_stream(self, prompt, images, **kw):
+            yield {"type": "token", "text": "A woman with red hair stands in a sunny"}
+            yield {"type": "done", "reason": "length"}
+
+    with pytest.raises(captioner.CaptionError, match="cut off"):
+        await captioner.describe(Cut(), b"img", model="m")

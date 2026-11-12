@@ -40,6 +40,7 @@ ERROR = "error"
 PENDING = (PENDING_DESCRIBE, PENDING_STRIP)
 
 _SLUG_RE = re.compile(r"[^a-z0-9_-]+")
+_SHA_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 class BucketError(ValueError):
@@ -118,6 +119,15 @@ def find_item(bucket: dict, sha: str) -> dict | None:
     return next((it for it in bucket["items"] if it["sha256"] == sha), None)
 
 
+def clean_sha(sha: str) -> str:
+    """A picture id as stored: 64 lowercase hex digits. Anything else is
+    refused — the id becomes a file name in the export."""
+    s = str(sha or "").strip().lower()
+    if not _SHA_RE.match(s):
+        raise BucketError(f"not a picture id: {str(sha)[:80]!r}")
+    return s
+
+
 def add_items(bucket: dict, shas: list[str]) -> list[str]:
     """Add pictures not already in the bucket. Returns the ones added."""
     have = {it["sha256"] for it in bucket["items"]}
@@ -190,14 +200,18 @@ def _mark_for_strip(bucket: dict, shas: list[str], *, force: bool) -> int:
     for it in bucket["items"]:
         if it["sha256"] not in want:
             continue
+        if it["edited"] and not force:
+            # Before the description check: a hand caption with no description
+            # sent back to "describe" would never leave it (the describe result
+            # defers to the hand), and the job would pick it up for ever.
+            it["stale"] = True
+            continue
         if not it["full_caption"]:
             # Never described (or that failed): it has to be looked at first.
             if it["status"] != PENDING_DESCRIBE:
                 it["status"], it["error"] = PENDING_DESCRIBE, ""
+                it["edited"], it["stale"] = False, False
                 n += 1
-            continue
-        if it["edited"] and not force:
-            it["stale"] = True
             continue
         it["status"], it["error"] = PENDING_STRIP, ""
         it["edited"], it["stale"] = False, False
@@ -224,6 +238,19 @@ def request_recaption(bucket: dict, shas: list[str] | None, *, step: str, force:
     return n
 
 
+def resume(bucket: dict) -> int:
+    """'Resume': pictures that were waiting when the job stopped, and nothing
+    else. A picture held as waiting by a hand edit (an older bug) is let go."""
+    n = 0
+    for it in bucket["items"]:
+        if it["status"] in PENDING:
+            if it["edited"]:
+                it["status"], it["error"] = DONE, ""
+            else:
+                n += 1
+    return n
+
+
 def next_pending(bucket: dict) -> dict | None:
     """The next picture to work on, oldest first."""
     return next((it for it in bucket["items"] if it["status"] in PENDING), None)
@@ -239,15 +266,26 @@ def apply_described(bucket: dict, sha: str, full_caption: str) -> None:
         return
     it["full_caption"] = full_caption.strip()
     if it["edited"]:
-        # Corrected by hand while the VLM was still looking: the hand wins.
+        # Corrected by hand while the VLM was still looking: the hand wins,
+        # and the picture is done (never left waiting, or the job loops).
+        it["status"], it["error"] = DONE, ""
         return
     it["status"], it["error"] = PENDING_STRIP, ""
 
 
-def apply_stripped(bucket: dict, sha: str, caption: str, *, expected_full: str) -> None:
-    """Store a strip result — unless the picture changed under it meanwhile."""
+def strip_setting(bucket: dict) -> list:
+    """What a strip result depends on besides the description."""
+    return [bucket.get("trigger", ""), list(bucket.get("targets") or [])]
+
+
+def apply_stripped(bucket: dict, sha: str, caption: str, *, expected_full: str,
+                   expected_setting: list | None = None) -> None:
+    """Store a strip result — unless the picture, the trigger or the targets
+    changed under it meanwhile (it stays waiting and is stripped again)."""
     it = find_item(bucket, sha)
     if it is None or it["status"] != PENDING_STRIP or it["full_caption"] != expected_full:
+        return
+    if expected_setting is not None and expected_setting != strip_setting(bucket):
         return
     it["caption"] = caption.strip()
     it["status"], it["error"] = DONE, ""
@@ -255,8 +293,12 @@ def apply_stripped(bucket: dict, sha: str, caption: str, *, expected_full: str) 
 
 def apply_error(bucket: dict, sha: str, message: str) -> None:
     it = find_item(bucket, sha)
-    if it is not None and not it["edited"]:
-        it["status"], it["error"] = ERROR, message
+    if it is None:
+        return
+    if it["edited"]:
+        it["status"], it["error"] = DONE, ""  # the hand caption stands
+        return
+    it["status"], it["error"] = ERROR, message
 
 
 def with_trigger(trigger: str, text: str) -> str:
@@ -265,7 +307,12 @@ def with_trigger(trigger: str, text: str) -> str:
     trigger = (trigger or "").strip()
     if not trigger:
         return text
-    if text.lower().startswith(trigger.lower()):
+    head = text[len(trigger):len(trigger) + 1]
+    exact = text.startswith(trigger) and not (head.isalnum() or head == "_")
+    # Another case only when it stands as a tag ("Rnbl." / "RNBL,"): trigger
+    # "a" must not eat the "A" of "A woman", nor "zqx" the start of "zqxstyle".
+    tagged = text.lower().startswith(trigger.lower()) and head in ("", ",", ".", ":", ";")
+    if exact or tagged:
         text = text[len(trigger):].lstrip(" ,.:;")
     return f"{trigger}, {text}" if text else trigger
 
@@ -319,14 +366,23 @@ def lock(bucket_id: str) -> asyncio.Lock:
     return _locks.setdefault(bucket_id, asyncio.Lock())
 
 
-async def load(db, bucket_id: str) -> dict | None:
+def valid_id(any_id: str) -> bool:
     try:
-        points = await db._qc.retrieve(
-            collection_name=LORA_BUCKETS_COLLECTION, ids=[bucket_id], with_payload=True,
-        )
-    except Exception:
-        # A malformed id is "no such bucket", not a server error.
+        uuid.UUID(str(any_id))
+        return True
+    except ValueError:
+        return False
+
+
+async def load(db, bucket_id: str) -> dict | None:
+    """The bucket, or None when there is no such bucket. A malformed id is
+    "no such bucket"; a store that is briefly unreachable is an error, not
+    "deleted" (that silently ended caption jobs)."""
+    if not valid_id(bucket_id):
         return None
+    points = await db._qc.retrieve(
+        collection_name=LORA_BUCKETS_COLLECTION, ids=[bucket_id], with_payload=True,
+    )
     return dict(points[0].payload or {}) if points else None
 
 
@@ -355,8 +411,16 @@ async def list_all(db) -> list[dict]:
 
 
 async def delete(db, bucket_id: str) -> None:
+    """Call with the bucket's lock held, so a job's load-modify-save cannot
+    bring it back right after."""
     await db._qc.delete(
         collection_name=LORA_BUCKETS_COLLECTION,
         points_selector=qm.PointIdsList(points=[bucket_id]),
     )
-    _locks.pop(bucket_id, None)
+
+
+def forget_lock(bucket_id: str) -> None:
+    """Drop a deleted bucket's lock — only when nobody holds or waits for it."""
+    lk = _locks.get(bucket_id)
+    if lk is not None and not lk.locked():
+        _locks.pop(bucket_id, None)

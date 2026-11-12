@@ -169,3 +169,36 @@ async def test_zip_pictures_are_bare_pngs_too(tmp_path):
             assert str(tmp_path) not in zf.read("red/meta.json").decode()
     finally:
         path.unlink()
+
+
+def test_another_buckets_folder_is_never_replaced(tmp_path):
+    out = tmp_path / "out"
+    (out / "red").mkdir(parents=True)
+    (out / "red" / "meta.json").write_text(json.dumps({"bucket_id": "someone-else"}))
+    entries = [export.Entry("meta.json", None, "{}")]
+    with pytest.raises(export.ExportError, match="another bucket"):
+        export.write_folder(entries, out, "red", bucket_id="me")
+    assert json.loads((out / "red" / "meta.json").read_text())["bucket_id"] == "someone-else"
+    # Its own folder, or an old export without an id where it last exported, is replaced.
+    (out / "red" / "meta.json").write_text(json.dumps({"bucket_id": "me"}))
+    export.write_folder(entries, out, "red", bucket_id="me")
+    (out / "red" / "meta.json").write_text("{}")
+    export.write_folder(entries, out, "red", bucket_id="me", known_path=str(out / "red"))
+
+
+def test_16bit_and_transparent_colour_pictures_export_right(tmp_path):
+    import io
+
+    from PIL import Image
+
+    p16 = tmp_path / "g16.png"
+    Image.new("I;16", (4, 4), 40000).save(p16)
+    with Image.open(io.BytesIO(export.clean_png(p16))) as im:
+        assert im.mode == "RGB" and im.getpixel((0, 0))[0] in range(150, 160)  # 40000/256 ≈ 156
+
+    ptr = tmp_path / "trns.png"
+    im = Image.new("RGB", (4, 4), (255, 0, 0))
+    im.putpixel((0, 0), (0, 255, 0))
+    im.save(ptr, transparency=(0, 255, 0))
+    with Image.open(io.BytesIO(export.clean_png(ptr))) as out:
+        assert out.mode == "RGBA" and out.getpixel((0, 0))[3] == 0 and out.getpixel((1, 1))[3] == 255

@@ -66,6 +66,13 @@ async def _load(request: Request, bucket_id: str) -> dict:
     return bucket
 
 
+def _shas(values: list[str]) -> list[str]:
+    try:
+        return [bk.clean_sha(v) for v in values]
+    except bk.BucketError as exc:
+        raise HTTPException(400, str(exc))
+
+
 def _start_captions(request: Request, bucket: dict) -> None:
     spooler = getattr(request.app.state, "spooler", None)
     if spooler is not None:
@@ -78,6 +85,18 @@ async def _export_dir(request: Request) -> Path:
     cfg = await get_runtime_config(_db(request))
     path = Path(str(cfg.get("lora_export_dir") or "").strip() or "/mnt/lora_export")
     return path
+
+
+#: Two buckets created at once with the same name must not get the same slug.
+_create_lock = asyncio.Lock()
+
+
+async def _export_names(request: Request) -> set[str]:
+    try:
+        d = await _export_dir(request)
+        return {p.name for p in d.iterdir() if p.is_dir()} if d.is_dir() else set()
+    except Exception:
+        return set()
 
 
 @router.get("/targets")
@@ -102,17 +121,21 @@ async def list_buckets(request: Request):
 @router.post("/buckets")
 async def create_bucket(body: BucketCreate, request: Request):
     db = _db(request)
-    taken = {b.get("slug", "") for b in await bk.list_all(db)}
-    try:
-        bucket = bk.new_bucket(
-            body.name, slug=bk.unique_slug(body.name, taken), trigger=body.trigger,
-            targets=body.targets, target_model=body.target_model,
-        )
-    except bk.BucketError as exc:
-        raise HTTPException(400, str(exc))
-    bk.add_items(bucket, body.sha256s)
-    async with bk.lock(bucket["id"]):
-        await bk.save(db, bucket)
+    shas = _shas(body.sha256s)
+    async with _create_lock:
+        # Folders already in the export dir are taken too: a deleted bucket's
+        # dataset keeps its name, and a new bucket must not export over it.
+        taken = {b.get("slug", "") for b in await bk.list_all(db)} | await _export_names(request)
+        try:
+            bucket = bk.new_bucket(
+                body.name, slug=bk.unique_slug(body.name, taken), trigger=body.trigger,
+                targets=body.targets, target_model=body.target_model,
+            )
+        except bk.BucketError as exc:
+            raise HTTPException(400, str(exc))
+        bk.add_items(bucket, shas)
+        async with bk.lock(bucket["id"]):
+            await bk.save(db, bucket)
     _start_captions(request, bucket)
     return _view(bucket)
 
@@ -138,17 +161,26 @@ async def patch_bucket(bucket_id: str, body: BucketPatch, request: Request):
 
 @router.delete("/buckets/{bucket_id}")
 async def delete_bucket(bucket_id: str, request: Request):
-    """Removes the bucket only; an exported folder stays where it is."""
-    await _load(request, bucket_id)
-    await bk.delete(_db(request), bucket_id)
+    """Removes the bucket only; an exported folder stays where it is. A caption
+    job on it is stopped, and the delete waits for the job's save in flight so
+    that save cannot bring the bucket back."""
+    job_id = captioner._active.job(bucket_id)
+    spooler = getattr(request.app.state, "spooler", None)
+    if job_id and spooler is not None:
+        await spooler.cancel(job_id)
+    async with bk.lock(bucket_id):
+        await _load(request, bucket_id)
+        await bk.delete(_db(request), bucket_id)
+    bk.forget_lock(bucket_id)
     return {"ok": True}
 
 
 @router.post("/buckets/{bucket_id}/images")
 async def add_images(bucket_id: str, body: ImagesBody, request: Request):
+    shas = _shas(body.sha256s)
     async with bk.lock(bucket_id):
         bucket = await _load(request, bucket_id)
-        added = bk.add_items(bucket, body.sha256s)
+        added = bk.add_items(bucket, shas)
         await bk.save(_db(request), bucket)
     _start_captions(request, bucket)
     return _view(bucket) | {"added": len(added)}
@@ -156,9 +188,11 @@ async def add_images(bucket_id: str, body: ImagesBody, request: Request):
 
 @router.delete("/buckets/{bucket_id}/images/{sha256}")
 async def remove_image(bucket_id: str, sha256: str, request: Request):
+    if not bk.valid_id(bucket_id):
+        raise HTTPException(404, "bucket not found")
     async with bk.lock(bucket_id):
         bucket = await _load(request, bucket_id)
-        bk.remove_items(bucket, [sha256])
+        bk.remove_items(bucket, [sha256.lower()])
         await bk.save(_db(request), bucket)
     return _view(bucket)
 
@@ -184,6 +218,18 @@ async def recaption(bucket_id: str, body: RecaptionBody, request: Request):
             n = bk.request_recaption(bucket, body.sha256s, step=body.step, force=body.force)
         except bk.BucketError as exc:
             raise HTTPException(400, str(exc))
+        await bk.save(_db(request), bucket)
+    _start_captions(request, bucket)
+    return _view(bucket) | {"queued": n}
+
+
+@router.post("/buckets/{bucket_id}/resume")
+async def resume_captions(bucket_id: str, request: Request):
+    """Start the caption job again for the pictures that were waiting when it
+    stopped — finished captions are left alone."""
+    async with bk.lock(bucket_id):
+        bucket = await _load(request, bucket_id)
+        n = bk.resume(bucket)
         await bk.save(_db(request), bucket)
     _start_captions(request, bucket)
     return _view(bucket) | {"queued": n}

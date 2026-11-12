@@ -15,6 +15,7 @@ from pathlib import Path
 from ..spooler.models import CancelToken, JobCancelled, ProgressReporter
 from . import bucket as bk
 from . import targets
+from .active import ActiveJobs
 
 logger = logging.getLogger(__name__)
 
@@ -84,13 +85,16 @@ def clean_answer(text: str) -> str:
 
 async def _collect(stream, cancel: CancelToken | None) -> str:
     """Only the answer tokens. Thinking is streamed and discarded (CLAUDE.md:
-    non-streaming lets thinking eat the output budget)."""
+    non-streaming lets thinking eat the output budget). An answer the model's
+    window cut off is not a caption."""
     out: list[str] = []
     async for event in stream:
         if cancel is not None:
             cancel.raise_if_set()
         if event.get("type") == "token":
             out.append(event["text"])
+        elif event.get("type") == "done" and event.get("reason") == "length":
+            raise CaptionError("the answer was cut off by the model's context window")
     return "".join(out)
 
 
@@ -99,7 +103,8 @@ async def describe(ollama, image: bytes, *, model: str, target_model: str = "kre
                    cancel: CancelToken | None = None) -> str:
     prompt = describe_prompt(target_model=target_model, stored_prompt=stored_prompt, tags=tags)
     raw = await _collect(
-        ollama.generate_vlm_stream(prompt, [image], model=model, think=False), cancel,
+        ollama.generate_vlm_stream(prompt, [image], model=model, think=False, with_done=True),
+        cancel,
     )
     text = clean_answer(raw)
     if len(text) < _MIN_CAPTION_CHARS:
@@ -116,7 +121,8 @@ async def strip(ollama, full_caption: str, targets: list[str], *, model: str,
     if not targets:
         return full_caption
     raw = await _collect(
-        ollama.generate_text_stream(strip_prompt(full_caption, targets), model=model, think=False),
+        ollama.generate_text_stream(strip_prompt(full_caption, targets), model=model, think=False,
+                                    with_done=True),
         cancel,
     )
     text = clean_answer(raw)
@@ -128,7 +134,7 @@ async def strip(ollama, full_caption: str, targets: list[str], *, model: str,
 # ── Job ───────────────────────────────────────────────────────────────────────
 
 #: Buckets that have a caption job queued or running.
-_active: set[str] = set()
+_active = ActiveJobs()
 
 
 def is_captioning(bucket_id: str) -> bool:
@@ -140,18 +146,19 @@ def ensure_job(spooler, *, db, ollama, bucket: dict) -> str | None:
     from ..spooler.models import JobLane
 
     bucket_id = bucket["id"]
-    if bucket_id in _active or not bk.pending_count(bucket):
+    if not bk.pending_count(bucket) or not _active.claim(bucket_id, spooler):
         return None
-    _active.add(bucket_id)
     try:
-        return spooler.submit(
+        job_id = spooler.submit(
             JobLane.EVALUATION, "lora_caption", run_lora_caption,
             meta={"bucket_id": bucket_id, "bucket_name": bucket["name"]},
             db=db, ollama=ollama, bucket_id=bucket_id,
         )
     except Exception:
-        _active.discard(bucket_id)
+        _active.drop(bucket_id)
         raise
+    _active.submitted(bucket_id, job_id)
+    return job_id
 
 
 async def resume_all(spooler, *, db, ollama) -> int:
@@ -169,6 +176,24 @@ async def _caption_model(db) -> str:
 
     cfg = await get_runtime_config(db)
     return str(cfg.get("lora_caption_model") or "").strip() or cfg["vlm_model"]
+
+
+def _same_model(a: str, b: str) -> bool:
+    norm = lambda m: m if ":" in m else f"{m}:latest"  # noqa: E731
+    return norm(a) == norm(b)
+
+
+async def _check_reads_images(ollama, model: str) -> None:
+    """A model that cannot read pictures does not fail — Ollama drops the image
+    and it writes a caption from the hints in the prompt alone (CLAUDE.md).
+    Refuse up front. An empty list means Ollama could not be asked; the
+    picture-by-picture checks still stand then."""
+    try:
+        seeing = await ollama.vision_models()
+    except Exception:
+        return
+    if seeing and not any(_same_model(model, m) for m in seeing):
+        raise CaptionError(f"{model} cannot read images — choose a vision model for LoRA captions")
 
 
 async def _read_image(doc: dict) -> bytes:
@@ -189,10 +214,13 @@ async def run_lora_caption(
     ollama,
     bucket_id: str,
 ) -> dict:
+    _active.started(bucket_id, reporter)
     model = await _caption_model(db)
     worked = 0
     errors = 0
+    failure: BaseException | None = None
     try:
+        await _check_reads_images(ollama, model)
         while True:
             cancel.raise_if_set()
             await cancel.pause_checkpoint()
@@ -203,11 +231,12 @@ async def run_lora_caption(
                 if item is None:
                     # Decided under the lock, so a picture added right now
                     # either is seen here or finds no job and starts one.
-                    _active.discard(bucket_id)
+                    _active.drop(bucket_id)
                     break
                 remaining = bk.pending_count(bucket)
                 sha, status = item["sha256"], item["status"]
                 full, targets, trigger = item["full_caption"], list(bucket["targets"]), bucket["trigger"]
+                setting = bk.strip_setting(bucket)
                 target_model = bucket.get("target_model") or "krea2"
 
             reporter.update(
@@ -241,12 +270,19 @@ async def run_lora_caption(
                         bucket = await bk.load(db, bucket_id)
                         if bucket is None:
                             break
-                        bk.apply_stripped(bucket, sha, text, expected_full=full)
+                        bk.apply_stripped(bucket, sha, text, expected_full=full,
+                                          expected_setting=setting)
                         await bk.save(db, bucket)
                     worked += 1
             except JobCancelled:
                 raise
             except Exception as exc:
+                from ..spooler.spooler import _is_unreachable
+
+                if _is_unreachable(exc):
+                    # Ollama is restarting: the spooler waits and runs the job
+                    # again. The picture is not at fault and stays waiting.
+                    raise
                 errors += 1
                 logger.warning("[lora_caption] %s %s: %s", bucket_id[:8], sha[:12], exc)
                 async with bk.lock(bucket_id):
@@ -255,8 +291,11 @@ async def run_lora_caption(
                         break
                     bk.apply_error(bucket, sha, str(exc) or exc.__class__.__name__)
                     await bk.save(db, bucket)
+    except BaseException as exc:
+        failure = exc
+        raise
     finally:
-        _active.discard(bucket_id)
+        _active.ended(bucket_id, failure)
 
     reporter.update(1.0, f"{worked} captions", key="images", done=worked, total=worked)
     return {"bucket_id": bucket_id, "captioned": worked, "errors": errors}

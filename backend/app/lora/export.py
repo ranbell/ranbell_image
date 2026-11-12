@@ -95,6 +95,16 @@ def _to_srgb(im):
         return im  # an unreadable profile: keep the pixels as they are
 
 
+def _to_8bit(im):
+    """16/32-bit greyscale scaled into 0–255. A plain convert clips it, so a
+    16-bit picture came out almost white."""
+    if im.mode in ("I;16", "I;16L", "I;16B", "I;16N", "I"):
+        im = im.convert("I").point(lambda v: v * (1 / 256)).convert("L")
+    elif im.mode == "F":
+        im = im.point(lambda v: v * 255).convert("L")
+    return im
+
+
 def clean_png(path: Path) -> bytes:
     """The picture as a PNG carrying pixels only. Blocking."""
     from PIL import ImageOps
@@ -102,8 +112,15 @@ def clean_png(path: Path) -> bytes:
     with _open(path) as src:
         src.load()
         im = ImageOps.exif_transpose(src)
+        icc = im.info.get("icc_profile")
+        # A transparent colour (tRNS) on P, L or RGB is alpha too.
+        has_alpha = "A" in im.getbands() or "transparency" in im.info
+        im = _to_8bit(im)
+        if im.mode == "P":  # colour management needs the real colours
+            im = im.convert("RGBA" if has_alpha else "RGB")
+            if icc:
+                im.info["icc_profile"] = icc
         im = _to_srgb(im)
-        has_alpha = "A" in im.getbands() or (im.mode == "P" and "transparency" in im.info)
         want = "RGBA" if has_alpha else "RGB"
         if im.mode != want:
             im = im.convert(want)
@@ -149,6 +166,7 @@ async def plan(db, bucket: dict) -> list[Entry]:
 
     meta = {
         "format": FORMAT,
+        "bucket_id": bucket["id"],  # whose folder this is, so another bucket never replaces it
         "name": bucket["name"],
         "slug": bucket["slug"],
         "trigger": bucket["trigger"],
@@ -170,13 +188,34 @@ def _write_entry(entry: Entry, dest: Path) -> None:
         dest.write_text(entry.text, encoding="utf-8")
 
 
+def folder_owner(folder: Path) -> str | None:
+    """The bucket id an exported folder belongs to; '' for an export older
+    than the id (or a folder that is not an export), None when there is none."""
+    if not folder.exists():
+        return None
+    try:
+        meta = json.loads((folder / "meta.json").read_text(encoding="utf-8"))
+        return str(meta.get("bucket_id") or "")
+    except Exception:
+        return ""
+
+
 def write_folder(entries: list[Entry], export_dir: Path, slug: str,
                  cancel: CancelToken | None = None,
-                 on_file=None) -> Path:
-    """Build the folder beside the live one, then swap it in. Blocking."""
+                 on_file=None, *, bucket_id: str = "", known_path: str = "") -> Path:
+    """Build the folder beside the live one, then swap it in. Blocking.
+
+    A folder of the same name that belongs to another bucket (a deleted
+    bucket's dataset, maybe already trained on) is never replaced. An older
+    export without an owner id counts as this bucket's when it is where this
+    bucket last exported to."""
     if not export_dir.is_dir():
         raise ExportError(f"export folder does not exist: {export_dir}")
     final = export_dir / slug
+    owner = folder_owner(final)
+    if bucket_id and owner is not None and owner != bucket_id and not (
+            owner == "" and known_path and Path(known_path) == final):
+        raise ExportError(f"{final} is another bucket's dataset — move or delete that folder first")
     tag = uuid.uuid4().hex[:8]
     tmp = export_dir / f".{slug}.tmp-{tag}"
     old = export_dir / f".{slug}.old-{tag}"
@@ -239,7 +278,9 @@ async def run_lora_export(
         reporter.update(done / total, f"{done}/{total} files", key="files", done=done, total=total)
 
     final = await asyncio.get_running_loop().run_in_executor(
-        None, lambda: write_folder(entries, Path(export_dir), bucket["slug"], cancel, _progress),
+        None, lambda: write_folder(entries, Path(export_dir), bucket["slug"], cancel, _progress,
+                                   bucket_id=bucket["id"],
+                                   known_path=bucket.get("export_path") or ""),
     )
 
     async with bk.lock(bucket_id):

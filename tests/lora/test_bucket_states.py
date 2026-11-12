@@ -141,3 +141,63 @@ def test_a_hand_correction_during_describe_is_kept():
     assert it["full_caption"] == "a woman with red hair"  # kept for a later forced recompute
     bk.apply_error(b, "a", "boom")
     assert it["status"] == bk.DONE and not it["error"]
+
+
+def test_a_hand_caption_without_a_description_never_loops():
+    # Describe failed, the Showrunner wrote the caption, then the trigger
+    # changed: the picture must not go back to "describe" (the describe result
+    # defers to the hand, so it would be picked up for ever).
+    b = bk.new_bucket("x", slug="x", trigger="t1")
+    bk.add_items(b, ["a"])
+    bk.apply_error(b, "a", "file missing")
+    bk.set_caption(b, "a", "my words")
+    assert bk.update_settings(b, trigger="t2")
+    it = b["items"][0]
+    assert it["status"] == bk.DONE and it["stale"] and bk.next_pending(b) is None
+    # And a picture already caught that way is let go by "resume".
+    it["status"] = bk.PENDING_DESCRIBE
+    assert bk.resume(b) == 0 and it["status"] == bk.DONE
+    # A describe result or an error for a hand-captioned picture finishes it.
+    it["status"] = bk.PENDING_DESCRIBE
+    bk.apply_described(b, "a", "a woman")
+    assert it["status"] == bk.DONE and it["caption"] == "my words"
+    it["status"] = bk.PENDING_DESCRIBE
+    bk.apply_error(b, "a", "boom")
+    assert it["status"] == bk.DONE and it["error"] == ""
+
+
+def test_a_strip_result_from_before_a_settings_change_is_dropped():
+    b = bk.new_bucket("x", slug="x", trigger="old", targets=["red hair"])
+    bk.add_items(b, ["a"])
+    bk.apply_described(b, "a", "a woman with red hair")
+    before = bk.strip_setting(b)
+    bk.update_settings(b, trigger="new")  # while the strip was running
+    bk.apply_stripped(b, "a", "old, a woman", expected_full="a woman with red hair",
+                      expected_setting=before)
+    assert b["items"][0]["status"] == bk.PENDING_STRIP  # stripped again with "new"
+    bk.apply_stripped(b, "a", "new, a woman", expected_full="a woman with red hair",
+                      expected_setting=bk.strip_setting(b))
+    assert b["items"][0]["caption"] == "new, a woman"
+
+
+def test_resume_leaves_finished_captions_alone():
+    b = bk.new_bucket("x", slug="x")
+    bk.add_items(b, ["a", "b"])
+    bk.apply_described(b, "a", "a woman")
+    bk.apply_stripped(b, "a", "a woman", expected_full="a woman")
+    assert bk.resume(b) == 1
+    assert [it["status"] for it in b["items"]] == [bk.DONE, bk.PENDING_DESCRIBE]
+
+
+def test_the_trigger_is_matched_as_a_whole_word():
+    assert bk.with_trigger("a", "A woman stands.") == "a, A woman stands."
+    assert bk.with_trigger("zqx", "zqx, a woman") == "zqx, a woman"
+    assert bk.with_trigger("zqx", "zqxstyle woman") == "zqx, zqxstyle woman"
+
+
+def test_picture_ids_are_checked():
+    good = "AB" * 32
+    assert bk.clean_sha(good) == good.lower()
+    for bad in ["a", "g" * 64, "ab" * 32 + "/../x", ""]:
+        with pytest.raises(bk.BucketError):
+            bk.clean_sha(bad)
