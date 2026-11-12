@@ -220,15 +220,18 @@ def build_commands(plan: Plan, *, te_cached: bool) -> list[tuple[str, list[str]]
     toml = str(plan.run_dir / "dataset.toml")
 
     cmds: list[tuple[str, list[str]]] = [
+        # No --keep_cache: training reads every cache file in the folder
+        # (musubi globs cache_directory), so caches of pictures taken out of the
+        # bucket — or of another resolution — would be trained on too.
         ("latents", [py, str(src / r.latents_script),
                      "--dataset_config", toml, "--vae", files["vae"],
-                     "--skip_existing", "--keep_cache"]),
+                     "--skip_existing"]),
     ]
     if not te_cached:
         cmds.append(("text_encoder", [py, str(src / r.te_script),
                                       "--dataset_config", toml,
                                       "--text_encoder", files["text_encoder"],
-                                      "--batch_size", "1", "--keep_cache"]))
+                                      "--batch_size", "1"]))
 
     train = [
         str(VENV_BIN / "accelerate"), "launch",
@@ -259,6 +262,16 @@ def build_commands(plan: Plan, *, te_cached: bool) -> list[tuple[str, list[str]]
     return cmds
 
 
+def new_run_dir(slug: str) -> Path:
+    """<slug>-<YYYYmmdd>-<HHMMSS>, with _2, _3… when that exists already (two
+    runs in the same second). Two dashes after the slug, as publish reads it."""
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    run, n = OUTPUT / f"{slug}-{stamp}", 2
+    while run.exists():
+        run, n = OUTPUT / f"{slug}-{stamp}_{n}", n + 1
+    return run
+
+
 def make_plan(args) -> Plan:
     slug = args.bucket.strip("/").split("/")[-1]
     dataset_dir = DATASETS / slug
@@ -279,10 +292,9 @@ def make_plan(args) -> Plan:
         "alpha": args.alpha if args.alpha is not None else args.rank,
         "lr": args.lr, "seed": args.seed, "save_every": args.save_every,
     }
-    stamp = datetime.now().strftime("%Y%m%d-%H%M")
     plan = Plan(
         slug=slug, dataset_dir=dataset_dir, cache_dir=CACHE / slug,
-        run_dir=OUTPUT / f"{slug}-{stamp}", output_name=args.name or slug,
+        run_dir=new_run_dir(slug), output_name=args.name or slug,
         meta=meta, settings=settings, te_hash=captions_hash(images), recipe=recipe,
     )
     marker = plan.cache_dir / "te.hash"

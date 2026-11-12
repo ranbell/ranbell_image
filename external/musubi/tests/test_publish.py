@@ -82,3 +82,15 @@ def test_run_name_and_epoch_pick_the_file(pub, tmp_path):
     assert pub.resolve("my_style", 20).name == "my_style-000020.safetensors"
     with pytest.raises(SystemExit, match="000007"):
         pub.resolve("my_style", 7)
+
+
+def test_a_run_trained_with_name_and_its_last_epoch_are_found(pub):
+    run = pub.OUTPUT / "red-20261111-004000"
+    run.mkdir(parents=True)
+    (run / "train.log").write_text(
+        "=== train: accelerate launch ... --max_train_epochs 30 --output_name zqx_v2 --logging_dir x\n")
+    for f in ("zqx_v2.safetensors", "zqx_v2-000010.safetensors"):
+        (run / f).write_bytes(b"")
+    assert pub.resolve("red", None).name == "zqx_v2.safetensors"
+    assert pub.resolve("red", 10).name == "zqx_v2-000010.safetensors"
+    assert pub.resolve("red", 30).name == "zqx_v2.safetensors"  # the last epoch has the plain name

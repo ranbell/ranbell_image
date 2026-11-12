@@ -1,6 +1,8 @@
 FROM nvidia/cuda:13.2.1-runtime-ubuntu24.04
 
-ENV TZ="Asia/Tokyo"
+# Time zone of the run folders' time stamps; set TZ in .env to change it.
+ARG TZ=UTC
+ENV TZ=${TZ}
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Same base as docker-comfyui. The venv and musubi-tuner live in ./work

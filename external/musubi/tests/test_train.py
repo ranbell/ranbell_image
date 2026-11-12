@@ -100,7 +100,19 @@ def test_text_encoder_cache_is_reused_only_for_the_same_captions(tk):
 def test_latents_are_always_cached_incrementally(tk):
     _dataset(tk)
     latents = dict(tk.make_plan(_args(tk)).commands)["latents"]
-    assert "--skip_existing" in latents and "--keep_cache" in latents
+    assert "--skip_existing" in latents
+    # Never --keep_cache: musubi trains on every cache file in the folder, so
+    # pictures taken out of the bucket would be trained on too.
+    assert all("--keep_cache" not in cmd for _, cmd in tk.make_plan(_args(tk)).commands)
+
+
+def test_two_runs_in_the_same_second_get_their_own_folder(tk):
+    _dataset(tk)
+    first = tk.make_plan(_args(tk)).run_dir
+    first.mkdir(parents=True)
+    second = tk.make_plan(_args(tk)).run_dir
+    assert second != first and not second.exists()
+    assert second.name.rsplit("-", 2)[0] == "red"
 
 
 def test_toml_points_at_the_readonly_dataset_and_a_separate_cache(tk):

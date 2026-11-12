@@ -1,6 +1,9 @@
 services:
   musubi:
-    build: .
+    build:
+      context: .
+      args:
+        TZ: ${TZ:-UTC}
     image: musubi
     container_name: musubi
     tty: true

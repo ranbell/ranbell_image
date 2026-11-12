@@ -98,6 +98,31 @@ def write_with_metadata(src: Path, dst: Path, meta: dict[str, str]) -> None:
     os.replace(tmp, dst)
 
 
+def _train_cmd(run: Path) -> str:
+    try:
+        text = (run / "train.log").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    trains = [ln for ln in text.splitlines() if ln.startswith("=== train:")]
+    return trains[-1] if trains else ""
+
+
+def output_name(run: Path) -> str:
+    """The file name the run saves under: --output_name as trained (``train
+    --name`` sets it), else the slug the run folder starts with."""
+    import re
+
+    m = re.search(r"--output_name (\S+)", _train_cmd(run))
+    return m.group(1) if m else run.name.rsplit("-", 2)[0]
+
+
+def last_epoch(run: Path) -> int | None:
+    import re
+
+    m = re.search(r"--max_train_epochs (\d+)", _train_cmd(run))
+    return int(m.group(1)) if m else None
+
+
 def resolve(target: str, epoch: int | None) -> Path:
     p = Path(target)
     if p.suffix == ".safetensors":
@@ -109,9 +134,11 @@ def resolve(target: str, epoch: int | None) -> Path:
     if not runs:
         raise SystemExit(f"✋ no run found for {target!r}")
     run = runs[-1]
-    name = run.name.rsplit("-", 2)[0]
+    name = output_name(run)
     files = {f.name: f for f in run.glob("*.safetensors")}
     want = f"{name}-{epoch:06d}.safetensors" if epoch else f"{name}.safetensors"
+    if epoch and want not in files and f"{name}.safetensors" in files and epoch == last_epoch(run):
+        want = f"{name}.safetensors"  # the last epoch is saved under the plain name
     if want not in files:
         have = ", ".join(sorted(files)) or "none yet"
         raise SystemExit(f"✋ {want} is not in {run.name} (have: {have})")
