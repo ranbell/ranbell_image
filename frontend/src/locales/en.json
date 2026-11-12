@@ -2078,7 +2078,8 @@
     "submittingAlignment": "Submitting for alignment",
     "tagged": "{done}/{total} tagged",
     "tags": "{done}/{total} tags",
-    "tagsRegistered": "Done: {n} tags registered"
+    "tagsRegistered": "Done: {n} tags registered",
+    "imagesStep": "{done}/{total} images · step {v}/{m}"
   },
   "startupWarning": {
     "backupDirMissing": "Backups are not being kept — “{path}” is not mounted. Update docker-compose.yml and docker-compose.override.yml to the current version (it mounts ./qdrant_snapshots on qdrant and {path} on backend).",
@@ -2282,6 +2283,8 @@
     "drawingNow": "Drawing…",
     "stop": "Stop",
     "stopping": "Stopping. What is drawn stays; 'Draw the rest' picks it up again.",
-    "samplingReset": "Back to defaults ({d})"
+    "samplingReset": "Back to defaults ({d})",
+    "step": "Step {v}/{m}",
+    "progress": "{done}/{total} pictures"
   }
 }

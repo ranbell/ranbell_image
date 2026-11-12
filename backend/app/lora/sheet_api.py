@@ -64,6 +64,7 @@ def _view(sheet: dict) -> dict:
         "grid": sh.grid(sheet),
         "drawing": sh.is_drawing(sheet["id"]),
         "drawing_key": (sh.latest_preview(sheet["id"]) or {}).get("key", ""),
+        "drawing_step": [(sh.latest_preview(sheet["id"]) or {}).get(k, 0) for k in ("step", "steps")],
     }
 
 
@@ -294,7 +295,8 @@ async def sheet_preview(sheet_id: str):
     headers = {"Cache-Control": "no-store"}
     if not p:
         return Response(status_code=204, headers=headers)
-    headers |= {"X-Sheet-Key": p["key"], "X-Preview-Seq": str(p["seq"])}
+    headers |= {"X-Sheet-Key": p["key"], "X-Preview-Seq": str(p["seq"]),
+                "X-Step": str(p.get("step", 0)), "X-Steps": str(p.get("steps", 0))}
     if not p["jpeg"]:
         return Response(status_code=204, headers=headers)
     return Response(p["jpeg"], media_type="image/jpeg", headers=headers)

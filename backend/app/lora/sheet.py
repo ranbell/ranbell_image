@@ -353,10 +353,33 @@ def latest_preview(sheet_id: str) -> dict | None:
     return _previews.get(sheet_id)
 
 
+class _StepReporter:
+    """Hands run_render's per-step progress on as the sheet's: the job line
+    reads 'pictures done/total · step v/m', and the cell being drawn keeps its
+    step for the sheet screen."""
+
+    def __init__(self, reporter, sheet_id: str, done: int, total: int):
+        self._r, self._id, self._done, self._total = reporter, sheet_id, done, total
+
+    def update(self, progress, text=None, *, key="", **params):
+        if key != "step":
+            return self._r.update(progress, text, key=key, **params)
+        v, m = int(params.get("v", 0)), max(int(params.get("m", 1)), 1)
+        live = _previews.get(self._id)
+        if live is not None:
+            live["step"], live["steps"] = v, m
+        overall = (self._done + v / m) / self._total if self._total else 0.0
+        self._r.update(overall, f"{self._done}/{self._total} · Step {v}/{m}", key="imagesStep",
+                       done=self._done, total=self._total, v=v, m=m)
+
+    def indeterminate(self):
+        self._r.indeterminate()
+
+
 def _preview_sink(sheet_id: str, key: str):
     async def _publish(jpeg: bytes) -> None:
-        seq = (_previews.get(sheet_id) or {}).get("seq", 0) + 1
-        _previews[sheet_id] = {"key": key, "jpeg": jpeg, "seq": seq}
+        prev = _previews.get(sheet_id) or {}
+        _previews[sheet_id] = prev | {"key": key, "jpeg": jpeg, "seq": prev.get("seq", 0) + 1}
     return _publish
 
 
@@ -413,7 +436,7 @@ async def run_lora_sheet(
             try:
                 graph = build(sheet, spec)
                 result = await run_render(
-                    reporter, cancel, db=db, comfy=comfy,
+                    _StepReporter(reporter, sheet_id, done_before, total), cancel, db=db, comfy=comfy,
                     workflow_name=f"lora_sheet:{sheet['target_model']}", workflow=graph,
                     positive=spec["prompt"], seed=sheet["seed"],
                     width=sheet["width"], height=sheet["height"],

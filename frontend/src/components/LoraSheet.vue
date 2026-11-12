@@ -35,7 +35,7 @@ const lightbox = ref(null)      // { r, c }
 let pollTimer = null
 let previewTimer = null
 // The picture being drawn right now: its cell and its newest in-flight frame.
-const live = ref({ sheet: '', key: '', url: '', seq: '' })
+const live = ref({ sheet: '', key: '', url: '', seq: '', step: 0, steps: 0 })
 
 const form = ref(blankForm())
 
@@ -270,10 +270,12 @@ async function openSheet(id) {
   poll()
 }
 
+const stepText = computed(() => live.value.steps ? t('loraSheet.step', { v: live.value.step, m: live.value.steps }) : '')
+
 function clearLive() {
   clearTimeout(previewTimer)
   if (live.value.url) URL.revokeObjectURL(live.value.url)
-  live.value = { sheet: '', key: '', url: '', seq: '' }
+  live.value = { sheet: '', key: '', url: '', seq: '', step: 0, steps: 0 }
 }
 
 // Frames come in faster than the sheet changes, so they have their own loop.
@@ -287,13 +289,17 @@ function pollPreview() {
       if (current.value?.id !== s.id) return
       const key = resp.headers.get('X-Sheet-Key') || ''
       const seq = resp.headers.get('X-Preview-Seq') || ''
+      const step = Number(resp.headers.get('X-Step') || 0)
+      const steps = Number(resp.headers.get('X-Steps') || 0)
       if (resp.status === 200 && seq !== live.value.seq) {
         const url = URL.createObjectURL(await resp.blob())
         if (live.value.url) URL.revokeObjectURL(live.value.url)
-        live.value = { sheet: s.id, key, url, seq }
+        live.value = { sheet: s.id, key, url, seq, step, steps }
       } else if (key !== live.value.key) {
         if (live.value.url) URL.revokeObjectURL(live.value.url)
-        live.value = { sheet: s.id, key, url: '', seq }
+        live.value = { sheet: s.id, key, url: '', seq, step, steps }
+      } else {
+        live.value = { ...live.value, step, steps }
       }
     } catch {}
     pollPreview()
@@ -577,6 +583,9 @@ onBeforeUnmount(() => { clearTimeout(pollTimer); clearLive(); window.removeEvent
             <h4 class="font-semibold">{{ current.name }}</h4>
             <span class="text-[11px] text-gray-500">{{ current.done }}/{{ current.pictures }}</span>
             <span v-if="current.drawing" class="text-[11px] text-amber-300 motion-safe:animate-pulse">{{ t('loraSheet.drawing') }}</span>
+            <span v-if="current.drawing" class="text-[11px] text-amber-200 font-mono">
+              {{ t('loraSheet.progress', { done: (current.done || 0) + (current.errors || 0), total: current.pictures || 0 }) }}<template v-if="stepText"> · {{ stepText }}</template>
+            </span>
             <div class="ml-auto flex flex-wrap gap-1.5">
               <button v-if="current.drawing" type="button" :disabled="busy" @click="stopDrawing"
                 class="px-2.5 py-1 rounded-lg bg-red-800/70 hover:bg-red-700 text-xs">■ {{ t('loraSheet.stop') }}</button>
@@ -623,14 +632,16 @@ onBeforeUnmount(() => { clearTimeout(pollTimer); clearLive(); window.removeEvent
                   <div v-else-if="live.key === key && live.url" class="relative">
                     <img :src="live.url" class="w-44 rounded-lg object-cover ring-2 ring-amber-500/70"
                       :style="{ aspectRatio: `${current.width} / ${current.height}` }" />
-                    <span class="absolute bottom-1 left-1 px-1.5 rounded bg-black/60 text-[10px] text-amber-200">{{ t('loraSheet.drawingNow') }}</span>
+                    <span class="absolute bottom-1 left-1 px-1.5 rounded bg-black/60 text-[10px] text-amber-200 font-mono">{{ stepText || t('loraSheet.drawingNow') }}</span>
+                    <span v-if="live.steps" class="absolute bottom-0 left-0 h-0.5 rounded bg-amber-400 transition-all"
+                      :style="{ width: `${100 * live.step / live.steps}%` }"></span>
                   </div>
                   <div v-else class="w-44 rounded-lg flex items-center justify-center text-[11px] p-2 text-center break-words overflow-hidden"
                     :style="{ aspectRatio: `${current.width} / ${current.height}` }"
                     :class="render(key).status === 'error' ? 'bg-red-950/50 text-red-300' : 'bg-gray-900 text-gray-500 motion-safe:animate-pulse'"
                     :title="render(key).error || ''">
                     {{ render(key).status === 'error' ? `⚠ ${render(key).error}`.slice(0, 220)
-                      : live.key === key ? t('loraSheet.drawingNow') : t('loraSheet.waiting') }}
+                      : live.key === key ? (stepText || t('loraSheet.drawingNow')) : t('loraSheet.waiting') }}
                   </div>
                 </td>
               </tr>

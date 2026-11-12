@@ -231,9 +231,11 @@ async def test_in_flight_frames_are_kept_per_cell_and_dropped_at_the_end(store, 
     async def fake_render(reporter, cancel, **kw):
         # Before the first frame the cell is already known (shown as drawing).
         before = sh.latest_preview(s["id"])
+        reporter.update(0.0, "Step 3/8", key="step", v=3, m=8)
         await kw["preview"](b"jpeg-1")
         await kw["preview"](b"jpeg-2")
         now = sh.latest_preview(s["id"])
+        assert (now["step"], now["steps"]) == (3, 8)
         seen.append((before["key"], before["jpeg"], now["key"], now["jpeg"]))
         return {"sha256s": [f"sha{len(seen)}"]}
 

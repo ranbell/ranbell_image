@@ -2078,7 +2078,8 @@
     "submittingAlignment": "適合度の評価に回しています",
     "tagged": "{done}/{total} タグ付け",
     "tags": "{done}/{total} タグ",
-    "tagsRegistered": "完了: {n} タグを登録"
+    "tagsRegistered": "完了: {n} タグを登録",
+    "imagesStep": "{done}/{total} 枚 · ステップ {v}/{m}"
   },
   "startupWarning": {
     "backupDirMissing": "バックアップが取られていません —— 「{path}」がマウントされていません。docker-compose.yml と docker-compose.override.yml を最新版に更新してください（qdrant に ./qdrant_snapshots、backend に {path} をマウントします）。",
@@ -2282,6 +2283,8 @@
     "drawingNow": "描画中…",
     "stop": "中止",
     "stopping": "中止しています。描けた分は残ります。「続きを描く」で再開できます。",
-    "samplingReset": "既定に戻す（{d}）"
+    "samplingReset": "既定に戻す（{d}）",
+    "step": "Step {v}/{m}",
+    "progress": "{done}/{total} 枚"
   }
 }
