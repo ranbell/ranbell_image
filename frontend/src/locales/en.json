@@ -2311,6 +2311,7 @@
     "boardClear": "Unpin all",
     "boardEmpty": "Press 📌 on a cell to place it here (up to 4)",
     "boardFull": "The compare board holds {n} pictures",
-    "boardOpen": "Open the compare board"
+    "boardOpen": "Open the compare board",
+    "promptFromWd14": "This picture has no prompt, so one was built from its WD14 tags. Drop the words you do not want before drawing."
   }
 }

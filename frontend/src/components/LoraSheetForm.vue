@@ -187,6 +187,8 @@ async function startNew({ fresh = false } = {}) {
         const types = (pre.foreign.clip_types || []).join(', ')
         toast(types ? t('loraSheet.foreignSource', { types }) : t('loraSheet.foreignSourceUnknown'), 'info')
       }
+      // No prompt of its own (a photo or a drawing): built from its WD14 tags.
+      if (pre.prompt_source === 'wd14') toast(t('loraSheet.promptFromWd14'), 'info')
       for (const k of ['prompt', 'seed', 'steps', 'cfg', 'sampler', 'scheduler']) {
         if (pre[k] !== undefined) f[k] = pre[k]
       }

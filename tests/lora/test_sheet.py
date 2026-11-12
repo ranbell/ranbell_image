@@ -558,3 +558,16 @@ def test_rename_and_stack_png_routes(store, monkeypatch):
     r = client.post("/api/lora/sheets/stack.png", json={"ids": [a["id"], b["id"]]})
     assert r.status_code == 200 and r.content[:8] == b"\x89PNG\r\n\x1a\n"
     assert client.post("/api/lora/sheets/stack.png", json={"ids": ["nope"]}).status_code == 404
+
+
+def test_a_picture_without_a_prompt_starts_from_its_wd14_tags():
+    from app.lora.sheet_api import wd14_prompt
+
+    doc = {"positive_prompt": None, "wd14_tags": ["general", "1girl", "long_hair", "^_^", "1girl"]}
+    p = prefill_from_doc(doc, (800, 1200), "krea2")
+    assert p["prompt"] == "1girl, long hair, ^_^"
+    assert p["prompt_source"] == "wd14"
+    assert prefill_from_doc({"positive_prompt": "a cat"})["prompt_source"] == "prompt"
+    # Neither a prompt nor tags: nothing to carry over.
+    assert "prompt" not in prefill_from_doc({}) and "prompt_source" not in prefill_from_doc({})
+    assert len(wd14_prompt([f"t{i}" for i in range(80)]).split(", ")) == 40

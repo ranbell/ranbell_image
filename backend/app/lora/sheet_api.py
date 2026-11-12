@@ -136,8 +136,15 @@ def prefill_from_doc(doc: dict, image_size: tuple[int, int] | None = None,
     are taken, and ``foreign`` says why the rest was left alone."""
     cr = doc.get("creation_record") or {}
     mi = doc.get("model_info") or {}
+    prompt = cr.get("positive_prompt_generated") or doc.get("positive_prompt") or ""
+    source = "prompt"
+    if not str(prompt).strip():
+        # A picture with no prompt of its own (a photo, a drawing — "NR" in the
+        # gallery): its WD14 tags as a starting point, to be edited on screen.
+        prompt, source = wd14_prompt(doc.get("wd14_tags") or []), "wd14"
     out: dict[str, Any] = {
-        "prompt": cr.get("positive_prompt_generated") or doc.get("positive_prompt") or "",
+        "prompt": prompt,
+        "prompt_source": source if prompt else "",
         "seed": cr.get("seed") if cr.get("seed") is not None else mi.get("seed"),
         "models": {},
     }
@@ -180,6 +187,27 @@ def prefill_from_doc(doc: dict, image_size: tuple[int, int] | None = None,
         elif ct.startswith(("EmptyLatent", "EmptySD3")):
             _latent_size(graph, node, out)
     return _with_shape(out, image_size)
+
+
+WD14_RATINGS = {"general", "sensitive", "questionable", "explicit"}
+WD14_MAX_TAGS = 40
+
+
+def wd14_prompt(tags: list[str]) -> str:
+    """WD14 tags as a prompt: the rating tags dropped, ``long_hair`` read as
+    ``long hair`` (emoticons such as ``^_^`` left alone), at most 40."""
+    out: list[str] = []
+    for tag in tags:
+        tag = str(tag or "").strip()
+        if not tag or tag in WD14_RATINGS:
+            continue
+        if any(ch.isalnum() for ch in tag):
+            tag = tag.replace("_", " ")
+        if tag not in out:
+            out.append(tag)
+        if len(out) >= WD14_MAX_TAGS:
+            break
+    return ", ".join(out)
 
 
 def _latent_size(graph: dict, node: dict, out: dict) -> None:
