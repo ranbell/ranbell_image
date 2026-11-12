@@ -3,7 +3,7 @@
  * A sheet picture at full size. Arrows walk the grid (empty cells are skipped
  * in the direction of travel), P pins to the compare board, Esc closes.
  */
-import { computed, onMounted, onBeforeUnmount } from 'vue'
+import { computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const props = defineProps({
@@ -16,6 +16,9 @@ const emit = defineEmits(['move', 'close', 'pin'])
 const { t } = useI18n()
 
 const cell = computed(() => props.cells[props.at.r]?.[props.at.c] || null)
+// The picture went away under it (a sheet reloaded without it): close, or the
+// key listener would stay and keep eating arrows with nothing on screen.
+watch(cell, c => { if (!c) emit('close') })
 
 function step(dr, dc) {
   const rows = props.cells.length
@@ -31,7 +34,12 @@ function step(dr, dc) {
 
 function onKey(e) {
   if (e.key === 'Escape') { e.stopPropagation(); emit('close'); return }
-  if (e.key === 'p' || e.key === 'P') { if (cell.value) emit('pin', cell.value); return }
+  // Typing in a field (the list's search box stays usable): not for us.
+  if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName || '') || e.target?.isContentEditable) return
+  if ((e.key === 'p' || e.key === 'P') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    if (cell.value) emit('pin', cell.value)
+    return
+  }
   const move = { ArrowLeft: [0, -1], ArrowRight: [0, 1], ArrowUp: [-1, 0], ArrowDown: [1, 0] }[e.key]
   if (!move) return
   e.preventDefault()

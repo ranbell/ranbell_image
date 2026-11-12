@@ -2227,7 +2227,8 @@
     "exportDone": "Export finished ({n} pictures): {path}",
     "exportFailed": "Export failed: {error}",
     "exportCancelled": "Export cancelled",
-    "compareSheet": "📊 Compare this bucket's LoRAs"
+    "compareSheet": "📊 Compare this bucket's LoRAs",
+    "notReady": "Not ready to export: {why}"
   },
   "loraSheet": {
     "title": "📊 LoRA comparison sheet",
@@ -2312,6 +2313,14 @@
     "boardEmpty": "Press 📌 on a cell to place it here (up to 4)",
     "boardFull": "The compare board holds {n} pictures",
     "boardOpen": "Open the compare board",
-    "promptFromWd14": "This picture has no prompt, so one was built from its WD14 tags. Drop the words you do not want before drawing."
+    "promptFromWd14": "This picture has no prompt, so one was built from its WD14 tags. Drop the words you do not want before drawing.",
+    "badStrengths": "Not a number among the strengths: {s}",
+    "strengthRange": "Strengths go from -2 to 3",
+    "tooManyStrengths": "At most {n} strengths",
+    "tooManyPictures": "At most {n} pictures on one sheet — use fewer LoRAs or strengths",
+    "badSeed": "The seed is a whole number from 0 to 2^64-1",
+    "draftRowsGone": "{n} LoRA(s) from the draft are no longer in ComfyUI and were left out",
+    "stackTooMany": "Up to {n} sheets can be compared at once",
+    "stopped": "Drawing stopped ({n} drawn — 'Draw the rest' picks it up)"
   }
 }

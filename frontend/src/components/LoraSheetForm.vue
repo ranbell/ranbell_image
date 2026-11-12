@@ -13,7 +13,7 @@ const props = defineProps({
   // { sha256 } (a gallery picture) or { bucket_id, slug, trigger } (a bucket)
   prefill: { type: Object, default: null },
 })
-const emit = defineEmits(['created', 'toast'])
+const emit = defineEmits(['created', 'toast', 'prefill-used'])
 const { t } = useI18n()
 
 const LS_KEY = 'ranbell.loraSheet.last'
@@ -34,7 +34,15 @@ function blankForm() {
     sampler: 'euler', scheduler: 'simple', rows: [], no_trigger_column: false, bucket_id: '',
   }
 }
-function randomSeed() { return Math.floor(Math.random() * 2 ** 48) }
+// Seeds are text end to end: ComfyUI takes up to 2^64-1, and a JS number
+// rounds anything above 2^53 (the sheet would draw another seed).
+function randomSeed() { return String(Math.floor(Math.random() * 2 ** 48)) }
+const MAX_SEED = (1n << 64n) - 1n
+function seedOk(s) {
+  const v = String(s ?? '').trim()
+  if (v === '') return true  // empty = a random one
+  return /^\d+$/.test(v) && BigInt(v) <= MAX_SEED
+}
 
 // Size = aspect ratio × megapixels (1 MP = 1024×1024, as ComfyUI counts it),
 // each side snapped to 16 and kept inside what the backend accepts.
@@ -51,8 +59,19 @@ function reduceRatio(w, h) {
   return [Math.round(w) / d, Math.round(h) / d]
 }
 function toast(msg, type = 'info') { emit('toast', { msg, type }) }
-const strengths = computed(() => strengthText.value.split(/[\s,]+/).filter(Boolean)
-  .map(Number).filter(v => Number.isFinite(v)))
+// Mirrors backend sheet._clean_strengths: rounded to 4 places, deduplicated,
+// -2..3. What does not parse is shown, not silently dropped.
+const strengthTokens = computed(() => strengthText.value.split(/[\s,]+/).filter(Boolean))
+const badStrengths = computed(() => strengthTokens.value.filter(x => !Number.isFinite(Number(x))))
+const strengths = computed(() => {
+  const out = []
+  for (const x of strengthTokens.value) {
+    const v = Math.round(Number(x) * 1e4) / 1e4
+    if (Number.isFinite(v) && !out.includes(v)) out.push(v)
+  }
+  return out
+})
+const LIMITS = { renders: 160, strengths: 10, min: -2, max: 3 }
 
 const loraGroups = computed(() => {
   const q = loraFilter.value.trim().toLowerCase()
@@ -66,13 +85,32 @@ const loraGroups = computed(() => {
   return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b))
 })
 
-// The count the backend will draw: rows sharing a trigger share the 0 column.
+// The count the backend will draw — the same keys as sheet.render_key, so
+// cells that would be the same picture count once (rows sharing a trigger
+// share the 0 column; with an empty trigger the no-trigger column is the
+// strength-1 picture again).
 const pictureCount = computed(() => {
-  const rows = form.value.rows
-  if (!rows.length) return 0
-  const nonzero = strengths.value.filter(s => s !== 0).length
-  const base = strengths.value.includes(0) ? new Set(rows.map(r => r.trigger.trim())).size : 0
-  return base + rows.length * (nonzero + (form.value.no_trigger_column ? 1 : 0))
+  const cols = strengths.value.map(s => [s, true])
+  if (form.value.no_trigger_column) cols.push([1, false])
+  const prompt = form.value.prompt.trim()
+  const keys = new Set()
+  for (const r of form.value.rows) {
+    const trig = (r.trigger || '').trim()
+    for (const [s, on] of cols) {
+      const p = on && trig ? (prompt ? `${trig}, ${prompt}` : trig) : prompt
+      keys.add(JSON.stringify([p, s ? r.lora : '', s]))
+    }
+  }
+  return keys.size
+})
+const problems = computed(() => {
+  const out = []
+  if (badStrengths.value.length) out.push(t('loraSheet.badStrengths', { s: badStrengths.value.join(' ') }))
+  if (strengths.value.some(s => s < LIMITS.min || s > LIMITS.max)) out.push(t('loraSheet.strengthRange'))
+  if (strengths.value.length > LIMITS.strengths) out.push(t('loraSheet.tooManyStrengths', { n: LIMITS.strengths }))
+  if (pictureCount.value > LIMITS.renders) out.push(t('loraSheet.tooManyPictures', { n: LIMITS.renders }))
+  if (!seedOk(form.value.seed)) out.push(t('loraSheet.badSeed'))
+  return out
 })
 const estimate = computed(() => {
   const s = options.value?.seconds_per_picture
@@ -104,7 +142,7 @@ function swapAspect() {
   const f = form.value
   ;[f.aspect_w, f.aspect_h] = [f.aspect_h, f.aspect_w]
 }
-const canCreate = computed(() => form.value.rows.length && form.value.prompt.trim()
+const canCreate = computed(() => form.value.rows.length && form.value.prompt.trim() && !problems.value.length
   && form.value.models.unet && form.value.models.clip && form.value.models.vae
   && strengths.value.length && !busy.value)
 
@@ -151,7 +189,8 @@ async function resetForm() {
 async function startNew({ fresh = false } = {}) {
   ready.value = false
   const f = blankForm()
-  const tgt = (options.value?.targets || [])[0]
+  const targets = options.value?.targets || []
+  const tgt = targets.find(x => x.id === options.value?.default_target) || targets[0]
   if (tgt) {
     const { width, height, ...rest } = tgt.defaults || {}
     Object.assign(f, { target_model: tgt.id }, rest)
@@ -172,8 +211,20 @@ async function startNew({ fresh = false } = {}) {
   loraFilter.value = ''
   const draft = fresh ? null : recallDraft()
   if (draft?.form) {
-    const { target_model, ...kept } = draft.form
+    // bucket_id belongs to the opening from a bucket, not to the draft.
+    const { target_model, bucket_id, ...kept } = draft.form
     Object.assign(f, kept, { models: { ...f.models, ...(kept.models || {}) } })
+    f.seed = kept.seed == null ? f.seed : String(kept.seed)
+    // Rows from an older draft may lack a trigger; LoRAs since removed from
+    // ComfyUI would fail every picture of their row.
+    const known = options.value?.comfy ? new Set(options.value.loras || []) : null
+    const rows = (Array.isArray(kept.rows) ? kept.rows : [])
+      .filter(r => r && typeof r.lora === 'string')
+      .map(r => ({ lora: r.lora, trigger: r.trigger || '', label: r.label || '' }))
+    f.rows = known ? rows.filter(r => known.has(r.lora)) : rows
+    if (f.rows.length < rows.length) {
+      toast(t('loraSheet.draftRowsGone', { n: rows.length - f.rows.length }), 'info')
+    }
     if (draft.strengths) strengthText.value = draft.strengths
     newTrigger.value = draft.newTrigger || ''
   }
@@ -204,6 +255,9 @@ async function startNew({ fresh = false } = {}) {
     newTrigger.value = p.trigger || ''
     loraFilter.value = p.slug || ''
   }
+  // Used once: "+ New" or "Reset" afterwards must not bring it back over
+  // what was typed since.
+  if (p) emit('prefill-used')
   // Drop chosen files ComfyUI does not have (a remembered file since removed).
   const o = options.value
   if (o?.comfy) {
@@ -220,7 +274,15 @@ async function create() {
   try {
     const f = form.value
     const { aspect_w, aspect_h, megapixels, ...rest } = f
-    const body = { ...rest, ...size.value, strengths: strengths.value, seed: f.seed === '' ? null : Number(f.seed) }
+    const d = samplingDefaults.value
+    const num = (v, fallback) => (v === '' || v == null || !Number.isFinite(Number(v)) ? fallback : Number(v))
+    const seed = String(f.seed ?? '').trim()
+    const body = {
+      ...rest, ...size.value, strengths: strengths.value,
+      seed: seed === '' ? null : seed,
+      steps: Math.max(1, Math.round(num(f.steps, d.steps ?? 8))),
+      cfg: num(f.cfg, d.cfg ?? 1),
+    }
     const s = await api('/api/lora/sheets', { method: 'POST', body })
     remember()
     toast(t('loraSheet.queued', { n: s.pictures }), 'info')
@@ -261,7 +323,7 @@ defineExpose({ startNew })
     <label class="flex flex-col gap-1 text-[11px] text-gray-400">
       {{ t('loraSheet.seed') }}
       <span class="flex gap-1">
-        <input v-model.number="form.seed" type="number" min="0"
+        <input v-model.trim="form.seed" type="text" inputmode="numeric" :class="seedOk(form.seed) ? '' : 'border-red-500 text-red-300'"
           class="w-44 px-2 py-1 rounded-lg bg-gray-900 border border-gray-700 text-xs font-mono" />
         <button type="button" class="px-2 rounded-lg bg-gray-800 hover:bg-gray-700" :title="t('loraSheet.reseed')"
           @click="form.seed = randomSeed()">🎲</button>
@@ -285,7 +347,8 @@ defineExpose({ startNew })
     </label>
     <label class="flex flex-col gap-1 text-[11px] text-gray-400 flex-1 min-w-48">
       {{ t('loraSheet.strengths') }}
-      <input v-model="strengthText" class="px-2 py-1 rounded-lg bg-gray-900 border border-gray-700 text-xs font-mono" />
+      <input v-model="strengthText" class="px-2 py-1 rounded-lg bg-gray-900 border text-xs font-mono"
+        :class="badStrengths.length ? 'border-red-500 text-red-300' : 'border-gray-700'" />
     </label>
     <label class="flex items-center gap-1.5 text-[11px] text-gray-300" :title="t('loraSheet.noTriggerHelp')">
       <input v-model="form.no_trigger_column" type="checkbox" /> {{ t('loraSheet.noTriggerColumn') }}
@@ -358,6 +421,7 @@ defineExpose({ startNew })
     <span class="text-xs text-gray-400">
       {{ t('loraSheet.count', { n: pictureCount }) }}<template v-if="estimate"> · {{ estimate }}</template>
     </span>
+    <span v-for="p in problems" :key="p" class="text-xs text-red-300">⚠ {{ p }}</span>
     <button type="button" :title="t('loraSheet.resetHelp')" @click="resetForm"
       class="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-xs">{{ t('loraSheet.reset') }}</button>
     <button type="button" :disabled="!canCreate" @click="create"

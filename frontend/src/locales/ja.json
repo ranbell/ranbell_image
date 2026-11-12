@@ -2227,7 +2227,8 @@
     "exportDone": "書き出しが完了しました（{n}枚）: {path}",
     "exportFailed": "書き出しに失敗しました: {error}",
     "exportCancelled": "書き出しを中止しました",
-    "compareSheet": "📊 このバケットの LoRA を比べる"
+    "compareSheet": "📊 このバケットの LoRA を比べる",
+    "notReady": "まだ書き出せません: {why}"
   },
   "loraSheet": {
     "title": "📊 LoRA 比較シート",
@@ -2312,6 +2313,14 @@
     "boardEmpty": "マスの 📌 を押すとここに並びます（最大 4 枚）",
     "boardFull": "比較ボードは {n} 枚までです",
     "boardOpen": "比較ボードを開く",
-    "promptFromWd14": "この絵にはプロンプトが無いので、WD14 タグからプロンプトを組みました。不要な語を消してから描いてください。"
+    "promptFromWd14": "この絵にはプロンプトが無いので、WD14 タグからプロンプトを組みました。不要な語を消してから描いてください。",
+    "badStrengths": "strength に数字でないものがあります: {s}",
+    "strengthRange": "strength は -2〜3 の範囲で指定してください",
+    "tooManyStrengths": "strength は {n} 個までです",
+    "tooManyPictures": "1枚のシートは {n} 枚までです。LoRA か strength を減らしてください",
+    "badSeed": "シードは 0〜2^64-1 の整数です",
+    "draftRowsGone": "下書きの LoRA のうち {n} 件は ComfyUI に無いので外しました",
+    "stackTooMany": "並べて比べるのは {n} 枚までです",
+    "stopped": "描画を中止しました（{n} 枚描けています。「続きを描く」で再開できます）"
   }
 }

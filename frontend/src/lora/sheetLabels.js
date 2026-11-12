@@ -81,7 +81,9 @@ export async function api(path, opts = {}) {
   if (!resp.ok) {
     let detail = ''
     try { detail = (await resp.json()).detail } catch {}
-    throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail || resp.status))
+    const err = new Error(typeof detail === 'string' ? detail : JSON.stringify(detail || resp.status))
+    err.status = resp.status
+    throw err
   }
   return resp.json()
 }

@@ -48,8 +48,13 @@ function flatIndex(si, r) {
   return n + r
 }
 
+let loadSeq = 0
 async function load() {
+  // Only the newest load is taken: a slow one for the previous selection
+  // must not replace the sheets chosen since.
+  const seq = ++loadSeq
   const got = await Promise.all(props.ids.map(id => api(`/api/lora/sheets/${id}`).catch(() => null)))
+  if (seq !== loadSeq || !alive) return
   sheets.value = got.filter(Boolean)
   clearTimeout(pollTimer)
   if (alive && sheets.value.some(s => s.drawing)) pollTimer = setTimeout(() => load().catch(() => {}), 2500)

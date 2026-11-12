@@ -10,7 +10,7 @@
  * the new-sheet form, one sheet, several sheets stacked, or the compare board
  * of pinned pictures (kept in the browser between visits).
  */
-import { ref, watch } from 'vue'
+import { ref, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import LoraSheetList from './LoraSheetList.vue'
 import LoraSheetForm from './LoraSheetForm.vue'
@@ -25,7 +25,7 @@ const props = defineProps({
   // { bucket_id, slug, trigger } (a LoRA bucket). Applied to a new sheet.
   prefill: { type: Object, default: null },
 })
-const emit = defineEmits(['close', 'toast'])
+const emit = defineEmits(['close', 'toast', 'prefill-used'])
 const { t } = useI18n()
 
 const LS_BOARD = 'ranbell.loraSheet.board'
@@ -49,6 +49,8 @@ function readPins() {
 }
 watch(pins, v => { try { localStorage.setItem(LS_BOARD, JSON.stringify(v)) } catch {} }, { deep: true })
 const isPinned = cell => pins.value.some(p => p.sha256 === cell.sha256)
+// A pinned picture deleted from the gallery no longer loads: let it go.
+function dropBrokenPin(sha) { pins.value = pins.value.filter(p => p.sha256 !== sha) }
 function togglePin(cell) {
   if (isPinned(cell)) { pins.value = pins.value.filter(p => p.sha256 !== cell.sha256); return }
   if (pins.value.length >= BOARD_MAX) { toast(t('loraSheet.boardFull', { n: BOARD_MAX }), 'info'); return }
@@ -68,7 +70,15 @@ async function onDeleted(id) {
   await loadList()
   sheets.value.length ? openSheet(sheets.value[0].id) : startNew()
 }
-function openStack() { stackIds.value = [...selected.value]; mode.value = 'stack' }
+const STACK_MAX = 12  // what /sheets/stack.png takes
+function openStack() {
+  if (selected.value.length > STACK_MAX) {
+    toast(t('loraSheet.stackTooMany', { n: STACK_MAX }), 'info')
+    return
+  }
+  stackIds.value = [...selected.value]
+  mode.value = 'stack'
+}
 function closeStack() {
   if (currentId.value && sheets.value.some(s => s.id === currentId.value)) openSheet(currentId.value)
   else if (sheets.value.length) openSheet(sheets.value[0].id)
@@ -80,30 +90,65 @@ function openBoard() {
 }
 function closeBoard() {
   const b = backFromBoard
-  if (b?.mode === 'sheet' && b.id) openSheet(b.id)
+  if (b?.mode === 'new') { mode.value = 'new'; formKey.value++ }  // the draft comes back
+  else if (b?.mode === 'sheet' && b.id && sheets.value.some(s => s.id === b.id)) openSheet(b.id)
   else if (b?.mode === 'stack' && stackIds.value.length) mode.value = 'stack'
   else if (sheets.value.length) openSheet(sheets.value[0].id)
   else startNew()
 }
 async function deleteMany(ids) {
+  const failed = []
   for (const id of ids) {
-    try { await api(`/api/lora/sheets/${id}`, { method: 'DELETE' }) } catch (e) { toast(e.message, 'error') }
+    try { await api(`/api/lora/sheets/${id}`, { method: 'DELETE' }) } catch (e) {
+      failed.push(id)
+      toast(e.message, 'error')
+    }
   }
-  selected.value = []
-  stackIds.value = stackIds.value.filter(id => !ids.includes(id))
+  const gone = ids.filter(id => !failed.includes(id))
+  selected.value = failed  // what could not be deleted stays ticked
+  stackIds.value = stackIds.value.filter(id => !gone.includes(id))
   await loadList()
-  if (ids.includes(currentId.value) || mode.value === 'stack') {
+  if (mode.value === 'board') return
+  if (gone.includes(currentId.value) || mode.value === 'stack') {
     sheets.value.length ? openSheet(sheets.value[0].id) : startNew()
   }
 }
 
+// Escape closes the innermost thing: the lightbox handles its own (it listens
+// earlier, on window), then the board, then the modal. On document in the
+// capture phase, so the gallery behind (App.vue, document bubble) never sees it.
+function onKey(e) {
+  if (!props.show) return
+  if (e.key === 'Escape') {
+    e.stopPropagation()
+    e.preventDefault()
+    if (mode.value === 'board') closeBoard()
+    else emit('close')
+  } else if (e.key === '/' && !/^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName || '')) {
+    e.stopPropagation()  // keep the Control Room toggle behind the modal still
+  }
+}
+watch(() => props.show, open => {
+  if (open) document.addEventListener('keydown', onKey, true)
+  else document.removeEventListener('keydown', onKey, true)
+}, { immediate: true })
+onBeforeUnmount(() => document.removeEventListener('keydown', onKey, true))
+
 watch(() => props.show, async (open) => {
   if (!open) return
+  // Nothing on the right until the lists are in: an old 'new' mode would
+  // mount the form now and again after (two prefill fetches, two toasts).
+  const was = { mode: mode.value, id: currentId.value }
+  mode.value = 'loading'
   try {
     await Promise.all([loadOptions(), loadList()])
-    if (props.prefill || !sheets.value.length) startNew()
-    else if (mode.value === 'new' || !sheets.value.some(s => s.id === currentId.value)) openSheet(sheets.value[0].id)
-  } catch (e) { toast(e.message, 'error') }
+    if (props.prefill || !sheets.value.length || was.mode === 'new') startNew()
+    else if (sheets.value.some(s => s.id === was.id)) openSheet(was.id)
+    else openSheet(sheets.value[0].id)
+  } catch (e) {
+    toast(e.message, 'error')
+    if (mode.value === 'loading') mode.value = was.mode
+  }
 }, { immediate: true })
 </script>
 
@@ -122,7 +167,7 @@ watch(() => props.show, async (open) => {
 
       <div class="flex-1 min-w-0 min-h-0 flex flex-col">
         <LoraSheetForm v-if="mode === 'new' && options" :key="formKey" :options="options" :prefill="prefill"
-          @created="onCreated" @toast="onToast" />
+          @created="onCreated" @toast="onToast" @prefill-used="emit('prefill-used')" />
         <LoraSheetGrid v-else-if="mode === 'sheet' && currentId" :sheet-id="currentId" :is-pinned="isPinned"
           @pin="togglePin" @toast="onToast" @changed="loadList" @deleted="onDeleted" @opened="onOpened" />
         <LoraSheetStack v-else-if="mode === 'stack'" :ids="stackIds" :is-pinned="isPinned"
@@ -135,7 +180,8 @@ watch(() => props.show, async (open) => {
           class="shrink-0 border-t border-gray-800 px-3 py-2 flex items-center gap-2 bg-slate-950">
           <span class="text-[11px] text-gray-400">📌 {{ pins.length }}/{{ BOARD_MAX }}</span>
           <div v-for="p in pins" :key="p.sha256" class="relative group">
-            <img :src="`/api/thumbnails/${p.sha256}.webp`" :title="p.label" class="w-10 h-10 rounded-md object-cover" />
+            <img :src="`/api/thumbnails/${p.sha256}.webp`" :title="p.label" class="w-10 h-10 rounded-md object-cover"
+              @error="dropBrokenPin(p.sha256)" />
             <button type="button" :aria-label="t('loraSheet.unpin')" @click="togglePin(p)"
               class="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-black/80 text-[9px] leading-4 text-gray-300 opacity-0 group-hover:opacity-100">✕</button>
           </div>

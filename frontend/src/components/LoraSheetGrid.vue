@@ -26,6 +26,20 @@ const lightbox = ref(null)      // { r, c }
 let pollTimer = null
 let previewTimer = null
 let alive = true
+let stopped = false   // Stop was pressed: the end is "stopped", not "drawn"
+// A response is only taken when it is for the sheet shown now: a slow answer
+// for the sheet clicked before must not replace it (and Delete or Rename
+// would then act on the wrong one).
+function adopt(view) {
+  if (view && view.id === props.sheetId) current.value = view
+  return current.value?.id === props.sheetId
+}
+function gone(e) {
+  if (e?.status !== 404) return false
+  stop()
+  emit('deleted', props.sheetId)
+  return true
+}
 // The picture being drawn right now: its cell and its newest in-flight frame.
 const live = ref({ key: '', url: '', seq: '', step: 0, steps: 0 })
 
@@ -52,8 +66,15 @@ async function load() {
   confirmDelete.value = false
   editingName.value = false
   lightbox.value = null
-  current.value = await api(`/api/lora/sheets/${props.sheetId}`)
-  poll()
+  stopped = false
+  const want = props.sheetId
+  if (current.value?.id !== want) current.value = null  // never show the previous sheet as this one
+  try {
+    const view = await api(`/api/lora/sheets/${want}`)
+    if (want === props.sheetId && adopt(view)) poll()
+  } catch (e) {
+    if (want === props.sheetId && !gone(e)) throw e
+  }
 }
 
 function clearLive() {
@@ -101,16 +122,19 @@ function poll() {
     if (current.value?.id !== s.id) return
     try {
       const fresh = await api(`/api/lora/sheets/${s.id}`)
-      if (current.value?.id !== s.id) return
-      current.value = fresh
+      if (current.value?.id !== s.id || !adopt(fresh)) return
       if (!fresh.drawing) {
-        toast(fresh.errors ? t('loraSheet.doneWithErrors', { n: fresh.done, e: fresh.errors })
+        if (stopped) toast(t('loraSheet.stopped', { n: fresh.done }), 'info')
+        else toast(fresh.errors ? t('loraSheet.doneWithErrors', { n: fresh.done, e: fresh.errors })
           : t('loraSheet.done', { n: fresh.done }), fresh.errors ? 'error' : 'success')
+        stopped = false
         emit('changed')
         clearLive()
         return
       }
-    } catch {}
+    } catch (e) {
+      if (gone(e)) return
+    }
     poll()
   }, 2500)
 }
@@ -120,11 +144,12 @@ async function act(fn) {
   try { await fn() } catch (e) { toast(e.message, 'error') } finally { busy.value = false }
 }
 const drawRest = () => act(async () => {
-  current.value = await api(`/api/lora/sheets/${current.value.id}/render`, { method: 'POST' })
+  stopped = false
+  if (adopt(await api(`/api/lora/sheets/${current.value.id}/render`, { method: 'POST' }))) poll()
   emit('changed')
-  poll()
 })
 const stopDrawing = () => act(async () => {
+  stopped = true
   await api(`/api/lora/sheets/${current.value.id}/cancel`, { method: 'POST' })
   toast(t('loraSheet.stopping'), 'info')
   poll()
@@ -142,7 +167,7 @@ const saveName = () => act(async () => {
   if (!editingName.value) return
   editingName.value = false
   if (nameDraft.value.trim() === current.value.name) return
-  current.value = await api(`/api/lora/sheets/${current.value.id}`, { method: 'PATCH', body: { name: nameDraft.value } })
+  adopt(await api(`/api/lora/sheets/${current.value.id}`, { method: 'PATCH', body: { name: nameDraft.value } }))
   emit('changed')
 })
 async function deleteSheet() {

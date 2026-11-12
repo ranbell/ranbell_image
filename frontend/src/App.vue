@@ -6338,6 +6338,7 @@ onUnmounted(() => {
       :show="showLoraSheet"
       :prefill="loraSheetPrefill"
       @close="showLoraSheet = false; loraSheetPrefill = null"
+      @prefill-used="loraSheetPrefill = null"
       @toast="showToast($event.msg, $event.type)"
     />
 

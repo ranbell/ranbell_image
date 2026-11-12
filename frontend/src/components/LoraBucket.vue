@@ -28,9 +28,21 @@ const openFull = ref(new Set())  // sha whose full description is unfolded
 const confirmDelete = ref(false)
 const targetModels = ref([])     // [{id, label, caption_style}] the trainer side supports
 const newTarget = ref('')
-const exporting = ref(false)
+// Exports run per bucket: one bucket's export does not lock the others.
+const exportingIds = ref(new Set())
+const exporting = computed(() => !!current.value && exportingIds.value.has(current.value.id))
+function setExporting(id, on) {
+  const s = new Set(exportingIds.value)
+  on ? s.add(id) : s.delete(id)
+  exportingIds.value = s
+}
+// The bucket picked last, and a counter bumped by every change sent: a
+// response for another bucket, or a poll that started before a change and
+// lands after it, is not shown (it would jump back or undo the change).
+const wantedId = ref('')
+let writeSeq = 0
 let pollTimer = null
-let exportTimer = null
+const exportTimers = new Map()
 
 const incoming = computed(() => props.incomingShas.filter(Boolean))
 const incomingNew = computed(() => {
@@ -93,6 +105,7 @@ async function loadList() {
 }
 
 function adopt(bucket) {
+  if (!bucket || (wantedId.value && bucket.id !== wantedId.value)) return false
   current.value = bucket
   settings.value = {
     name: bucket.name, trigger: bucket.trigger, targets: [...bucket.targets],
@@ -106,9 +119,11 @@ function adopt(bucket) {
   }
   drafts.value = next
   schedulePoll()
+  return true
 }
 
 async function openBucket(id) {
+  wantedId.value = id
   loading.value = true
   confirmDelete.value = false
   try { adopt(await api(`/api/lora/buckets/${id}`)) }
@@ -118,12 +133,14 @@ async function openBucket(id) {
 
 async function refresh() {
   if (!current.value) return
+  const id = current.value.id
+  const seq = writeSeq
   try {
-    const b = await api(`/api/lora/buckets/${current.value.id}`)
-    // Settings being edited stay as typed.
-    const keep = settingsDirty.value ? { ...settings.value } : null
-    adopt(b)
-    if (keep) settings.value = keep
+    const b = await api(`/api/lora/buckets/${id}`)
+    if (seq !== writeSeq || id !== wantedId.value) { schedulePoll(); return }
+    // Settings being edited stay as typed (this bucket's own, never another's).
+    const keep = settingsDirty.value && current.value?.id === id ? { ...settings.value } : null
+    if (adopt(b) && keep) settings.value = keep
   } catch {}
   loadList().catch(() => {})
 }
@@ -145,6 +162,7 @@ async function createBucket() {
     })
     newName.value = ''
     if (incoming.value.length) emit('added', incoming.value.length)
+    wantedId.value = b.id
     adopt(b)
     await loadList()
   } catch (e) { toast(e.message, 'error') }
@@ -154,6 +172,7 @@ async function createBucket() {
 async function addIncoming() {
   if (!current.value || !incomingNew.value.length) return
   busy.value = true
+  writeSeq++
   try {
     const b = await api(`/api/lora/buckets/${current.value.id}/images`, {
       method: 'POST', body: { sha256s: incomingNew.value },
@@ -178,6 +197,7 @@ function removeTarget(i) { settings.value.targets.splice(i, 1) }
 async function saveSettings() {
   if (targetDraft.value.trim()) addTarget()
   busy.value = true
+  writeSeq++
   try {
     adopt(await api(`/api/lora/buckets/${current.value.id}`, {
       method: 'PATCH', body: { ...settings.value },
@@ -196,6 +216,7 @@ function onCaptionInput(it, value) {
 async function saveCaption(it) {
   const value = drafts.value[it.sha256]
   if (value === undefined || value === it.caption) return
+  writeSeq++
   try {
     adopt(await api(`/api/lora/buckets/${current.value.id}/images/${it.sha256}/caption`, {
       method: 'PUT', body: { caption: value },
@@ -205,6 +226,7 @@ async function saveCaption(it) {
 
 async function recaption({ shas = [], step = 'strip', force = false } = {}) {
   busy.value = true
+  writeSeq++
   try {
     const b = await api(`/api/lora/buckets/${current.value.id}/recaption`, {
       method: 'POST', body: { sha256s: shas, step, force },
@@ -214,7 +236,18 @@ async function recaption({ shas = [], step = 'strip', force = false } = {}) {
   finally { busy.value = false }
 }
 
+// "Resume": only the pictures that were waiting when the job stopped.
+async function resume() {
+  busy.value = true
+  writeSeq++
+  try {
+    adopt(await api(`/api/lora/buckets/${current.value.id}/resume`, { method: 'POST' }))
+  } catch (e) { toast(e.message, 'error') }
+  finally { busy.value = false }
+}
+
 async function removeItem(it) {
+  writeSeq++
   try {
     adopt(await api(`/api/lora/buckets/${current.value.id}/images/${it.sha256}`, { method: 'DELETE' }))
     loadList().catch(() => {})
@@ -229,22 +262,25 @@ async function exportFolder() {
     watchExport(r.job_id, r.path, current.value.id)
   } catch (e) {
     const d = e.detail
-    toast(d?.error === 'no_export_dir' ? t('lora.noExportDir', { path: d.path }) : e.message, 'error')
+    toast(d?.error === 'no_export_dir' ? t('lora.noExportDir', { path: d.path })
+      : d?.error === 'not_ready' ? t('lora.notReady', { why: (d.blockers || []).map(b => t(`lora.blocker.${b}`)).join(' / ') })
+      : e.message, 'error')
   } finally { busy.value = false }
 }
 
 // The export runs as a job; follow it until it ends and say how it went.
 // Keeps watching after the screen is closed, so the toast still arrives.
 function watchExport(jobId, path, bucketId) {
-  clearTimeout(exportTimer)
-  exporting.value = true
+  clearTimeout(exportTimers.get(bucketId))
+  setExporting(bucketId, true)
   const started = Date.now()
   const tick = async () => {
     try {
       const data = await api('/api/jobs')
       const job = (data.jobs || []).find(j => j.id === jobId)
       if (job && ['succeeded', 'failed', 'cancelled'].includes(job.state)) {
-        exporting.value = false
+        setExporting(bucketId, false)
+        exportTimers.delete(bucketId)
         if (job.state === 'succeeded') {
           toast(t('lora.exportDone', { path: job.result?.path || path, n: job.result?.count ?? '' }), 'success')
         } else if (job.state === 'failed') {
@@ -256,10 +292,10 @@ function watchExport(jobId, path, bucketId) {
         return
       }
     } catch {}
-    if (Date.now() - started > 30 * 60 * 1000) { exporting.value = false; return }
-    exportTimer = setTimeout(tick, 1500)
+    if (Date.now() - started > 30 * 60 * 1000) { setExporting(bucketId, false); return }
+    exportTimers.set(bucketId, setTimeout(tick, 1500))
   }
-  exportTimer = setTimeout(tick, 1000)
+  exportTimers.set(bucketId, setTimeout(tick, 1000))
 }
 
 function zipUrl() {
@@ -271,6 +307,7 @@ async function deleteBucket() {
   try {
     await api(`/api/lora/buckets/${current.value.id}`, { method: 'DELETE' })
     current.value = null
+    wantedId.value = ''
     confirmDelete.value = false
     await loadList()
   } catch (e) { toast(e.message, 'error') }
@@ -309,7 +346,23 @@ watch(() => props.show, async (open) => {
   } catch (e) { toast(e.message, 'error') }
 }, { immediate: true })
 
-onBeforeUnmount(() => { clearTimeout(pollTimer); clearTimeout(exportTimer) })
+// Escape closes this modal and does not reach the gallery behind it.
+function onKey(e) {
+  if (!props.show || e.key !== 'Escape') return
+  e.stopPropagation()
+  e.preventDefault()
+  emit('close')
+}
+watch(() => props.show, open => {
+  if (open) document.addEventListener('keydown', onKey, true)
+  else document.removeEventListener('keydown', onKey, true)
+}, { immediate: true })
+
+onBeforeUnmount(() => {
+  clearTimeout(pollTimer)
+  for (const timer of exportTimers.values()) clearTimeout(timer)
+  document.removeEventListener('keydown', onKey, true)
+})
 </script>
 
 <template>
@@ -420,7 +473,7 @@ onBeforeUnmount(() => { clearTimeout(pollTimer); clearTimeout(exportTimer) })
             <span v-if="counts.error" class="text-red-300">{{ t('lora.errorsN', { n: counts.error }) }}</span>
             <span v-if="counts.stale" class="text-sky-300">{{ t('lora.staleN', { n: counts.stale }) }}</span>
 
-            <button v-if="stalled" type="button" @click="recaption({ shas: [], step: 'strip' })"
+            <button v-if="stalled" type="button" @click="resume"
               class="px-2 py-1 rounded-lg bg-amber-800/60 hover:bg-amber-700">{{ t('lora.resume') }}</button>
             <button v-if="counts.error" type="button" @click="recaption({ shas: current.items.filter(i => i.status === 'error').map(i => i.sha256), step: 'describe' })"
               class="px-2 py-1 rounded-lg bg-red-900/60 hover:bg-red-800">{{ t('lora.retryErrors') }}</button>

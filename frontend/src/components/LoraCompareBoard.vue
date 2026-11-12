@@ -67,7 +67,7 @@ function reset() { view.value = { s: 1, x: 0, y: 0 } }
         <div class="flex-1 min-h-0 overflow-hidden rounded-lg bg-black cursor-grab active:cursor-grabbing select-none touch-none"
           @wheel.prevent="onWheel" @pointerdown="onDown" @pointermove="onMove" @pointerup="onUp" @pointercancel="onUp"
           @dblclick="reset">
-          <img :src="`/api/originals/${it.sha256}`" draggable="false"
+          <img :src="`/api/originals/${it.sha256}`" draggable="false" @error="emit('remove', it)"
             class="w-full h-full object-contain origin-top-left" :style="{ transform }" />
         </div>
       </figure>
