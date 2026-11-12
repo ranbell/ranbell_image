@@ -109,10 +109,10 @@ watch(() => props.show, async (open) => {
 
 <template>
   <div v-if="show"
-    class="fixed inset-0 z-[var(--z-modal,9999)] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+    class="fixed inset-0 z-[var(--z-modal,9999)] flex items-center justify-center bg-black/60 backdrop-blur-sm p-2"
     @click.self="emit('close')">
     <div role="dialog" aria-modal="true" aria-labelledby="lora-sheet-title"
-      class="relative w-full max-w-7xl h-[92vh] flex flex-col md:flex-row rounded-2xl overflow-hidden
+      class="relative w-full max-w-[min(98vw,2400px)] h-[94vh] flex flex-col md:flex-row rounded-2xl overflow-hidden
              bg-slate-950/95 border border-amber-500/30 shadow-2xl text-gray-200">
       <button type="button" :aria-label="t('lora.close')" @click="emit('close')"
         class="absolute top-3 right-3 z-40 w-8 h-8 rounded-full bg-gray-800 hover:bg-gray-700 text-gray-300">✕</button>
