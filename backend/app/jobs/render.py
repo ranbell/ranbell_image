@@ -142,11 +142,11 @@ async def run_render(
             except Exception as exc:
                 logger.warning("[render] queue delete failed: %s", exc)
         try:
-            await comfy.interrupt()
+            # Only this prompt: another client's render on the same ComfyUI
+            # is not ours to stop.
+            await comfy.interrupt(prompt_id)
         except Exception as exc:
             logger.warning("[render] interrupt failed: %s", exc)
-
-    cancel.on_cancel(lambda: asyncio.create_task(_cancel_comfy()))
 
     saved: list[str] = []
     seen_filenames: set[str] = set()
@@ -185,52 +185,68 @@ async def run_render(
             except Exception as exc:
                 logger.error("[render] attach failed for %s: %s", sha256, exc)
 
-    last_preview = 0.0
+    async def _stream_and_keep() -> dict:
+        nonlocal queued
+        last_preview = 0.0
 
-    async for event in comfy.stream_progress(prompt_id, client_id=client_id):
-        cancel.raise_if_set()
-        queued = False
-        if event["type"] == "comfy_progress":
-            v = event.get("value", 0)
-            m = max(event.get("max", 1), 1)
-            reporter.update(v / m, f"Step {v}/{m}", key="step", v=v, m=m)
-        elif event["type"] == "comfy_preview" and preview is not None:
-            now = time.monotonic()
-            if now - last_preview >= PREVIEW_MIN_INTERVAL:
-                last_preview = now
-                try:
-                    await preview(event["image"])
-                except Exception as exc:
-                    logger.warning("[render] preview publish failed: %s", exc)
-        elif event["type"] == "comfy_output":
-            for img_ref in event.get("images", []):
-                cancel.raise_if_set()
-                try:
-                    await _keep(img_ref)
-                except Exception as exc:
-                    logger.error("[render] image save error: %s", exc)
-        elif event["type"] in ("comfy_failed", "error"):
-            # Let it out. Swallowing this is what left a dead render looking
-            # like a live one: the job stayed `running`, kept the GPU resource,
-            # and the generation lane queued behind a job nobody could cancel.
-            raise RuntimeError(
-                f"ComfyUI failed: {event.get('message') or 'unknown error'}"
-            )
+        async for event in comfy.stream_progress(prompt_id, client_id=client_id):
+            cancel.raise_if_set()
+            queued = False
+            if event["type"] == "comfy_progress":
+                v = event.get("value", 0)
+                m = max(event.get("max", 1), 1)
+                reporter.update(v / m, f"Step {v}/{m}", key="step", v=v, m=m)
+            elif event["type"] == "comfy_preview" and preview is not None:
+                now = time.monotonic()
+                if now - last_preview >= PREVIEW_MIN_INTERVAL:
+                    last_preview = now
+                    try:
+                        await preview(event["image"])
+                    except Exception as exc:
+                        logger.warning("[render] preview publish failed: %s", exc)
+            elif event["type"] == "comfy_output":
+                for img_ref in event.get("images", []):
+                    cancel.raise_if_set()
+                    try:
+                        await _keep(img_ref)
+                    except Exception as exc:
+                        logger.error("[render] image save error: %s", exc)
+            elif event["type"] in ("comfy_failed", "error"):
+                # Let it out. Swallowing this is what left a dead render looking
+                # like a live one: the job stayed `running`, kept the GPU resource,
+                # and the generation lane queued behind a job nobody could cancel.
+                raise RuntimeError(
+                    f"ComfyUI failed: {event.get('message') or 'unknown error'}"
+                )
 
-    # The websocket drops frames under load; /history is the backstop.
-    for img_ref in await comfy.fetch_history(prompt_id):
-        if img_ref.get("filename") in seen_filenames:
-            continue
-        try:
-            await _keep(img_ref)
-        except Exception as exc:
-            logger.error("[render] history image save error: %s", exc)
+        # The websocket drops frames under load; /history is the backstop.
+        for img_ref in await comfy.fetch_history(prompt_id):
+            if img_ref.get("filename") in seen_filenames:
+                continue
+            try:
+                await _keep(img_ref)
+            except Exception as exc:
+                logger.error("[render] history image save error: %s", exc)
 
-    reporter.update(1.0, f"{len(saved)} image(s)", key="imagesSaved", n=len(saved))
-    return {
-        "sha256s": saved,
-        "seed": seed,
-        "prompt_id": prompt_id,
-        "unpatched": unpatched,
-        "openpose": openpose_info,
-    }
+        reporter.update(1.0, f"{len(saved)} image(s)", key="imagesSaved", n=len(saved))
+        return {
+            "sha256s": saved,
+            "seed": seed,
+            "prompt_id": prompt_id,
+            "unpatched": unpatched,
+            "openpose": openpose_info,
+        }
+
+    # Taken off again when this picture is done: a job drawing many pictures
+    # (a LoRA sheet) would otherwise pile up one handler per picture and fire
+    # them all on cancel.
+    def _on_cancel() -> None:
+        asyncio.create_task(_cancel_comfy())
+
+    cancel.on_cancel(_on_cancel)
+    try:
+        return await _stream_and_keep()
+    finally:
+        cancel.remove_handler(_on_cancel)
+
+

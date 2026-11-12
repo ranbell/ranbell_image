@@ -179,8 +179,12 @@ def store(monkeypatch):
         data[s["id"]] = copy.deepcopy(s)
         return s
 
+    async def delete(db, sid):
+        data.pop(sid, None)
+
     monkeypatch.setattr(sh, "load", load)
     monkeypatch.setattr(sh, "save", save)
+    monkeypatch.setattr(sh, "delete", delete)
     return data
 
 
@@ -298,12 +302,24 @@ async def test_run_render_queues_a_given_graph_untouched():
 
     class Cancel:
         def on_cancel(self, fn): pass
+        def remove_handler(self, fn): pass
         def raise_if_set(self): pass
 
     g = _graph("a.safetensors", 1.0)
     await run_render(Reporter(), Cancel(), db=None, comfy=Comfy(), workflow_name="lora_sheet:krea2",
                      positive="x", seed=7, workflow=g)
     assert queued == [g]
+
+    # With the real token: one picture after another leaves no handler behind,
+    # so a cancel late in a long sheet does not fire one interrupt per picture.
+    import asyncio
+
+    handlers: list = []
+    token = sh.CancelToken(asyncio.Event(), handlers)
+    for _ in range(3):
+        await run_render(Reporter(), token, db=None, comfy=Comfy(), workflow_name="lora_sheet:krea2",
+                         positive="x", seed=7, workflow=g)
+    assert handlers == []
 
 
 # ── Picture and prefill ──────────────────────────────────────────────────────
@@ -353,11 +369,11 @@ def test_prefill_reads_the_graph_the_picture_was_drawn_with():
     doc = {"positive_prompt": "a girl", "raw_metadata": {"content": graph}}
     p = prefill_from_doc(doc)
     assert p["models"] == {"unet": "jank.safetensors", "clip": "te.safetensors", "vae": "vae.safetensors"}
-    assert (p["seed"], p["steps"], p["cfg"], p["sampler"], p["scheduler"]) == (555, 8, 1, "er_sde", "simple")
+    assert (p["seed"], p["steps"], p["cfg"], p["sampler"], p["scheduler"]) == ("555", 8, 1, "er_sde", "simple")
     assert (p["width"], p["height"], p["prompt"]) == (1284, 1824, "a girl")
     # ranbell's own record wins for prompt and seed
     doc["creation_record"] = {"positive_prompt_generated": "rendered", "seed": 9}
-    assert (prefill_from_doc(doc)["prompt"], prefill_from_doc(doc)["seed"]) == ("rendered", 9)
+    assert (prefill_from_doc(doc)["prompt"], prefill_from_doc(doc)["seed"]) == ("rendered", "9")
 
 
 @pytest.mark.asyncio
@@ -500,7 +516,7 @@ def test_prefill_from_another_models_picture_keeps_only_prompt_seed_and_shape():
     doc = {"positive_prompt": "a girl", "raw_metadata": {"content": graph}}
     p = prefill_from_doc(doc, None, "krea2")
     assert p["foreign"] == {"clip_types": ["stable_diffusion"]}
-    assert (p["prompt"], p["seed"], p["source_width"], p["source_height"]) == ("a girl", 77, 896, 1152)
+    assert (p["prompt"], p["seed"], p["source_width"], p["source_height"]) == ("a girl", "77", 896, 1152)
     assert not p.get("models")
     assert not {"steps", "cfg", "sampler", "scheduler"} & p.keys()
     # The same picture, opened with no target in mind, still gives everything.
@@ -571,3 +587,151 @@ def test_a_picture_without_a_prompt_starts_from_its_wd14_tags():
     # Neither a prompt nor tags: nothing to carry over.
     assert "prompt" not in prefill_from_doc({}) and "prompt_source" not in prefill_from_doc({})
     assert len(wd14_prompt([f"t{i}" for i in range(80)]).split(", ")) == 40
+
+
+def test_prefill_reads_config_nodes_by_name_and_the_first_pass_sampler():
+    graph = {
+        # one config node feeding steps, cfg, sampler and scheduler
+        "9": {"class_type": "KSampler Config (rgthree)", "inputs": {
+            "steps_total": 30, "cfg": 4.5, "sampler_name": "euler", "scheduler": "normal"}},
+        "8": {"class_type": "Size", "inputs": {"width": 832, "height": 1216}},
+        "5": {"class_type": "EmptyLatentImage", "inputs": {"width": ["8", 0], "height": ["8", 1]}},
+        # hires-fix pass first in dict order, lower denoise, fed by an upscale
+        "20": {"class_type": "KSampler", "inputs": {"seed": 1, "steps": 10, "cfg": 2.0,
+               "sampler_name": "dpmpp_2m", "scheduler": "karras", "denoise": 0.4,
+               "latent_image": ["21", 0]}},
+        "21": {"class_type": "LatentUpscale", "inputs": {"samples": ["3", 0]}},
+        "3": {"class_type": "KSampler", "inputs": {"seed": 77, "steps": ["9", 0], "cfg": ["9", 1],
+              "sampler_name": ["9", 2], "scheduler": ["9", 3], "denoise": 1.0,
+              "latent_image": ["5", 0]}},
+    }
+    p = prefill_from_doc({"positive_prompt": "x", "raw_metadata": {"content": graph}})
+    assert (p["steps"], p["cfg"], p["sampler"], p["scheduler"]) == (30, 4.5, "euler", "normal")
+    assert (p["seed"], p["width"], p["height"]) == ("77", 832, 1216)
+
+
+def test_prefill_from_a_sheet_picture_does_not_double_the_trigger():
+    doc = {"positive_prompt": "zqx, a girl", "creation_record": {"positive_prompt_generated": "zqx, a girl"},
+           "lora_sheet": {"prompt": "a girl"}}
+    assert prefill_from_doc(doc)["prompt"] == "a girl"
+
+
+def test_seeds_are_checked_and_kept_exact():
+    big = str((1 << 64) - 1)
+    assert sh.new_sheet(_body(seed=big))["seed"] == (1 << 64) - 1
+    for bad in [str(1 << 64), "-1", "1.5", "abc"]:
+        with pytest.raises(sh.SheetError):
+            sh.new_sheet(_body(seed=bad))
+    huge = {"positive_prompt": "x", "creation_record": {"seed": (1 << 63) + 1}}
+    assert prefill_from_doc(huge)["seed"] == str((1 << 63) + 1)
+
+
+def test_a_missing_lora_graph_error_is_caught_at_creation():
+    # The first picture is the bare 0 column; the LoRA picture is checked too.
+    with pytest.raises(sh.SheetError):
+        sh.new_sheet(_body(rows=[{"lora": ""}]))
+
+
+@pytest.mark.asyncio
+async def test_comfy_down_mid_render_keeps_the_cell_waiting_and_the_sheet_drawing(store, monkeypatch):
+    import httpx
+
+    import app.jobs.render as render
+
+    s = sh.new_sheet(_body())
+    store[s["id"]] = s
+
+    class Comfy:
+        async def is_available(self):
+            return False
+
+    async def dropped(reporter, cancel, **kw):
+        raise RuntimeError("ComfyUI failed: connection closed")
+
+    monkeypatch.setattr(render, "run_render", dropped)
+    sh._active.claim(s["id"], None)
+    try:
+        with pytest.raises(httpx.ConnectError):
+            await sh.run_lora_sheet(_reporter(), _cancel(), db=None, comfy=Comfy(), sheet_id=s["id"])
+        assert all(r["status"] == sh.PENDING for r in store[s["id"]]["renders"].values())
+        assert sh.is_drawing(s["id"])  # the spooler runs it again
+    finally:
+        sh._active.drop(s["id"])
+
+
+def test_sheet_job_progress_never_jumps_back_to_zero():
+    seen = []
+
+    class R:
+        def update(self, progress, text=None, *, key="", **p):
+            seen.append(round(progress, 3))
+
+        def indeterminate(self):
+            pass
+
+    rep = sh._StepReporter(R(), "x", done=2, total=4)
+    rep.update(0.0, "Waiting", key="comfyQueue")
+    rep.update(0.5, "Step 4/8", key="step", v=4, m=8)
+    rep.update(1.0, "1 image(s)", key="imagesSaved")
+    assert seen == [0.5, 0.625, 0.75]
+
+
+def test_routes_draw_rest_says_drawing_and_png_names_survive_japanese(store, monkeypatch):
+    from urllib.parse import unquote
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.lora import sheet_api
+
+    monkeypatch.setattr(sheet_api.sh, "load", sh.load)
+    monkeypatch.setattr(sheet_api.sh, "save", sh.save)
+    monkeypatch.setattr(sheet_api.sh, "delete", sh.delete)
+
+    class Spooler:
+        def __init__(self):
+            self._registry = {}
+            self.cancelled = []
+
+        def submit(self, lane, title, func, meta=None, **kw):
+            self._registry["gen-1"] = object()
+            return "gen-1"
+
+        async def cancel(self, job_id):
+            self.cancelled.append(job_id)
+            self._registry.pop(job_id, None)
+            return True
+
+    class DB:
+        async def get(self, sha):
+            return None
+
+    app = FastAPI()
+    app.include_router(sheet_api.router)
+    app.state.db, app.state.spooler, app.state.comfy = DB(), Spooler(), None
+    s = sheet_api.sh.new_sheet(_body(name="テスト比較"))
+    store[s["id"]] = s
+    client = TestClient(app)
+
+    r = client.post(f"/api/lora/sheets/{s['id']}/render")
+    assert r.status_code == 200 and r.json()["drawing"] is True and r.json()["job_id"] == "gen-1"
+
+    r = client.get(f"/api/lora/sheets/{s['id']}/grid.png")
+    assert r.status_code == 200
+    cd = r.headers["content-disposition"]
+    assert "filename*=UTF-8''" in cd and unquote(cd.split("UTF-8''")[1]) == "テスト比較.png"
+
+    # Deleting stops the job and the sheet stays gone.
+    assert client.delete(f"/api/lora/sheets/{s['id']}").status_code == 200
+    assert app.state.spooler.cancelled == ["gen-1"] and s["id"] not in store
+    assert not sheet_api.sh.is_drawing(s["id"])
+
+
+def test_a_huge_stack_png_shrinks_its_cells():
+    from app.lora import sheet_grid
+
+    secs = [{"ratio": 1216 / 832, "keys": [[""] * 6] * 16} for _ in range(12)]
+    cw = sheet_grid._cell_width(6, secs)
+    total = 6 * sum(cw * cw * s["ratio"] * len(s["keys"]) for s in secs)
+    assert cw < sheet_grid.CELL_W and total <= sheet_grid.MAX_PIXELS
+    assert sheet_grid._cell_width(6, secs[:1]) == sheet_grid.CELL_W

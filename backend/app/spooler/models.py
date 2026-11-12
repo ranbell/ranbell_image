@@ -173,6 +173,13 @@ class CancelToken:
     def on_cancel(self, handler: Callable) -> None:
         self._handlers.append(handler)
 
+    def remove_handler(self, handler: Callable) -> None:
+        """Take a handler off again (a step of the job that is over)."""
+        try:
+            self._handlers.remove(handler)
+        except ValueError:
+            pass
+
     async def pause_checkpoint(self) -> None:
         """Checkpoint: wait until the lane/job is resumed if paused, or abort if cancelled."""
         self.raise_if_set()

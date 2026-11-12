@@ -15,6 +15,10 @@ from PIL import Image, ImageDraw, ImageFont
 from . import sheet as sh
 
 CELL_W = 320
+#: The whole picture stays under this many pixels: cells shrink to fit
+#: (12 tall sheets of 16 rows would otherwise ask for a ~700 MB canvas).
+MAX_PIXELS = 60_000_000
+MIN_CELL_W = 64
 LABEL_W = 230
 HEAD_H = 34
 PAD = 12
@@ -89,17 +93,27 @@ def _section(sheet: dict, heading: str, keys: list[list[str]]) -> dict:
 SECTION_H = 30
 
 
+def _cell_width(n_cols: int, sections: list[dict]) -> int:
+    """CELL_W, or less when the cells alone would pass MAX_PIXELS."""
+    rows_ratio = sum(sec["ratio"] * len(sec["keys"]) for sec in sections)
+    area = n_cols * rows_ratio  # cells' area per (cell width)^2
+    if area <= 0 or area * CELL_W * CELL_W <= MAX_PIXELS:
+        return CELL_W
+    return max(MIN_CELL_W, int((MAX_PIXELS / area) ** 0.5))
+
+
 def _draw(title: str, info: str, prompt: str, cols: list[dict], sections: list[dict],
           open_image: Callable[[str], Image.Image | None]) -> bytes:
     big, small = _font(20), _font(15)
     probe = ImageDraw.Draw(Image.new("RGB", (1, 1)))
-    width = LABEL_W + CELL_W * len(cols) + PAD
+    cw = _cell_width(len(cols), sections)
+    width = LABEL_W + cw * len(cols) + PAD
     title_lines = _wrap(probe, title, big, width - 2 * PAD, 2)
     info_lines = _wrap(probe, info, small, width - 2 * PAD, 3) if info else []
     prompt_lines = _wrap(probe, prompt, small, width - 2 * PAD, 4) if prompt else []
     top = PAD + 26 * len(title_lines) + 20 * (len(info_lines) + len(prompt_lines)) + PAD
     for sec in sections:
-        sec["cell_h"] = max(1, round(CELL_W * sec["ratio"]))
+        sec["cell_h"] = max(1, round(cw * sec["ratio"]))
         sec["heading_lines"] = (_wrap(probe, sec["heading"], small, width - 2 * PAD, 2)
                                 if sec["heading"] else [])
     body = sum((SECTION_H * bool(sec["heading_lines"]) + 18 * max(0, len(sec["heading_lines"]) - 1))
@@ -117,8 +131,8 @@ def _draw(title: str, info: str, prompt: str, cols: list[dict], sections: list[d
         y += 20
 
     for ci, col in enumerate(cols):
-        x = LABEL_W + ci * CELL_W
-        d.text((x + CELL_W // 2, top + HEAD_H // 2), column_label(col), font=big, fill=FG,
+        x = LABEL_W + ci * cw
+        d.text((x + cw // 2, top + HEAD_H // 2), column_label(col), font=big, fill=FG,
                anchor="mm")
 
     y0 = top + HEAD_H
@@ -133,7 +147,7 @@ def _draw(title: str, info: str, prompt: str, cols: list[dict], sections: list[d
         cell_h = sec["cell_h"]
         for row, row_keys in zip(sec["rows"], sec["keys"]):
             _draw_row(d, out, probe, row, row_keys, sec["renders"], y0, cell_h, open_image,
-                      big, small)
+                      big, small, cw)
             y0 += cell_h
 
     buf = io.BytesIO()
@@ -141,7 +155,8 @@ def _draw(title: str, info: str, prompt: str, cols: list[dict], sections: list[d
     return buf.getvalue()
 
 
-def _draw_row(d, out, probe, row, row_keys, renders, y0, cell_h, open_image, big, small):
+def _draw_row(d, out, probe, row, row_keys, renders, y0, cell_h, open_image, big, small,
+              cw=CELL_W):
     label = _wrap(probe, row_label(row), big, LABEL_W - 2 * PAD, 3)
     ty = y0 + PAD
     for line in label:
@@ -152,16 +167,16 @@ def _draw_row(d, out, probe, row, row_keys, renders, y0, cell_h, open_image, big
             d.text((PAD, ty + 4), line, font=small, fill=DIM)
             ty += 19
     for ci, key in enumerate(row_keys):
-        x0 = LABEL_W + ci * CELL_W
+        x0 = LABEL_W + ci * cw
         if not key:  # this sheet has no such column
             continue
         r = renders.get(key) or {}
         im = open_image(r["sha256"]) if r.get("sha256") else None
         if im is None:
-            d.rectangle((x0 + 2, y0 + 2, x0 + CELL_W - 3, y0 + cell_h - 3), fill=EMPTY)
+            d.rectangle((x0 + 2, y0 + 2, x0 + cw - 3, y0 + cell_h - 3), fill=EMPTY)
             mark = "error" if r.get("status") == sh.ERROR else "—"
-            d.text((x0 + CELL_W // 2, y0 + cell_h // 2), mark, font=small, fill=DIM, anchor="mm")
+            d.text((x0 + cw // 2, y0 + cell_h // 2), mark, font=small, fill=DIM, anchor="mm")
             continue
         with im:
-            tile = im.convert("RGB").resize((CELL_W - 4, cell_h - 4), Image.LANCZOS)
+            tile = im.convert("RGB").resize((cw - 4, cell_h - 4), Image.LANCZOS)
         out.paste(tile, (x0 + 2, y0 + 2))

@@ -30,6 +30,7 @@ from qdrant_client import models as qm
 from ..db.qdrant_client import LORA_SHEETS_COLLECTION
 from ..spooler.models import CancelToken, JobCancelled, ProgressReporter
 from . import targets as target_models
+from .active import ActiveJobs
 from .sheet_graph import Models, Sampling, SheetGraphError
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,8 @@ MAX_ROWS = 16
 MAX_STRENGTHS = 10
 MAX_RENDERS = 160
 SUBDIR = "lora_sheet"
+#: KSampler's seed range in ComfyUI.
+MAX_SEED = (1 << 64) - 1
 
 
 class SheetError(ValueError):
@@ -202,9 +205,12 @@ def new_sheet(body: dict[str, Any]) -> dict:
     if not strengths or len(strengths) > MAX_STRENGTHS:
         raise SheetError(f"1 to {MAX_STRENGTHS} strengths")
     seed = body.get("seed")
-    seed = random.randint(0, (1 << 50) - 1) if seed in (None, "") else int(seed)
-    if seed < 0:
-        raise SheetError("seed must not be negative")
+    try:
+        seed = random.randint(0, (1 << 50) - 1) if seed in (None, "") else int(str(seed).strip())
+    except ValueError:
+        raise SheetError(f"the seed is not a whole number: {seed!r}") from None
+    if not 0 <= seed <= MAX_SEED:
+        raise SheetError("the seed must be between 0 and 2^64-1")
     models = body.get("models") or {}
     now = time.time()
     sheet = {
@@ -233,9 +239,13 @@ def new_sheet(body: dict[str, Any]) -> dict:
     specs = sync_renders(sheet)
     if len(specs) > MAX_RENDERS:
         raise SheetError(f"{len(specs)} pictures is too many for one sheet (max {MAX_RENDERS})")
-    # Fail now, not in the job, when the graph cannot be built.
+    # Fail now, not in the job, when the graph cannot be built — with and
+    # without a LoRA (the first picture is usually the bare 0 column).
     try:
         build(sheet, specs[0])
+        with_lora = next((sp for sp in specs if sp["lora"]), None)
+        if with_lora is not None:
+            build(sheet, with_lora)
     except SheetGraphError as exc:
         raise SheetError(str(exc)) from exc
     return sheet
@@ -282,6 +292,7 @@ def summary(sheet: dict) -> dict:
         "rows": len(sheet["rows"]), "columns": len(columns(sheet)),
         "pictures": len(sheet["renders"]), "done": c[DONE], "pending": c[PENDING],
         "errors": c[ERROR], "cover": first,
+        "seed": str(sheet.get("seed", "")),  # text: the browser rounds above 2^53
         # for the list's search and grouping
         "unet": short_model(sheet["models"].get("unet", "")),
         "loras": sorted({file_stem(r["lora"]) for r in sheet["rows"]}),
@@ -311,12 +322,15 @@ def lock(sheet_id: str) -> asyncio.Lock:
 
 
 async def load(db, sheet_id: str) -> dict | None:
+    """The sheet, or None when there is none. A store error is raised, not
+    read as "deleted" (that ended drawing jobs as if they had finished)."""
     try:
-        points = await db._qc.retrieve(
-            collection_name=LORA_SHEETS_COLLECTION, ids=[sheet_id], with_payload=True,
-        )
-    except Exception:
+        uuid.UUID(str(sheet_id))
+    except ValueError:
         return None
+    points = await db._qc.retrieve(
+        collection_name=LORA_SHEETS_COLLECTION, ids=[sheet_id], with_payload=True,
+    )
     return dict(points[0].payload or {}) if points else None
 
 
@@ -344,41 +358,39 @@ async def list_all(db) -> list[dict]:
 
 
 async def delete(db, sheet_id: str) -> None:
+    """Call with the sheet's lock held, so the job's save in flight cannot
+    bring the sheet back."""
     await db._qc.delete(
         collection_name=LORA_SHEETS_COLLECTION,
         points_selector=qm.PointIdsList(points=[sheet_id]),
     )
-    _locks.pop(sheet_id, None)
+
+
+def forget_lock(sheet_id: str) -> None:
+    lk = _locks.get(sheet_id)
+    if lk is not None and not lk.locked():
+        _locks.pop(sheet_id, None)
 
 
 # ── Job ───────────────────────────────────────────────────────────────────────
 
-#: Sheets with a drawing job queued or running.
-#: sheet id -> (job id, spooler) of the job drawing it.
-_active: dict[str, tuple[str | None, Any]] = {}
+#: Sheets with a drawing job queued or running (see lora/active.py).
+_active = ActiveJobs()
 #: The newest in-flight frame per sheet being drawn: {"key", "jpeg", "seq"}.
 #: Memory only — a frame is worthless once the picture lands.
 _previews: dict[str, dict] = {}
 
 
 def is_drawing(sheet_id: str) -> bool:
-    return active_job(sheet_id) is not None or (sheet_id in _active)
+    drawing = sheet_id in _active
+    if not drawing:
+        _previews.pop(sheet_id, None)
+    return drawing
 
 
 def active_job(sheet_id: str) -> str | None:
-    """The job drawing this sheet. A job cancelled while still queued never
-    runs, so nothing would clear it; one the spooler no longer holds as active
-    is dropped here instead of leaving the sheet 'drawing' for good."""
-    entry = _active.get(sheet_id)
-    if entry is None:
-        return None
-    job_id, spooler = entry
-    registry = getattr(spooler, "_registry", None)
-    if job_id and isinstance(registry, dict) and job_id not in registry:
-        _active.pop(sheet_id, None)
-        _previews.pop(sheet_id, None)
-        return None
-    return job_id
+    """The job drawing this sheet (None once the spooler no longer holds it)."""
+    return _active.job(sheet_id)
 
 
 def latest_preview(sheet_id: str) -> dict | None:
@@ -395,7 +407,10 @@ class _StepReporter:
 
     def update(self, progress, text=None, *, key="", **params):
         if key != "step":
-            return self._r.update(progress, text, key=key, **params)
+            # run_render's own 0 / 1 per picture, scaled into the sheet's.
+            overall = (self._done + max(0.0, min(1.0, progress))) / self._total if self._total else 0.0
+            return self._r.update(overall, f"{self._done}/{self._total}", key="images",
+                                  done=self._done, total=self._total)
         v, m = int(params.get("v", 0)), max(int(params.get("m", 1)), 1)
         live = _previews.get(self._id)
         if live is not None:
@@ -415,13 +430,19 @@ def _preview_sink(sheet_id: str, key: str):
     return _publish
 
 
+async def _comfy_up(comfy) -> bool:
+    try:
+        return bool(await comfy.is_available())
+    except Exception:
+        return False
+
+
 def submit(spooler, *, db, comfy, sheet: dict) -> str | None:
     """Queue the drawing job unless one is already on this sheet."""
     from ..spooler.models import JobLane
 
-    if is_drawing(sheet["id"]) or not counts(sheet)[PENDING]:
+    if not counts(sheet)[PENDING] or not _active.claim(sheet["id"], spooler):
         return None
-    _active[sheet["id"]] = (None, spooler)
     try:
         job_id = spooler.submit(
             JobLane.GENERATION, "lora_sheet", run_lora_sheet,
@@ -429,10 +450,9 @@ def submit(spooler, *, db, comfy, sheet: dict) -> str | None:
             db=db, comfy=comfy, sheet_id=sheet["id"],
         )
     except Exception:
-        _active.pop(sheet["id"], None)
+        _active.drop(sheet["id"])
         raise
-    if sheet["id"] in _active:  # an instant job may already have finished
-        _active[sheet["id"]] = (job_id, spooler)
+    _active.submitted(sheet["id"], job_id)
     return job_id
 
 
@@ -446,8 +466,11 @@ async def run_lora_sheet(
 ) -> dict:
     """Draw every picture of the sheet not drawn yet, saving after each."""
     from ..jobs.render import run_render
+    from ..spooler.spooler import _is_unreachable
 
+    _active.started(sheet_id, reporter)
     drawn = errors = 0
+    failure: BaseException | None = None
     try:
         while True:
             cancel.raise_if_set()
@@ -478,6 +501,7 @@ async def run_lora_sheet(
                     payload_extra={"lora_sheet": {
                         "sheet_id": sheet_id, "lora": spec["lora"], "strength": spec["strength"],
                         "trigger_on": spec["trigger_on"],
+                        "prompt": sheet["prompt"],  # without the row's trigger
                     }},
                 )
                 sha = (result.get("sha256s") or [""])[0]
@@ -488,11 +512,13 @@ async def run_lora_sheet(
                 drawn += 1
             except JobCancelled:
                 raise
-            except (httpx.ConnectError, httpx.ConnectTimeout, ConnectionError):
-                # ComfyUI is gone: every other picture would fail the same way.
-                # Leave them waiting and let the job fail with the reason.
-                raise
             except Exception as exc:
+                if _is_unreachable(exc) or isinstance(exc, ConnectionError) or (
+                        str(exc).startswith("ComfyUI failed") and not await _comfy_up(comfy)):
+                    # ComfyUI is gone (before or during this picture): every
+                    # other picture would fail the same way. Leave them all
+                    # waiting; the spooler waits and runs the job again.
+                    raise httpx.ConnectError(str(exc) or "ComfyUI is unreachable") from exc
                 errors += 1
                 logger.warning("[lora_sheet] %s %s: %s", sheet_id[:8], spec["key"], exc)
                 outcome = {"status": ERROR, "error": str(exc) or exc.__class__.__name__}
@@ -505,9 +531,12 @@ async def run_lora_sheet(
                 if r is not None:
                     r.update(outcome)
                     await save(db, sheet)
+    except BaseException as exc:
+        failure = exc
+        raise
     finally:
-        _active.pop(sheet_id, None)
         _previews.pop(sheet_id, None)
+        _active.ended(sheet_id, failure)
 
     reporter.update(1.0, f"{drawn}", key="imagesGenerated", n=drawn)
     return {"sheet_id": sheet_id, "drawn": drawn, "errors": errors}

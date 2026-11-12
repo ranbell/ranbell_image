@@ -31,7 +31,7 @@ class SheetCreate(BaseModel):
     target_model: str = target_models.DEFAULT_TARGET
     models: dict[str, str] = Field(default_factory=dict)
     prompt: str
-    seed: int | None = None
+    seed: int | str | None = None  # text keeps seeds above 2^53 exact
     width: int | None = None
     height: int | None = None
     steps: int | None = None
@@ -46,7 +46,7 @@ class SheetCreate(BaseModel):
 
 
 class DuplicateBody(BaseModel):
-    seed: int | None = None  # None = a new random seed
+    seed: int | str | None = None  # None = a new random seed
     name: str = ""
     start: bool = True
 
@@ -56,7 +56,7 @@ def _db(request: Request):
 
 
 def _view(sheet: dict) -> dict:
-    return sh.summary(sheet) | {
+    return sh.summary(sheet) | {"seed": str(sheet["seed"])} | {
         k: sheet[k] for k in ("models", "prompt", "width", "height", "steps", "cfg", "sampler",
                               "scheduler", "rows", "strengths", "no_trigger_column", "renders")
     } | {
@@ -105,19 +105,75 @@ async def sheet_options(request: Request):
     return out
 
 
-def _resolve(graph: dict, value: Any, depth: int = 0) -> Any:
-    """A literal input, or the literal at the end of a wire (Primitive / Seed nodes)."""
+#: Input names that carry the same value on helper nodes (Primitive, literals).
+_ALIASES = {
+    "steps": ("steps", "int", "value", "steps_total"),
+    "cfg": ("cfg", "float", "value"),
+    "sampler_name": ("sampler_name", "sampler", "value"),
+    "scheduler": ("scheduler", "value"),
+    "seed": ("seed", "noise_seed", "int", "value"),
+    "width": ("width", "int", "value"),
+    "height": ("height", "int", "value"),
+    "denoise": ("denoise", "float", "value"),
+}
+
+
+def _resolve(graph: dict, value: Any, name: str = "", depth: int = 0) -> Any:
+    """A literal input, or the literal at the end of a wire (Primitive / Seed /
+    config nodes). On a node with several literals, the one whose input name
+    matches is taken — never just the first (a config node holding steps, cfg
+    and sampler would answer 30 for all of them). None when it cannot tell."""
     if not isinstance(value, list) or depth > 3:
         return value
     node = graph.get(str(value[0])) or {}
-    for v in (node.get("inputs") or {}).values():
-        if not isinstance(v, list):
-            return v
-    for v in (node.get("inputs") or {}).values():
-        r = _resolve(graph, v, depth + 1)
-        if r is not None and not isinstance(r, list):
-            return r
+    inputs = node.get("inputs") or {}
+    names = _ALIASES.get(name, (name,)) if name else ()
+    for n in names:
+        if n in inputs:
+            return _resolve(graph, inputs[n], name, depth + 1)
+    literals = [v for v in inputs.values() if not isinstance(v, list)]
+    if len(literals) == 1:
+        return literals[0]
+    wires = [v for v in inputs.values() if isinstance(v, list)]
+    if not literals and len(wires) == 1:
+        return _resolve(graph, wires[0], name, depth + 1)
     return None
+
+
+def _typed(value: Any, kind: type) -> Any:
+    if kind is str:
+        return value if isinstance(value, str) and value else None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return kind(value)
+
+
+def _seed_text(value: Any) -> str | None:
+    """Seeds go out as text: the browser rounds numbers above 2^53."""
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        return None
+    s = str(value).strip()
+    return s if s.isdigit() else None
+
+
+def _first_pass_sampler(graph: dict) -> dict | None:
+    """The sampler that draws the picture from noise — not a hires-fix or
+    refiner pass after it (those run at a lower denoise)."""
+    samplers = [n for n in graph.values()
+                if isinstance(n, dict) and n.get("class_type") in ("KSampler", "KSamplerAdvanced")]
+    if not samplers:
+        return None
+
+    def from_empty(n: dict) -> bool:
+        link = (n.get("inputs") or {}).get("latent_image")
+        src = graph.get(str(link[0])) if isinstance(link, list) else None
+        return bool(src) and str(src.get("class_type", "")).startswith(("EmptyLatent", "EmptySD3"))
+
+    def full(n: dict) -> bool:
+        d = _resolve(graph, (n.get("inputs") or {}).get("denoise", 1.0), "denoise")
+        return not isinstance(d, (int, float)) or d >= 0.999
+
+    return max(samplers, key=lambda n: (from_empty(n), full(n)))
 
 
 def prefill_from_doc(doc: dict, image_size: tuple[int, int] | None = None,
@@ -136,7 +192,11 @@ def prefill_from_doc(doc: dict, image_size: tuple[int, int] | None = None,
     are taken, and ``foreign`` says why the rest was left alone."""
     cr = doc.get("creation_record") or {}
     mi = doc.get("model_info") or {}
-    prompt = cr.get("positive_prompt_generated") or doc.get("positive_prompt") or ""
+    from_sheet = doc.get("lora_sheet") or {}
+    # A sheet's own picture: its prompt without the row's trigger in front,
+    # or a sheet made from it would write the trigger twice.
+    prompt = (from_sheet.get("prompt") if isinstance(from_sheet, dict) else None) \
+        or cr.get("positive_prompt_generated") or doc.get("positive_prompt") or ""
     source = "prompt"
     if not str(prompt).strip():
         # A picture with no prompt of its own (a photo, a drawing — "NR" in the
@@ -145,24 +205,21 @@ def prefill_from_doc(doc: dict, image_size: tuple[int, int] | None = None,
     out: dict[str, Any] = {
         "prompt": prompt,
         "prompt_source": source if prompt else "",
-        "seed": cr.get("seed") if cr.get("seed") is not None else mi.get("seed"),
+        "seed": _seed_text(cr.get("seed") if cr.get("seed") is not None else mi.get("seed")),
         "models": {},
     }
     graph = (doc.get("raw_metadata") or {}).get("content")
     if not isinstance(graph, dict):
         return _with_shape(out, image_size)
+    sampler = _first_pass_sampler(graph)
+    sinp = (sampler or {}).get("inputs") or {}
+    if out["seed"] is None and sampler is not None:
+        out["seed"] = _seed_text(_resolve(graph, sinp.get("seed", sinp.get("noise_seed")), "seed"))
+    _latent_size(graph, out)
     if clip_type:
         types = [str((n.get("inputs") or {}).get("type") or "") for n in graph.values()
                  if isinstance(n, dict) and n.get("class_type") == "CLIPLoader"]
         if clip_type not in types:
-            for node in graph.values():
-                if isinstance(node, dict) and str(node.get("class_type", "")).startswith(
-                        ("EmptyLatent", "EmptySD3")):
-                    _latent_size(graph, node, out)
-                elif (isinstance(node, dict) and out["seed"] is None
-                      and node.get("class_type") in ("KSampler", "KSamplerAdvanced")):
-                    inp = node.get("inputs") or {}
-                    out["seed"] = _resolve(graph, inp.get("seed", inp.get("noise_seed")))
             out["foreign"] = {"clip_types": [t for t in types if t]}
             return _with_shape(out, image_size)
     for node in graph.values():
@@ -176,16 +233,12 @@ def prefill_from_doc(doc: dict, image_size: tuple[int, int] | None = None,
             out["models"]["clip"] = inp["clip_name"]
         elif ct == "VAELoader" and isinstance(inp.get("vae_name"), str):
             out["models"]["vae"] = inp["vae_name"]
-        elif ct in ("KSampler", "KSamplerAdvanced"):
-            for src, dst in (("steps", "steps"), ("cfg", "cfg"), ("sampler_name", "sampler"),
-                             ("scheduler", "scheduler")):
-                v = _resolve(graph, inp.get(src))
-                if v is not None:
-                    out[dst] = v
-            if out["seed"] is None:
-                out["seed"] = _resolve(graph, inp.get("seed", inp.get("noise_seed")))
-        elif ct.startswith(("EmptyLatent", "EmptySD3")):
-            _latent_size(graph, node, out)
+    if sampler is not None:
+        for src, dst, kind in (("steps", "steps", int), ("cfg", "cfg", float),
+                               ("sampler_name", "sampler", str), ("scheduler", "scheduler", str)):
+            v = _typed(_resolve(graph, sinp.get(src), src), kind)
+            if v is not None:
+                out[dst] = v
     return _with_shape(out, image_size)
 
 
@@ -210,11 +263,18 @@ def wd14_prompt(tags: list[str]) -> str:
     return ", ".join(out)
 
 
-def _latent_size(graph: dict, node: dict, out: dict) -> None:
-    for side in ("width", "height"):
-        v = _resolve(graph, (node.get("inputs") or {}).get(side))
-        if isinstance(v, (int, float)):
-            out[side] = int(v)
+def _latent_size(graph: dict, out: dict) -> None:
+    """The empty latent's size (the first one: a second is usually a pass
+    after the picture was drawn)."""
+    for node in graph.values():
+        if isinstance(node, dict) and str(node.get("class_type", "")).startswith(
+                ("EmptyLatent", "EmptySD3")):
+            for side in ("width", "height"):
+                v = _typed(_resolve(graph, (node.get("inputs") or {}).get(side), side), int)
+                if v:
+                    out[side] = v
+            if out.get("width") and out.get("height"):
+                return
 
 
 def _with_shape(out: dict, image_size: tuple[int, int] | None) -> dict:
@@ -293,9 +353,16 @@ async def rename_sheet(sheet_id: str, body: RenameBody, request: Request):
 
 @router.delete("/sheets/{sheet_id}")
 async def delete_sheet(sheet_id: str, request: Request):
-    """The sheet only; the pictures it drew stay in the gallery."""
-    await _load(request, sheet_id)
-    await sh.delete(_db(request), sheet_id)
+    """The sheet only; the pictures it drew stay in the gallery. A drawing job
+    on it is stopped, and the delete waits for the job's save in flight so that
+    save cannot bring the sheet back."""
+    job_id = sh.active_job(sheet_id)
+    if job_id:
+        await request.app.state.spooler.cancel(job_id)
+    async with sh.lock(sheet_id):
+        await _load(request, sheet_id)
+        await sh.delete(_db(request), sheet_id)
+    sh.forget_lock(sheet_id)
     return {"ok": True}
 
 
@@ -307,7 +374,8 @@ async def render_sheet(sheet_id: str, request: Request):
         if not sh.is_drawing(sheet_id):
             sh.request_rest(sheet)
             await sh.save(_db(request), sheet)
-    return _view(sheet) | {"job_id": _start(request, sheet)}
+    job_id = _start(request, sheet)  # first: the view says whether it is drawing
+    return _view(sheet) | {"job_id": job_id}
 
 
 @router.post("/sheets/{sheet_id}/cancel")
@@ -375,9 +443,15 @@ async def _opener(request: Request, sheets: list[dict]):
 
 
 def _png(data: bytes, name: str) -> Response:
-    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in name)[:60] or "sheet"
-    return Response(data, media_type="image/png",
-                    headers={"Content-Disposition": f'attachment; filename="{safe}.png"'})
+    """Headers are latin-1: the plain filename is ASCII only, and the real name
+    (Japanese and all) goes in filename* (RFC 5987)."""
+    from urllib.parse import quote
+
+    safe = "".join(c if c.isascii() and (c.isalnum() or c in "-_") else "_" for c in name)[:60]
+    safe = safe.strip("_") or "sheet"
+    full = quote(f"{name[:100]}.png", safe="")
+    return Response(data, media_type="image/png", headers={
+        "Content-Disposition": f"attachment; filename=\"{safe}.png\"; filename*=UTF-8''{full}"})
 
 
 @router.get("/sheets/{sheet_id}/grid.png")

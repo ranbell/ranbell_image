@@ -106,7 +106,7 @@ async def test_run_render_raises_so_the_job_fails_and_frees_the_lane():
         async def fetch_history(self, pid):
             return []
 
-        async def interrupt(self):
+        async def interrupt(self, prompt_id=None):
             pass
 
         async def delete_from_queue(self, pid):
@@ -121,6 +121,9 @@ async def test_run_render_raises_so_the_job_fails_and_frees_the_lane():
 
     class Cancel:
         def on_cancel(self, fn):
+            pass
+
+        def remove_handler(self, fn):
             pass
 
         def raise_if_set(self):

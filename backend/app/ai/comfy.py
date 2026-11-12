@@ -1017,10 +1017,15 @@ class ComfyUIClient:
                 return True
         return False
 
-    async def interrupt(self) -> None:
-        """Send an interrupt signal to the currently running job (assumes concurrency=1)."""
+    async def interrupt(self, prompt_id: str | None = None) -> None:
+        """Interrupt the running prompt. With ``prompt_id``, ComfyUI only stops
+        it when that prompt is the one running (another client's render is
+        left alone); without, whatever is running."""
         try:
-            r = await self._http.post(f"{settings.comfyui_url}/interrupt", timeout=5.0)
+            r = await self._http.post(
+                f"{settings.comfyui_url}/interrupt",
+                json={"prompt_id": prompt_id} if prompt_id else {}, timeout=5.0,
+            )
             r.raise_for_status()
         except Exception as exc:
             logger.warning("ComfyUI interrupt error: %s", exc)
