@@ -56,7 +56,7 @@ _defaults = {
     # Ollama; on the external server its own model setting applies.
     "refine_model":  "",
     # LoRA buckets (2026-11-10). ranbell only gathers, captions and hands the
-    # set over as a folder; training lives outside (e.g. /villa/apps/docker-musubi).
+    # set over as a folder; training lives outside (e.g. external/musubi).
     # Empty caption model uses `vlm_model`.
     "lora_export_dir":    "/mnt/lora_export",
     "lora_caption_model": "",

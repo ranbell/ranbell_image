@@ -158,9 +158,10 @@ ComfyUI's loras folder. To compare epochs, keep them **in a subfolder**
 ranbell's **📊 LoRA comparison sheet** draws them with one seed and one prompt, each LoRA across strengths.
 
 - Three ways in:
-  - "📊 Compare this bucket's LoRAs" on the bucket screen (LoRAs filtered by the bucket name, its trigger filled in)
+  - "📊 Compare this bucket's LoRAs" on the bucket screen (the LoRA list filtered by the bucket name, and the bucket's trigger filled in as the trigger for rows you add)
   - select one picture in the gallery, then "📊 Compare LoRAs" in the tray (its prompt, seed and models carry over, and its aspect ratio — set the size in megapixels, 1 MP = 1024×1024)
   - open it with nothing selected and set it up from scratch
+- The new-sheet form is kept as a draft and comes back when the screen is reopened; "Reset" starts from the defaults
 - **Rows are LoRAs, columns are strengths** (0 / 0.25 / 0.5 / 0.75 / 1 / 1.25 by default). **The 0 column has no LoRA**:
   it is the bare model, the baseline. Rows with the same trigger share one 0 picture
 - Each row's trigger goes in front of the prompt (do not write it in the prompt box)

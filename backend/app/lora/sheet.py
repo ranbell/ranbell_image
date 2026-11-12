@@ -157,7 +157,7 @@ MODEL_NAME_CHARS = 30
 
 
 def file_stem(path: str) -> str:
-    """``Krea2/flt_style-000010.safetensors`` -> ``flt_style-000010``."""
+    """``Krea2/my_style-000010.safetensors`` -> ``my_style-000010``."""
     name = (path or "").rsplit("/", 1)[-1]
     return name.rsplit(".", 1)[0] if "." in name else name
 
