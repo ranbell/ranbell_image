@@ -4,6 +4,9 @@ on:
   push:
     branches: [main, dev, 'feature/**', 'feat/**']
     tags: ['v*.*.*']
+  # By hand from the Actions tab, on any branch. Off dev and tags it builds and
+  # does not publish (see PUBLISH below).
+  workflow_dispatch:
 
 permissions: {}
 
