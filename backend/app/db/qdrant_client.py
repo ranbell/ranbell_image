@@ -1835,46 +1835,78 @@ class QdrantDBClient:
         return result.count
 
     async def scroll_color_lab_points(self, limit: int = 5000) -> list[dict]:
-        """Return up to `limit` images with color data, reading Lab from color_vector named vector.
+        """Up to `limit` images with their L*a*b* colour, for the 3D colour space.
 
-        Falls back to color_lab payload field for images in transition (not yet backfilled).
+        **Colour is read where it lives.** This asked `images` for a
+        `color_vector` after colour had moved to `images_color`; Qdrant refused
+        the request and the colour-space view answered 500 every time
+        (2026-11-21). The vector comes from `images_color`, the name from
+        `images` by the same point id, and a colour row whose picture is gone is
+        left out. Pictures that only carry `color_lab` on their own payload
+        (written before the colour collection) are read from there.
         """
         docs: list[dict] = []
+        seen: set[str] = set()
+
+        def row(img: dict, lab, hexes) -> dict:
+            return {
+                "sha256": img.get("sha256"),
+                "L": lab[0], "a": lab[1], "b": lab[2],
+                "hex": (hexes or ["#888888"])[0],
+                "name": img.get("name", ""),
+            }
+
+        if self.has_color_vector:
+            offset = None
+            while len(docs) < limit:
+                points, offset = await self._qc.scroll(
+                    collection_name=IMAGES_COLOR_COLLECTION,
+                    limit=min(500, limit - len(docs)),
+                    offset=offset,
+                    with_payload=qm.PayloadSelectorInclude(include=["palette_hex"]),
+                    with_vectors=["color_vector"],
+                )
+                if points:
+                    images = await self._qc.retrieve(
+                        collection_name=IMAGES_COLLECTION,
+                        ids=[p.id for p in points],
+                        with_payload=qm.PayloadSelectorInclude(include=["sha256", "name"]),
+                        with_vectors=False,
+                    )
+                    by_id = {str(d.id): d.payload or {} for d in images}
+                    for p in points:
+                        img = by_id.get(str(p.id))
+                        if img is None:
+                            continue  # the picture is gone; the sweep clears its colour
+                        vec = p.vector.get("color_vector") if isinstance(p.vector, dict) else p.vector
+                        if vec and len(vec) == 3:
+                            docs.append(row(img, list(vec), (p.payload or {}).get("palette_hex")))
+                            seen.add(str(p.id))
+                if offset is None:
+                    break
+
         offset = None
-        filt = qm.Filter(must=[
-            qm.FieldCondition(key="avg_saturation", range=qm.Range(gte=0.0))
-        ])
+        filt = qm.Filter(must_not=[qm.IsEmptyCondition(is_empty=qm.PayloadField(key="color_lab"))])
         while len(docs) < limit:
-            batch_limit = min(500, limit - len(docs))
-            points, next_offset = await self._qc.scroll(
+            points, offset = await self._qc.scroll(
                 collection_name=IMAGES_COLLECTION,
                 scroll_filter=filt,
-                limit=batch_limit,
+                limit=500,
                 offset=offset,
                 with_payload=qm.PayloadSelectorInclude(
                     include=["sha256", "palette_hex", "name", "color_lab"]
                 ),
-                with_vectors=["color_vector"] if self.has_color_vector else False,
+                with_vectors=False,
             )
             for p in points:
+                if str(p.id) in seen or len(docs) >= limit:
+                    continue
                 pl = p.payload or {}
-                lab = None
-                if self.has_color_vector and p.vector:
-                    vec = p.vector.get("color_vector") if isinstance(p.vector, dict) else p.vector
-                    if vec and len(vec) == 3:
-                        lab = list(vec)
-                if lab is None:
-                    lab = pl.get("color_lab")
+                lab = pl.get("color_lab")
                 if lab and len(lab) == 3:
-                    docs.append({
-                        "sha256": pl.get("sha256"),
-                        "L": lab[0], "a": lab[1], "b": lab[2],
-                        "hex": (pl.get("palette_hex") or ["#888888"])[0],
-                        "name": pl.get("name", ""),
-                    })
-            if next_offset is None:
+                    docs.append(row(pl, lab, pl.get("palette_hex")))
+            if offset is None:
                 break
-            offset = next_offset
         return docs
 
     async def count_pending_color_extraction(self) -> int:
@@ -1889,46 +1921,44 @@ class QdrantDBClient:
         return result.count
 
     async def recover_missing_color_vectors(self) -> int:
-        """Heuristic recovery: images with avg_saturation set but color_vector all-zero are
-        repaired by deriving Lab from palette_hex[0]. Returns count of recovered images.
+        """Repair colour rows whose vector is all zeros, from their own palette_hex[0].
+
+        Returns how many were repaired. **Reads `images_color`**: it used to ask
+        `images` for the vector, which Qdrant refused, so the colour backfill job
+        failed at its very end after doing all of its work (2026-11-21). Only the
+        vector is written; the row's palette and saturation stay as they are.
         """
         if not self.has_color_vector:
             return 0
         from ..ai.color_extractor import hex_to_lab  # lazy import to avoid circular dependency
         count = 0
         offset = None
-        filt = qm.Filter(must=[
-            qm.FieldCondition(key="avg_saturation", range=qm.Range(gte=0.0)),
-            qm.IsEmptyCondition(is_empty=qm.PayloadField(key="color_lab")),
-        ])
         while True:
-            points, next_offset = await self._qc.scroll(
-                collection_name=IMAGES_COLLECTION,
-                scroll_filter=filt,
+            points, offset = await self._qc.scroll(
+                collection_name=IMAGES_COLOR_COLLECTION,
                 limit=200,
                 offset=offset,
-                with_payload=qm.PayloadSelectorInclude(include=["sha256", "palette_hex"]),
+                with_payload=qm.PayloadSelectorInclude(include=["palette_hex"]),
                 with_vectors=["color_vector"],
             )
-            to_fix: list[tuple[str, list[float]]] = []
+            fixes: list[qm.PointVectors] = []
             for p in points:
                 vec = p.vector.get("color_vector") if isinstance(p.vector, dict) else p.vector
                 if vec and len(vec) == 3 and any(v != 0.0 for v in vec):
-                    continue  # already has a real vector
-                pl = p.payload or {}
-                sha256 = pl.get("sha256")
-                palette = pl.get("palette_hex") or []
-                if sha256 and palette:
-                    try:
-                        to_fix.append((sha256, [round(x, 2) for x in hex_to_lab(palette[0])]))
-                    except Exception:
-                        pass
-            if to_fix:
-                await self.set_color_vectors_batch(to_fix)
-                count += len(to_fix)
-            if next_offset is None:
+                    continue  # a real colour
+                palette = (p.payload or {}).get("palette_hex") or []
+                if not palette:
+                    continue
+                try:
+                    lab = [round(x, 2) for x in hex_to_lab(palette[0])]
+                except Exception:
+                    continue
+                fixes.append(qm.PointVectors(id=p.id, vector={"color_vector": lab}))
+            if fixes:
+                await self._qc.update_vectors(collection_name=IMAGES_COLOR_COLLECTION, points=fixes)
+                count += len(fixes)
+            if offset is None:
                 break
-            offset = next_offset
         return count
 
     async def delete_payload_keys(self, sha256: str, keys: list[str]) -> None:
