@@ -2994,7 +2994,23 @@ class QdrantDBClient:
         For each image whose stored path starts with old_prefix, replaces that
         prefix with new_prefix and recomputes is_reference.  Returns the number
         of updated records.
+
+        **The prefix is a folder, matched whole.** A bare `startswith` moved
+        `/mnt/ab/y.png` to `/newb/y.png` when asked to move `/mnt/a` to `/new`,
+        and a trailing slash on one side and not the other lost or doubled the
+        separator (found 2026-11-21). Both prefixes are read without a trailing
+        slash, and a path moves only if it is the folder or lies inside it.
         """
+        old_prefix = old_prefix.rstrip("/") or "/"
+        new_prefix = new_prefix.rstrip("/") or "/"
+
+        def moves(path: str) -> bool:
+            return path == old_prefix or path.startswith(old_prefix.rstrip("/") + "/")
+
+        def moved(path: str) -> str:
+            rest = path[len(old_prefix):].lstrip("/")
+            return new_prefix if not rest else new_prefix.rstrip("/") + "/" + rest
+
         source_prefix = str(settings.source_images_dir)
         count = 0
         offset = None
@@ -3011,9 +3027,9 @@ class QdrantDBClient:
                 pl = p.payload or {}
                 sha256 = pl.get("sha256")
                 old_path = pl.get("path", "")
-                if not sha256 or not old_path.startswith(old_prefix):
+                if not sha256 or not moves(old_path):
                     continue
-                new_path = new_prefix + old_path[len(old_prefix):]
+                new_path = moved(old_path)
                 update: dict = {
                     "path": new_path,
                     "dir": os.path.dirname(new_path),
@@ -3022,8 +3038,8 @@ class QdrantDBClient:
                 dups = pl.get("dup_paths") or []
                 if dups:
                     moved = [
-                        {**d, "path": new_prefix + d["path"][len(old_prefix):]}
-                        if d.get("path", "").startswith(old_prefix) else d
+                        {**d, "path": moved(d["path"])}
+                        if moves(d.get("path", "")) else d
                         for d in dups
                     ]
                     update["dup_paths"] = moved
@@ -3145,7 +3161,9 @@ class QdrantDBClient:
         if scope != "pending":
             await self._qc.delete_vectors(
                 collection_name=IMAGES_COLLECTION,
-                vectors=["embedding"],
+                # Both widths: a small vector left behind keeps the point in the
+                # first phase of every search, taking a slot a live picture needs.
+                vectors=["embedding", "embedding_small"] if self.has_mrl else ["embedding"],
                 points=qm.FilterSelector(filter=filt),
             )
 
