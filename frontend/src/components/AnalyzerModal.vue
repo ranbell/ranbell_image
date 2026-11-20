@@ -1,6 +1,9 @@
 <script setup>
 import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+// Static: App.vue and the chemistry viewer load d3-force up front anyway, so a
+// lazy import here saved nothing (Vite's INEFFECTIVE_DYNAMIC_IMPORT).
+import { forceCenter, forceCollide, forceLink, forceManyBody, forceSimulation } from 'd3-force'
 
 const { t } = useI18n()
 
@@ -830,14 +833,6 @@ function toggleTagNetSim() {
 }
 
 function initTagNetCanvas(canvas) {
-  if (!window.__d3force__) {
-    import('d3-force').then(d3 => {
-      window.__d3force__ = d3
-      initTagNetCanvas(canvas)
-    })
-    return
-  }
-  const { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide } = window.__d3force__
   const { nodes, edges } = tagNetData.value
   if (!nodes.length) return
 

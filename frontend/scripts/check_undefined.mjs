@@ -90,7 +90,10 @@ const declared = new Set()
 const decl = /(?:^|\s)(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)/g
 for (const m of compiled.content.matchAll(decl)) declared.add(m[1])
 // import { a, b as c } from '…' / import d from '…'
-for (const m of compiled.content.matchAll(/import\s+([\s\S]*?)\s+from\s+['"]/g)) {
+// Read with the comments taken out: the word "import" in a comment started a match
+// that ran on into the next real import and lost its first name (2026-11-21).
+const importable = compiled.content.replace(/\/\*[\s\S]*?\*\/|(^|[^:])\/\/[^\n]*/g, '$1')
+for (const m of importable.matchAll(/(?:^|\n)\s*import\s+([^;'"]*?)\s+from\s+['"]/g)) {
   for (const part of m[1].replace(/[{}]/g, ' ').split(',')) {
     const name = part.trim().split(/\s+as\s+/).pop()?.trim()
     if (name && /^[A-Za-z_$][\w$]*$/.test(name)) declared.add(name)
