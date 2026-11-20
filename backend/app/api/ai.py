@@ -1,37 +1,23 @@
 import asyncio
-import hashlib
 import json
 import logging
 import re
 import time
-from datetime import datetime
-from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from ..config import settings
-from ..ai.tile_image import create_tile_image
 from ..jobs.sse_stream import queue_sse_response
 from ..prompt.visual_spec import (
     DEFAULT_PROSE_PARAGRAPHS,
     LABELED_TAG_FOOTER,
-    REFINE_CAT_FIELDS as _REFINE_CAT_FIELDS,
     clamp_prose_paragraphs,
-    parse_visual_script as _parse_visual_script_sections,
-    strip_section_markers as _strip_visual_script_markers,
     visual_script_length_line,
 )
 from ..runtime_config import get_runtime_config
-from ..scanner.scanner import register_image
 from ..spooler.models import JobLane
-from ..tags.subject_anchors import (
-    SUBJECT_ANCHOR_TAGS as _SUBJECT_ANCHOR_TAGS,
-    insert_after_anchors,
-)
 from .sort_utils import sort_docs
 
 logger = logging.getLogger(__name__)
@@ -39,21 +25,6 @@ logger = logging.getLogger(__name__)
 # Tag-merge helpers now live in prompt/tag_merge.py (they are pure functions,
 # which is why they don't need to drag in the whole route module). Re-exported
 # here because runners.py imports them from this module.
-from ..prompt.tag_merge import (  # noqa: E402
-    _WD14_MUST_INCLUDE_THRESHOLD,
-    _ROLE_CONTEXT_LABELS,
-    _apply_must_replacements,
-    _build_all_must,
-    _build_weighted_wd14_context,
-    _correct_prose_wd14_conflicts,
-    _enforce_wd14_on_cat_tags,
-    _filter_tags_for_role,
-    _inject_wd14_must_tags,
-    _resolve_weights,
-    _tags_conflict,
-    filter_tag_list,
-    removal_tag_set,
-)
 router = APIRouter(prefix="/api/ai")
 
 
@@ -829,7 +800,7 @@ async def _sample_mutation_tags(
 @router.post("/pipeline")
 async def trigger_pipeline(
     request: Request,
-    body: PipelineRequest = PipelineRequest(),
+    body: PipelineRequest = PipelineRequest(),  # noqa: B008 — FastAPI's optional body
 ):
     from ..jobs.runners import run_pipeline_tagging
     spooler = request.app.state.spooler
@@ -1121,8 +1092,9 @@ async def emotion_search(body: EmotionSearchRequest, request: Request):
 
     Results are ordered highest score first.
     """
-    from ..ai.emotion_tagger import EMOTION_DIMENSIONS
     from qdrant_client import models as qm
+
+    from ..ai.emotion_tagger import EMOTION_DIMENSIONS
     from ..db.qdrant_client import IMAGES_COLLECTION
 
     if body.emotion not in EMOTION_DIMENSIONS:
@@ -1148,7 +1120,7 @@ async def emotion_search(body: EmotionSearchRequest, request: Request):
         )
     except Exception as e:
         logger.warning("emotion_search failed: %s", e)
-        raise HTTPException(500, "Emotion search failed — indexes may not be built yet")
+        raise HTTPException(500, "Emotion search failed — indexes may not be built yet") from e
 
     docs = [p.payload for p in points if p.payload]
     return {"emotion": body.emotion, "min_score": body.min_score, "results": docs}

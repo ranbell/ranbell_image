@@ -138,7 +138,7 @@ const diskCautionPct = ref(75)
 const diskFaultPct = ref(90)
 const jobStreamConnected = ref(false)
 const cr = useControlRoom(jobsMap, resourcesRef)
-const { masterStatus, systemStatus, ingestEvent: crIngestEvent } = cr
+const { masterStatus, ingestEvent: crIngestEvent } = cr
 
 // ── Remote resource connection status ─────────────────────────────────────────
 function _resourceStatus(name) {
@@ -178,7 +178,6 @@ const sentinel = ref(null)
 const sentinelVisible = ref(false)
 const mainEl = ref(null)
 
-const showInfo = ref(false)
 const info = ref(null)
 
 // ── Search & filter ───────────────────────────────────────────────────────────
@@ -216,7 +215,6 @@ const colorPickExcludeOpposite = ref(false) // exclude opposite hues
 const colorPickLoading = ref(false)
 const colorPickActive = ref(false)          // true when color pick results are displayed
 const modelFacets = ref([])         // [{model, count}, ...] from /api/images/facets
-const modelsExpanded = ref(false)   // show all models vs top 8
 // Which Muse is in the picture. Single-select: 「みおの写真」 ("a photo of Mio") is
 // one girl, and
 // a union of two casts is not a question anyone has asked for.
@@ -397,7 +395,6 @@ async function triggerAlignmentEvaluate(sha256) {
 }
 
 const selectedIds = ref(new Set())
-const selectionMode = computed(() => selectedIds.value.size > 0)
 const hoveredThumbnailSha = ref(null)
 const hoveredThumbnailStyle = ref({})
 const bucketHovered = ref(false)
@@ -1109,7 +1106,6 @@ const graphRootSha = ref(null)
 const graphCanvasRef = ref(null)
 const graphDepth = ref(2)
 const graphNeighbors = ref(6)
-const graphNavigate = ref(true)   // true = click navigates to image
 let _graphSourceImg = null
 
 async function openSimilarityGraph(img) {
@@ -1974,11 +1970,6 @@ function toggleModel(name) {
   fetchImages(true)
 }
 
-function clearModels() {
-  activeModels.value = []
-  fetchImages(true)
-}
-
 // Clicking the girl you are already looking at goes back to everything —
 // the same gesture the tag chips use, so there is nothing new to learn.
 function toggleCharacter(id) {
@@ -2378,15 +2369,6 @@ function formatMtime(iso) {
   return iso.replace('T', ' ').substring(0, 19)
 }
 
-function formatEta(seconds) {
-  if (seconds == null || seconds < 0) return ''
-  const s = Math.floor(seconds)
-  if (s < 60) return t('header.etaSec', { s })
-  const m = Math.floor(s / 60)
-  const r = s % 60
-  return r > 0 ? t('header.etaMin', { m, r }) : t('header.etaMinOnly', { m })
-}
-
 // ── Tag autocomplete ──────────────────────────────────────────────────────────
 async function fetchSuggestions(q) {
   if (!q || q.length < 2) { tagSuggestions.value = []; showSuggestions.value = false; return }
@@ -2517,11 +2499,6 @@ function clearFilter() {
   fetchImages(true)
 }
 
-
-function onSortChange(order) {
-  sortOrder.value = order
-  fetchImages(true)
-}
 
 function toggleSearchMode(mode) {
   const prev = searchMode.value
@@ -2805,7 +2782,7 @@ async function randomSelect() {
 
 watch(
   () => [...selectedIds.value].slice(0, 6).join(','),
-  (next, prev) => {
+  () => {
     redistributeWeights([...selectedIds.value].slice(0, 6))
   },
   { immediate: true }

@@ -163,7 +163,6 @@ def report(run: Path) -> str:
     out.append("")
 
     if steps:
-        lows: list[str] = []
         out.append("epoch   mean     min      max      saved")
         last_epoch = max(epoch_loss) if epoch_loss else 0
         current = (steps[-1][0] - 1) // per_epoch + 1

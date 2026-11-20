@@ -5,46 +5,46 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .config import settings
-
-from .db.qdrant_client import QdrantDBClient
-from .ai.ollama import OllamaClient
-from .ai.llm import LlmGateway, apply_llm_runtime_config
-from .ai.comfy import ComfyUIClient
-from .core.runtime_cache import RuntimeConfigCache
 from . import runtime_config as _runtime_config
-from .scanner.watcher import ImageDirectoryWatcher
-from .spooler.spooler import JobSpooler
-from .spooler.resources import build_resources
+from .ai.comfy import ComfyUIClient
+from .ai.llm import LlmGateway, apply_llm_runtime_config
+from .ai.ollama import OllamaClient
+from .api.admin import router as admin_router
+from .api.ai import router as ai_router
+from .api.alignment import router as alignment_router
+from .api.analyzer import router as analyzer_router
+from .api.comfy import router as comfy_router
+from .api.health import router as health_router
 from .api.images import router as images_router
 from .api.info import router as info_router
-from .api.scan import router as scan_router
-from .api.ai import router as ai_router
-from .api.health import router as health_router
-from .api.admin import router as admin_router
-from .api.comfy import router as comfy_router
 from .api.inspire import router as inspire_router
-from .muse.api import router as muse_router
-from .api.jobs import router as jobs_router
-from .api.analyzer import router as analyzer_router
-from .api.alignment import router as alignment_router
 from .api.invoke import router as invoke_router
+from .api.jobs import router as jobs_router
+from .api.scan import router as scan_router
 from .characters.api import router as characters_router
-
-logger = logging.getLogger(__name__)
+from .config import settings
+from .core.runtime_cache import RuntimeConfigCache
+from .db.qdrant_client import QdrantDBClient
 
 # **Muse Classic retired (2026-09-12).** There is one studio, Muse Refine. Only the
 # green room and the notebook shared classic's router, so those were made
 # independent (the URLs stay `/api/muse/lounge/...` — that is how the screen calls
 # them).
-from .muse.lounge_api import router as muse_lounge_router
-from .muse.video_api import router as muse_video_router
 from .lora.api import router as lora_router
 from .lora.sheet_api import router as lora_sheet_router
+from .muse.api import router as muse_router
+from .muse.lounge_api import router as muse_lounge_router
+from .muse.video_api import router as muse_video_router
+from .scanner.watcher import ImageDirectoryWatcher
+from .spooler.resources import build_resources
+from .spooler.spooler import JobSpooler
+
+logger = logging.getLogger(__name__)
 
 
 def _abort(msg: str) -> None:
-    import sys, time
+    import sys
+    import time
     sep = "=" * 60
     print(f"\n{sep}\nSTARTUP ERROR: {msg}\n{sep}\n", file=sys.stderr, flush=True)
     print("Fix the config above, then: docker compose restart backend", file=sys.stderr, flush=True)
@@ -57,7 +57,8 @@ def _abort(msg: str) -> None:
 
 
 def _check_generated_dir(warnings: list[str]) -> None:
-    import os, tempfile
+    import os
+    import tempfile
     gen_dir = settings.generated_images_dir
     if not gen_dir.exists():
         _abort(
@@ -195,7 +196,8 @@ async def lifespan(app: FastAPI):
     await spooler.start()
 
     # On startup: apply pause settings saved in the DB to the spooler
-    from .runtime_config import _defaults as _rc_defaults, LEGACY_KEYS as _rc_legacy_keys
+    from .runtime_config import LEGACY_KEYS as _rc_legacy_keys
+    from .runtime_config import _defaults as _rc_defaults
     _saved_cfg = await db.get_config()
     # Left behind by the LLM provider removed in v0.4.0. Nothing reads them, but
     # the same names would surface again if a setting were ever called that,

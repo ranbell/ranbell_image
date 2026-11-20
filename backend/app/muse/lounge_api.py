@@ -20,7 +20,8 @@ import logging
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from . import handpost_db, lounge as lounge_mod, lounge_db
+from . import handpost_db, lounge_db
+from . import lounge as lounge_mod
 
 logger = logging.getLogger(__name__)
 
@@ -56,13 +57,11 @@ async def _faces(request: Request) -> dict[str, str]:
 
 @router.get("/lounge/threads")
 async def lounge_threads(request: Request, limit: int = 40, kind: str = ""):
-    from . import lounge_db
     rows = await lounge_db.list_threads(_db(request), limit=limit, kind=kind)
     lounge_mod.stamp_faces(rows, await _faces(request))
     return {"threads": rows}
 @router.get("/lounge/threads/{thread_id}")
 async def lounge_thread(thread_id: str, request: Request):
-    from . import lounge_db
     row = await lounge_db.get_thread(_db(request), thread_id)
     if row is None:
         raise HTTPException(404, "thread not found")
@@ -70,12 +69,10 @@ async def lounge_thread(thread_id: str, request: Request):
     return row
 @router.get("/lounge/trends")
 async def lounge_trends(request: Request):
-    from . import lounge_db
     return {"trends": await lounge_db.get_trends(_db(request))}
 @router.post("/lounge/threads/{thread_id}/like")
-async def lounge_like(thread_id: str, request: Request, body: LikeBody = LikeBody()):
+async def lounge_like(thread_id: str, request: Request, body: LikeBody = LikeBody()):  # noqa: B008 — FastAPI's optional body
     """Toggle or set liked on a pitch (or any lounge thread)."""
-    from . import lounge_db
     liked = body.liked
     row = await lounge_db.set_thread_liked(_db(request), thread_id, liked)
     if row is None:
@@ -84,12 +81,10 @@ async def lounge_like(thread_id: str, request: Request, body: LikeBody = LikeBod
 @router.get("/lounge/summary")
 async def lounge_summary(request: Request, since: float = 0.0):
     """Gallery badge: new threads since last peek + unanswered pitches."""
-    from . import lounge_db
     return await lounge_db.summary(_db(request), since=since)
 @router.get("/handpost")
 async def handpost_list(request: Request, pinned_only: bool = False):
     """Read-only list. Pages are written by habit jobs — not by the showrunner."""
-    from . import handpost_db
     pages = await handpost_db.list_pages(_db(request), pinned_only=pinned_only)
     # **Pages already saved are cut here too.** The writing side was fixed, but a
     # page left broken keeps being displayed until a new one arrives (measured, 2

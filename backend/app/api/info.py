@@ -2,6 +2,7 @@ import asyncio
 import os
 
 from fastapi import APIRouter, Request
+
 from ..config import settings
 from ..scanner.scanner import SCAN_EXTENSIONS
 

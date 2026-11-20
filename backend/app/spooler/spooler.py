@@ -5,7 +5,8 @@ import json
 import logging
 import time
 from collections import deque
-from typing import Any, AsyncGenerator
+from collections.abc import AsyncGenerator
+from typing import Any
 
 from .models import (
     CancelToken,
@@ -377,7 +378,7 @@ class JobSpooler:
                 try:
                     data = await asyncio.wait_for(q.get(), timeout=timeout)
                     yield data
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     yield ": ping\n\n"
                     last_heartbeat = time.monotonic()
         finally:
@@ -650,8 +651,8 @@ class JobSpooler:
             cancel_token._on_pause  = _on_pause
             cancel_token._on_resume = _on_resume
 
-            async def _run() -> Any:
-                return await job._func(reporter, cancel_token, **job._kwargs)
+            async def _run() -> Any:  # awaited inside this same iteration
+                return await job._func(reporter, cancel_token, **job._kwargs)  # noqa: B023
 
             try:
                 result = await run_with_resource(

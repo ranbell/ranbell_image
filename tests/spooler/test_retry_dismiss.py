@@ -152,7 +152,6 @@ async def test_waiting_does_not_go_on_for_ever():
     """**It does not hold on for ever.** If the resource is truly dead, it is shown as
     a failure eventually."""
     import httpx
-
     from app.spooler import spooler as spooler_mod
 
     sp = _spooler()

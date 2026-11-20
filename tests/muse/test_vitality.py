@@ -57,7 +57,7 @@ def test_b_leads_every_third_talk():
 
 def test_shot_compile_cleanup_every_15():
     s: dict = {}
-    for i in range(14):
+    for _ in range(14):
         assert vitality.bump_shot_compile(s) is False
     assert vitality.bump_shot_compile(s) is True
 

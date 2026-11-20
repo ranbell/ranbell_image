@@ -9,9 +9,8 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from starlette.responses import StreamingResponse
 
-from . import events
+from . import events, service
 from .catalog import build_muse_catalog
-from . import service
 
 logger = logging.getLogger(__name__)
 
@@ -273,8 +272,7 @@ async def restore_banned(session_id: str, body: RestoreBody, request: Request):
     session = await _session(request, session_id)
     try:
         session = service.restore_banned(session, body.tag)
-        from . import session_db
-        from . import assemble
+        from . import assemble, session_db
         session = await assemble.rebuild_craft(_db(request), _ollama(request), session)
         await session_db.save(_db(request), session)
     except service.RefineError as exc:
@@ -366,7 +364,7 @@ async def stream(session_id: str, request: Request):
                     break
                 try:
                     evt = await asyncio.wait_for(queue.get(), timeout=25.0)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     yield f"data: {json.dumps({'type': 'ping'})}\n\n"
                     continue
                 yield f"data: {json.dumps(evt, ensure_ascii=False)}\n\n"

@@ -361,6 +361,7 @@ async def get_character_danbooru_hints(
 async def get_recent_adopted_tags(db, days: int = 7, limit: int = 200) -> dict[str, int]:
     """Return WD14 tag frequency from images adopted in the last N days."""
     import time
+
     from qdrant_client import models as qm
 
     cutoff = time.time() - days * 86400
@@ -782,6 +783,7 @@ async def _taste_centroid(db) -> list[float] | None:
     Returns the normalized centroid vector, or None when no starred images exist.
     """
     import math
+
     from qdrant_client import models as qm
 
     # Scroll all images rated ≥4 and retrieve their full embeddings

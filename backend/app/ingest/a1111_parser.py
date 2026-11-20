@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from .schema import ExtractionInfo, ExtractionResult, ModelInfo, RawMetadata
 from ._utils import compute_hash, now_iso
+from .schema import ExtractionInfo, ExtractionResult, ModelInfo, RawMetadata
 
 
 def parse_a1111(text: str) -> ExtractionResult:

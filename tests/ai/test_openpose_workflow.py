@@ -144,6 +144,7 @@ def test_store_and_public_view_redacts_jpeg():
     # Use a real tiny jpeg from PIL if available
     try:
         from io import BytesIO
+
         from PIL import Image
         buf = BytesIO()
         Image.new("RGB", (8, 8), (1, 2, 3)).save(buf, format="JPEG")

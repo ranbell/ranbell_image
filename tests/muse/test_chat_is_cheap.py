@@ -33,7 +33,8 @@ def _code(fn) -> str:
     `rebuild_craft` and `quality_enrich`, so searching a raw `inspect.getsource`
     always matches.
     """
-    import io, tokenize
+    import io
+    import tokenize
 
     out: list[str] = []
     src = inspect.getsource(fn)

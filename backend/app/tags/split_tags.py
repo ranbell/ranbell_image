@@ -9,7 +9,6 @@ through to identity and got locked to the character forever.
 """
 from __future__ import annotations
 
-
 _IDENTITY_SUBJECTS = frozenset({
     "1girl", "1boy", "1other", "solo", "multiple_girls", "multiple_boys",
     "adult_male", "adult_female",

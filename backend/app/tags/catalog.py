@@ -7,8 +7,8 @@ truth (no hand-copied expression lists).
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 _JSON_PATH = Path(__file__).resolve().parent.parent / "static" / "tag_categories.json"
 

@@ -740,8 +740,7 @@ _STOPWORDS: frozenset[str] = frozenset({
     "here", "just", "only", "even", "still", "very", "more", "most", "some",
     "such", "same", "other", "another", "around", "between", "behind", "before",
     "after", "above", "below", "down", "back", "away", "toward", "towards",
-    "along", "past", "near", "close", "half", "one", "two", "three", "her",
-    "him", "hers", "own", "self", "body", "face", "eyes", "hair", "hand",
+    "along", "past", "near", "close", "half", "one", "two", "three", "him", "hers", "own", "self", "body", "face", "eyes", "hair", "hand",
     "hands", "head", "look", "looks", "looking", "holds", "holding", "held",
     "sits", "sitting", "stands", "standing", "leans", "leaning", "keeps",
     "kept", "makes", "made", "gives", "given", "turns", "turning", "turned",
@@ -750,7 +749,7 @@ _STOPWORDS: frozenset[str] = frozenset({
     "soft", "warm", "cool", "pale", "dark", "bright", "faint", "thin", "wide",
     "long", "short", "small", "large", "tall", "deep", "high", "low", "full",
     "left", "right", "front", "side", "edge", "line", "lines", "shape",
-    "against", "across", "beneath", "within", "without", "about", "like",
+    "beneath", "within", "without", "about", "like",
 })
 
 

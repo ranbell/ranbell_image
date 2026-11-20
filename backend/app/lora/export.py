@@ -27,7 +27,7 @@ import tempfile
 import uuid
 import zipfile
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from ..spooler.models import CancelToken, ProgressReporter
@@ -173,7 +173,7 @@ async def plan(db, bucket: dict) -> list[Entry]:
         "targets": bucket["targets"],
         "target_model": target_models.get(bucket.get("target_model")).id,
         "caption_style": target_models.get(bucket.get("target_model")).caption_style,
-        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "exported_at": datetime.now(UTC).isoformat(),
         "count": len(meta_items),
         "items": meta_items,
     }
@@ -286,7 +286,7 @@ async def run_lora_export(
     async with bk.lock(bucket_id):
         bucket = await bk.load(db, bucket_id)
         if bucket is not None:
-            bucket["exported_at"] = datetime.now(timezone.utc).isoformat()
+            bucket["exported_at"] = datetime.now(UTC).isoformat()
             bucket["export_path"] = str(final)
             await bk.save(db, bucket)
     count = sum(1 for e in entries if e.name.endswith(".txt"))

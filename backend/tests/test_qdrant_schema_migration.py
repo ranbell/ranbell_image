@@ -28,10 +28,13 @@ if str(root_dir) not in sys.path:
 
 from backend.app.config import settings
 from backend.app.db.qdrant_client import (
-    CONFIG_COLLECTION, CONFIG_POINT_ID, IMAGES_COLLECTION,
-    IMAGES_COLOR_COLLECTION, SCHEMA_KEY, QdrantDBClient,
+    CONFIG_COLLECTION,
+    CONFIG_POINT_ID,
+    IMAGES_COLLECTION,
+    IMAGES_COLOR_COLLECTION,
+    SCHEMA_KEY,
+    QdrantDBClient,
 )
-
 
 # ── in-memory Qdrant ────────────────────────────────────────────────────────
 
@@ -532,6 +535,7 @@ def test_abort_holds_the_process_instead_of_crashing_it():
     """`sleep(inf)` raises OverflowError where time_t cannot hold it, which
     crashes the process and restart-loops the container it meant to park."""
     import inspect
+
     from backend.app import main
     src = inspect.getsource(main._abort)
     assert 'float("inf")' not in src

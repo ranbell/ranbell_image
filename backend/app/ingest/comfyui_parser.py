@@ -2,10 +2,8 @@
 from __future__ import annotations
 
 from .known_nodes import (
-    CLIP_TEXT_ENCODE_CLASSES,
     SAMPLER_CLASSES,
     TEXT_INPUT_FIELDS,
-    WILDCARD_ENCODE_CLASSES,
 )
 
 

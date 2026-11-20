@@ -22,6 +22,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 from app.characters.presets import load_seed_presets, preset_to_character
 from app.muse import service, session_db
+
 from tests.muse.test_duet_notebook import NotebookOllama, _scripter_block
 from tests.muse.test_service import FakeDb
 

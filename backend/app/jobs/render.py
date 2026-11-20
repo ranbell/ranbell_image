@@ -13,7 +13,8 @@ import asyncio
 import logging
 import random
 import time
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from ..creation.schema import CreationRecord
 from ..scanner.save import save_generated_image

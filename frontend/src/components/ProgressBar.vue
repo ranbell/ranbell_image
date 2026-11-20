@@ -1,4 +1,4 @@
-<script setup lang="ts">
+<script setup>
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
@@ -15,7 +15,7 @@ const props = defineProps({
 
 const { t } = useI18n()
 
-function formatEta(seconds: number): string {
+function formatEta(seconds) {
   if (seconds == null || seconds < 0) return ''
   const s = Math.ceil(seconds)
   if (s < 60) return t('header.etaSec', { s })

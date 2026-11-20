@@ -4,8 +4,8 @@ import pickle
 import random
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 import numpy as np
 
@@ -41,7 +41,7 @@ def _load_bundle() -> dict | None:
         return None
     try:
         with UMAP_MODEL_PATH.open("rb") as f:
-            _umap_bundle = pickle.load(f)
+            _umap_bundle = pickle.load(f)  # noqa: S301 — our own file, written by fit() under data/
         return _umap_bundle
     except Exception as e:
         logger.warning("Failed to load UMAP model: %s", e)
@@ -99,8 +99,8 @@ async def run_umap_analysis(db, cancel_fn: Callable[[], bool]) -> None:
 
         # Phase 2 & 3: PCA → UMAP (executed in thread pool)
         def _compute(vecs: np.ndarray):
-            from sklearn.decomposition import PCA
             import umap
+            from sklearn.decomposition import PCA
 
             analyzer_umap_state["phase"] = "pca"
             n_components = min(50, vecs.shape[1], vecs.shape[0] - 1)

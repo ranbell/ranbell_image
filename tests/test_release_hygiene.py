@@ -86,4 +86,6 @@ def test_nothing_in_git_carries_it(pattern: str, why: str):
 def test_the_lab_is_out_of_scope():
     """`private/` is outside the scan — the lab tools may write real machine names."""
     assert not any(p.startswith("private/") for p in _tracked_text_files())
-    assert (ROOT / "private").is_dir(), "台そのものは在る（git 管理外なだけ）"
+    if not (ROOT / "private").is_dir():
+        # A fresh clone (CI) has no lab: it is not in git, which is the point.
+        pytest.skip("private/ はこの clone に無い（git 管理外なので CI では在らない）")

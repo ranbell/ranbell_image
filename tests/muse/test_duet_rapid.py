@@ -9,6 +9,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 from app.muse import notebook, shared, vitality
+
 from tests.muse.test_duet_notebook import _scripter_block  # noqa: E402
 
 

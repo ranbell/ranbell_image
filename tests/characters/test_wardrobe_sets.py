@@ -19,7 +19,9 @@ if str(root_dir / "backend") not in sys.path:
     sys.path.insert(0, str(root_dir / "backend"))
 
 from app.characters.presets import (  # noqa: E402
-    WARDROBE_KEYS, preset_to_character, wardrobe_sets,
+    WARDROBE_KEYS,
+    preset_to_character,
+    wardrobe_sets,
 )
 
 _ASSET = (root_dir / "backend" / "app" / "characters" / "assets"

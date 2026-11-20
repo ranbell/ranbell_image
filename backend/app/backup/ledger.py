@@ -23,9 +23,10 @@ import gzip
 import hashlib
 import json
 import logging
-from datetime import datetime, timezone
+from collections.abc import Iterable
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,7 @@ MANIFEST_NAME = "manifest.json"
 
 
 def _digest(value: Any) -> str:
-    return hashlib.sha1(
+    return hashlib.sha1(  # noqa: S324 — a fingerprint, not a signature
         json.dumps(value, sort_keys=True, ensure_ascii=False, default=str).encode()
     ).hexdigest()[:16]
 
@@ -99,7 +100,7 @@ class Ledger:
 
     def append(self, records: Iterable[dict], *, day: str | None = None) -> int:
         """Append records to today's file. Returns how many were written."""
-        day = day or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        day = day or datetime.now(UTC).strftime("%Y-%m-%d")
         self.dir.mkdir(parents=True, exist_ok=True)
         path = self.dir / f"{day}.jsonl.gz"
         written = 0

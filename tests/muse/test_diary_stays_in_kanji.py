@@ -28,7 +28,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "backend"))
 
 from app.muse import crew, diary  # noqa: E402
 
-
 LIVE_KANA_PAGE = (
     "あした、あさ、もし、あしたも　いい　かぜが　ふいたら、また　いっしょに　いう。"
     "「あしたも　いい　せんたくびより　だね」　って。　そうだ、そうなんだもん。"
@@ -91,6 +90,7 @@ def test_the_rewrite_is_recorded_on_the_session():
     """**Log lines were not enough.** When this happened live the log held nothing,
     so what the room had done had to be re-derived from the stored pages."""
     import inspect
+
     from app.muse import shared
 
     src = inspect.getsource(shared.run_generate_actress_diary_job)

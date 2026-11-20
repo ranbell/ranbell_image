@@ -74,7 +74,6 @@ export function applyVrmPose(vrm, model) {
   const side = model.cameraSide || 'front'
   const crouch = posture === 'squatting' || posture === 'crouching' || posture === 'kneeling'
 
-  const hips = bone(vrm, Bone.Hips)
   const spine = bone(vrm, Bone.Spine)
   const chest = bone(vrm, Bone.Chest)
   const neck = bone(vrm, Bone.Neck)

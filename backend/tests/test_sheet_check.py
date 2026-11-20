@@ -9,7 +9,6 @@ The check lives on the EVALUATION lane because that lane is auto-paused while
 GENERATION, PROMPT and EMBEDDING are active: it waits for the card on its own,
 with no `ollama.unload()` dance and no chance of landing on top of a render.
 """
-import asyncio
 import json
 import sys
 from pathlib import Path
@@ -21,7 +20,6 @@ if str(root_dir) not in sys.path:
     sys.path.insert(0, str(root_dir))
 
 from backend.app.jobs.runners import run_sheet_check
-
 
 INTENDED = {
     "medium": "anime illustration",

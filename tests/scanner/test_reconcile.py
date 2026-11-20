@@ -24,10 +24,9 @@ sys.modules["sklearn.cluster"].KMeans = object
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 import pytest
-from PIL import Image
-
 from app.config import settings
 from app.scanner import scanner, walk
+from PIL import Image
 
 PAST = 1_600_000_000  # an mtime well outside walk.RACY_NS
 

@@ -9,8 +9,9 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 from app.muse import chain, crew, identity, notebook, shared
+
 from tests.muse.test_duet_notebook import (  # noqa: E402
-    NotebookOllama, _current_note, _fake_clerk_reply, _scripter_block,
+    _scripter_block,
 )
 
 

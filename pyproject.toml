@@ -1,0 +1,41 @@
+# Tool settings only — this repository is not a Python package.
+# The checks are run by scripts/check.sh, both by the git hooks and by CI.
+
+[tool.ruff]
+target-version = "py312"          # what backend/Dockerfile ships
+line-length = 120
+extend-exclude = ["private", "frontend", ".venv", "docker-data", "data", "qdrant_data"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes: undefined names, unused imports and variables
+    "I",        # import order
+    "B",        # bugbear: likely bugs
+    "UP",       # pyupgrade
+    "S",        # bandit: security
+]
+ignore = [
+    "E501",     # long lines: the comments here are prose and are kept whole
+    "B905",     # zip(strict=): adding strict=True changes behaviour; False is noise
+    "S110",     # try/except/pass: the app swallows best-effort side work on purpose
+    "S112",     # try/except/continue: same
+    "S311",     # random: used for seeds and sampling, never for secrets
+    "UP042",    # StrEnum: changes str() of existing enums
+    "E741",     # names like `l`: readability only
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106", "S108", "S603", "S607", "E402"]
+"backend/tests/**" = ["S101", "S105", "S106", "S108", "S603", "S607", "E402"]
+"external/**/tests/**" = ["S101", "S105", "S106", "S108", "S603", "S607", "E402"]
+# Command-line tools put their own folder on sys.path before importing.
+"scripts/**" = ["E402", "S101"]
+"external/**/bin/**" = ["E402"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI declares request bodies and dependencies as defaults.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Body", "fastapi.File", "fastapi.Form"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "backend/tests", "external/musubi/tests"]

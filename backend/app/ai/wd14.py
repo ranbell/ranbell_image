@@ -1,10 +1,12 @@
 import asyncio
 import logging
 from pathlib import Path
+
 import numpy as np
 from PIL import Image
-from ..scanner.walk import PIL_FORMATS
+
 from ..config import settings
+from ..scanner.walk import PIL_FORMATS
 
 logger = logging.getLogger(__name__)
 

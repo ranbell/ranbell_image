@@ -16,6 +16,7 @@ from typing import Any
 
 from . import brief as brief_mod
 from . import crew, identity
+from . import facets as facets_mod
 from . import notebook as notebook_mod
 
 # The fields are not defined here. notebook.py holds the notebook and is the one
@@ -24,7 +25,6 @@ _CONTRACTS = notebook_mod.contracts_block()
 _CONTRACTS_YOU = notebook_mod.contracts_block(
     ("scene", "light", "frame", "wearing", "beat"), second_person=True,
 )
-from . import facets as facets_mod
 
 logger = logging.getLogger(__name__)
 

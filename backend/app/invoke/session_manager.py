@@ -173,7 +173,8 @@ class InvokeSessionManager:
                 axis_tags.extend(v.replace(",", " ").split())
 
         import asyncio
-        from .vocab_bank import get_vocab_hints, get_axis_semantic_tags
+
+        from .vocab_bank import get_axis_semantic_tags, get_vocab_hints
         _vh, _ah = await asyncio.gather(
             get_vocab_hints(session.db, session.ollama, axis_tags, wildness=session.wildness),
             get_axis_semantic_tags(session.db, session.ollama, axes),
@@ -208,8 +209,8 @@ class InvokeSessionManager:
         else:
             _topic_tier = {}
 
-        from ..spooler.models import JobLane
         from ..jobs.runners import run_invoke_spirit_compose
+        from ..spooler.models import JobLane
 
         scene_variants = axes.get('_scene_variants', [])
         spirit_names = list(session.enabled_spirits)
@@ -280,8 +281,8 @@ class InvokeSessionManager:
 
         # Once every spirit has finished composing, submit generation in one go
         if all(s.status != "composing" for s in session.spirits.values()):
-            from ..spooler.models import JobLane
             from ..jobs.runners import run_invoke_image_generate
+            from ..spooler.models import JobLane
             for name, s in session.spirits.items():
                 if s.status == "composed":
                     s.status = "generating"

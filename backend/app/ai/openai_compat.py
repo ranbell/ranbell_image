@@ -33,7 +33,7 @@ import json
 import logging
 import re
 import time
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
 import httpx
 

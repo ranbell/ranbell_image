@@ -10,7 +10,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 from app.tags.catalog import TAG_TO_AXIS, get_tag_axis
 
-
 # Tags from cafe / rain-station / rooftop / festival / beach scenes.
 _SCENE_TAGS = {
     # cafe

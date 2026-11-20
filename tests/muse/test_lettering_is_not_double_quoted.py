@@ -26,7 +26,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "backend"))
 
-from app.muse import anima, ledger as L
+from app.muse import anima
+from app.muse import ledger as L
 
 
 def test_the_live_value_renders_with_one_pair_of_quotes():

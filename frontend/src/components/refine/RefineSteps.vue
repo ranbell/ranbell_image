@@ -12,7 +12,7 @@
 // one place the time actually goes.
 import { useI18n } from 'vue-i18n'
 
-const props = defineProps({
+defineProps({
   // [{ code, state: 'done' | 'now' | 'todo' }]
   steps: { type: Array, default: () => [] },
   // A repeating step's progress through its passes; 0 when it does not repeat.

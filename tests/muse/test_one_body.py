@@ -26,7 +26,6 @@ from __future__ import annotations
 
 from app.muse import ledger as L
 
-
 #: The values observed live, exactly as they were (2026-09-12, reproducing 「今日も
 #: メイドさんで」 — "the maid outfit again today").
 BLOATED = (

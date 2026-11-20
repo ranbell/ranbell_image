@@ -198,8 +198,8 @@ async def import_lineage(db, root: str | Path) -> dict[str, Any]:
     makes it safe to run this at any moment, including straight after a heal
     scan, without thinking about it first.
     """
-    from ..db.qdrant_client import IMAGES_COLLECTION
     from ..db.id_utils import sha256_to_point_id
+    from ..db.qdrant_client import IMAGES_COLLECTION
 
     ledger = Ledger(root)
     entries = ledger.read_all()

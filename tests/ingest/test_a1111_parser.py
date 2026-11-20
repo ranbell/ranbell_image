@@ -1,9 +1,9 @@
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 from app.ingest.a1111_parser import parse_a1111
-
 
 A1111_STANDARD = """\
 1girl, masterpiece, best quality, long hair

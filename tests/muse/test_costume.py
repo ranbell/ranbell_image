@@ -20,9 +20,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
-from tests.muse import _shape
 from app.muse import brief as brief_mod
 from app.muse import chain, notebook
+
+from tests.muse import _shape
 
 GARMENTS = "top=school_swimsuit / bottom=covered_by_top / feet=barefoot / extras=goggles"
 

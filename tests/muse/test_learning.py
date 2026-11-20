@@ -22,9 +22,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
-from app.muse import chain, crew, shared as service  # noqa: E402
-from app.muse import shared
-
+from app.muse import chain, crew, shared  # noqa: E402
+from app.muse import shared as service
 
 # ── the lesson is read off what he said ─────────────────────────────────────
 

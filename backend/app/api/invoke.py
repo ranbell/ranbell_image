@@ -211,8 +211,8 @@ async def summon(body: SummonRequest, request: Request):
         spooler=spooler,
     )
 
-    from ..spooler.models import JobLane
     from ..jobs.runners import run_invoke_axis_decompose
+    from ..spooler.models import JobLane
 
     job_id = spooler.submit(
         JobLane.PROMPT,
@@ -278,8 +278,8 @@ async def respin(body: RespinRequest, request: Request):
     # Allow the finalize job (pipeline → novelty → alignment) to run again for the respun image
     session.finalize_submitted = False
 
-    from ..spooler.models import JobLane
     from ..jobs.runners import run_invoke_respin
+    from ..spooler.models import JobLane
 
     job_id = session.spooler.submit(
         JobLane.PROMPT,
@@ -347,8 +347,8 @@ async def _launch_lineage_session(
         spooler=request.app.state.spooler,
     )
 
-    from ..spooler.models import JobLane
     from ..jobs.runners import run_invoke_lineage
+    from ..spooler.models import JobLane
 
     job_id = request.app.state.spooler.submit(
         JobLane.PROMPT,
@@ -522,8 +522,8 @@ async def trigger_daily_oracle(body: DailyOracleRequest, request: Request):
     if existing:
         return {"status": "already_done", "date": today, "count": len(existing)}
 
-    from ..spooler.models import JobLane
     from ..jobs.runners import run_invoke_daily_oracle
+    from ..spooler.models import JobLane
 
     topic = cfg.get("invoke_daily_oracle_topic", "") or ""
     job_id = spooler.submit(
@@ -566,8 +566,8 @@ async def enhance_prompt(body: EnhancePromptRequest, request: Request):
     if count == 0:
         raise HTTPException(503, "WD14 vocab not imported — run POST /api/admin/invoke/import-wd14-vocab first")
 
-    from ..spooler.models import JobLane
     from ..jobs.runners import run_invoke_enhance_prompt
+    from ..spooler.models import JobLane
 
     event_queue: asyncio.Queue = asyncio.Queue()
     job_id = spooler.submit(

@@ -4,10 +4,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
+import json
+
 import pytest
 from app.characters import presets
-
-import json
 
 _JSON_PATH = Path(__file__).parent.parent.parent / "backend/app/characters/assets/personality_presets.json"
 _JA_RE = re.compile(r"[\u3040-\u30ff\u4e00-\u9fff]")
@@ -64,7 +64,7 @@ def test_muse_dialogue_attributes_completeness(preset_id):
     """Verify each of the 30 Muses has valid first_person_ja, user_address_ja, talk_quirks, and >=4 say examples."""
     preset = get_preset_sync(preset_id)
     assert preset is not None, f"Preset {preset_id} could not be loaded!"
-    
+
     char = presets.preset_to_character(preset)
 
     # 1. First person checks

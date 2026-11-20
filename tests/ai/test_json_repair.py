@@ -11,7 +11,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 import pytest
-
 from app.ai.json_util import parse_json_object
 
 GOOD = '{"title": "t", "world": {"setting": "beach"}, "panels": [{"key": "panel_1"}]}'
@@ -70,5 +69,5 @@ def test_prose_with_commas_and_colons_is_untouched():
 def test_hopeless_input_still_raises():
     with pytest.raises(ValueError):
         parse_json_object("")
-    with pytest.raises(Exception):
+    with pytest.raises(ValueError):  # JSONDecodeError is a ValueError
         parse_json_object("no json here at all")

@@ -18,12 +18,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 from app.characters.board import (
     _ACTIVE_HINTS,
+    SLOT_SIZE,
     _is_a_gaze,
     _shows_the_legs,
     centre_pose,
-    plan_sheet,
-    SLOT_SIZE,
     compile_board_slot,
+    plan_sheet,
     sheet_vignettes,
 )
 from app.characters.presets import BOARD_SLOTS, load_seed_presets, preset_to_character

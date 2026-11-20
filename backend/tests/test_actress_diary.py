@@ -3,9 +3,10 @@ import asyncio
 import sys
 import time
 import types
-import pytest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 root_dir = Path(__file__).resolve().parent.parent.parent
 if str(root_dir) not in sys.path:
@@ -14,9 +15,9 @@ if str(root_dir) not in sys.path:
 from backend.app.characters import api as characters_api
 from backend.app.characters import presets as presets_db
 from backend.app.muse import chain as muse_chain
+from backend.app.muse import crew as muse_crew
 from backend.app.muse import diary as muse_diary
 from backend.app.muse import shared as muse_service
-from backend.app.muse import crew as muse_crew
 from backend.app.spooler.models import JobLane
 
 
@@ -107,7 +108,7 @@ async def test_preset_diaries_crud(monkeypatch):
     }
     added = await presets_db.add_preset_diary(mock_db, "c001", diary_data)
     assert added["id"] == "diary-123"
-    
+
     # 2. Get diaries
     diaries = await presets_db.get_preset_diaries(mock_db, "c001")
     assert len(diaries) == 1

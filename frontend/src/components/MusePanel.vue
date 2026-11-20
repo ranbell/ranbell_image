@@ -213,7 +213,6 @@ function mergeRewriteLog(keep, next) {
   }
   return [...byAt.values()].sort((a, b) => Number(a?.at || 0) - Number(b?.at || 0)).slice(-24)
 }
-const characters = computed(() => characterList.value)
 //: What must be filled in before starting. **What is missing is named.**
 const missingBeforeStart = computed(() => {
   const want = []
@@ -1022,9 +1021,6 @@ function isSeatRow(row) {
 }
 function isHeckleRow(row) {
   return (row?.meta?.kind) === 'heckle'
-}
-function isCrewRow(row) {
-  return isSeatRow(row) || isHeckleRow(row)
 }
 function isChangeRow(row) {
   const kind = row?.meta?.kind

@@ -30,7 +30,6 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-
 from app.muse import assemble, service, session_db
 
 

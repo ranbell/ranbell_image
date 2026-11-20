@@ -1,5 +1,7 @@
 import io
+
 from PIL import Image
+
 from ..scanner.walk import PIL_FORMATS
 
 

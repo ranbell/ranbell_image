@@ -80,7 +80,7 @@ async def iter_queue_sse(
                 disconnect_since = None
             try:
                 item = await asyncio.wait_for(queue.get(), timeout=ping_seconds)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 yield "event: ping\ndata: {}\n\n"
                 continue
             if item is None:

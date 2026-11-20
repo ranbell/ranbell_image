@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import pytest
-
 from app.lora import bucket as bk
 from app.lora import captioner
 from app.spooler.models import CancelToken, ProgressReporter

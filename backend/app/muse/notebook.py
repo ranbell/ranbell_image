@@ -12,10 +12,11 @@ import time
 from collections.abc import Iterable
 from typing import Any
 
+from ..tags import catalog as tag_catalog
+
 # Garment vocabulary has one owner. `brief` imports `identity` and neither
 # imports this module, so the edge is safe.
 from . import brief
-from ..tags import catalog as tag_catalog
 
 SHOT_KEYS = (
     "atmosphere",

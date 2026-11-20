@@ -3,9 +3,8 @@ import logging
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from ..alignment.evaluator import AlignmentEvaluator
-from ..alignment.vlm_analyzer import translate_to_lang
 from ..alignment.schema import AlignmentRequest
+from ..alignment.vlm_analyzer import translate_to_lang
 from ..spooler.models import JobLane
 
 _SUPPORTED_EXTRA_LANGS = {"zh", "ko", "fr", "de", "es", "pt"}

@@ -19,9 +19,10 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
-from tests.muse import _shape
 from app.muse import brief as brief_mod
 from app.muse import facets, identity
+
+from tests.muse import _shape
 
 
 def _session() -> dict:

@@ -134,7 +134,7 @@ class ImageDirectoryWatcher:
                 event_type, path = await asyncio.wait_for(
                     self._event_queue.get(), timeout=1.0
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 now = asyncio.get_event_loop().time()
                 if source_deadline is not None and now >= source_deadline:
                     self._submit_sync(source_dirs)

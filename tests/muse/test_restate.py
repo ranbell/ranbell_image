@@ -20,12 +20,9 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 from app.muse import chain, crew  # noqa: E402
-
 
 # ── she may only point at real parts ────────────────────────────────────────
 

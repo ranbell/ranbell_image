@@ -27,7 +27,8 @@ if str(root_dir) not in sys.path:
 
 from backend.app.api.images import list_images  # noqa: E402
 from backend.app.db.qdrant_client import (  # noqa: E402
-    GALLERY_PAYLOAD_FIELDS, QdrantDBClient,
+    GALLERY_PAYLOAD_FIELDS,
+    QdrantDBClient,
 )
 
 MIO = "38814c43-824f-5a42-96ca-e3afc00f76cf"

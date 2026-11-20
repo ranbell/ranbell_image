@@ -21,6 +21,7 @@ const KNOWN = new Set([
   'URLSearchParams','ResizeObserver','IntersectionObserver','MutationObserver','Event',
   'CustomEvent','History','Audio','Worker','WebSocket','TextEncoder','TextDecoder',
   'queueMicrotask','atob','btoa','alert','confirm','prompt','getComputedStyle','matchMedia',
+  'BigInt',
 ])
 // Syntax, not calls
 const SYNTAX = new Set(['async','import','var','let','const','setup','super','this'])

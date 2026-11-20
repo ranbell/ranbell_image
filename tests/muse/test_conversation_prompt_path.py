@@ -6,8 +6,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
-from tests.muse import _shape
 from app.muse import identity, notebook
+
+from tests.muse import _shape
 
 
 def _solo_cast():
@@ -164,6 +165,7 @@ def test_an_unchanged_marker_never_reaches_the_picture():
     straight into the picture.
     """
     import asyncio
+
     from app.muse import chain
 
     class _Ollama:

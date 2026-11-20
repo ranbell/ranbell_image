@@ -4,9 +4,9 @@ import logging
 from fastapi import APIRouter, Request
 from qdrant_client import models as qm
 
-from ..db.qdrant_client import IMAGES_COLLECTION
-from ..ai.umap_reducer import analyzer_umap_state
 from ..ai.tag_analyzer import build_tag_cooccurrence
+from ..ai.umap_reducer import analyzer_umap_state
+from ..db.qdrant_client import IMAGES_COLLECTION
 from ..runtime_config import get_runtime_config
 
 logger = logging.getLogger(__name__)
@@ -75,9 +75,10 @@ async def get_umap_clusters(request: Request, k: int = 10):
 
     def _cluster(docs, noise_tags, common_tags):
         import math
+        from collections import Counter
+
         import numpy as np
         from sklearn.cluster import KMeans
-        from collections import Counter
 
         sha256s = [d["sha256"] for d in docs]
         coords = np.array([[d["umap_x"], d["umap_y"]] for d in docs], dtype=np.float32)

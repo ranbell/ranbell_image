@@ -23,8 +23,8 @@ from __future__ import annotations
 import inspect
 
 import pytest
-
-from app.muse import identity, shared as muse_service, shared
+from app.muse import identity, shared
+from app.muse import shared as muse_service
 
 #: Which side the lead and the partner are on. **Never written out here** (change
 #: `identity.LEAD_SIDE` and this follows).
@@ -39,7 +39,8 @@ def _code(fn) -> str:
     says "`is_duet` only looks at `mode`", so searching a raw `getsource` always
     matches.
     """
-    import io, tokenize
+    import io
+    import tokenize
     out = []
     for tok in tokenize.generate_tokens(io.StringIO(inspect.getsource(fn)).readline):
         if tok.type in (tokenize.COMMENT, tokenize.STRING):
@@ -94,7 +95,8 @@ def test_the_hint_says_it_is_not_material_to_copy():
 def test_the_diary_and_the_picture_agree():
     """**Read the same document of record.** Keep two and the picture and her own
     memory disagree."""
-    from app.muse import assemble, ledger as L
+    from app.muse import assemble
+    from app.muse import ledger as L
 
     led = {**L.blank(), "wearing": "maid outfit", "beat": "holding tray",
            "scene": "cafe", "wearing_b": "maid outfit", "beat_b": "holding menu"}

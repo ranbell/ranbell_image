@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import asyncio
 
+from app.muse import ledger as L
 from app.muse import shared as muse_service
-from app.muse import ledger as L, writer
+from app.muse import writer
 
 
 class _Ollama:

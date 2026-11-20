@@ -7,12 +7,12 @@ import uuid
 from typing import Any
 
 from ..characters import presets as presets_db
-from . import events, session_db, vitality
+from . import assemble, crew_room, events, persona, pipeline_view, session_db, talk, vitality, writer
+from . import debug as debug_mod
+from . import ledger as ledger_mod
+from .ctx import refine_num_ctx
 from .defaults import ALL_DEFAULTS
 from .notebook import blank as notebook_blank
-from . import assemble, crew_room, debug as debug_mod, ledger as ledger_mod
-from . import persona, pipeline_view, talk, writer
-from .ctx import refine_num_ctx
 
 logger = logging.getLogger(__name__)
 
@@ -1532,8 +1532,8 @@ def _board_seed(board: dict[str, Any]) -> int:
 
 async def start_shoot(db, request, session: dict[str, Any]) -> dict[str, Any]:
     """Approve board → final shoot. Requires a finished board (OK gate)."""
-    from . import runner
     from ..spooler.models import JobLane
+    from . import runner
 
     board = session.get("board") or {}
     if board.get("pending"):
@@ -1634,8 +1634,8 @@ async def start_shoot(db, request, session: dict[str, Any]) -> dict[str, Any]:
 
 async def start_board(db, request, session: dict[str, Any]) -> dict[str, Any]:
     """Enqueue a board render using muse runner (prompt from refine craft)."""
-    from . import runner
     from ..spooler.models import JobLane
+    from . import runner
 
     board = session.get("board") or {}
     if board.get("pending"):

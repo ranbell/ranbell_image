@@ -14,8 +14,9 @@ from __future__ import annotations
 
 import inspect
 
-from app.muse import lounge as lounge_mod, shared as muse_service
+from app.muse import lounge as lounge_mod
 from app.muse import service
+from app.muse import shared as muse_service
 
 
 def test_a_picture_direction_is_kept():

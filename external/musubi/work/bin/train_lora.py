@@ -308,10 +308,10 @@ def make_plan(args) -> Plan:
 # ── 2. free the card ──────────────────────────────────────────────────────────
 
 def _post(url: str, body: dict, timeout: float = 10) -> bool:
-    req = urllib.request.Request(url, data=json.dumps(body).encode(),
+    req = urllib.request.Request(url, data=json.dumps(body).encode(),  # noqa: S310 — our own config's http URL
                                  headers={"Content-Type": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=timeout):
+        with urllib.request.urlopen(req, timeout=timeout):  # noqa: S310 — our own config's http URL
             return True
     except (urllib.error.URLError, OSError):
         return False
@@ -319,7 +319,7 @@ def _post(url: str, body: dict, timeout: float = 10) -> bool:
 
 def _get_json(url: str, timeout: float = 5):
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as r:
+        with urllib.request.urlopen(url, timeout=timeout) as r:  # noqa: S310 — our own config's http URL
             return json.loads(r.read())
     except (urllib.error.URLError, OSError, ValueError):
         return None
@@ -347,7 +347,7 @@ def gpu_memory() -> tuple[float, float] | None:
     """(used GiB, total GiB) of GPU 0, or None without nvidia-smi."""
     try:
         out = subprocess.run(
-            ["nvidia-smi", "--query-gpu=memory.used,memory.total", "--format=csv,noheader,nounits", "-i", "0"],
+            ["nvidia-smi", "--query-gpu=memory.used,memory.total", "--format=csv,noheader,nounits", "-i", "0"],  # noqa: S607 — on PATH by design
             capture_output=True, text=True, timeout=10, check=True,
         ).stdout.strip().splitlines()[0]
         used, total = (float(x) / 1024 for x in out.split(","))
@@ -396,12 +396,12 @@ class Runner:
 
     def run(self, label: str, cmd: list[str]) -> None:
         self.note(f"\n=== {label}: {shlex.join(cmd)}")
-        self.proc = subprocess.Popen(
+        self.proc = subprocess.Popen(  # noqa: S603 — argv list built by this script
             cmd, cwd=MUSUBI, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             start_new_session=True,  # its own process group, killed as one
             env={"PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"} | os.environ | {"PYTHONUNBUFFERED": "1"},
         )
-        assert self.proc.stdout is not None
+        assert self.proc.stdout is not None  # noqa: S101 — narrows the type; PIPE was asked for
         self._oom_seen = False
         for raw in iter(self.proc.stdout.readline, b""):
             text = raw.decode("utf-8", "replace")
@@ -563,7 +563,7 @@ def main(argv: list[str] | None = None) -> int:
 MAX_SWAP = 26
 
 
-def run_train_with_retry(runner: "Runner", plan: Plan) -> None:
+def run_train_with_retry(runner: Runner, plan: Plan) -> None:
     """Train; on out-of-memory, swap 4 more blocks and start again (up to 26)."""
     while True:
         cmd = dict(build_commands(plan, te_cached=True))["train"]

@@ -1,15 +1,16 @@
 """Fallback chain integration tests (workflow dict only, no real image files)."""
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 import json
-import tempfile
 import struct
+import tempfile
 import zlib
 
-from app.ingest.extractor import extract_from_image
 from app.ingest.a1111_parser import parse_a1111
+from app.ingest.extractor import extract_from_image
 
 FIXTURES = Path(__file__).parent / "fixtures" / "workflows"
 

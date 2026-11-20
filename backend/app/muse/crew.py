@@ -21,7 +21,7 @@ from typing import Any
 # The parts of the shot. This module writes the copy that tells a Muse what each
 # part is; `facets` owns what the parts are and the rules that keep them apart.
 from .facets import FACET_LABELS
-from .notebook import FIELD_CONTRACTS, contracts_block
+from .notebook import FIELD_CONTRACTS
 
 # Job order. Dependency order, not importance — the editor always closes.
 ROLE_ORDER: tuple[str, ...] = (
@@ -2273,7 +2273,7 @@ def _pick_say_example(muse_id: str, seed: str = "") -> str:
     examples = MUSES[muse_id]["say_examples"]
     if not examples:
         return ""
-    key = f"{muse_id}:{seed}".encode("utf-8")
+    key = f"{muse_id}:{seed}".encode()
     idx = int(hashlib.sha256(key).hexdigest()[:8], 16) % len(examples)
     return examples[idx]
 
@@ -2462,7 +2462,7 @@ def actress_banter_prompt(character: dict[str, Any]) -> str:
     traits = ", ".join(str(t) for t in (p.get("traits") or [])[:4] if t)
     charm_ja = str(p.get("charm_ja") or p.get("charm") or "").strip()
     inner_ja = ", ".join(str(i) for i in (p.get("inner_ja") or [])[:2] if i)
-    
+
     age = int(p.get("age") or 0)
     job = str(p.get("occupation_ja") or p.get("occupation") or "").strip()
     parts = [
@@ -3389,7 +3389,7 @@ def w_facet_output_block(
         "  wrong; a room tag under CAMERA is wrong. Anything belonging to",
         "  another part is thrown away, so writing it only costs you the slot.",
         f"- A row marked `{name_a} ONLY` never contains a tag about {name_b}",
-        f"  and the reverse — even when they are dressed alike or posed",
+        "  and the reverse — even when they are dressed alike or posed",
         "  alike, restate it in both rows rather than assuming one implies "
         "the other.",
         "- The prose line is that part and nothing else. One or two sentences,",

@@ -23,7 +23,8 @@ a `shirt` erased a `skirt`, and banning `top` erased `rooftop` as well.
 """
 from __future__ import annotations
 
-from app.muse import ledger as L, talk
+from app.muse import ledger as L
+from app.muse import talk
 
 
 # ── Steps 1 and 2: the side that stays as designed ─────────────────────

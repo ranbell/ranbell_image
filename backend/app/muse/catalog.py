@@ -6,7 +6,8 @@ missing is reported before a generation is spent finding out.
 from __future__ import annotations
 
 import logging
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from . import family
 from .defaults import ALL_DEFAULTS

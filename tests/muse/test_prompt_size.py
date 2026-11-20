@@ -15,8 +15,7 @@ from __future__ import annotations
 
 import re
 
-from app.muse import crew
-from app.muse import persona, writer
+from app.muse import crew, persona, writer
 
 CHAR = {
     "identity_tags": ["1girl", "silver_hair"],

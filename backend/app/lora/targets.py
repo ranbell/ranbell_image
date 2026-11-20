@@ -11,8 +11,9 @@ planned can sit here with ``available=False`` and is refused for new buckets.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from ..prompt.scene_sheet import _SCRIPT_MODELS
 from . import sheet_graph

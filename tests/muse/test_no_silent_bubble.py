@@ -16,7 +16,8 @@ from __future__ import annotations
 
 import asyncio
 
-from app.muse import ledger as L, talk, writer
+from app.muse import ledger as L
+from app.muse import talk, writer
 
 #: The shape that happened live — the model returned something, and there was
 #: nothing in it that could be taken out as a line.

@@ -2,9 +2,11 @@ import asyncio
 import io
 import os
 from pathlib import Path
+
 from PIL import Image
-from ..scanner.walk import PIL_FORMATS
+
 from ..config import settings
+from ..scanner.walk import PIL_FORMATS
 
 
 def get_thumbnail_path(sha256: str) -> Path:

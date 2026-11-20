@@ -56,7 +56,7 @@ def prop_fingerprint(nb: dict[str, Any]) -> str:
         str(nb.get(k) or "").strip().lower()
         for k in ("scene", "wearing", "wearing_b", "beat")
     )
-    return hashlib.sha1(blob.encode("utf-8")).hexdigest()[:12] if blob.strip("|") else ""
+    return hashlib.sha1(blob.encode("utf-8")).hexdigest()[:12] if blob.strip("|") else ""  # noqa: S324 — a fingerprint, not a signature
 
 
 def tick_prop_age(session: dict[str, Any], nb: dict[str, Any]) -> str:

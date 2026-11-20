@@ -26,7 +26,6 @@ for _name in ("sklearn", "sklearn.cluster"):
 sys.modules["sklearn.cluster"].KMeans = object
 
 import pytest
-
 from app.ai.comfy import ComfyUIClient
 from app.jobs.render import run_render
 
@@ -175,6 +174,7 @@ def test_each_render_gets_its_own_client_id():
     now". **Separate the clientIds and that assumption becomes true.**
     """
     import inspect
+
     from backend.app.jobs import render as render_mod
     src = inspect.getsource(render_mod.run_render)
     # The same id is used to queue and to wait (a different one and nothing arrives)

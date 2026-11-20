@@ -20,7 +20,7 @@ shots. This module only finalises the string Anima / FLUX-natural expects.
 from __future__ import annotations
 
 import re
-from typing import Iterable
+from collections.abc import Iterable
 
 # Official-ish quality / meta / safety that belong in the prefix slot.
 _QUALITY_META = {
@@ -152,7 +152,7 @@ def split_tags_and_prose(prompt: str) -> tuple[str, str]:
         # No prose detected — whole prompt is tags.
         return text, ""
     tag_block = "\n".join(lines[:prose_start]).strip()
-    prose = " ".join(l.strip() for l in lines[prose_start:] if l.strip())
+    prose = " ".join(ln.strip() for ln in lines[prose_start:] if ln.strip())
     return tag_block, prose
 
 

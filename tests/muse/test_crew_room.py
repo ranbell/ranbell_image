@@ -17,9 +17,9 @@ them in a solo shoot. Now there are two guards (an empty default, and the mark).
 """
 from __future__ import annotations
 
-from app.muse import crew
+from app.muse import crew, service
 from app.muse import crew_room as C
-from app.muse import ledger as L, service
+from app.muse import ledger as L
 
 
 def _session(*, crew_preset: str = "standard", **kw):
@@ -191,6 +191,7 @@ def test_the_writer_only_hears_the_crew_when_there_is_one():
     """**Not one character of the solo contract moves.** The rules reach only the
     turns where a crew spoke."""
     import inspect
+
     from app.muse import writer
     assert "THE CREW SPOKE" not in writer.WRITER_SYSTEM
     src = inspect.getsource(writer.write_patch)

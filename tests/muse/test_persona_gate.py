@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import pytest
-
 from app.muse import ledger, persona, service
 
 

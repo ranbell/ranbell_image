@@ -13,18 +13,18 @@ Runner signature:
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import logging
 import math
-import re
 import time
-from contextlib import asynccontextmanager
+from datetime import UTC
 from pathlib import Path
 
 from ..spooler.models import CancelToken, JobCancelled, ProgressReporter
 from ..tags.subject_anchors import (
     PERSON_COUNT_TAGS as _PERSON_COUNT_TAGS,
+)
+from ..tags.subject_anchors import (
     ensure_subject_anchor as _ensure_subject_anchor,
 )
 
@@ -85,7 +85,7 @@ async def _drive_scan(reporter: ProgressReporter, cancel: CancelToken, *, db, ol
     try:
         await task
     except asyncio.CancelledError:
-        raise JobCancelled()
+        raise JobCancelled() from None
 
     # auto-start AI pipeline if new files were registered (CPU tagging stage
     # first; it chains the embed stage on the EMBEDDING lane)
@@ -174,7 +174,7 @@ async def run_scan_refresh_metadata(
     try:
         await task
     except asyncio.CancelledError:
-        raise JobCancelled()
+        raise JobCancelled() from None
 
 
 # ── SYNC lane: color extraction · UMAP ────────────────────────────────────────
@@ -195,7 +195,6 @@ async def run_color_backfill(
     reporter.indeterminate()
     done = 0
     total = 0
-    cancelled = False
 
     def _check_cancel() -> bool:
         return cancel._event.is_set()
@@ -354,7 +353,7 @@ async def run_analyze_umap(
     try:
         await task
     except asyncio.CancelledError:
-        raise JobCancelled()
+        raise JobCancelled() from None
 
 
 # ── EMBEDDING lane: AI pipeline · MRL backfill ────────────────────────────────
@@ -370,7 +369,7 @@ async def run_pipeline_tagging(
 ) -> dict:
     """TAGGING lane (CPU only, never auto-paused). WD14 + colors for pending docs,
     then chains the embed stage on the EMBEDDING lane."""
-    from ..ai.pipeline import tagging_state, run_ai_pipeline
+    from ..ai.pipeline import run_ai_pipeline, tagging_state
     from ..spooler.models import JobLane
 
     def _on_cancel() -> None:
@@ -397,7 +396,7 @@ async def run_pipeline_tagging(
     try:
         await task
     except asyncio.CancelledError:
-        raise JobCancelled()
+        raise JobCancelled() from None
 
     if cancel._event.is_set():
         raise JobCancelled()
@@ -462,7 +461,7 @@ async def run_pipeline(
     try:
         await task
     except asyncio.CancelledError:
-        raise JobCancelled()
+        raise JobCancelled() from None
 
     if cancel._event.is_set():
         raise JobCancelled()
@@ -646,7 +645,7 @@ async def run_sheet_check(
     card to be free by itself — no `ollama.unload()` dance, and no chance of
     landing on top of a render (CLAUDE.md).
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
     from pathlib import Path as _Path
 
     from ..api.inspire import _parse_json_from_llm
@@ -674,7 +673,7 @@ async def run_sheet_check(
             continue
 
         record: dict = {
-            "checked_at": datetime.now(timezone.utc).isoformat(),
+            "checked_at": datetime.now(UTC).isoformat(),
             "missed": [], "checked": 0, "covered": 0, "got_sheet": None, "error": "",
         }
         try:
@@ -917,8 +916,8 @@ async def run_generation(
     import asyncio as _asyncio
     import random as _random
 
-    from ..scanner.save import save_generated_image
     from ..creation.schema import CreationRecord, InspireContext, SourceImageRef
+    from ..scanner.save import save_generated_image
 
     reporter.indeterminate()
 
@@ -1084,6 +1083,7 @@ async def run_inversion(
 ) -> None:
     """PROMPT lane runner — streams inversion events into event_queue."""
     import json as _json
+
     from ..api.inspire import InversionRequest, _inversion_stream
     from ..runtime_config import get_runtime_config
 
@@ -1175,8 +1175,12 @@ async def run_expand_theme(
 ) -> None:
     """PROMPT lane runner — expands a theme into 4 section tags via VLM, puts done event on event_queue."""
     from ..api.inspire import (
-        ExpandThemeRequest, _sse, _normalize_section,
-        _EXPAND_THEME_PROMPT, _parse_json_from_llm, create_tile_image,
+        _EXPAND_THEME_PROMPT,
+        ExpandThemeRequest,
+        _normalize_section,
+        _parse_json_from_llm,
+        _sse,
+        create_tile_image,
     )
     from ..runtime_config import get_runtime_config
 
@@ -1416,39 +1420,36 @@ async def run_refine_prompt(
     waited on another would hold its lane for the length of the render.
     """
     # lazy import — avoids circular import with api.ai
+    from ..ai.tile_image import create_tile_image
     from ..api.ai import (
         RefineRequest,
-        _WD14_MUST_INCLUDE_THRESHOLD,
-        _resolve_weights,
-        _build_vlm_prompt,
-        _build_natural_tags_prompt,
-        _build_natural_prose_prompt,
-        _build_natural_visual_script_prompt,
-        _build_weighted_wd14_context,
-        _clean_markdown,
-        _strip_stray_negative,
-        _parse_positive_negative,
-        _parse_visual_script_sections,
-        _strip_visual_script_markers,
-        _build_all_must,
-        _inject_wd14_must_tags,
-        _correct_prose_wd14_conflicts,
-        _enforce_wd14_on_cat_tags,
-        _check_natural_prose,
-        _remove_forced_tags,
-        _translate_instruction,
-        _translate_and_classify,
-        _extract_literal_texts,
         _append_literal_texts,
+        _build_natural_tags_prompt,
+        _build_natural_visual_script_prompt,
+        _build_vlm_prompt,
+        _clean_markdown,
+        _extract_literal_texts,
+        _parse_positive_negative,
+        _remove_forced_tags,
         _sample_mutation_tags,
-        _REFINE_CAT_FIELDS,
+        _strip_stray_negative,
+        _translate_and_classify,
     )
     from ..api.inspire import _parse_json_from_llm
-    from ..ai.tile_image import create_tile_image
     from ..prompt import moss as moss_prompt
+    from ..prompt.tag_merge import (
+        _build_all_must,
+        _build_weighted_wd14_context,
+        _correct_prose_wd14_conflicts,
+        _enforce_wd14_on_cat_tags,
+        _inject_wd14_must_tags,
+        _resolve_weights,
+    )
+    from ..prompt.visual_spec import REFINE_CAT_FIELDS as _REFINE_CAT_FIELDS
     from ..prompt.visual_spec import clamp_prose_paragraphs
+    from ..prompt.visual_spec import parse_visual_script as _parse_visual_script_sections
+    from ..prompt.visual_spec import strip_section_markers as _strip_visual_script_markers
     from ..runtime_config import get_runtime_config, refine_model
-    from ..spooler.models import JobLane
 
     body = RefineRequest(**body_dict)
 
@@ -2656,8 +2657,8 @@ async def run_invoke_axis_decompose(
     reporter.indeterminate()
     cancel.raise_if_set()
 
-    from ..invoke.vocab_bank import get_character_danbooru_hints
     from ..invoke.axis_decomposer import _EMOJI_MEANINGS
+    from ..invoke.vocab_bank import get_character_danbooru_hints
 
     person_present = bool(person_gender or person_count)
     pro_prompt_spec: dict | None = None
@@ -2835,7 +2836,7 @@ async def run_invoke_spirit_compose(
     user_msg_parts.extend([
         f"slogan: {axes.get('_slogan', '')}",
         f"user_intent: {axes.get('_user_intent', '')}",
-        f"axes:",
+        "axes:",
         f"  subject: {axes.get('subject', '')}",
         f"  character_detail: {axes.get('character_detail', '')}",
         f"  action: {axes.get('action', '')}",
@@ -2955,7 +2956,7 @@ async def run_invoke_spirit_compose(
         pass  # BM25 index not ready yet — skip silently
 
     # ── Content safety check on LLM output (VLM-delegated) ───────────────────
-    from ..invoke.content_guard import check_spirit_output, BLOCK_MESSAGE
+    from ..invoke.content_guard import BLOCK_MESSAGE, check_spirit_output
     if await check_spirit_output(result, ollama):
         logger.warning("[invoke] content_guard blocked spirit output: %s", spirit_name)
         await session_manager.on_spirit_error(session_id, spirit_name, BLOCK_MESSAGE)
@@ -3142,7 +3143,7 @@ async def run_invoke_session_finalize(
         cancel.on_cancel(task.cancel)
         await task
     except asyncio.CancelledError:
-        raise JobCancelled()
+        raise JobCancelled() from None
     except Exception as exc:
         logger.warning("[invoke] session_finalize pipeline failed: %s", exc)
 
@@ -3246,7 +3247,8 @@ async def run_invoke_respin(
 ) -> dict:
     """PROMPT lane. Compute vocab/axis hints then compose a single spirit for respin."""
     import asyncio as _asyncio
-    from ..invoke.vocab_bank import get_vocab_hints, get_axis_semantic_tags
+
+    from ..invoke.vocab_bank import get_axis_semantic_tags, get_vocab_hints
 
     reporter.indeterminate()
     cancel.raise_if_set()
@@ -3341,6 +3343,7 @@ async def run_invoke_enhance_prompt(
     """PROMPT lane. Embed text, find semantic WD14 tags, refine via LLM. Puts done event on event_queue."""
     import json as _json
     import re as _re
+
     from ..invoke.vocab_bank import _is_species_tag
 
     reporter.update(0.1, "Embedding text...", key="embeddingText")
@@ -3423,6 +3426,7 @@ async def run_invoke_oracle_compose(
     # Alternates "comfort day" (recent taste) and "frontier day" (unexplored vocabulary).
     if not topic and roulette:
         from datetime import date as _date
+
         from ..invoke.vocab_bank import compute_frontier_hints, synthesize_slogan
 
         try:
@@ -3544,7 +3548,7 @@ async def run_invoke_daily_oracle(
     try:
         await waiter
     except asyncio.CancelledError:
-        raise JobCancelled()
+        raise JobCancelled() from None
 
     reporter.update(1.0, "Daily oracle complete", key="dailyOracleComplete")
     return {"session_id": session.session_id, "axes": axes}
@@ -3665,6 +3669,7 @@ async def run_import_wd14_vocab(
     and upsert into the wd14_vocab Qdrant collection for semantic search.
     """
     import csv
+
     from ..config import settings
     from ..invoke.vocab_bank import invalidate_vocab_cache
 
@@ -3747,8 +3752,9 @@ async def run_emotion_tag(
     When sha256s is None, processes all images that lack emotion scores (no emotion_loneliness
     payload field). Results are stored as flat keys: emotion_loneliness, emotion_nostalgia, ...
     """
-    from ..ai.emotion_tagger import score_emotions, EMOTION_DIMENSIONS
     from qdrant_client import models as qm
+
+    from ..ai.emotion_tagger import EMOTION_DIMENSIONS, score_emotions
 
     reporter.indeterminate()
     cancel.raise_if_set()

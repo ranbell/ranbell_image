@@ -1,4 +1,5 @@
 from pathlib import Path
+
 from pydantic_settings import BaseSettings
 
 
@@ -46,7 +47,7 @@ class Settings(BaseSettings):
     # an admin-screen operation, because it rewrites every point.
 
     # API authentication
-    api_token: str = "RANBELL_IMAGE_API_TOKEN"
+    api_token: str = "RANBELL_IMAGE_API_TOKEN"  # noqa: S105 — placeholder; set the real one in .env
 
     # File watcher
     watch_debounce_seconds: float = 5.0

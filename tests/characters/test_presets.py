@@ -15,15 +15,13 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 import pytest
-
 from app.characters.presets import (
     GALLERY_LIMIT,
-    preset_label,
     _with_candidate,
-    load_seed_presets,
     normalise_gallery,
     personality_text_from_preset,
     plan_reset,
+    preset_label,
     preset_point_id,
     preset_summary,
     preset_to_character,

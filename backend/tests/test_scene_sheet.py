@@ -115,7 +115,6 @@ def test_a_lowercase_medium_opening_gets_its_article():
 # ── The whole Refine job on the detailed style ───────────────────────────────
 
 import asyncio
-import io
 import json
 
 import pytest

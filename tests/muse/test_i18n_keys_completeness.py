@@ -4,7 +4,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
-import pytest
 
 JA_JSON_PATH = Path(__file__).parent.parent.parent / "frontend/src/locales/ja.json"
 EN_JSON_PATH = Path(__file__).parent.parent.parent / "frontend/src/locales/en.json"

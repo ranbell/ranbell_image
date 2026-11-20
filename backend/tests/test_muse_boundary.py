@@ -1287,7 +1287,7 @@ async def test_persona_is_deflected_and_the_harm_words_cancel_the_turn(monkeypat
         monkeypatch.setattr(muse_chain, "read_boundary", await _says(word))
         monkeypatch.setattr(
             muse_chain, "confirm_boundary",
-            lambda *a, **kw: _async(muse_chain.Verdict(word, "")),
+            lambda *a, _w=word, **kw: _async(muse_chain.Verdict(_w, "")),
         )
         session = {"inputs": {}, "chat": []}
         got = await muse_service._contract_check(object(), session, "…", cfg={})

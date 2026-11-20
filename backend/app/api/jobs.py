@@ -102,9 +102,9 @@ async def retry_job(job_id: str, request: Request):
     try:
         new_id = spooler.retry(job_id)
     except KeyError:
-        raise HTTPException(404, f"Job {job_id!r} not found")
+        raise HTTPException(404, f"Job {job_id!r} not found") from None
     except ValueError as exc:
-        raise HTTPException(409, str(exc))
+        raise HTTPException(409, str(exc)) from exc
     return {"status": "queued", "job_id": new_id, "retried_from": job_id}
 
 
@@ -138,7 +138,7 @@ async def pause_lane(lane: str, request: Request):
     try:
         lane_enum = JobLane(lane)
     except ValueError:
-        raise HTTPException(400, f"Unknown lane: {lane!r}")
+        raise HTTPException(400, f"Unknown lane: {lane!r}") from None
     request.app.state.spooler.pause_lanes([lane_enum], LanePauseReason.MANUAL)
     return {
         "status": "paused",
@@ -153,7 +153,7 @@ async def resume_lane(lane: str, request: Request):
     try:
         lane_enum = JobLane(lane)
     except ValueError:
-        raise HTTPException(400, f"Unknown lane: {lane!r}")
+        raise HTTPException(400, f"Unknown lane: {lane!r}") from None
     request.app.state.spooler.resume_lanes([lane_enum])   # reason=None → force resume
     return {
         "status": "resumed",

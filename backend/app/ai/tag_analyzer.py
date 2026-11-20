@@ -1,5 +1,5 @@
 import time
-from collections import Counter, defaultdict
+from collections import Counter
 
 _cooccurrence_cache: dict | None = None
 _cache_ts: float = 0.0

@@ -9,6 +9,7 @@ from pathlib import Path
 from PIL import Image
 
 from ..scanner.walk import PIL_FORMATS
+from ._utils import compute_hash, now_iso
 from .a1111_parser import parse_a1111
 from .comfyui_parser import (
     detect_format,
@@ -17,7 +18,6 @@ from .comfyui_parser import (
 )
 from .schema import ExtractionInfo, ExtractionResult, ModelInfo, RawMetadata
 from .trace import direct_search_prompts, trace_prompts
-from ._utils import basename, compute_hash, now_iso
 
 logger = logging.getLogger(__name__)
 

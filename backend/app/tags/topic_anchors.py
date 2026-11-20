@@ -150,7 +150,7 @@ def topic_anchor_groups(
         group: list[str] = []
         gseen: set[str] = set()
 
-        def _add_g(tok: str) -> None:
+        def _add_g(tok: str, gseen: set[str] = gseen, group: list[str] = group) -> None:
             t = _normalize_topic_token(tok)
             if not t or t in gseen or t in _TOPIC_STOP:
                 return

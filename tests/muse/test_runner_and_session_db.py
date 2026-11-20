@@ -3,9 +3,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from app.muse import runner, session_db
 
 
@@ -76,6 +76,6 @@ def test_runner_preview_publisher_and_finished_image():
     """Test preview_publisher and finished_image helpers."""
     pub = runner.preview_publisher("sess_123", "test_label")
     assert callable(pub)
-    
+
     sha = runner.finished_image(["sha_1", "sha_2", "sha_3"])
     assert sha == "sha_3"

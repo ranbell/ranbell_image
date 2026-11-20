@@ -1,6 +1,7 @@
 """KSampler reverse-lookup and recursive link resolution for ComfyUI workflows."""
 from __future__ import annotations
 
+from .comfyui_parser import get_sdxl_text, get_text_from_node
 from .known_nodes import (
     CLIP_TEXT_ENCODE_CLASSES,
     CONCAT_NODE_CLASSES,
@@ -13,7 +14,6 @@ from .known_nodes import (
     TEXT_SHOW_NODE_CLASSES,
     WILDCARD_ENCODE_CLASSES,
 )
-from .comfyui_parser import get_sdxl_text, get_text_from_node
 
 
 def trace_prompts(

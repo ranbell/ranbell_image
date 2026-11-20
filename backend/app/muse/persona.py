@@ -450,8 +450,8 @@ async def contract_check_with_db(db, ollama, session: dict[str, Any], text: str)
     if ollama is None or not str(text or "").strip():
         return ""
     try:
-        from . import shared as muse_service
         from ..runtime_config import get_runtime_config
+        from . import shared as muse_service
         cfg = await get_runtime_config(db)
         session["_runtime_cfg"] = cfg
         return await muse_service._contract_check(

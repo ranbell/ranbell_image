@@ -14,10 +14,10 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "backend"))
 
 from app.muse import notebook, service, session_db, vitality
+
 from tests.muse.test_duet import _duet_session
 from tests.muse.test_duet_notebook import NotebookOllama, _scripter_block
 from tests.muse.test_service import FakeDb
-
 
 OUT = Path("/opt/cursor/artifacts/muse_session_sim_report.md")
 
@@ -217,7 +217,7 @@ async def case_rooftop_rapid(db, lines: list[str]) -> None:
         ("かき氷なら何味がいい？", "かき氷"),
         ("いいね", "いいね"),
     ]
-    for text, key in turns:
+    for text, _key in turns:
         # Ensure say keyword matches via chat context containing key phrases
         await service.post_duet_chat(db, ollama, s, text)
         lines.append(_md_snap(f"監督「{text}」", _snap(s)))
@@ -337,7 +337,7 @@ CRAFT_SCENE: Both standing side by side.
     s["chemistry_notes"] = ["息が合いやすい"]
     await session_db.save(db, s)
 
-    for text, key in [
+    for text, _key in [
         ("あさひは椅子で読書、みなもは立ってて", "読書"),
         ("肩に手、ローアングル", "肩"),
         ("あさひだけ帽子かぶって", "あさひだけ"),

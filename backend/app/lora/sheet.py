@@ -73,7 +73,7 @@ def render_key(prompt: str, lora: str, strength: float) -> str:
     if not strength:
         lora = ""  # strength 0 is the bare model whatever the row
     raw = json.dumps([prompt, lora, round(float(strength), 4)], ensure_ascii=False)
-    return hashlib.sha1(raw.encode()).hexdigest()[:16]
+    return hashlib.sha1(raw.encode()).hexdigest()[:16]  # noqa: S324 — a fingerprint, not a signature
 
 
 def _spec(sheet: dict, row: dict, col: dict) -> dict:

@@ -15,8 +15,6 @@ server:
 """
 from __future__ import annotations
 
-import asyncio
-
 import sys
 from pathlib import Path
 
@@ -25,9 +23,6 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 from app.muse import shared  # noqa: E402
-from tests.muse.test_service import (  # noqa: E402
-    FakeComfy, FakeDb, FakeSpooler,
-)
 
 
 @pytest.fixture(autouse=True)

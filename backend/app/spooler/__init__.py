@@ -1,4 +1,4 @@
-from .models import Job, JobCancelled, JobLane, JobState, CancelToken, ProgressReporter, ResourceUnreachable
+from .models import CancelToken, Job, JobCancelled, JobLane, JobState, ProgressReporter, ResourceUnreachable
 from .spooler import JobSpooler
 
 __all__ = [

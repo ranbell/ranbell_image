@@ -15,7 +15,7 @@ Embeddings always go through Ollama so Qdrant vector dimensions stay stable.
 from __future__ import annotations
 
 import logging
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
 from .ollama import OllamaClient
 from .openai_compat import OpenAICompatClient
@@ -36,7 +36,7 @@ LLM_RUNTIME_KEYS = frozenset({
 })
 
 
-def apply_llm_runtime_config(llm: "LlmGateway", cfg: dict) -> None:
+def apply_llm_runtime_config(llm: LlmGateway, cfg: dict) -> None:
     """Push Admin / env connection settings onto the live gateway."""
     llm.configure(ollama_url=cfg.get("ollama_url"))
     llm.configure_external(cfg)
@@ -48,7 +48,7 @@ class ExternalLlm:
     passed. Embeddings and everything else fall through to the Ollama gateway.
     """
 
-    def __init__(self, gateway: "LlmGateway", feature: str) -> None:
+    def __init__(self, gateway: LlmGateway, feature: str) -> None:
         self._gateway = gateway
         self._client = gateway.external
         self.feature = feature
@@ -164,7 +164,7 @@ class LlmGateway:
                 self.external_vision_model or "(unset)", ", ".join(routed),
             )
 
-    def for_feature(self, feature: str) -> "LlmGateway | ExternalLlm":
+    def for_feature(self, feature: str) -> LlmGateway | ExternalLlm:
         """The gateway this feature's text / vision calls should use.
 
         Choosing the external server without filling in its URL or model is

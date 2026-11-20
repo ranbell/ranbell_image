@@ -24,10 +24,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
-from app.spooler.models import JobCancelled, JobLane, JobState, LanePauseReason, ResourceUnreachable
+from app.spooler.models import JobCancelled, JobLane, LanePauseReason, ResourceUnreachable
 from app.spooler.resources import Resource, build_resources
 from app.spooler.spooler import JobSpooler
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 

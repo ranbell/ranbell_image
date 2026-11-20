@@ -468,7 +468,6 @@
 <script setup>
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useControlRoom } from '../composables/useControlRoom.js'
 import { jobLabel, jobProgress } from '../jobLabel.js'
 import ProgressBar from './ProgressBar.vue'
 
@@ -488,7 +487,7 @@ const props = defineProps({
   diskFaultPct:   { type: Number,  default: 90 },
 })
 
-const emit = defineEmits(['close', 'retry', 'cancel', 'retry-all-failed', 'cancel-all-queued', 'reopen-refine'])
+defineEmits(['close', 'retry', 'cancel', 'retry-all-failed', 'cancel-all-queued', 'reopen-refine'])
 
 const {
   SYSTEMS,

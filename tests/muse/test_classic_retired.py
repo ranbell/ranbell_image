@@ -70,8 +70,8 @@ def test_there_is_one_studio_and_it_answers_under_api_muse():
 def test_the_two_routers_under_api_muse_do_not_collide():
     """The studio and the lounge now share a prefix. **Serve one route twice and
     the later one wins.**"""
-    from app.muse import lounge_api
     from app.muse import api as studio_api
+    from app.muse import lounge_api
 
     studio = _paths(studio_api.router)
     lounge = _paths(lounge_api.router)

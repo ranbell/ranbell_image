@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field
 
@@ -23,7 +23,7 @@ class InspireContext(BaseModel):
 class CreationRecord(BaseModel):
     version: str = "1.0"
     recorded_at: str = Field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+        default_factory=lambda: datetime.now(UTC).isoformat()
     )
     method: str = "refine"
     instruction: str = ""

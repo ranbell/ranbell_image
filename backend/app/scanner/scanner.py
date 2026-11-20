@@ -34,7 +34,7 @@ import os
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
@@ -148,14 +148,14 @@ class ScanState(BaseModel):
         self.moved = 0
         self.deleted = 0
         self.errors = 0
-        self.started_at = datetime.now(timezone.utc).isoformat()
+        self.started_at = datetime.now(UTC).isoformat()
         self.finished_at = None
         self.current_file = None
 
     def finish(self) -> None:
         self.running = False
         self.phase = None
-        self.finished_at = datetime.now(timezone.utc).isoformat()
+        self.finished_at = datetime.now(UTC).isoformat()
         self.current_file = None
 
 
@@ -200,7 +200,7 @@ def _under_any(path: str, dirs) -> bool:
 
 
 def _iso(mtime_ns: int) -> str:
-    return datetime.fromtimestamp(mtime_ns / 1e9, tz=timezone.utc).isoformat()
+    return datetime.fromtimestamp(mtime_ns / 1e9, tz=UTC).isoformat()
 
 
 # ── One image's places on disk ─────────────────────────────────────────────────
@@ -225,7 +225,7 @@ class _Point:
     star_from: int | None = None             # star_rating inherited from a replaced point
 
     @classmethod
-    def from_doc(cls, doc: dict) -> "_Point":
+    def from_doc(cls, doc: dict) -> _Point:
         locs: dict[str, _Loc] = {}
         if doc.get("path"):
             locs[doc["path"]] = _Loc(int(doc.get("size") or 0), doc.get("mtime_ns"), doc.get("mtime") or "")
@@ -259,8 +259,8 @@ def _location_fields(point: _Point) -> dict:
     loc = point.locs[primary]
     p = Path(primary)
     dups = [
-        {"path": q, "size": l.size, "mtime_ns": l.mtime_ns}
-        for q, l in sorted(point.locs.items()) if q != primary
+        {"path": q, "size": loc.size, "mtime_ns": loc.mtime_ns}
+        for q, loc in sorted(point.locs.items()) if q != primary
     ]
     return {
         "path": primary,
@@ -282,7 +282,7 @@ def _new_payload(point: _Point, result) -> dict:
     return {
         "sha256": point.sha256,
         **_location_fields(point),
-        "scanned_at": datetime.now(timezone.utc).isoformat(),
+        "scanned_at": datetime.now(UTC).isoformat(),
         "positive_prompt": result.positive_prompt,
         "negative_prompt": result.negative_prompt,
         "params": result.params,
@@ -541,7 +541,7 @@ async def _reconcile(
             await db.upsert_new_batch(to_insert, wait=False)
 
     # ── Write the rest ─────────────────────────────────────────────────────────
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     deletes: list[str] = []
     for pt in points.values():
         if not pt.locs and not pt.new:
@@ -813,7 +813,7 @@ async def register_image(path: Path, db: QdrantDBClient, data: bytes | None = No
             pt = _Point.from_doc(found[sha256])
             pt.add(f.path, f)
             await db.set_payload_batch([(sha256, {
-                **_location_fields(pt), "scanned_at": datetime.now(timezone.utc).isoformat(),
+                **_location_fields(pt), "scanned_at": datetime.now(UTC).isoformat(),
             })])
         else:
             result = await _io(_ingest_sync, f.path, sha256, data)

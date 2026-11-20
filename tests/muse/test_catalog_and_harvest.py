@@ -3,9 +3,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
-import pytest
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from app.muse import catalog
 
 
@@ -15,7 +15,7 @@ async def test_build_muse_catalog():
     fake_app = MagicMock()
     fake_app.state.comfy = MagicMock()
     fake_app.state.spooler = MagicMock()
-    
+
     # Mock comfy models & workflows as AsyncMocks
     fake_app.state.comfy.list_checkpoints = AsyncMock(return_value=["sdxl_base.safetensors", "pony_v6.safetensors"])
     fake_app.state.comfy.list_workflows = AsyncMock(return_value=["txt2img", "img2img"])

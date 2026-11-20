@@ -14,7 +14,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 import pytest
-
 from app.characters.presets import preset_to_character
 from app.muse import brief
 

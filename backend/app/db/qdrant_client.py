@@ -1,20 +1,21 @@
 import asyncio
-import time
 import base64
 import json
 import logging
 import os
 import random
+import time
 import uuid
 from collections import defaultdict
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
-from qdrant_client import AsyncQdrantClient, models as qm
+from qdrant_client import AsyncQdrantClient
+from qdrant_client import models as qm
 
-from .id_utils import sha256_to_point_id
 from ..config import settings
+from .id_utils import sha256_to_point_id
 
 logger = logging.getLogger(__name__)
 
@@ -180,7 +181,7 @@ def _next_scroll_cursor(
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 # Schema parameters live in Qdrant, in the app_config point. Startup seeds them

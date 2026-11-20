@@ -25,7 +25,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 import pytest
-
 from app.muse import brief, chain, runtime, shared
 
 
@@ -145,13 +144,13 @@ def test_the_contract_lets_her_decide_when_she_is_asked_to():
     mechanism that **makes her decide only on the turn where she is asked** is
     built separately.
     """
-    from app.muse import crew
-
     # **The contract was put back into English (2026-09-04).** It was English
     # originally and had recently been turned wholly into Japanese. The Showrunner:
     # "English is less likely to be misread". Only the words checked for are swapped —
     # the reasoning above still holds.
     import re
+
+    from app.muse import crew
 
     contract = re.sub(r"\s+", " ", crew.production_contract())
     assert "Not choosing is not an answer" in contract

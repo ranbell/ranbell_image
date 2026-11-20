@@ -2,10 +2,8 @@
 from __future__ import annotations
 
 import pytest
-
 from app.lora import bucket as bk
-from app.lora import captioner
-from app.lora import targets
+from app.lora import captioner, targets
 
 
 @pytest.fixture

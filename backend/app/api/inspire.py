@@ -4,23 +4,25 @@ import logging
 import math
 import random
 import re
+from collections.abc import AsyncGenerator
 from pathlib import Path
-from typing import AsyncGenerator
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from ..ai import vecmath
 from ..ai.tile_image import create_tile_image
 from ..jobs.sse_stream import queue_sse_response
 from ..runtime_config import get_runtime_config
 from ..spooler.models import JobLane
-from ..ai import vecmath
 from ..tags import catalog as tag_catalog
 from .inspire_axes import (
-    AXIS_DEFINITIONS, ALL_AXES, AXIS_ALIAS_MAP,
-    STEP1_AXIS_TABLE, STEP2_INVERSION_HINTS,
-    normalize_axis, resolve_axes,
+    ALL_AXES,
+    AXIS_DEFINITIONS,
+    STEP1_AXIS_TABLE,
+    STEP2_INVERSION_HINTS,
+    normalize_axis,
+    resolve_axes,
 )
 
 logger = logging.getLogger(__name__)
@@ -30,6 +32,7 @@ def _load_wd14_character_tags() -> frozenset[str]:
     """Return category=4 (character name) tags from selected_tags.csv."""
     try:
         import pandas as pd
+
         from ..config import settings
         csv_path = Path(settings.wd14_model_dir) / "selected_tags.csv"
         if not csv_path.exists():
@@ -327,7 +330,7 @@ async def anomaly(body: AnomalyRequest, request: Request):
     try:
         anomaly_text = await ollama.generate_text(prompt, model=cfg["vlm_model"])
     except Exception as e:
-        raise HTTPException(500, f"Ollama error: {e}")
+        raise HTTPException(500, f"Ollama error: {e}") from e
 
     raw_tags = [t.strip().lower().replace(" ", "_") for t in anomaly_text.split(",") if t.strip()]
     anomaly_tags = [t for t in raw_tags if t][:3]
@@ -338,7 +341,7 @@ async def anomaly(body: AnomalyRequest, request: Request):
     try:
         query_vec = await ollama.embed(combined_text, model=cfg["embed_model"])
     except Exception as e:
-        raise HTTPException(500, f"Embedding error: {e}")
+        raise HTTPException(500, f"Embedding error: {e}") from e
 
     docs = await db.search_by_vector(
         query_vec, n_results=body.n_results * 2, exclude_sha256s=body.sha256s, exclude_reference=True
@@ -960,14 +963,17 @@ async def _step2_semantic_inverter(
     model: str,
     options: dict | None = None,
 ) -> tuple[list[str], list[str], dict[str, list[str]], dict[str, list[str]]]:
+    # `intensity` is worked out but never reaches the prompt (found by ruff F841,
+    # 2026-11-21). Kept as it was — whether strength should be in the prompt is a
+    # prompt decision, not a lint one.
     if strength <= 0.3:
-        intensity = "GENTLE: subtle variation, similar feel but slightly different"
+        intensity = "GENTLE: subtle variation, similar feel but slightly different"  # noqa: F841
     elif strength <= 0.6:
-        intensity = "MODERATE: noticeable contrast, keep ~40% of original feel"
+        intensity = "MODERATE: noticeable contrast, keep ~40% of original feel"  # noqa: F841
     elif strength <= 0.9:
-        intensity = "STRONG: significant inversion, clearly different world"
+        intensity = "STRONG: significant inversion, clearly different world"  # noqa: F841
     else:
-        intensity = "DRAMATIC: complete conceptual opposite, maximum contrast"
+        intensity = "DRAMATIC: complete conceptual opposite, maximum contrast"  # noqa: F841
 
     change_set = set(change_targets)
 
@@ -1809,7 +1815,7 @@ async def text_search(body: TextSearchRequest, request: Request):
     try:
         query_vec = await ollama.embed(body.query, model=cfg["embed_model"])
     except Exception as e:
-        raise HTTPException(500, f"Embedding error: {e}")
+        raise HTTPException(500, f"Embedding error: {e}") from e
     docs = await db.search_by_vector(
         query_vec, n_results=body.n_results * 2, exclude_reference=True
     )

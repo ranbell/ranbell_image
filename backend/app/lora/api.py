@@ -70,7 +70,7 @@ def _shas(values: list[str]) -> list[str]:
     try:
         return [bk.clean_sha(v) for v in values]
     except bk.BucketError as exc:
-        raise HTTPException(400, str(exc))
+        raise HTTPException(400, str(exc)) from exc
 
 
 def _start_captions(request: Request, bucket: dict) -> None:
@@ -132,7 +132,7 @@ async def create_bucket(body: BucketCreate, request: Request):
                 targets=body.targets, target_model=body.target_model,
             )
         except bk.BucketError as exc:
-            raise HTTPException(400, str(exc))
+            raise HTTPException(400, str(exc)) from exc
         bk.add_items(bucket, shas)
         async with bk.lock(bucket["id"]):
             await bk.save(db, bucket)
@@ -153,7 +153,7 @@ async def patch_bucket(bucket_id: str, body: BucketPatch, request: Request):
             bk.update_settings(bucket, name=body.name, trigger=body.trigger, targets=body.targets,
                                target_model=body.target_model)
         except bk.BucketError as exc:
-            raise HTTPException(400, str(exc))
+            raise HTTPException(400, str(exc)) from exc
         await bk.save(_db(request), bucket)
     _start_captions(request, bucket)
     return _view(bucket)
@@ -204,7 +204,7 @@ async def put_caption(bucket_id: str, sha256: str, body: CaptionBody, request: R
         try:
             bk.set_caption(bucket, sha256, body.caption)
         except bk.BucketError as exc:
-            raise HTTPException(404, str(exc))
+            raise HTTPException(404, str(exc)) from exc
         await bk.save(_db(request), bucket)
     return _view(bucket)
 
@@ -217,7 +217,7 @@ async def recaption(bucket_id: str, body: RecaptionBody, request: Request):
         try:
             n = bk.request_recaption(bucket, body.sha256s, step=body.step, force=body.force)
         except bk.BucketError as exc:
-            raise HTTPException(400, str(exc))
+            raise HTTPException(400, str(exc)) from exc
         await bk.save(_db(request), bucket)
     _start_captions(request, bucket)
     return _view(bucket) | {"queued": n}
@@ -260,7 +260,7 @@ async def export_zip(bucket_id: str, request: Request):
     try:
         entries = await export.plan(_db(request), bucket)
     except export.ExportError as exc:
-        raise HTTPException(409, str(exc))
+        raise HTTPException(409, str(exc)) from exc
     path = await asyncio.get_running_loop().run_in_executor(
         None, export.write_zip, entries, bucket["slug"],
     )

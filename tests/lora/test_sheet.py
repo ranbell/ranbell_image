@@ -253,9 +253,8 @@ async def test_in_flight_frames_are_kept_per_cell_and_dropped_at_the_end(store, 
 
 @pytest.mark.asyncio
 async def test_comfy_gone_leaves_the_rest_waiting(store, monkeypatch):
-    import httpx
-
     import app.jobs.render as render
+    import httpx
 
     s = sh.new_sheet(_body())
     store[s["id"]] = s
@@ -379,7 +378,6 @@ def test_prefill_reads_the_graph_the_picture_was_drawn_with():
 @pytest.mark.asyncio
 async def test_model_lists_come_from_models_or_object_info():
     import httpx
-
     from app.ai.comfy import ComfyUIClient
 
     def handler(request):
@@ -463,9 +461,8 @@ def test_stacked_sheets_name_only_what_differs():
 def test_stack_png_has_a_section_per_sheet():
     import io
 
-    from PIL import Image
-
     from app.lora import sheet_grid
+    from PIL import Image
 
     a = sh.new_sheet(_body())
     b = sh.new_sheet(_body(seed=7))
@@ -491,9 +488,8 @@ def test_prefill_takes_the_shape_from_the_picture_itself():
 
 
 def test_prefill_reads_the_pixel_size_from_the_file_header(tmp_path):
-    from PIL import Image
-
     from app.lora.sheet_api import _pixel_size
+    from PIL import Image
 
     path = tmp_path / "x.png"
     Image.new("RGB", (640, 960)).save(path)
@@ -548,11 +544,10 @@ def test_a_sheet_whose_job_left_the_spooler_is_not_drawing():
 
 
 def test_rename_and_stack_png_routes(store, monkeypatch):
-    from fastapi import FastAPI
-    from fastapi.testclient import TestClient
-
     from app.lora import sheet_api
     from app.lora.sheet_api import router
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
 
     # Other suites may re-import app.lora.sheet; patch the module the routes use.
     monkeypatch.setattr(sheet_api.sh, "load", sh.load)
@@ -634,9 +629,8 @@ def test_a_missing_lora_graph_error_is_caught_at_creation():
 
 @pytest.mark.asyncio
 async def test_comfy_down_mid_render_keeps_the_cell_waiting_and_the_sheet_drawing(store, monkeypatch):
-    import httpx
-
     import app.jobs.render as render
+    import httpx
 
     s = sh.new_sheet(_body())
     store[s["id"]] = s
@@ -679,10 +673,9 @@ def test_sheet_job_progress_never_jumps_back_to_zero():
 def test_routes_draw_rest_says_drawing_and_png_names_survive_japanese(store, monkeypatch):
     from urllib.parse import unquote
 
+    from app.lora import sheet_api
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
-
-    from app.lora import sheet_api
 
     monkeypatch.setattr(sheet_api.sh, "load", sh.load)
     monkeypatch.setattr(sheet_api.sh, "save", sh.save)

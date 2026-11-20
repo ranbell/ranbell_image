@@ -743,7 +743,7 @@ async def create(
             await _character(db, partner_id) if partner_id and partner_id != character_id else {}
         )
     except KeyError:
-        raise VideoTalkError(_say(talk, "女優が見つかりません", "That actress is not on the roster"))
+        raise VideoTalkError(_say(talk, "女優が見つかりません", "That actress is not on the roster")) from None
     src = await source_of(db, sha)
     people = await photo_people(db, src)
     shoot = src.get("session")

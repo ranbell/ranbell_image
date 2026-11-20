@@ -9,6 +9,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 from app.muse import chain, notebook, shared
+
 from tests.muse.test_service import FakeOllama  # noqa: E402
 
 

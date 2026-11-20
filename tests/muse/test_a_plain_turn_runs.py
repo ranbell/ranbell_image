@@ -25,9 +25,9 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "backend"))
 
-from app.muse import assemble, crew_room as C, persona, service, session_db
+from app.muse import assemble, persona, service, session_db, writer
+from app.muse import crew_room as C
 from app.muse import shared as muse_shared
-from app.muse import writer
 
 
 @pytest.fixture

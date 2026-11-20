@@ -14,13 +14,12 @@ from typing import Any
 
 from qdrant_client import models as qm
 
-from ..spooler.models import JobCancelled
-
 from ..db.qdrant_client import (
     CHARACTER_COMPAT_COLLECTION,
     CHARACTER_PRESETS_COLLECTION,
     MUSE_SESSIONS_COLLECTION,
 )
+from ..spooler.models import JobCancelled
 
 logger = logging.getLogger(__name__)
 

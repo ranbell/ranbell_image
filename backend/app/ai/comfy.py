@@ -5,8 +5,8 @@ import logging
 import re
 import time
 import uuid
+from collections.abc import AsyncGenerator
 from pathlib import Path
-from typing import AsyncGenerator
 
 import httpx
 
@@ -26,7 +26,7 @@ async def _with_idle_timeout(ws, timeout: float):
             yield await asyncio.wait_for(it.__anext__(), timeout=timeout)
         except StopAsyncIteration:
             return
-        except asyncio.TimeoutError as exc:
+        except TimeoutError as exc:
             raise TimeoutError(
                 f"ComfyUI sent nothing for {timeout:.0f}s — assuming it died"
             ) from exc
@@ -915,7 +915,7 @@ class ComfyUIClient:
                         val = data.get("value", 0)
                         max_val = data.get("max", 0)
                         now = time.monotonic()
-                        
+
                         if val == max_val or (now - last_progress_time) > 0.1:
                             last_progress_time = now
                             yield {

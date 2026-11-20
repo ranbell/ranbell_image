@@ -14,7 +14,8 @@ copy**. Classic's notebook has had `expression_b` from the start.
 """
 from __future__ import annotations
 
-from app.muse import assemble, ledger as L
+from app.muse import assemble
+from app.muse import ledger as L
 
 CHAR = {"character_id": "a", "name": "Mio", "name_ja": "各務 みお",
         "identity_tags": ["silver_hair", "bob_cut", "flat_chest"]}

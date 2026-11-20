@@ -323,7 +323,7 @@ async def create_sheet(body: SheetCreate, request: Request):
     try:
         sheet = sh.new_sheet(data)
     except sh.SheetError as exc:
-        raise HTTPException(400, str(exc))
+        raise HTTPException(400, str(exc)) from exc
     async with sh.lock(sheet["id"]):
         await sh.save(_db(request), sheet)
     job_id = _start(request, sheet) if body.start else None
@@ -346,7 +346,7 @@ async def rename_sheet(sheet_id: str, body: RenameBody, request: Request):
         try:
             sh.rename(sheet, body.name)
         except sh.SheetError as exc:
-            raise HTTPException(400, str(exc))
+            raise HTTPException(400, str(exc)) from exc
         await sh.save(_db(request), sheet)
     return _view(sheet)
 
@@ -392,7 +392,7 @@ async def duplicate_sheet(sheet_id: str, body: DuplicateBody, request: Request):
     try:
         copy = sh.duplicate(await _load(request, sheet_id), seed=body.seed, name=body.name)
     except sh.SheetError as exc:
-        raise HTTPException(400, str(exc))
+        raise HTTPException(400, str(exc)) from exc
     async with sh.lock(copy["id"]):
         await sh.save(_db(request), copy)
     job_id = _start(request, copy) if body.start else None

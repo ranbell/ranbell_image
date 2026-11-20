@@ -3,15 +3,12 @@ import colorsys
 import json
 import logging
 import re
-import time
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
-from PIL import Image as _PILImage
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import FileResponse
+from PIL import Image as _PILImage
 from pydantic import BaseModel
-from typing import Optional
 
 from ..ai.color_extractor import rgb_to_lab
 from ..config import settings
@@ -21,6 +18,8 @@ from ..thumbnails.generator import ensure_thumbnail, get_thumbnail_path
 from .cache import Cached
 from .sort_utils import sort_docs
 from .tag_categories import guess_category
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api")
 
@@ -233,7 +232,8 @@ async def list_images(
     # point and each "next page" serves the first page again.
     if date_seek and not cursor and sort in ("newest", "oldest"):
         if re.match(r'^\d{4}-\d{2}-\d{2}', date_seek):
-            import base64 as _b64s, json as _jsons
+            import base64 as _b64s
+            import json as _jsons
             cursor = _b64s.b64encode(_jsons.dumps({"start": date_seek, "seen": []}).encode()).decode()
 
     # align_desc sort: pre-fetch alignment-ordered sha256 list, paginate with integer cursor
@@ -408,7 +408,7 @@ async def color_pick(
         lab = _hex_to_lab(hex_color)
     except ValueError as e:
         logger.warning("Invalid hex color %r: %s", hex_color, e)
-        raise HTTPException(status_code=422, detail="カラーコードの形式が正しくありません")
+        raise HTTPException(status_code=422, detail="カラーコードの形式が正しくありません") from e
 
     distance = max(1.0, min(float(distance), 100.0))
     limit = max(1, min(int(limit), 200))
@@ -468,7 +468,7 @@ async def get_image(sha256: str, request: Request):
 
 
 class RatingBody(BaseModel):
-    rating: Optional[int] = None  # 1-5 or null to remove
+    rating: int | None = None  # 1-5 or null to remove
 
 
 @router.put("/images/{sha256}/rating")
@@ -621,7 +621,7 @@ async def get_raw_metadata(sha256: str, request: Request):
             fmt = img.format
     except Exception as exc:
         logger.error("Failed to read image metadata %s: %s", file_path, exc)
-        raise HTTPException(status_code=500, detail="画像の読み込みに失敗しました")
+        raise HTTPException(status_code=500, detail="画像の読み込みに失敗しました") from exc
 
     sections: list[dict] = []
 

@@ -9,13 +9,14 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Iterable
+from collections.abc import Iterable
+
+from ..tags.body import BODY_SLOTS as _BODY_SLOTS
+from ..tags.body import BREAST_TAGS as _BREAST_TAGS
 
 # The body vocabulary lives in app.tags.body so the character registry and this
 # module cannot drift apart about what may be locked to a character.
-from ..tags.body import AGE_TAGS, REFUSED_TAGS
-from ..tags.body import BODY_SLOTS as _BODY_SLOTS
-from ..tags.body import BREAST_TAGS as _BREAST_TAGS
+from ..tags.body import REFUSED_TAGS
 from ..tags.catalog import HAIR_STYLES as _HAIR_STYLES
 
 logger = logging.getLogger(__name__)

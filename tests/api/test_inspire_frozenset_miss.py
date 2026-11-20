@@ -25,7 +25,6 @@ from app.api.inspire import (
     _step1_dynamic_separator,
 )
 
-
 # Tags deliberately absent from tag_categories.json frozensets
 _MISS_TAGS = (
     "neon_lantern_glow",

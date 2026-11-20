@@ -220,12 +220,6 @@ function nudgeGap(dir) {
   refreshCoachPreview()
 }
 
-function applyInteract(name) {
-  if (!stage?.applyInteraction || !coachOn.value) return
-  stage.applyInteraction(name)
-  refreshCoachPreview()
-}
-
 function resetPlacement() {
   if (!stage?.resetPlacement || !coachOn.value) return
   stage.resetPlacement()

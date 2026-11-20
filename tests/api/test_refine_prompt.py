@@ -22,17 +22,16 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 from app.api.ai import (
     _STYLE_INSTRUCTIONS,
+    _append_literal_texts,
     _build_natural_prose_prompt,
     _build_natural_tags_prompt,
     _build_vlm_prompt,
     _check_natural_prose,
     _extract_literal_texts,
-    _append_literal_texts,
     _remove_forced_tags,
     _translate_and_classify,
     _translate_instruction,
 )
-
 
 # ── _build_vlm_prompt (danbooru) ────────────────────────────────────────────
 

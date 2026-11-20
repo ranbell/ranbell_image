@@ -16,7 +16,8 @@ every turn.
 """
 from __future__ import annotations
 
-from app.muse import ledger as L, pipeline_view as P
+from app.muse import ledger as L
+from app.muse import pipeline_view as P
 
 
 def _session(led: dict, prompt: str, *, stale: bool = False, board: str = ""):

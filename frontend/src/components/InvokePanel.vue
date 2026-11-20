@@ -1,11 +1,10 @@
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, watch, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   useInvokeSession,
   SPIRIT_NAMES,
   SPIRIT_META,
-  EMOJI_PALETTE,
   EMOTION_DIMENSIONS,
   getSpiritFrame,
 } from '../composables/useInvokeSession.js'
@@ -20,8 +19,8 @@ const emit  = defineEmits(['update:show', 'send-to-refine', 'toast', 'select-ima
 const { locale, t } = useI18n()
 
 const {
-  invokeOpen, invokeInputMode, invokeLoading, isLoading,
-  invokeSessionId, invokeSpirits, invokeAxes,
+  invokeOpen, invokeInputMode, isLoading,
+  invokeSpirits, invokeAxes,
   invokeDailyOracle, invokeOracleNextRun, invokeStats,
   invokeEmojis, invokeText, invokeColors, invokeMoodSliders,
   invokePersonGender, invokePersonCount, invokePromptMode,
@@ -31,7 +30,6 @@ const {
   invokeResonanceMode, invokeResonanceTags, invokeResonanceCount,
   invokeFrontierMode, invokeFrontierTags, invokeHeat,
   invokeWildness, invokeEmotion,
-  openInvoke, closeInvoke,
   summon, cancel, respin, adopt, sendToRefine, evolve, breed,
   fetchDaily, fetchStats, enhancePrompt, fetchResonancePreview, fetchFrontierPreview,
   toggleEmoji, toggleSpirit,
@@ -151,10 +149,6 @@ const AXIS_DISPLAY = computed(() => [
 
 // ── Spirit narrative selection ─────────────────────────────────────────────────
 const selectedNarrativeSpirit = ref(null)
-
-const spiritsWithNarrative = computed(() =>
-  SPIRIT_NAMES.filter(n => invokeEnabledSpirits.value[n] && invokeSpirits.value[n]?.natural_language)
-)
 
 // Auto-switch to most recently composed spirit
 SPIRIT_NAMES.forEach(name => {

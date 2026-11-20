@@ -12,7 +12,9 @@ if str(root_dir) not in sys.path:
 
 from backend.app.characters import compat
 from backend.app.db.qdrant_client import (
-    CHARACTER_COMPAT_COLLECTION, CHARACTER_PRESETS_COLLECTION, MUSE_SESSIONS_COLLECTION,
+    CHARACTER_COMPAT_COLLECTION,
+    CHARACTER_PRESETS_COLLECTION,
+    MUSE_SESSIONS_COLLECTION,
 )
 
 

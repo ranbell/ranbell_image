@@ -13,8 +13,8 @@ director wins.
 """
 from __future__ import annotations
 
-from app.muse import identity
-from app.muse import assemble, ledger as L
+from app.muse import assemble, identity
+from app.muse import ledger as L
 
 #: Which side the lead and the partner are on. **Never written out here** — change
 #: `identity.LEAD_SIDE` and the tests follow (so nothing breaks when the Showrunner

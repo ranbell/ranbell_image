@@ -27,9 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import collections
-import json
 import logging
-import random
 import re
 import time
 import uuid
@@ -40,11 +38,10 @@ from ..characters import compat as compat_mod
 from ..characters import presets as presets_db
 from ..runtime_config import get_runtime_config
 from ..spooler.models import JobCancelled, JobLane
-from . import chain, crew, diary as diary_mod, events, identity, runner
-from . import memories_db, notebook as notebook_mod
-from . import session_db, vitality
-from . import handpost_db, lounge as lounge_mod, lounge_db
-from .runtime import render_settings
+from . import chain, crew, events, handpost_db, identity, lounge_db, memories_db, session_db
+from . import diary as diary_mod
+from . import lounge as lounge_mod
+from . import notebook as notebook_mod
 
 logger = logging.getLogger(__name__)
 
@@ -1004,7 +1001,7 @@ async def finish_session(
         ja = str(_inputs(session).get("locale") or "ja").startswith("ja")
         coda = (
             (
-                f"今日の余韻、メモに残しておくね"
+                "今日の余韻、メモに残しておくね"
                 + (f"（{last[:80]}）" if last else "。")
             )
             if ja else

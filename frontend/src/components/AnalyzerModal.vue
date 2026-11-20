@@ -244,7 +244,6 @@ function initUmapCanvas(canvas) {
   function draw() {
     ctx.clearRect(0, 0, W, H)
     const clusters = umapShowClusters.value ? (umapClusterData.value?.clusters || []) : []
-    const pointClusters = umapClusterData.value?.point_clusters || {}
     const selSet = new Set(umapSelection.value)
 
     if (clusters.length) drawClusterHalos(clusters)

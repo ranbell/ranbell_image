@@ -6,11 +6,13 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict
 
 from ..api.images import invalidate_image_caches
-from ..db.qdrant_client import QdrantDBClient, IMAGES_COLLECTION as _IMAGES_COLLECTION, PENDING_FILTER as _PENDING_FILTER
+from ..db.qdrant_client import IMAGES_COLLECTION as _IMAGES_COLLECTION
+from ..db.qdrant_client import PENDING_FILTER as _PENDING_FILTER
+from ..db.qdrant_client import QdrantDBClient
 from ..runtime_config import get_runtime_config
-from .ollama import OllamaClient
 from . import wd14 as wd14_mod
 from .color_extractor import extract_color_palette
+from .ollama import OllamaClient
 
 
 async def _run_with_sem(sem: asyncio.Semaphore, fn, *args) -> None:

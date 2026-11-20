@@ -111,7 +111,6 @@ export function cameraEnumsFromShotPosition(pos, { crouch = false } = {}) {
   const x = pos.x
   const y = pos.y
   const z = pos.z
-  const horiz = Math.hypot(x, z)
   const absX = Math.abs(x)
   const absZ = Math.abs(z)
 

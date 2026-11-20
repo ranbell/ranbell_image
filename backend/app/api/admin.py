@@ -8,8 +8,8 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from ..config import settings
 from ..ai import wd14 as wd14_mod
+from ..config import settings
 from ..runtime_config import LEGACY_KEYS, get_runtime_config, invalidate_cache
 
 logger = logging.getLogger(__name__)
@@ -696,7 +696,7 @@ async def drop_stale_rebuild_target(body: DropStaleBody, request: Request):
     try:
         return await request.app.state.db.drop_stale_rebuild_target(body.collection)
     except RuntimeError as exc:
-        raise HTTPException(status_code=409, detail={"error": "refused", "message": str(exc)})
+        raise HTTPException(status_code=409, detail={"error": "refused", "message": str(exc)}) from exc
 
 
 @router.get("/orphans")

@@ -1,9 +1,10 @@
 import json
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
-from app.ingest.trace import trace_prompts, direct_search_prompts
+from app.ingest.trace import direct_search_prompts, trace_prompts
 
 FIXTURES = Path(__file__).parent / "fixtures" / "workflows"
 

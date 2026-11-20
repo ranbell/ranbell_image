@@ -6,9 +6,8 @@ import logging
 import re
 from typing import Any
 
-from . import identity
+from . import identity, persona
 from . import ledger as ledger_mod
-from . import persona
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +18,7 @@ Rules:
 - Absolute phrases in English (danbooru-friendly words ok).
 - Carefully read the latest conversation, and update only the fields that have
   changed from the previous state to reflect the latest status.
-  Carefully evaluate the conversation context to decide if any fields 
+  Carefully evaluate the conversation context to decide if any fields
   need to be added or cleared.
 - Clothes and place are independent: changing clothes must not clear scene.
 - Changing place must not undress her.

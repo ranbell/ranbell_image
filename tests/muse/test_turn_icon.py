@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import inspect
 
-from app.muse import ledger as L, service
+from app.muse import ledger as L
+from app.muse import service
 
 
 def _say_row(text: str = "うん") -> dict:

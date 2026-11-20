@@ -8,15 +8,14 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
-from . import identity
 from ..tags.body import BREAST_TAGS as _BREAST_TAGS
-from . import anima
+from . import anima, identity, talk
 from . import debug as debug_mod
 from . import ledger as ledger_mod
 from .ctx import refine_num_ctx
-from . import talk
 
 logger = logging.getLogger(__name__)
 
@@ -696,7 +695,6 @@ async def rebuild_craft(
     want_dense = bool(inputs.get("enhance_quality")) or bool(
         (led.get("atmosphere") or "").strip() or (led.get("look") or "").strip()
     )
-    densified = False
     densify_reason = ""
     if want_dense and ollama is not None and prose:
         t0 = time.monotonic()
@@ -707,7 +705,6 @@ async def rebuild_craft(
         )
         debug_mod.stage(session, "prose_densify", t0)
         if denser and denser != prose:
-            densified = True
             densify_reason = (
                 "enhance_quality" if inputs.get("enhance_quality") else "atmosphere_or_look"
             )

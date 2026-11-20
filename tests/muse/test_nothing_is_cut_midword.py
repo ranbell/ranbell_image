@@ -30,8 +30,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "backend"))
 
-from app.muse import assemble, crew_room as C
-
+from app.muse import assemble
+from app.muse import crew_room as C
 
 # ── The prose handed to the picture ─────────────────────────────────────
 

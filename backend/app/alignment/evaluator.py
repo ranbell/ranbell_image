@@ -7,11 +7,11 @@ from collections.abc import Callable
 from qdrant_client import models as qm
 
 from ..ai.ollama import OllamaClient
-from ..db.qdrant_client import QdrantDBClient, IMAGES_COLLECTION
+from ..db.qdrant_client import IMAGES_COLLECTION, QdrantDBClient
 from .bm25_matcher import compute_bm25_match, detect_prompt_style
 from .embedding import compute_alignment_score
-from .vlm_analyzer import analyze_with_llm
 from .schema import AlignmentRecord, AlignmentResult
+from .vlm_analyzer import analyze_with_llm
 
 logger = logging.getLogger(__name__)
 

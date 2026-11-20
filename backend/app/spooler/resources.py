@@ -7,11 +7,12 @@ import os
 import shutil
 import subprocess
 import time
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Any, Callable, Literal
+from typing import Any, Literal
 
-from .models import Job, JobCancelled, JobLane, ResourceUnreachable
+from .models import Job, JobLane, ResourceUnreachable
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +114,7 @@ def _poll_gpu_stats() -> dict[str, float | None]:
 
     try:
         result = subprocess.run(
-            [
+            [  # noqa: S607 — nvidia-smi on PATH by design
                 "nvidia-smi",
                 "--query-gpu=utilization.gpu,temperature.gpu,memory.used,memory.total",
                 "--format=csv,noheader,nounits",

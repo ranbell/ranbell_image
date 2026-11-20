@@ -29,7 +29,8 @@ def _run(st, name, log=""):
 
 
 def test_dataset_name_picks_its_latest_run(st):
-    import os, time
+    import os
+    import time
     a = _run(st, "my_style-20261111-0035")
     b = _run(st, "my_style-20261111-0040")
     _run(st, "other-20261111-0100")
@@ -61,7 +62,8 @@ def test_chart_has_one_column_per_bucket_and_labels(st):
 
 
 def test_a_quiet_log_with_fresh_loss_events_is_still_running(st):
-    import os, time
+    import os
+    import time
     run = _run(st, "x-20261111-0000")
     old = time.time() - 3600
     os.utime(run / "train.log", (old, old))

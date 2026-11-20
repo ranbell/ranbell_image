@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import random
-import time
 import re
+import time
 from typing import Any
 
 _LABEL_RE = re.compile(

@@ -20,6 +20,8 @@ from collections.abc import Callable
 
 from ..tags.subject_anchors import (
     SUBJECT_ANCHOR_TAGS as _SUBJECT_ANCHOR_TAGS,
+)
+from ..tags.subject_anchors import (
     insert_after_anchors,
 )
 

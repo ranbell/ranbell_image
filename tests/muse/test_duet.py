@@ -10,8 +10,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
 import pytest
+from app.muse import crew, session_db, shared
 
-from app.muse import crew, shared, session_db
 from tests.muse.test_service import FakeOllama  # noqa: E402
 
 

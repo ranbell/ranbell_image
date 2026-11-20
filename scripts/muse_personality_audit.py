@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 from app.characters import presets
 from app.muse import crew, service, session_db
+
 from tests.muse.test_service import FakeDb, FakeOllama
 
 JSON_PATH = ROOT / "backend/app/characters/assets/personality_presets.json"
@@ -323,7 +324,7 @@ async def main() -> None:
     # Differentiation check: quirks unique across live systems
     lines.append("## 4. キャラ間の差が乗っているか\n")
     quirk_snips = []
-    for pid, markers, sc, system in live_rows:
+    for pid, markers, _sc, system in live_rows:
         q = markers.get("quirk_bit") or ""
         quirk_snips.append((pid, markers["name_ja"], q, q and q in system))
     uniq = len({q for _, _, q, ok in quirk_snips if ok and q})
@@ -347,7 +348,7 @@ async def main() -> None:
         gaps.append("`appearance.voice` が talk に未注入")
     if app.get("habit") and str(app.get("habit")) not in talk0:
         gaps.append("`appearance.habit` が talk に未注入")
-    fi = str((app.get("first_impression") or ""))
+    fi = str(app.get("first_impression") or "")
     if fi and fi not in talk0:
         gaps.append("`first_impression` が talk に未注入")
     sm = str((ch0.get("personality") or {}).get("signature_moment") or "")

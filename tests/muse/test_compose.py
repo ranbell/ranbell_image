@@ -20,7 +20,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "backend"))
 
-from app.muse import chain, shared, session_db
+from app.muse import chain, session_db, shared
+
 from tests.muse.test_duet import _duet_session  # noqa: E402
 
 COMPOSED = (

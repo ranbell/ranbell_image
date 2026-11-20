@@ -2,8 +2,8 @@ import base64
 import json
 import logging
 import re
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 import httpx
 
