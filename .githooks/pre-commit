@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Quick checks on what is being committed. Turn on once per clone:
+#   git config core.hooksPath .githooks
+# Skip in an emergency: git commit --no-verify
+exec "$(git rev-parse --show-toplevel)/scripts/check.sh" staged

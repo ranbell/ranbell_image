@@ -331,6 +331,19 @@ Open **[http://localhost:3100](http://localhost:3100)** in your browser.
 
 
 
+## Development
+
+The checks CI runs are one script, and the same script runs locally:
+
+```bash
+python -m pip install -r backend/requirements-dev.txt   # ruff, pytest, pip-audit
+(cd frontend && npm ci)                                  # eslint
+git config core.hooksPath .githooks   # once per clone: quick checks on commit, the full set on push
+scripts/check.sh                      # lint + test + build;  scripts/check.sh all  adds audit and secrets
+```
+
+A hook can be skipped with `--no-verify` when it has to be.
+
 ## Thanks
 
 **[Qdrant](https://qdrant.tech/)** — this whole project exists because of Qdrant. The first time semantic vector search felt this graceful, I knew I had to build something with it. "Search images by meaning" became everything you see here. Thank you, Qdrant team.

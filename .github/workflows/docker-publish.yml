@@ -2,19 +2,34 @@ name: Build and Push Docker Images
 
 on:
   push:
-    branches: [main, dev, 'feature/**']
+    branches: [main, dev, 'feature/**', 'feat/**']
     tags: ['v*.*.*']
+
+permissions: {}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Only dev and release tags reach the registry; other branches build to prove they can.
+  PUBLISH: ${{ github.ref == 'refs/heads/dev' || startsWith(github.ref, 'refs/tags/') }}
+
 jobs:
+  ci:
+    # Nothing is published that has not passed the checks.
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   build:
+    needs: ci
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: write
+      security-events: write   # the Trivy report goes to the Security tab
     strategy:
       matrix:
         include:
@@ -32,14 +47,16 @@ jobs:
       #     df -h
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Log in to GitHub Container Registry
-        if: ${{ github.ref == 'refs/heads/dev' || startsWith(github.ref, 'refs/tags/') }}
-        uses: docker/login-action@v3
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -47,7 +64,7 @@ jobs:
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ matrix.image }}
           tags: |
@@ -57,11 +74,38 @@ jobs:
             type=raw,value=dev-latest,enable=${{ github.ref == 'refs/heads/dev' }}
 
       - name: Build and push ${{ matrix.service }}
-        uses: docker/build-push-action@v6
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: ${{ matrix.context }}
-          push: ${{ github.ref == 'refs/heads/dev' || startsWith(github.ref, 'refs/tags/') }}
+          push: ${{ env.PUBLISH == 'true' }}
+          # Build provenance and an SBOM travel with the published image.
+          provenance: ${{ env.PUBLISH == 'true' }}
+          sbom: ${{ env.PUBLISH == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Report-only for now: a HIGH in a base image would otherwise stop a release
+      # the day it is announced. Raise exit-code to '1' once the reports are quiet.
+      - name: Scan the published image (Trivy)
+        if: env.PUBLISH == 'true'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          image-ref: ${{ matrix.image }}@${{ steps.build.outputs.digest }}
+          format: sarif
+          output: trivy-${{ matrix.service }}.sarif
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '0'
+
+      - name: Upload the Trivy report
+        if: env.PUBLISH == 'true'
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          sarif_file: trivy-${{ matrix.service }}.sarif
+          category: trivy-${{ matrix.service }}

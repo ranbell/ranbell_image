@@ -16,3 +16,4 @@ private/
 .syncthing.*.tmp
 CLAUDE.md
 .coverage
+.ruff_cache/

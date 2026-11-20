@@ -292,6 +292,19 @@ docker compose up -d --build
 
 ---
 
+## 開発
+
+CI が走らせるチェックは1本のスクリプトで、手元でも同じものが動きます。
+
+```bash
+python -m pip install -r backend/requirements-dev.txt   # ruff, pytest, pip-audit
+(cd frontend && npm ci)                                  # eslint
+git config core.hooksPath .githooks   # clone ごとに1回: コミット時に軽いチェック、push 時に全部
+scripts/check.sh                      # lint + test + build。scripts/check.sh all で監査と秘密情報も
+```
+
+どうしても飛ばすときは `--no-verify`。
+
 ## 感謝
 
 **[Qdrant](https://qdrant.tech/)** — このプロジェクト全体がQdrantによって存在しています。セマンティックベクター検索をこれほど優雅に扱えるものに初めて出会ったとき、これで何か作らなければという気持ちになりました。「意味で画像を検索できたら」という思いつきが、今あなたが見ているすべてになりました。Qdrant チームに心より感謝します。

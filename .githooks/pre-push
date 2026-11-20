@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# The full set before anything leaves the machine — the same steps CI runs.
+# Skip in an emergency: git push --no-verify
+exec "$(git rev-parse --show-toplevel)/scripts/check.sh" lint test build

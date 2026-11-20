@@ -1,0 +1,3 @@
+# False positives (gitleaks generic-api-key): a localStorage key name, not a secret.
+f0fd3c586dd44c2399284f24bd7dc24743e79f92:frontend/src/App.vue:generic-api-key:797
+eedef62575e2140dd7f1d892345de3a9bc43db7b:frontend/src/App.vue:generic-api-key:796
