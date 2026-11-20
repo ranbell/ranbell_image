@@ -2,6 +2,7 @@
 -r requirements.txt
 pytest>=9.1
 pytest-asyncio>=1.4
+pytest-cov>=7.1
 # ruff is pinned exactly: a new release adds rules, and CI should not go red on its own.
 ruff==0.17.6
 pip-audit>=2.10

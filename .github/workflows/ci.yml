@@ -47,7 +47,7 @@ jobs:
       - run: scripts/check.sh lint
 
   test:
-    name: Tests (pytest)
+    name: Tests (pytest + coverage)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -60,7 +60,7 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements*.txt
       - run: python -m pip install -r backend/requirements-dev.txt
-      - run: scripts/check.sh test
+      - run: scripts/check.sh cov
 
   build:
     name: Frontend build

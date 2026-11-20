@@ -39,3 +39,15 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Body", "f
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "backend/tests", "external/musubi/tests"]
+
+# `scripts/check.sh cov`. There is no fail_under on purpose: the number is a map
+# of what nothing exercises, not a target. What gets a test is decided by what
+# it would cost if it broke.
+[tool.coverage.run]
+source = ["backend/app"]
+branch = true
+
+[tool.coverage.report]
+skip_covered = true
+show_missing = true
+sort = "Miss"

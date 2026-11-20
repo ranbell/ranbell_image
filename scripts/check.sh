@@ -3,7 +3,9 @@
 # (.github/workflows/ci.yml) both call this, so what passes here passes there.
 #
 #   scripts/check.sh                 lint + test + build
-#   scripts/check.sh lint test       pick steps: lint test build audit secrets staged all
+#   scripts/check.sh lint test       pick steps: lint test cov build audit secrets staged all
+#
+#   cov      the tests, with a coverage report (CI writes it to the run's summary)
 #
 #   staged   the pre-commit set: only the files being committed, quick
 #
@@ -48,6 +50,14 @@ step_lint() {
 step_test() {
   say "pytest"
   "$PY" -m pytest -q
+}
+
+step_cov() {
+  say "pytest + coverage"
+  "$PY" -m pytest -q --cov --cov-report=term
+  if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    { echo "### Coverage (backend/app)"; echo; "$PY" -m coverage report --format=markdown; } >> "$GITHUB_STEP_SUMMARY"
+  fi
 }
 
 step_build() {
@@ -108,9 +118,9 @@ steps=("$@")
 ((${#steps[@]})) || steps=(lint test build)
 for s in "${steps[@]}"; do
   case "$s" in
-    lint|test|build|audit|secrets|staged) "step_$s" ;;
+    lint|test|cov|build|audit|secrets|staged) "step_$s" ;;
     all) step_lint; step_test; step_build; step_audit; step_secrets ;;
-    *) echo "unknown step: $s (lint test build audit secrets staged all)" >&2; exit 2 ;;
+    *) echo "unknown step: $s (lint test cov build audit secrets staged all)" >&2; exit 2 ;;
   esac
 done
 say "ok"
