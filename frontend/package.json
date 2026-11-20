@@ -12,7 +12,7 @@
   "dependencies": {
     "@pixiv/three-vrm": "^3.3.2",
     "d3-force": "^3.0.0",
-    "plotly.js-dist-min": "^3.5.1",
+    "plotly.js-gl3d-dist-min": "^3.7.0",
     "three": "^0.170.0",
     "vue": "^3.5.44",
     "vue-i18n": "^11.4.16"

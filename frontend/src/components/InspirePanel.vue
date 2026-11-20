@@ -168,7 +168,7 @@ watch(() => props.show, (val) => {
     // unless the user has manually curated the bucket this session.
     inspireSlots.value = (props.initialSlots || []).slice(0, 6)
   }
-})
+}, { immediate: true })  // App mounts this on first open, already showing
 
 // Notify parent of running state
 watch([inspireLoading, brainstormLoading], ([il, bl]) => {

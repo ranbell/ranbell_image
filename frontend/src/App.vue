@@ -1,27 +1,35 @@
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick, defineAsyncComponent } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { jobLabel, jobProgress } from './jobLabel.js'
 import { saveAndSyncToken, getToken } from './apiToken.js'
 import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide } from 'd3-force'
-import AnalyzerModal from './components/AnalyzerModal.vue'
-import AdminModal from './components/AdminModal.vue'
-import LoraBucket from './components/LoraBucket.vue'
-import LoraSheet from './components/LoraSheet.vue'
-import InspirePanel from './components/InspirePanel.vue'
-import InvokePanel from './components/InvokePanel.vue'
 import SceneSheetEditor from './components/refine/SceneSheetEditor.vue'
 import RefineSteps from './components/refine/RefineSteps.vue'
-import MusePanel from './components/MusePanel.vue'
-import VideoStudio from './components/VideoStudio.vue'
-import CharacterGallery from './components/CharacterGallery.vue'
-import ActressDiaryModal from './components/muse/ActressDiaryModal.vue'
-import CharacterDossier from './components/muse/CharacterDossier.vue'
-import ControlRoom from './components/ControlRoom.vue'
 import ProgressBar from './components/ProgressBar.vue'
 import { useControlRoom } from './composables/useControlRoom.js'
 import { useInspireSession } from './composables/useInspireSession.js'
 import { useInvokeSession } from './composables/useInvokeSession.js'
+// **The screens load when first opened**, not with the gallery. Each was in the
+// first download whether or not it was ever used (one 1.1 MB file).
+// A tab left open across a redeploy asks for file names the server no longer
+// has; `vite:preloadError` below reloads the page once instead of a dead button.
+const lazy = (load) => defineAsyncComponent({
+  loader: load,
+  onError: (err, retry, fail, attempts) => (attempts <= 2 ? retry() : fail(err)),
+})
+const AnalyzerModal = lazy(() => import('./components/AnalyzerModal.vue'))
+const AdminModal = lazy(() => import('./components/AdminModal.vue'))
+const LoraBucket = lazy(() => import('./components/LoraBucket.vue'))
+const LoraSheet = lazy(() => import('./components/LoraSheet.vue'))
+const InspirePanel = lazy(() => import('./components/InspirePanel.vue'))
+const InvokePanel = lazy(() => import('./components/InvokePanel.vue'))
+const MusePanel = lazy(() => import('./components/MusePanel.vue'))
+const VideoStudio = lazy(() => import('./components/VideoStudio.vue'))
+const CharacterGallery = lazy(() => import('./components/CharacterGallery.vue'))
+const ActressDiaryModal = lazy(() => import('./components/muse/ActressDiaryModal.vue'))
+const CharacterDossier = lazy(() => import('./components/muse/CharacterDossier.vue'))
+const ControlRoom = lazy(() => import('./components/ControlRoom.vue'))
 
 const { fetchDaily: fetchDailyOracle } = useInvokeSession()
 
@@ -3245,6 +3253,24 @@ const museResume = ref({ available: false, name: '', sessionId: '' })
 // Any still's 🎬 (the gallery detail, a Muse test shot or final) opens the
 // studio on that picture. Its own screen: the talk does not live in the shoot.
 const showVideoStudio = ref(false)
+
+// Mounted on first open and kept: a screen holds its state (a Muse shoot
+// survives being closed) once it exists, as it always did.
+function mountOnFirstOpen(isOpen) {
+  const mounted = ref(false)
+  watch(isOpen, open => { if (open) mounted.value = true }, { immediate: true })
+  return mounted
+}
+const adminMounted = mountOnFirstOpen(showAdmin)
+const loraMounted = mountOnFirstOpen(showLora)
+const loraSheetMounted = mountOnFirstOpen(showLoraSheet)
+const analyzerMounted = mountOnFirstOpen(showAnalyzer)
+const inspireMounted = mountOnFirstOpen(showInspire)
+const invokeMounted = mountOnFirstOpen(showInvoke)
+const museGalleryMounted = mountOnFirstOpen(showMuseGallery)
+const museDiaryMounted = mountOnFirstOpen(() => museDiaryModal.value.show)
+const museMounted = mountOnFirstOpen(showMuse)
+const videoStudioMounted = mountOnFirstOpen(showVideoStudio)
 const videoRequest = ref(null)
 function makeVideoFrom(sha) {
   if (!sha) return
@@ -5449,6 +5475,7 @@ onUnmounted(() => {
 
     <!-- ── Admin Modal ── -->
     <AdminModal
+      v-if="adminMounted"
       v-model:show="showAdmin"
       :pipeline-state="pipelineState"
       :scan-state="scanState"
@@ -6302,6 +6329,7 @@ onUnmounted(() => {
 
     <!-- ── LoRA buckets ── -->
     <LoraBucket
+      v-if="loraMounted"
       :show="showLora"
       :incoming-shas="loraIncoming"
       @close="showLora = false; loraIncoming = []"
@@ -6312,6 +6340,7 @@ onUnmounted(() => {
 
     <!-- ── LoRA comparison sheet ── -->
     <LoraSheet
+      v-if="loraSheetMounted"
       :show="showLoraSheet"
       :prefill="loraSheetPrefill"
       @close="showLoraSheet = false; loraSheetPrefill = null"
@@ -6321,6 +6350,7 @@ onUnmounted(() => {
 
     <!-- ── Analyzer Modal ── -->
     <AnalyzerModal
+      v-if="analyzerMounted"
       v-model:show="showAnalyzer"
       :images="images"
       :jobs-map="jobsMap"
@@ -6331,6 +6361,7 @@ onUnmounted(() => {
 
     <!-- ── Inspire Panel ── -->
     <InspirePanel
+      v-if="inspireMounted"
       v-model:show="showInspire"
       v-model:running="inspireRunning"
       :initial-slots="inspireInitialSlots"
@@ -6344,6 +6375,7 @@ onUnmounted(() => {
 
     <!-- ── Invoke Panel ── -->
     <InvokePanel
+      v-if="invokeMounted"
       :show="showInvoke"
       :comfyOffline="comfyOffline"
       @update:show="showInvoke = $event"
@@ -6357,6 +6389,7 @@ onUnmounted(() => {
          .muse-root で --z-panel-muse (640) を強制するので、DOM の順に関わらず
          名簿の上に出る。ここを --z-panel-muse より上げないこと。 -->
     <CharacterGallery
+      v-if="museGalleryMounted"
       :show="showMuseGallery"
       :workflows="workflows"
       :workflow="museGalleryWorkflow"
@@ -6372,6 +6405,7 @@ onUnmounted(() => {
     />
 
     <ActressDiaryModal
+      v-if="museDiaryMounted"
       :show="museDiaryModal.show"
       :character-id="museDiaryModal.characterId"
       :character-name="museDiaryModal.characterName"
@@ -6393,6 +6427,7 @@ onUnmounted(() => {
     />
 
     <MusePanel
+      v-if="museMounted"
       :show="showMuse"
       :comfyOffline="comfyOffline"
       :get-jobs-map="getJobsMap"
@@ -6406,6 +6441,7 @@ onUnmounted(() => {
     />
 
     <VideoStudio
+      v-if="videoStudioMounted"
       :show="showVideoStudio"
       :request="videoRequest"
       @update:show="showVideoStudio = $event"

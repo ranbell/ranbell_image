@@ -737,7 +737,7 @@ watch(() => props.show, async (val) => {
       fetchSchemaStatus(), fetchBackupStatus(), fetchComfyWorkflows(),
     ])
   }
-})
+}, { immediate: true })  // App mounts this on first open, already showing
 
 // Refresh backfill statuses when SSE-driven job state changes
 watch(() => props.jobs?.find(j => j.title === 'color_extract')?.state, (state) => {

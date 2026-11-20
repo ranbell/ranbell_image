@@ -476,7 +476,7 @@ watch(() => props.show, (val) => {
   } else {
     open()
   }
-})
+}, { immediate: true })  // App mounts this on first open, already showing
 
 onUnmounted(() => {
   umapCanvasRef.value?._umapCleanup?.()
@@ -619,7 +619,7 @@ async function triggerColorBackfill() {
 
 async function initPlotly3D(container) {
   if (!color3dPoints.value.length) return
-  const Plotly = _Plotly ?? await import('plotly.js-dist-min')
+  const Plotly = _Plotly ?? await import('plotly.js-gl3d-dist-min')  // scatter3d is the only trace drawn
   _Plotly = Plotly
   const pts = color3dPoints.value
   const trace = {

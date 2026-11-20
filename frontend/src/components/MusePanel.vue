@@ -973,7 +973,7 @@ watch(() => props.show, async (open) => {
   } catch (err) {
     fail(err)
   }
-})
+}, { immediate: true })  // App mounts this on first open, already showing
 
 // Tell the roster about a shoot that is paused (the "shooting" tag). A session
 // survives being closed, so the roster has to know it can be returned to.

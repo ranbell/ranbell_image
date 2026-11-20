@@ -19,4 +19,17 @@ export default defineConfig({
       usePolling: true,
     },
   },
+  build: {
+    rolldownOptions: {
+      output: {
+        // Vue and i18n in their own file: they change with a dependency bump, not
+        // with every edit to the app, so the browser keeps them across releases.
+        codeSplitting: {
+          groups: [
+            { name: 'vue', test: /node_modules[\\/](@vue|vue|vue-i18n|@intlify)[\\/]/ },
+          ],
+        },
+      },
+    },
+  },
 })
