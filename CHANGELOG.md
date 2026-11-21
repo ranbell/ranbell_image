@@ -27,6 +27,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · Versioning: 
 - **The analyzer's 3D colour space answered with an error every time**, and the colour backfill failed at its last step
 - **A picture id that is not one** (a typo, a cut-off link) is a 404 rather than a server error, on every picture route; so is a rating for a picture that is not there
 - **The admin screen said "OK" when the server refused**; it now shows why
+- **The AI tab's "cancel" button never appeared**, and the run buttons stayed pressable while the pipeline ran; both now follow the job, and cover WD14 tagging as well as embedding. The header shows the pipeline at either stage
 
 ### Removed
 

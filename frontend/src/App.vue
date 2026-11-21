@@ -169,7 +169,12 @@ const hasAnyActiveJob = computed(() =>
 )
 
 const SCAN_TITLES = new Set(['scan_heal', 'scan_sync', 'scan_strict', 'scan_full', 'meta_update'])
-const PIPELINE_TITLES = new Set(['ai_pipeline', 'ai_pipeline_auto', 'ai_pipeline_post_scan', 'ai_pipeline_continue'])
+// Both stages: WD14 tagging (TAGGING lane) chains the embedding (EMBEDDING lane).
+// Tagging was missing, so the AI tab could not stop it and did not refresh after it.
+const PIPELINE_TITLES = new Set([
+  'ai_tagging', 'ai_tagging_auto', 'ai_tagging_post_scan',
+  'ai_pipeline', 'ai_pipeline_auto', 'ai_pipeline_post_scan', 'ai_pipeline_continue',
+])
 
 // SYNC lane scan jobs (running / cancelling / queued)
 const scanState = computed(() =>
@@ -262,13 +267,12 @@ let suggestTimer = null
 // ── AI state ──────────────────────────────────────────────────────────────────
 const aiStatus = ref(null)
 
-// EMBEDDING lane AI pipeline job
-const pipelineState = computed(() =>
-  [...jobsMap.value.values()].find(
-    j => PIPELINE_TITLES.has(j.title) &&
-         (j.state === 'running' || j.state === 'queued' || j.state === 'cancelling')
-  ) || null
-)
+// The AI pipeline job in progress (either stage), a running one before a queued one
+const pipelineState = computed(() => {
+  const live = [...jobsMap.value.values()].filter(j => PIPELINE_TITLES.has(j.title))
+  return live.find(j => j.state === 'running' || j.state === 'cancelling')
+    || live.find(j => j.state === 'queued') || null
+})
 
 // All jobs (created_at is epoch seconds as float)
 const allJobs = computed(() =>
@@ -290,6 +294,8 @@ const otherActiveJobs = computed(() =>
 const headerActiveJobs = computed(() => {
   const list = []
   if (scanState.value) list.push(scanState.value)
+  // Either stage of the AI pipeline (tagging used to show here only as "other")
+  if (pipelineState.value) list.push(pipelineState.value)
   if (refining.value || refinePhase.value === 'comfy')
     list.push({ id: '__refine__', title: 'refine', state: 'running', progress_text: '', progress: 0 })
   if (inspireRunning.value)
@@ -2343,10 +2349,8 @@ async function triggerPipeline(sha256s = []) {
 }
 
 async function cancelPipeline() {
-  const job = [...jobsMap.value.values()].find(
-    j => PIPELINE_TITLES.has(j.title) && j.state === 'running'
-  )
-  if (job) await fetch(`/api/jobs/${job.id}/cancel`, { method: 'POST' })
+  const job = pipelineState.value
+  if (job && job.state !== 'cancelling') await fetch(`/api/jobs/${job.id}/cancel`, { method: 'POST' })
 }
 
 async function cancelJob(jobId) {

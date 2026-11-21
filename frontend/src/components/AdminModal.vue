@@ -13,7 +13,7 @@ function setLocale(lang) {
 
 const props = defineProps({
   show: Boolean,
-  pipelineState: Object,   // { running, ... }
+  pipelineState: Object,   // the AI pipeline job in progress (a spooler job), or null
   scanState: Object,       // { running, processed, total, mode } | null
   jobs: { type: Array, default: () => [] },
   selectedCount: Number,
@@ -41,6 +41,13 @@ const comfyWorkflows = ref([])
 const ollamaVisionModels = ref([])
 // Only warn once we actually know which models have vision; an empty list means
 // the capability probe failed, not that every model is text-only.
+// A job has a `state`, not a `running` flag: reading `.running` left the cancel
+// button hidden and the run buttons enabled while the pipeline ran.
+const pipelineBusy = computed(() =>
+  ['running', 'queued', 'cancelling'].includes(props.pipelineState?.state))
+const pipelineCancellable = computed(() =>
+  ['running', 'queued'].includes(props.pipelineState?.state))
+
 const vlmModelLacksVision = computed(() =>
   ollamaVisionModels.value.length > 0 &&
   !!adminConfig.value?.vlm_model &&
@@ -1087,17 +1094,17 @@ watch(() => props.jobs?.find(j => j.title === 'backup')?.state, (state) => {
               <div class="flex gap-2 flex-wrap">
                 <button
                   @click="triggerPipelineAll"
-                  :disabled="pipelineState?.running"
+                  :disabled="pipelineBusy"
                   class="px-4 py-2 bg-teal-800/60 hover:bg-teal-700/60 border border-teal-600/40 rounded-lg text-xs text-teal-300 disabled:opacity-40 transition-colors">
                   {{ $t('admin.ai.runAll') }}
                 </button>
                 <button v-if="selectedCount > 0"
                   @click="triggerPipelineSelected"
-                  :disabled="pipelineState?.running"
+                  :disabled="pipelineBusy"
                   class="px-4 py-2 bg-teal-900/50 hover:bg-teal-800/60 border border-teal-700/40 rounded-lg text-xs text-teal-400 disabled:opacity-40 transition-colors">
                   {{ $t('admin.ai.runSelected', { n: selectedCount }) }}
                 </button>
-                <button v-if="pipelineState?.running"
+                <button v-if="pipelineCancellable"
                   @click="emit('cancel-pipeline')"
                   class="px-4 py-2 bg-red-900/40 hover:bg-red-900/60 border border-red-700/40 rounded-lg text-xs text-red-300 transition-colors">
                   {{ $t('admin.ai.cancelRunning') }}
