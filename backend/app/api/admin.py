@@ -368,6 +368,18 @@ async def backup_restore(body: BackupRestoreBody, request: Request):
     # Snapshots are filed under the physical collection name even when they were
     # taken through an alias, so the path has to be resolved before it is built.
     physical = await _physical(db, body.collection)
+    # The name goes into a file:// URL the server opens, so it is taken only if
+    # the collection really has a snapshot by that name — never as a path.
+    try:
+        known = {s.name for s in await db._qc.list_snapshots(collection_name=physical)}
+    except Exception as e:
+        raise HTTPException(status_code=404, detail={
+            "error": "no_such_collection", "message": f"no collection {body.collection!r}",
+        }) from e
+    if body.snapshot not in known:
+        raise HTTPException(status_code=404, detail={
+            "error": "no_such_snapshot", "message": f"{body.collection} has no snapshot {body.snapshot!r}",
+        })
     location = f"file:///qdrant/snapshots/{physical}/{body.snapshot}"
     try:
         await db._qc.recover_snapshot(
@@ -790,9 +802,10 @@ async def migrate_paths(body: MigratePathsBody, request: Request):
     recomputes is_reference.  Run this BEFORE triggering a heal scan after
     changing source_images_dir / generated_images_dir mounts.
     """
-    if not body.old_prefix or not body.new_prefix:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=422, detail="old_prefix and new_prefix must not be empty")
+    # Both must name a folder. "/" alone strips to nothing and then matches every
+    # absolute path, so one click would move the whole library.
+    if not body.old_prefix.strip("/") or not body.new_prefix.strip("/"):
+        raise HTTPException(status_code=422, detail="old_prefix and new_prefix must each name a folder")
     db = request.app.state.db
     updated = await db.migrate_path_prefix(body.old_prefix, body.new_prefix)
     return {"updated": updated}
