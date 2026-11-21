@@ -308,6 +308,16 @@ def _gender(tag: str) -> str | None:
     return None
 
 
+def count_of(tag: str) -> str | None:
+    """Public form of `_count`: "one" / "many" for a head-count tag."""
+    return _count(tag)
+
+
+def gender_of(tag: str) -> str | None:
+    """Public form of `_gender`: "female" / "male" when the tag asserts one."""
+    return _gender(tag)
+
+
 def _parts(tag: str) -> tuple[str, frozenset[str]]:
     """``('hair', {'very', 'long'})`` for ``very_long_hair``."""
     tokens = [t for t in str(tag or "").strip().lower().replace(" ", "_").split("_") if t]

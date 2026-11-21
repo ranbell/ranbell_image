@@ -87,6 +87,9 @@ def new_bucket(name: str, *, slug: str, trigger: str = "", targets: list[str] | 
         "trigger": (trigger or "").strip(),
         "targets": clean_targets(targets),
         "target_model": target_model,
+        # WD14 tags the Showrunner wants the trigger to learn: the pre-training
+        # diagnosis shows them as intended rather than as burn-in (`diagnose`).
+        "absorb_ok": [],
         "items": [],
         "created_at": now,
         "updated_at": now,
@@ -162,12 +165,14 @@ def set_caption(bucket: dict, sha: str, caption: str) -> dict:
 
 
 def update_settings(bucket: dict, *, name: str | None = None, trigger: str | None = None,
-                    targets: list[str] | None = None, target_model: str | None = None) -> bool:
+                    targets: list[str] | None = None, target_model: str | None = None,
+                    absorb_ok: list[str] | None = None) -> bool:
     """Apply a settings change. True when captions have to be recomputed.
 
     A new target model changes how captions read, so every picture is
     described again (hand edits are kept and marked stale). A new trigger or
-    new targets only re-run the strip step.
+    new targets only re-run the strip step. ``absorb_ok`` is advice for the
+    diagnosis and never touches a caption.
     """
     new_model = target_model is not None and target_model != bucket.get("target_model")
     if new_model:
@@ -176,6 +181,10 @@ def update_settings(bucket: dict, *, name: str | None = None, trigger: str | Non
         if not name.strip():
             raise BucketError("name is required")
         bucket["name"] = name.strip()
+    if absorb_ok is not None:
+        from .diagnose import clean_tags
+
+        bucket["absorb_ok"] = clean_tags(absorb_ok)
     changed = False
     if trigger is not None and trigger.strip() != bucket["trigger"]:
         bucket["trigger"] = trigger.strip()

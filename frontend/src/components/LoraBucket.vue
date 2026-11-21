@@ -7,6 +7,7 @@
  */
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
+import LoraDiagnosis from './LoraDiagnosis.vue'
 
 const props = defineProps({
   show: { type: Boolean, default: false },
@@ -43,6 +44,10 @@ const wantedId = ref('')
 let writeSeq = 0
 let pollTimer = null
 const exportTimers = new Map()
+// Pre-training diagnosis: bumped after a change that alters its reading, and
+// the number of burn-in risks it last found (null = not read yet).
+const diagVersion = ref(0)
+const diagRisks = ref(null)
 
 const incoming = computed(() => props.incomingShas.filter(Boolean))
 const incomingNew = computed(() => {
@@ -180,6 +185,7 @@ async function addIncoming() {
     toast(t('lora.addedN', { n: b.added }), 'success')
     emit('added', b.added)
     adopt(b)
+    diagVersion.value++
     loadList().catch(() => {})
   } catch (e) { toast(e.message, 'error') }
   finally { busy.value = false }
@@ -221,6 +227,7 @@ async function saveCaption(it) {
     adopt(await api(`/api/lora/buckets/${current.value.id}/images/${it.sha256}/caption`, {
       method: 'PUT', body: { caption: value },
     }))
+    diagVersion.value++
   } catch (e) { toast(e.message, 'error') }
 }
 
@@ -250,8 +257,25 @@ async function removeItem(it) {
   writeSeq++
   try {
     adopt(await api(`/api/lora/buckets/${current.value.id}/images/${it.sha256}`, { method: 'DELETE' }))
+    diagVersion.value++
     loadList().catch(() => {})
   } catch (e) { toast(e.message, 'error') }
+}
+
+// "Learn this on purpose": a burn-in tag the trigger is meant to absorb.
+async function setAbsorbOk(tags) {
+  writeSeq++
+  try {
+    adopt(await api(`/api/lora/buckets/${current.value.id}`, { method: 'PATCH', body: { absorb_ok: tags } }))
+  } catch (e) { toast(e.message, 'error') }
+}
+
+// From a diagnosis example to that picture's caption, ready to type.
+function focusItem(sha) {
+  const el = document.getElementById(`lora-item-${sha}`)
+  if (!el) return
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  el.querySelector('textarea')?.focus({ preventScroll: true })
 }
 
 async function exportFolder() {
@@ -485,6 +509,8 @@ onBeforeUnmount(() => {
                 class="px-3 py-1 rounded-lg bg-purple-800/70 hover:bg-purple-700 disabled:opacity-40">
                 {{ t('lora.addSelected', { n: incomingNew.length }) }}
               </button>
+              <span v-if="diagRisks" class="px-2 py-0.5 rounded-full bg-red-900/50 text-red-200 text-[11px]"
+                :title="t('lora.diag.badgeHelp')">{{ t('lora.diag.risksN', { n: diagRisks }) }}</span>
               <button type="button" :disabled="busy || exporting || !canExport" @click="exportFolder"
                 :title="(current.blockers || []).map(b => t(`lora.blocker.${b}`)).join(' / ')"
                 class="px-3 py-1 rounded-lg bg-emerald-700 hover:bg-emerald-600 font-semibold disabled:opacity-40">
@@ -505,10 +531,14 @@ onBeforeUnmount(() => {
             {{ t('lora.lastExport', { when: fmtDate(current.exported_at), path: current.export_path }) }}
           </div>
 
+          <LoraDiagnosis :bucket-id="current.id" :absorb-ok="current.absorb_ok || []" :version="diagVersion"
+            @absorb="setAbsorbOk" @remove="sha => removeItem({ sha256: sha })" @focus="focusItem"
+            @risks="n => diagRisks = n" />
+
           <!-- Pictures -->
           <div class="flex-1 overflow-y-auto p-4 flex flex-col gap-3 min-h-0">
             <p v-if="!current.items.length" class="text-sm text-gray-500 text-center py-10">{{ t('lora.noItems') }}</p>
-            <div v-for="it in current.items" :key="it.sha256" class="flex gap-3 p-2 rounded-xl bg-gray-900/60 border border-gray-800">
+            <div v-for="it in current.items" :key="it.sha256" :id="`lora-item-${it.sha256}`" class="flex gap-3 p-2 rounded-xl bg-gray-900/60 border border-gray-800">
               <img :src="`/api/thumbnails/${it.sha256}.webp`" class="w-28 h-28 rounded-lg object-cover shrink-0" loading="lazy" />
               <div class="flex-1 min-w-0 flex flex-col gap-1">
                 <div class="flex items-center gap-2 text-[11px]">

@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
 from . import bucket as bk
-from . import captioner, export
+from . import captioner, diagnose, export
 from . import targets as target_models
 
 router = APIRouter(prefix="/api/lora", tags=["lora"])
@@ -31,6 +31,7 @@ class BucketPatch(BaseModel):
     trigger: str | None = None
     targets: list[str] | None = None
     target_model: str | None = None
+    absorb_ok: list[str] | None = None
 
 
 class ImagesBody(BaseModel):
@@ -54,6 +55,7 @@ def _db(request: Request):
 def _view(bucket: dict) -> dict:
     return bk.summary(bucket) | {
         "items": bucket["items"],
+        "absorb_ok": bucket.get("absorb_ok") or [],
         "captioning": captioner.is_captioning(bucket["id"]),
         "blockers": bk.export_blockers(bucket),
     }
@@ -151,12 +153,18 @@ async def patch_bucket(bucket_id: str, body: BucketPatch, request: Request):
         bucket = await _load(request, bucket_id)
         try:
             bk.update_settings(bucket, name=body.name, trigger=body.trigger, targets=body.targets,
-                               target_model=body.target_model)
+                               target_model=body.target_model, absorb_ok=body.absorb_ok)
         except bk.BucketError as exc:
             raise HTTPException(400, str(exc)) from exc
         await bk.save(_db(request), bucket)
     _start_captions(request, bucket)
     return _view(bucket)
+
+
+@router.get("/buckets/{bucket_id}/diagnosis")
+async def bucket_diagnosis(bucket_id: str, request: Request):
+    """Before training: burn-in, skew and near-duplicates (`diagnose`)."""
+    return await diagnose.diagnose(_db(request), await _load(request, bucket_id))
 
 
 @router.delete("/buckets/{bucket_id}")
