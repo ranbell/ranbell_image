@@ -338,7 +338,7 @@ The checks CI runs are one script, and the same script runs locally:
 ```bash
 python -m pip install -r backend/requirements-dev.txt   # ruff, pytest, pip-audit
 (cd frontend && npm ci)                                  # eslint
-git config core.hooksPath .githooks   # once per clone: quick checks on commit, the full set on push
+git config core.hooksPath .githooks   # once per clone: quick checks on commit, lint on push; CI runs the rest
 scripts/check.sh                      # lint + test + build;  scripts/check.sh all  adds audit and secrets
 ```
 

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
-# The full set before anything leaves the machine — the same steps CI runs.
+# Lint only, a few seconds: a push from the editor's button shows no output while
+# it waits, so the long checks (tests, build, audit, secrets) are CI's, which runs
+# on every push. For the same full set by hand: scripts/check.sh all
 # Skip in an emergency: git push --no-verify
-exec "$(git rev-parse --show-toplevel)/scripts/check.sh" lint test build
+exec "$(git rev-parse --show-toplevel)/scripts/check.sh" lint

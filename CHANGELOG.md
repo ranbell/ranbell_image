@@ -12,7 +12,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · Versioning: 
 
 - **Checks on every push and pull request** (GitHub Actions): ruff, ESLint, the test suite, the frontend build, pip-audit / npm audit and a gitleaks secret scan. Images are published only after the checks pass, and a published image is scanned with Trivy
 - **CodeQL** (Python, JavaScript, workflows) and **Dependabot** (pip, npm, Actions, Docker)
-- **The same checks before a commit**: `scripts/check.sh` is what CI runs; `git config core.hooksPath .githooks` turns on a quick pre-commit check and the full set before a push
+- **The same checks before a commit**: `scripts/check.sh` is what CI runs; `git config core.hooksPath .githooks` turns on a quick pre-commit check and lint before a push (tests and the rest run in CI)
 
 ---
 

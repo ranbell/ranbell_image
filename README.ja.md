@@ -299,7 +299,7 @@ CI が走らせるチェックは1本のスクリプトで、手元でも同じ�
 ```bash
 python -m pip install -r backend/requirements-dev.txt   # ruff, pytest, pip-audit
 (cd frontend && npm ci)                                  # eslint
-git config core.hooksPath .githooks   # clone ごとに1回: コミット時に軽いチェック、push 時に全部
+git config core.hooksPath .githooks   # clone ごとに1回: コミット時に軽いチェック、push 時に lint。残りは CI
 scripts/check.sh                      # lint + test + build。scripts/check.sh all で監査と秘密情報も
 ```
 
