@@ -71,3 +71,73 @@ sys.modules["app.ai.tile_image"].create_tile_image = MagicMock()
 sys.modules["app.scanner.scanner"].register_image = MagicMock()
 sys.modules["app.spooler.models"].JobLane = MagicMock()
 sys.modules["app.api.sort_utils"].sort_docs = MagicMock()
+
+
+# ── The real app, driven through its real routes ──────────────────────────────
+#
+# `api` puts an in-memory Qdrant behind `backend.app.main.app` and talks to it over
+# HTTP (httpx + ASGI, no lifespan — so no boot, no watcher, no schedulers). What a
+# test sees is what the panel sees: status codes, bodies, and the rows left behind.
+#
+# The spooler records what was queued and runs nothing; what a job does is tested
+# where the job is. Ollama and ComfyUI are tripwires: an API test that reaches
+# either fails, so none of these quietly depends on a model being up.
+
+from types import SimpleNamespace  # noqa: E402
+
+import pytest_asyncio  # noqa: E402
+
+
+class RecordingSpooler:
+    def __init__(self):
+        self.jobs: list[SimpleNamespace] = []
+
+    def submit(self, lane, title, func, meta=None, *, priority=0, **kwargs):
+        job_id = f"{getattr(lane, 'value', lane)}-{len(self.jobs) + 1:06d}"
+        self.jobs.append(SimpleNamespace(id=job_id, lane=lane, title=title, func=func,
+                                         meta=meta or {}, kwargs=kwargs))
+        return job_id
+
+    def snapshot(self) -> list[dict]:
+        return [{"id": j.id, "title": j.title, "state": "queued", "meta": j.meta}
+                for j in reversed(self.jobs)]
+
+
+class Tripwire:
+    def __init__(self, name: str):
+        self._name = name
+
+    def __getattr__(self, attr):
+        raise AssertionError(f"an API test reached {self._name}.{attr}")
+
+
+@pytest_asyncio.fixture()
+async def api(tmp_path, monkeypatch):
+    import httpx
+
+    from backend.app.config import settings
+    from backend.app.main import app
+    from tests.memdb import memory_db
+
+    for name in ("source_images_dir", "generated_images_dir", "thumbnails_dir"):
+        d = tmp_path / name
+        d.mkdir()
+        monkeypatch.setattr(settings, name, d)
+
+    from backend.app.api.images import invalidate_image_caches
+    invalidate_image_caches()
+
+    saved = dict(app.state._state)
+    async with memory_db() as db:
+        spooler = RecordingSpooler()
+        app.state.db = db
+        app.state.spooler = spooler
+        app.state.ollama = Tripwire("ollama")
+        app.state.comfy = Tripwire("comfy")
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(transport=transport, base_url="http://api",
+                                     headers={"X-API-Token": settings.api_token}) as http:
+            yield SimpleNamespace(http=http, db=db, spooler=spooler, settings=settings, tmp=tmp_path)
+    app.state._state.clear()
+    app.state._state.update(saved)
+    invalidate_image_caches()
