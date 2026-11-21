@@ -48,6 +48,10 @@ class Settings(BaseSettings):
 
     # API authentication
     api_token: str = "RANBELL_IMAGE_API_TOKEN"  # noqa: S105 — placeholder; set the real one in .env
+    # Origins other than the app's own that may call the API from a browser
+    # (e.g. ["http://other-tool:5173"]). The screens are served from the same
+    # origin as /api, so none is needed; "*" let any page read the token.
+    cors_origins: list[str] = []
 
     # File watcher
     watch_debounce_seconds: float = 5.0

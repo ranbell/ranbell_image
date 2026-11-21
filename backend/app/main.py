@@ -297,27 +297,53 @@ async def _not_a_picture_id(request: Request, exc: NotAPictureId):
     return JSONResponse({"detail": "Image not found"}, status_code=404)
 
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# The screens are served from the same origin as /api, so a browser needs no
+# CORS at all. It used to be "*", which let any page the browser opened read
+# /api/token and then call anything with it.
+if settings.cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+
+def _from_another_origin(request: Request) -> bool:
+    """A browser request sent by a page that is not this app.
+
+    Browsers set Sec-Fetch-Site themselves and a page cannot change it. Absent
+    means it is not a browser (curl, a script, the other services), which the
+    token alone decides for. "same-site" is not enough: SameSite ignores the
+    port, so another service on this host (ComfyUI, a web UI) counts as the
+    same site and its pages would carry the cookie.
+    """
+    site = request.headers.get("sec-fetch-site")
+    return site is not None and site not in ("same-origin", "none")
 
 
 @app.middleware("http")
 async def verify_api_token(request: Request, call_next):
-    # Exempt probes and the public token endpoint
-    if request.url.path in {"/api/health", "/api/token"}:
+    path = request.url.path
+    if path == "/api/health":
         return await call_next(request)
-    if request.url.path.startswith("/api"):
-        token = (
+    if path == "/api/token":
+        # Handed to the app's own page only, never to another page or a script:
+        # a script has the token from where the server was configured.
+        if request.headers.get("sec-fetch-site") != "same-origin":
+            return JSONResponse({"detail": "Forbidden"}, status_code=403)
+        return await call_next(request)
+    if path.startswith("/api"):
+        given = (
             request.headers.get("X-API-Token")
             or request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
             or request.query_params.get("token", "")
-            or request.cookies.get("api_token", "")
         )
-        if token != settings.api_token:
+        if not given:
+            # The cookie is the one credential a browser attaches by itself, so
+            # it counts only on a request from this app's own pages.
+            given = "" if _from_another_origin(request) else request.cookies.get("api_token", "")
+        if given != settings.api_token:
             return JSONResponse({"detail": "Unauthorized"}, status_code=401)
     return await call_next(request)
 
