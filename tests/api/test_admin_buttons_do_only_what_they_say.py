@@ -140,22 +140,48 @@ async def test_an_unknown_scope_clears_nothing(api):
 
 # ── thumbnails ───────────────────────────────────────────────────────────────
 
-async def test_clearing_thumbnails_deletes_webp_in_the_thumbnail_folder_only(api):
+def _thumb(root, s: str):
+    f = root / s[:2] / s[2:4] / f"{s}.webp"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_bytes(b"RIFF")
+    return f
+
+
+async def test_clearing_thumbnails_deletes_the_generators_files_and_nothing_else(api):
     thumbs = api.settings.thumbnails_dir
-    (thumbs / "aa" / "bb").mkdir(parents=True)
-    (thumbs / "aa" / "bb" / "t.webp").write_bytes(b"x")
-    (thumbs / "keep.txt").write_text("x")
+    t1, t2 = _thumb(thumbs, A), _thumb(thumbs, B)
+    stray = [thumbs / "keep.txt", thumbs / "photo.webp", thumbs / "aa" / "bb" / "t.webp",
+             thumbs / "aa" / "aa" / f"{B}.webp"]           # a name that is not its folder's
+    for f in stray:
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_bytes(b"x")
     outside = api.tmp / "elsewhere"
-    outside.mkdir()
-    (outside / "photo.webp").write_bytes(b"x")
-    (thumbs / "link").symlink_to(outside, target_is_directory=True)
+    _thumb(outside, A)
+    (thumbs / "cc").symlink_to(outside / A[:2], target_is_directory=True)
 
     r = await api.http.post("/api/admin/thumbnails/clear")
 
-    assert r.json() == {"deleted": 1}
-    assert not (thumbs / "aa" / "bb" / "t.webp").exists()
-    assert (thumbs / "keep.txt").exists()
-    assert (outside / "photo.webp").exists(), "a link out of the folder is not followed"
+    assert r.json() == {"deleted": 2}
+    assert not t1.exists() and not t2.exists()
+    assert all(f.exists() for f in stray)
+    assert (outside / A[:2] / A[2:4] / f"{A}.webp").exists(), "a link out of the folder is not followed"
+
+
+@pytest.mark.parametrize("where", ["source", "generated", "parent_of_source", "inside_source", "root"])
+async def test_a_thumbnail_folder_that_overlaps_a_library_deletes_nothing(api, monkeypatch, where):
+    """Set by mistake to a picture folder, "delete every .webp" took the originals."""
+    src, gen = api.settings.source_images_dir, api.settings.generated_images_dir
+    target = {"source": src, "generated": gen, "parent_of_source": src.parent,
+              "inside_source": src / "sub", "root": api.tmp.anchor}[where]
+    if where == "inside_source":
+        target.mkdir()
+    original = _thumb(src, A)          # a .webp original laid out exactly like a thumbnail
+    monkeypatch.setattr(api.settings, "thumbnails_dir", target)
+
+    r = await api.http.post("/api/admin/thumbnails/clear")
+
+    assert r.status_code == 409 and r.json()["detail"]["error"] == "thumbnail_dir_overlaps_library"
+    assert original.exists()
 
 
 # ── confirmation-gated ───────────────────────────────────────────────────────

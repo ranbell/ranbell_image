@@ -18,6 +18,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · Versioning: 
 
 - **Deleting every picture, erasing the cast's memory and resetting the cast ask for the phrase on the server too**, as schema changes and restores already did. A bare request used to run them; the dialogs now ask you to type `confirm`
 - **A second press of a whole-library job button gets the job already waiting or running** instead of queueing it again. A job on a selection is queued every time
+- **Other web pages can no longer reach the API through your browser.** CORS was open to every origin, so any page you opened could read the token from `/api/token` and call anything with it. CORS is off (set `CORS_ORIGINS` for a tool on another origin that needs it), `/api/token` answers only the app's own page, and the token cookie counts only on the app's own requests — not even from another service on the same host. Scripts and tools keep sending the token in a header as before
+- **Clearing thumbnails deletes only thumbnails**: files laid out as the generator writes them, and nothing at all when the thumbnail folder is, contains or is inside a picture folder. It used to delete every `.webp` below the folder
 
 ### Fixed
 

@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import re
 import time
 from pathlib import Path
 from typing import Annotated, Literal
@@ -499,12 +500,47 @@ async def rebuild_vectors(request: Request):
 
 # ── Thumbnail Management ──────────────────────────────────────────────────────
 
+_HEX2 = re.compile(r"[0-9a-f]{2}")
+_THUMB_NAME = re.compile(r"([0-9a-f]{64})\.webp")
+
+
+def _overlaps(a: Path, b: Path) -> bool:
+    return a == b or a in b.parents or b in a.parents
+
+
+def _thumbnail_files(thumb_dir: Path):
+    """The files the generator wrote, and nothing else: <ab>/<cd>/<abcd…64 hex>.webp.
+
+    Read by that shape rather than as "every .webp below": a thumbnail folder
+    set by mistake to a library folder would otherwise lose its originals.
+    Links are not followed.
+    """
+    for d1 in thumb_dir.iterdir():
+        if d1.is_symlink() or not d1.is_dir() or not _HEX2.fullmatch(d1.name):
+            continue
+        for d2 in d1.iterdir():
+            if d2.is_symlink() or not d2.is_dir() or not _HEX2.fullmatch(d2.name):
+                continue
+            for f in d2.iterdir():
+                m = _THUMB_NAME.fullmatch(f.name)
+                if m and m.group(1)[:4] == d1.name + d2.name and f.is_file() and not f.is_symlink():
+                    yield f
+
+
 @router.post("/thumbnails/clear")
 async def clear_thumbnails():
-    thumb_dir = Path(settings.thumbnails_dir)
+    """Delete the thumbnail cache; it is rebuilt as pictures are viewed."""
+    thumb_dir = Path(settings.thumbnails_dir).resolve()
+    libraries = [Path(settings.source_images_dir).resolve(), Path(settings.generated_images_dir).resolve()]
+    if thumb_dir == Path(thumb_dir.anchor) or any(_overlaps(thumb_dir, lib) for lib in libraries):
+        raise HTTPException(status_code=409, detail={
+            "error": "thumbnail_dir_overlaps_library",
+            "message": (f"The thumbnail folder {thumb_dir} is, contains or is inside a picture "
+                        f"folder; nothing was deleted. Check THUMBNAILS_DIR."),
+        })
     count = 0
-    if thumb_dir.exists():
-        for f in thumb_dir.rglob("*.webp"):
+    if thumb_dir.is_dir():
+        for f in _thumbnail_files(thumb_dir):
             try:
                 f.unlink()
                 count += 1
