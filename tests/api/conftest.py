@@ -129,8 +129,10 @@ async def api(tmp_path, monkeypatch):
         d.mkdir()
         monkeypatch.setattr(settings, name, d)
 
+    from backend.app.ai import tag_analyzer
     from backend.app.api.images import invalidate_image_caches
     invalidate_image_caches()
+    monkeypatch.setattr(tag_analyzer, "_cooccurrence_cache", None)   # 5 minutes, by design
 
     saved = dict(app.state._state)
     async with memory_db() as db:

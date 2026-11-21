@@ -2,6 +2,7 @@ import asyncio
 import logging
 
 from fastapi import APIRouter, Request
+from pydantic import BaseModel, Field
 from qdrant_client import models as qm
 
 from ..ai.tag_analyzer import build_tag_cooccurrence
@@ -184,14 +185,21 @@ async def get_tag_network(
     return result
 
 
+class TagTaxonomyBody(BaseModel):
+    tags: list[str] = Field(default_factory=list)
+    model: str | None = None
+
+
 @router.post("/tag-taxonomy")
-async def tag_taxonomy_submit(request: Request):
-    """Classify tags by category using an LLM. Submits a job to the EVALUATION lane."""
+async def tag_taxonomy_submit(body: TagTaxonomyBody, request: Request):
+    """Classify tags by category using an LLM. Submits a job to the EVALUATION lane.
+
+    The body is a model, not `request.json()` read by hand: that answered a
+    malformed body with a 500 and queued a job for a list that was not one.
+    """
     from ..jobs.runners import run_tag_taxonomy
     from ..spooler.models import JobLane
-    body = await request.json()
-    tags: list[str] = body.get("tags", [])
-    model: str | None = body.get("model")
+    tags, model = body.tags, body.model
     spooler = request.app.state.spooler
     ollama = request.app.state.ollama
     job_id = spooler.submit(
