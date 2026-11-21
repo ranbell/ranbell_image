@@ -12,8 +12,15 @@
 services:
   backend:
     environment:
-      # API authentication token — must match the token stored in the frontend localStorage
+      # API authentication token. Set a long random value of your own. The screen
+      # picks it up by itself from /api/token, which answers only the app's own
+      # page; scripts and tools send it as the X-API-Token header.
       API_TOKEN: RANBELL_IMAGE_API_TOKEN
+
+      # Browser origins other than the app's own that may call the API (CORS).
+      # None is needed for the app itself; leave it unset unless a tool served
+      # from another origin calls the API from a browser.
+      # CORS_ORIGINS: '["http://my-tool.lan:5173"]'
 
       # NOTE ON EMBED_DIM / EMBED_DIM_SMALL / EMBED_MODEL
       #
@@ -77,3 +84,23 @@ services:
 # on the qdrant service, SELinux labelling, a read-only or full filesystem. A
 # backup that cannot be written is worse than none because it looks like one, so
 # the admin screen reports the failure instead of logging it quietly.
+
+# [Qdrant port]
+#   docker-compose.yml publishes Qdrant on 6333 on every interface, with no API
+#   key, so that another machine on the LAN can inspect it. Anyone who can reach
+#   that port can read, rewrite and delete the whole library without the API
+#   token — keep it that way only on a network you trust.
+#
+#   A `ports:` list here is added to the one in docker-compose.yml, not used
+#   instead of it, so closing the port takes `!override` or `!reset`
+#   (Docker Compose 2.24.4 or later). The backend reaches Qdrant inside the
+#   compose network either way.
+#
+#   This machine only:
+#   qdrant:
+#     ports: !override
+#       - "127.0.0.1:6333:6333"
+#
+#   Not published at all:
+#   qdrant:
+#     ports: !reset []
