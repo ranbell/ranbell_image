@@ -24,6 +24,7 @@ from .api.scan import router as scan_router
 from .characters.api import router as characters_router
 from .config import settings
 from .core.runtime_cache import RuntimeConfigCache
+from .db.id_utils import NotAPictureId
 from .db.qdrant_client import QdrantDBClient
 
 # **Muse Classic retired (2026-09-12).** There is one studio, Muse Refine. Only the
@@ -289,6 +290,12 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Ranbell Image", version="0.5.0", lifespan=lifespan)
+
+@app.exception_handler(NotAPictureId)
+async def _not_a_picture_id(request: Request, exc: NotAPictureId):
+    # A typo or a truncated link in a URL: there is no such picture.
+    return JSONResponse({"detail": "Image not found"}, status_code=404)
+
 
 app.add_middleware(
     CORSMiddleware,

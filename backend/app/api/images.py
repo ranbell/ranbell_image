@@ -37,6 +37,8 @@ _tags_cache = Cached(900.0, what="tag histogram")  # a whole-library histogram b
 _dirs_cache = Cached(60.0, what="dir list")
 _name_cache = Cached(300.0, what="name index")
 _align_sort_cache = Cached(120.0, what="alignment sort")
+_HEX_ID = re.compile(r"[0-9a-fA-F]{32,64}")
+
 _facets_cache = Cached(120.0, what="model facets")
 _date_range_cache = Cached(300.0, what="date range")
 
@@ -474,6 +476,9 @@ class RatingBody(BaseModel):
 @router.put("/images/{sha256}/rating")
 async def set_image_rating(sha256: str, body: RatingBody, request: Request):
     db = _db(request)
+    # Checked first: Qdrant refuses a payload write to a point that is not there.
+    if not await db.get(sha256):
+        raise HTTPException(status_code=404, detail="Image not found")
     if body.rating is None:
         await db.delete_payload_keys(sha256, ["star_rating"])
     else:
@@ -565,6 +570,9 @@ async def _make_missing_thumbnail(request: Request, sha256: str) -> bool:
 
 @router.get("/thumbnails/{sha256}.webp")
 async def serve_thumbnail(sha256: str, request: Request, response: Response):
+    # The id becomes a path: only hex may, or ".." walks out of the thumbnail folder.
+    if not _HEX_ID.fullmatch(sha256):
+        raise HTTPException(status_code=404, detail="Thumbnail not found")
     thumb = get_thumbnail_path(sha256)
     if not thumb.exists() and not await _make_missing_thumbnail(request, sha256):
         raise HTTPException(status_code=404, detail="Thumbnail not found")
