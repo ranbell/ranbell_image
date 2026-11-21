@@ -97,7 +97,7 @@ async def test_erasing_memory_keeps_the_characters_and_every_picture(api):
     await _diary(api, cid, "a day")
     await api.db.upsert_new(sha("a"), {"sha256": sha("a"), "path": "/x/a.png"})
 
-    r = await api.http.post("/api/characters/erase-memory", json={})
+    r = await api.http.post("/api/characters/erase-memory", json={"confirm": "confirm"})
 
     assert r.status_code == 200 and r.json()["dry_run"] is False
     assert (await api.http.get(f"/api/characters/{cid}/diaries")).json()["diaries"] == []
@@ -119,7 +119,7 @@ async def test_a_reset_keeps_hand_made_characters_and_their_diaries(api):
     cid = await _character(api, "Handmade")
     await _diary(api, cid, "mine")
 
-    r = await api.http.post("/api/characters/reset", json={})
+    r = await api.http.post("/api/characters/reset", json={"confirm": "confirm"})
 
     assert r.status_code == 200
     assert "Handmade" in await _names(api)
@@ -128,6 +128,27 @@ async def test_a_reset_keeps_hand_made_characters_and_their_diaries(api):
 
 async def test_only_a_wipe_removes_hand_made_characters(api):
     await _character(api, "Handmade")
-    r = await api.http.post("/api/characters/reset", json={"wipe": True})
+    r = await api.http.post("/api/characters/reset", json={"wipe": True, "confirm": "confirm"})
     assert r.status_code == 200
     assert "Handmade" not in await _names(api)
+
+
+# ── the phrase ───────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("route,body", [
+    ("/api/characters/erase-memory", None),
+    ("/api/characters/erase-memory", {}),
+    ("/api/characters/erase-memory", {"dry_run": False, "confirm": "yes"}),
+    ("/api/characters/reset", None),
+    ("/api/characters/reset", {"wipe": True}),
+])
+async def test_erase_and_reset_need_the_phrase_from_the_server_too(api, route, body):
+    """A bare POST used to run them: the phrase was asked for only in the dialog."""
+    cid = await _character(api, "Handmade")
+    await _diary(api, cid, "mine")
+
+    r = await api.http.post(route, json=body) if body is not None else await api.http.post(route)
+
+    assert r.status_code == 400 and r.json()["detail"]["error"] == "confirm_required"
+    assert "Handmade" in await _names(api)
+    assert len((await api.http.get(f"/api/characters/{cid}/diaries")).json()["diaries"]) == 1

@@ -14,6 +14,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · Versioning: 
 - **CodeQL** (Python, JavaScript, workflows) and **Dependabot** (pip, npm, Actions, Docker)
 - **The same checks before a commit**: `scripts/check.sh` is what CI runs; `git config core.hooksPath .githooks` turns on a quick pre-commit check and lint before a push (tests and the rest run in CI)
 
+### Changed
+
+- **Deleting every picture, erasing the cast's memory and resetting the cast ask for the phrase on the server too**, as schema changes and restores already did. A bare request used to run them; the dialogs now ask you to type `confirm`
+- **A second press of a whole-library job button gets the job already waiting or running** instead of queueing it again. A job on a selection is queued every time
+
+### Fixed
+
+- **`migrate-paths` with `/` as the old prefix moved the whole library**; both prefixes must now name a folder
+- **A restore took any snapshot name as a path** on the Qdrant server; only a snapshot the collection has is accepted
+- **The thumbnail route could serve a file outside the thumbnail folder**; only hex ids reach the path
+- **The analyzer's 3D colour space answered with an error every time**, and the colour backfill failed at its last step
+- **A picture id that is not one** (a typo, a cut-off link) is a 404 rather than a server error, on every picture route; so is a rating for a picture that is not there
+- **The admin screen said "OK" when the server refused**; it now shows why
+
+### Removed
+
+- `POST /api/ai/pipeline/cancel` — nothing called it, and it could not stop the tagging stage. The screen stops jobs by id
+
 ---
 
 ## [0.5.0] — 2026-11-03

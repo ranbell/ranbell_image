@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Request
 
+from ..core.queue_once import queued, submit_once
 from ..spooler.models import JobLane
 
 router = APIRouter(prefix="/api")
@@ -11,9 +12,9 @@ async def trigger_scan(request: Request):
     spooler = request.app.state.spooler
     db = request.app.state.db
     ollama = request.app.state.ollama
-    job_id = spooler.submit(JobLane.SYNC, "scan_heal", run_scan_heal,
-                            db=db, ollama=ollama, spooler=spooler)
-    return {"status": "queued", "job_id": job_id}
+    job_id, fresh = submit_once(spooler, JobLane.SYNC, "scan_heal", run_scan_heal,
+                                  db=db, ollama=ollama, spooler=spooler)
+    return queued(job_id, fresh)
 
 
 @router.post("/scan/strict")
@@ -27,9 +28,9 @@ async def trigger_strict_scan(request: Request):
     spooler = request.app.state.spooler
     db = request.app.state.db
     ollama = request.app.state.ollama
-    job_id = spooler.submit(JobLane.SYNC, "scan_strict", run_scan_heal,
-                            db=db, ollama=ollama, spooler=spooler, strict=True)
-    return {"status": "queued", "job_id": job_id}
+    job_id, fresh = submit_once(spooler, JobLane.SYNC, "scan_strict", run_scan_heal,
+                                  db=db, ollama=ollama, spooler=spooler, strict=True)
+    return queued(job_id, fresh)
 
 
 @router.post("/scan/full")
@@ -38,9 +39,9 @@ async def trigger_full_scan(request: Request):
     spooler = request.app.state.spooler
     db = request.app.state.db
     ollama = request.app.state.ollama
-    job_id = spooler.submit(JobLane.SYNC, "scan_full", run_scan_full,
-                            db=db, ollama=ollama, spooler=spooler)
-    return {"status": "queued", "job_id": job_id}
+    job_id, fresh = submit_once(spooler, JobLane.SYNC, "scan_full", run_scan_full,
+                                  db=db, ollama=ollama, spooler=spooler)
+    return queued(job_id, fresh)
 
 
 @router.post("/scan/refresh-metadata")
@@ -51,10 +52,12 @@ async def trigger_refresh_metadata(request: Request, methods: str | None = None)
     spooler = request.app.state.spooler
     db = request.app.state.db
     only = [m.strip() for m in methods.split(",") if m.strip()] if methods else None
-    job_id = spooler.submit(
-        JobLane.SYNC, "meta_update", run_scan_refresh_metadata, db=db, methods=only
+    job_id, fresh = submit_once(
+        spooler,
+        JobLane.SYNC, "meta_update", run_scan_refresh_metadata, db=db, methods=only,
+        dedupe=only is None,   # a narrowed refresh is its own job
     )
-    return {"status": "queued", "job_id": job_id}
+    return queued(job_id, fresh)
 
 
 @router.get("/scan/status")

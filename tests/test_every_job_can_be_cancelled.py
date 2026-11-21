@@ -60,22 +60,30 @@ def _sources() -> dict[str, str]:
     return out
 
 
+#: Hands its `func` straight to `spooler.submit`; the runners are at its callers.
+PASS_THROUGH = {"core/queue_once.py"}
+
+
 def _submitted() -> set[str]:
-    """Every runner passed as the third argument of a `.submit(...)` call."""
+    """Every runner passed to `.submit(lane, title, runner)` or
+    `submit_once(spooler, lane, title, runner)`."""
     names: set[str] = set()
     for path in sorted(APP.rglob("*.py")):
+        if str(path.relative_to(APP)) in PASS_THROUGH:
+            continue
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"))
         except Exception:
             continue
         for node in ast.walk(tree):
-            if not isinstance(node, ast.Call) or len(node.args) < 3:
+            if not isinstance(node, ast.Call):
                 continue
             fn = node.func
             called = fn.attr if isinstance(fn, ast.Attribute) else getattr(fn, "id", "")
-            if called != "submit":
+            at = {"submit": 2, "submit_once": 3}.get(called)
+            if at is None or len(node.args) <= at:
                 continue
-            third = node.args[2]
+            third = node.args[at]
             if isinstance(third, ast.Name):
                 names.add(third.id)
             elif isinstance(third, ast.Attribute):

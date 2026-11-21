@@ -247,3 +247,23 @@ async def test_deleting_a_days_oracle_leaves_other_days(api):
     assert r.status_code == 200
     assert await api.db.get(A) is None
     assert await api.db.get(B) is not None
+
+
+# ── deleting every picture ───────────────────────────────────────────────────
+
+@pytest.mark.parametrize("body", [None, {}, {"confirm": "yes"}])
+async def test_deleting_every_picture_needs_the_phrase_from_the_server_too(api, body):
+    """The danger zone's button: a bare POST used to empty the library."""
+    await _picture(api, A, "/x/a.png", star_rating=5)
+    r = (await api.http.post("/api/admin/scan/full", json=body) if body is not None
+         else await api.http.post("/api/admin/scan/full"))
+    assert r.status_code == 400
+    assert await api.db.total_count() == 1
+
+
+async def test_with_the_phrase_every_picture_is_deleted(api):
+    await _picture(api, A, "/x/a.png")
+    await _picture(api, B, "/x/b.png")
+    r = await api.http.post("/api/admin/scan/full", json={"confirm": CONFIRM_PHRASE})
+    assert r.json() == {"deleted": 2}
+    assert await api.db.total_count() == 0

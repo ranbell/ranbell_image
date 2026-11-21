@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ..config import settings
+from ..core.confirm import require_confirm
 from ..spooler.models import JobLane
 from . import compat as compat_mod
 from . import presets as presets_db
@@ -104,6 +105,8 @@ class ResetRequest(BaseModel):
     # Report the same numbers and change nothing, so the confirm dialog can say
     # what is about to be deleted instead of asking the user to trust it.
     dry_run: bool = False
+    # Checked here as well as in the dialog (core/confirm.py); a preview needs none.
+    confirm: str = ""
 
 
 @router.post("/reset")
@@ -124,6 +127,8 @@ async def reset_characters(request: Request, body: ResetRequest | None = None):
     User-authored characters survive unless `wipe`.
     """
     opts = body or ResetRequest()
+    if not opts.dry_run:
+        require_confirm(opts.confirm)
     result = await presets_db.reset_presets_to_defaults(
         request.app.state.db, vector_dim=settings.embed_dim,
         wipe=opts.wipe, dry_run=opts.dry_run,
@@ -159,6 +164,8 @@ class EraseMemoryRequest(BaseModel):
     # Report the same numbers and change nothing, so the confirm dialog can
     # say what is about to be deleted instead of asking the user to trust it.
     dry_run: bool = False
+    # Checked here as well as in the dialog (core/confirm.py); a preview needs none.
+    confirm: str = ""
 
 
 @router.post("/erase-memory")
@@ -177,6 +184,8 @@ async def erase_character_memory(request: Request, body: EraseMemoryRequest | No
     """
     db = request.app.state.db
     opts = body or EraseMemoryRequest()
+    if not opts.dry_run:
+        require_confirm(opts.confirm)
     # Muse owns sessions/lounge/handpost; imported here rather than at module
     # scope since this is the only characters/ endpoint that needs them.
     from ..muse import handpost_db, lounge_db, memories_db, session_db, video_db

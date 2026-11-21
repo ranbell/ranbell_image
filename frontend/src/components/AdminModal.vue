@@ -264,7 +264,13 @@ async function adminAction(key, url, opts = {}) {
       ...(body ? { body } : {}),
       ...fetchOpts,
     })
-    const data = await r.json()
+    const data = await r.json().catch(() => ({}))
+    // A refusal is not a success: the server checks the confirmation too, and a
+    // 400 used to come back here as "OK" with nothing done.
+    if (!r.ok) {
+      const d = data?.detail
+      throw new Error(d?.message || (typeof d === 'string' ? d : '') || `HTTP ${r.status}`)
+    }
     adminSuccess.value = successMsg?.(data) ?? 'OK'
     setTimeout(() => { adminSuccess.value = '' }, 4000)
     await fetchAdminStats()
@@ -585,12 +591,13 @@ async function resetCharacterRoster() {
       t('admin.characters.resetConfirm', { n: plan.seeds ?? 0 }),
       resetPlanDescription(plan),
       () => adminAction('characterReset', '/api/characters/reset', {
-        body: JSON.stringify({}),
+        body: JSON.stringify({ confirm: 'confirm' }),
         successMsg: d => t('admin.characters.resetDone', {
           n: d.inserted ?? 0, removed: d.removed ?? 0,
         }),
         after: fetchCharacterRoster,
       }),
+      { requirePhrase: 'confirm' },
     )
   } catch (e) {
     adminError.value = e.message || String(e)
@@ -638,7 +645,7 @@ async function eraseCharacterMemory() {
       t('admin.characters.eraseConfirm', { n: plan.affected ?? 0 }),
       erasePlanDescription(plan),
       () => adminAction('characterEraseMemory', '/api/characters/erase-memory', {
-        body: JSON.stringify({ dry_run: false }),
+        body: JSON.stringify({ dry_run: false, confirm: 'confirm' }),
         successMsg: d => t('admin.characters.eraseDone', {
           n: d.characters ?? 0, sessions: d.sessions ?? 0,
           lounge: d.lounge_threads ?? 0, handpost: d.handpost_pages ?? 0,
@@ -2245,8 +2252,10 @@ watch(() => props.jobs?.find(j => j.title === 'backup')?.state, (state) => {
                     $t('admin.system.deleteConfirm'),
                     $t('admin.system.deleteConfirmDesc'),
                     () => adminAction('fullRescan', '/api/admin/scan/full',
-                      { successMsg: d => $t('admin.system.deleted', { n: d.deleted }),
-                        after: triggerFullScanProxy })
+                      { body: JSON.stringify({ confirm: 'confirm' }),
+                        successMsg: d => $t('admin.system.deleted', { n: d.deleted }),
+                        after: triggerFullScanProxy }),
+                    { requirePhrase: 'confirm' }
                   )"
                   :disabled="!!adminLoading"
                   class="px-3 py-1.5 bg-red-900/50 hover:bg-red-800/70 border border-red-700/50 rounded-lg text-xs text-red-300 disabled:opacity-40 transition-colors whitespace-nowrap ml-4">

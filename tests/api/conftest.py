@@ -96,7 +96,7 @@ class RecordingSpooler:
     def submit(self, lane, title, func, meta=None, *, priority=0, **kwargs):
         job_id = f"{getattr(lane, 'value', lane)}-{len(self.jobs) + 1:06d}"
         self.jobs.append(SimpleNamespace(id=job_id, lane=lane, title=title, func=func,
-                                         meta=meta or {}, kwargs=kwargs))
+                                         meta=meta or {}, kwargs=kwargs, state="queued"))
         return job_id
 
     async def cancel(self, job_id: str) -> bool:
@@ -104,7 +104,8 @@ class RecordingSpooler:
         return True
 
     def snapshot(self) -> list[dict]:
-        return [{"id": j.id, "title": j.title, "state": "queued", "meta": j.meta}
+        return [{"id": j.id, "title": j.title, "state": j.state, "meta": j.meta,
+                 "lane": getattr(j.lane, "value", j.lane)}
                 for j in reversed(self.jobs)]
 
 

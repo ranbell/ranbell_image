@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from ..alignment.schema import AlignmentRequest
 from ..alignment.vlm_analyzer import translate_to_lang
+from ..core.queue_once import queued, submit_once
 from ..spooler.models import JobLane
 
 _SUPPORTED_EXTRA_LANGS = {"zh", "ko", "fr", "de", "es", "pt"}
@@ -24,7 +25,8 @@ async def evaluate_alignment(body: AlignmentRequest, request: Request):
     db = request.app.state.db
     ollama = request.app.state.ollama
     sha256s = body.sha256s if body.sha256s else None
-    job_id = spooler.submit(
+    job_id, fresh = submit_once(
+        spooler,
         JobLane.EVALUATION,
         "alignment_evaluate",
         run_alignment_evaluate,
@@ -34,8 +36,9 @@ async def evaluate_alignment(body: AlignmentRequest, request: Request):
         sha256s=sha256s,
         spooler=spooler if sha256s is None else None,
         priority=_PRIORITY_ALIGNMENT,
+        dedupe=sha256s is None,   # a selection is its own job
     )
-    return {"status": "queued", "job_id": job_id}
+    return queued(job_id, fresh)
 
 
 @router.post("/evaluate/single/{sha256}")

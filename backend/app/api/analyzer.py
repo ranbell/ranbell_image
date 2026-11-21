@@ -7,6 +7,7 @@ from qdrant_client import models as qm
 
 from ..ai.tag_analyzer import build_tag_cooccurrence
 from ..ai.umap_reducer import analyzer_umap_state
+from ..core.queue_once import queued, submit_once
 from ..db.qdrant_client import IMAGES_COLLECTION
 from ..runtime_config import get_runtime_config
 
@@ -59,8 +60,8 @@ async def trigger_umap_analyze(request: Request):
     from ..spooler.models import JobLane
     spooler = request.app.state.spooler
     db = request.app.state.db
-    job_id = spooler.submit(JobLane.SYNC, "umap_analyze", run_analyze_umap, db=db)
-    return {"status": "queued", "job_id": job_id}
+    job_id, fresh = submit_once(spooler, JobLane.SYNC, "umap_analyze", run_analyze_umap, db=db)
+    return queued(job_id, fresh)
 
 
 @router.get("/umap/clusters")

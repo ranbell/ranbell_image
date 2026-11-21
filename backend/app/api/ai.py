@@ -802,6 +802,7 @@ async def trigger_pipeline(
     request: Request,
     body: PipelineRequest = PipelineRequest(),  # noqa: B008 — FastAPI's optional body
 ):
+    from ..core.queue_once import queued, submit_once
     from ..jobs.runners import run_pipeline_tagging
     spooler = request.app.state.spooler
     db = request.app.state.db
@@ -809,7 +810,8 @@ async def trigger_pipeline(
     sha256s = body.sha256s or None
     # CPU tagging stage first (TAGGING lane, never auto-paused); it chains the
     # embed stage onto the EMBEDDING lane when done.
-    job_id = spooler.submit(
+    job_id, fresh = submit_once(
+        spooler,
         JobLane.TAGGING,
         "ai_tagging",
         run_pipeline_tagging,
@@ -817,8 +819,9 @@ async def trigger_pipeline(
         ollama=ollama,
         sha256s=sha256s,
         spooler=spooler,
+        dedupe=sha256s is None,   # a selection is its own job
     )
-    return {"status": "queued", "job_id": job_id}
+    return queued(job_id, fresh)
 
 
 @router.get("/pipeline/status")
@@ -840,19 +843,6 @@ async def get_pipeline_status(request: Request):
             "eta_seconds": j["eta_seconds"],
         }
     return {"running": False}
-
-
-@router.post("/pipeline/cancel")
-async def cancel_pipeline(request: Request):
-    spooler = request.app.state.spooler
-    running = [
-        j for j in spooler.snapshot()
-        if j["lane"] == "embed" and j["state"] in ("running", "cancelling")
-    ]
-    if not running:
-        return {"status": "not_running"}
-    ok = await spooler.cancel(running[0]["id"])
-    return {"status": "cancel_requested" if ok else "not_running"}
 
 
 @router.post("/reset")

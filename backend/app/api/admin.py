@@ -10,6 +10,8 @@ from pydantic import BaseModel, Field
 
 from ..ai import wd14 as wd14_mod
 from ..config import settings
+from ..core.confirm import CONFIRM_PHRASE, require_confirm
+from ..core.queue_once import queued, submit_once
 from ..runtime_config import LEGACY_KEYS, get_runtime_config, invalidate_cache
 
 logger = logging.getLogger(__name__)
@@ -237,7 +239,6 @@ async def external_llm_models(body: OpenAIModelsBody, request: Request):
 # with progress rather than as a side effect of a process starting up.
 
 SCHEMA_JOB_TITLE = "schema_apply"
-CONFIRM_PHRASE = "confirm"
 
 
 class SchemaApplyBody(BaseModel):
@@ -282,11 +283,7 @@ async def schema_apply(body: SchemaApplyBody, request: Request):
     trusts the client to have asked is an endpoint that can be called without
     asking.
     """
-    if body.confirm != CONFIRM_PHRASE:
-        raise HTTPException(status_code=400, detail={
-            "error": "confirm_required",
-            "message": f'Type "{CONFIRM_PHRASE}" to confirm.',
-        })
+    require_confirm(body.confirm)
 
     spooler = request.app.state.spooler
     running = _running_schema_job(spooler)
@@ -358,11 +355,7 @@ async def backup_status(request: Request):
 @router.post("/backup/restore")
 async def backup_restore(body: BackupRestoreBody, request: Request):
     """Recover one collection from a snapshot. Replaces what is there now."""
-    if body.confirm != CONFIRM_PHRASE:
-        raise HTTPException(status_code=400, detail={
-            "error": "confirm_required",
-            "message": f'Type "{CONFIRM_PHRASE}" to confirm.',
-        })
+    require_confirm(body.confirm)
     from ..backup.service import _physical
     db = request.app.state.db
     # Snapshots are filed under the physical collection name even when they were
@@ -557,8 +550,8 @@ async def start_mrl_backfill(request: Request):
     from ..spooler.models import JobLane
     spooler = request.app.state.spooler
     db = request.app.state.db
-    job_id = spooler.submit(JobLane.EMBEDDING, "mrl_backfill", run_mrl_backfill, db=db)
-    return {"status": "queued", "job_id": job_id}
+    job_id, fresh = submit_once(spooler, JobLane.EMBEDDING, "mrl_backfill", run_mrl_backfill, db=db)
+    return queued(job_id, fresh)
 
 
 # ── Character chemistry vectors ──────────────────────────────────────────────
@@ -609,11 +602,12 @@ async def start_character_compat_backfill(request: Request):
     from ..characters.compat import run_character_compat_backfill
     from ..spooler.models import JobLane
     spooler = request.app.state.spooler
-    job_id = spooler.submit(
+    job_id, fresh = submit_once(
+        spooler,
         JobLane.EMBEDDING, "character_compat_backfill", run_character_compat_backfill,
         db=request.app.state.db, ollama=request.app.state.ollama,
     )
-    return {"status": "queued", "job_id": job_id}
+    return queued(job_id, fresh)
 
 
 # ── Color Palette Backfill ───────────────────────────────────────────────────
@@ -652,8 +646,8 @@ async def start_color_backfill(request: Request):
     from ..spooler.models import JobLane
     spooler = request.app.state.spooler
     db = request.app.state.db
-    job_id = spooler.submit(JobLane.SYNC, "color_extract", run_color_backfill, db=db)
-    return {"status": "queued", "job_id": job_id}
+    job_id, fresh = submit_once(spooler, JobLane.SYNC, "color_extract", run_color_backfill, db=db)
+    return queued(job_id, fresh)
 
 
 @router.post("/batch-category/backfill")
@@ -662,8 +656,8 @@ async def start_batch_category_backfill(request: Request):
     from ..spooler.models import JobLane
     spooler = request.app.state.spooler
     db = request.app.state.db
-    job_id = spooler.submit(JobLane.SYNC, "batch_category_backfill", run_batch_category_backfill, db=db)
-    return {"status": "queued", "job_id": job_id}
+    job_id, fresh = submit_once(spooler, JobLane.SYNC, "batch_category_backfill", run_batch_category_backfill, db=db)
+    return queued(job_id, fresh)
 
 
 @router.post("/is-reference/backfill")
@@ -672,8 +666,8 @@ async def start_is_reference_backfill(request: Request):
     from ..spooler.models import JobLane
     spooler = request.app.state.spooler
     db = request.app.state.db
-    job_id = spooler.submit(JobLane.SYNC, "is_reference_backfill", run_is_reference_backfill, db=db)
-    return {"status": "queued", "job_id": job_id}
+    job_id, fresh = submit_once(spooler, JobLane.SYNC, "is_reference_backfill", run_is_reference_backfill, db=db)
+    return queued(job_id, fresh)
 
 
 @router.get("/schema/stale")
@@ -700,11 +694,7 @@ async def drop_stale_rebuild_target(body: DropStaleBody, request: Request):
     Never a sweep: the name has to be given, because one of these may be the
     previous library, kept deliberately.
     """
-    if body.confirm != CONFIRM_PHRASE:
-        raise HTTPException(status_code=400, detail={
-            "error": "confirm_required",
-            "message": f'Type "{CONFIRM_PHRASE}" to confirm.',
-        })
+    require_confirm(body.confirm)
     try:
         return await request.app.state.db.drop_stale_rebuild_target(body.collection)
     except RuntimeError as exc:
@@ -728,8 +718,8 @@ async def start_orphan_sweep(request: Request):
     from ..spooler.models import JobLane
     spooler = request.app.state.spooler
     db = request.app.state.db
-    job_id = spooler.submit(JobLane.SYNC, "orphan_sweep", run_orphan_sweep, db=db)
-    return {"status": "queued", "job_id": job_id}
+    job_id, fresh = submit_once(spooler, JobLane.SYNC, "orphan_sweep", run_orphan_sweep, db=db)
+    return queued(job_id, fresh)
 
 
 @router.post("/model-name/backfill")
@@ -738,8 +728,8 @@ async def start_model_name_backfill(request: Request):
     from ..spooler.models import JobLane
     spooler = request.app.state.spooler
     db = request.app.state.db
-    job_id = spooler.submit(JobLane.SYNC, "model_name_backfill", run_model_name_backfill, db=db)
-    return {"status": "queued", "job_id": job_id}
+    job_id, fresh = submit_once(spooler, JobLane.SYNC, "model_name_backfill", run_model_name_backfill, db=db)
+    return queued(job_id, fresh)
 
 
 # ── Duplicate Detection ───────────────────────────────────────────────────────
@@ -779,9 +769,18 @@ async def find_duplicates(request: Request):
 
 # ── Scan ──────────────────────────────────────────────────────────────────────
 
+class ConfirmBody(BaseModel):
+    confirm: str = ""
+
+
 @router.post("/scan/full")
-async def full_rescan(request: Request):
-    """Delete all image points from Qdrant so a full scan re-registers everything."""
+async def full_rescan(request: Request, body: ConfirmBody | None = None):
+    """Delete all image points from Qdrant so a full scan re-registers everything.
+
+    Ratings, provenance and AI results go with them; the backup ledger can put
+    provenance and ratings back. So the phrase is checked here too.
+    """
+    require_confirm(body.confirm if body else None)
     db = request.app.state.db
     count = await db.delete_all_images()
     return {"deleted": count}
@@ -850,13 +849,14 @@ async def invoke_import_wd14_vocab(request: Request):
     spooler = request.app.state.spooler
     db = request.app.state.db
     ollama = request.app.state.ollama
-    job_id = spooler.submit(
+    job_id, fresh = submit_once(
+        spooler,
         JobLane.SYNC,
         "import_wd14_vocab",
         run_import_wd14_vocab,
         db=db,
         ollama=ollama,
     )
-    return {"status": "queued", "job_id": job_id}
+    return queued(job_id, fresh)
 
 

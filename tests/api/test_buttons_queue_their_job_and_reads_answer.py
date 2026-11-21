@@ -184,3 +184,38 @@ async def test_tag_taxonomy_refuses_a_body_that_is_not_a_tag_list(api, body):
                             headers={"content-type": "application/json"})
     assert r.status_code == 422
     assert api.spooler.jobs == []
+
+
+# ── a second press ───────────────────────────────────────────────────────────
+
+#: tag-taxonomy carries the tags to classify, so each press is its own job.
+WHOLE_ARCHIVE = [b for b in BUTTONS if b[0] != "/api/analyzer/tag-taxonomy"]
+
+
+@pytest.mark.parametrize("route,title,runner,lane", WHOLE_ARCHIVE, ids=[b[0] for b in WHOLE_ARCHIVE])
+async def test_a_second_press_is_handed_the_job_already_there(api, route, title, runner, lane):
+    first = (await api.http.post(route, json={})).json()
+    second = (await api.http.post(route, json={})).json()
+    assert len(api.spooler.jobs) == 1
+    assert second == {"status": "already_queued", "job_id": first["job_id"]}
+
+
+@pytest.mark.parametrize("state,again", [("running", False), ("paused", False),
+                                         ("cancelling", True), ("done", True), ("failed", True)])
+async def test_only_a_live_job_holds_the_button(api, state, again):
+    """Pressing after a cancel, or after it finished, means "start over"."""
+    await api.http.post("/api/admin/colors/backfill")
+    api.spooler.jobs[0].state = state
+    await api.http.post("/api/admin/colors/backfill")
+    assert len(api.spooler.jobs) == (2 if again else 1)
+
+
+@pytest.mark.parametrize("route,body", [
+    ("/api/ai/pipeline", {"sha256s": [sha("a")]}),
+    ("/api/alignment/evaluate", {"sha256s": [sha("a")]}),
+    ("/api/scan/refresh-metadata?methods=longest_text", {}),
+])
+async def test_a_job_on_a_selection_is_queued_every_time(api, route, body):
+    await api.http.post(route, json=body)
+    await api.http.post(route, json=body)
+    assert len(api.spooler.jobs) == 2
