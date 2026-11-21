@@ -78,9 +78,11 @@ step_audit() {
 }
 
 step_secrets() {
+  # detect / protect rather than the newer `git` subcommand (8.19+): they work on
+  # the distro packages too (Ubuntu ships 8.16) and on the release CI pins.
   say "gitleaks (whole history)"
   if command -v gitleaks >/dev/null; then
-    gitleaks git --redact --no-banner .
+    gitleaks detect --redact --no-banner --source .
   else
     missing gitleaks "https://github.com/gitleaks/gitleaks/releases"
   fi
@@ -106,7 +108,7 @@ step_staged() {
   fi
   say "gitleaks (staged)"
   if command -v gitleaks >/dev/null; then
-    gitleaks git --pre-commit --staged --redact --no-banner .
+    gitleaks protect --staged --redact --no-banner --source .
   else
     missing gitleaks "https://github.com/gitleaks/gitleaks/releases"
   fi
