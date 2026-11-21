@@ -91,12 +91,17 @@ import pytest_asyncio  # noqa: E402
 class RecordingSpooler:
     def __init__(self):
         self.jobs: list[SimpleNamespace] = []
+        self.cancelled: list[str] = []
 
     def submit(self, lane, title, func, meta=None, *, priority=0, **kwargs):
         job_id = f"{getattr(lane, 'value', lane)}-{len(self.jobs) + 1:06d}"
         self.jobs.append(SimpleNamespace(id=job_id, lane=lane, title=title, func=func,
                                          meta=meta or {}, kwargs=kwargs))
         return job_id
+
+    async def cancel(self, job_id: str) -> bool:
+        self.cancelled.append(job_id)
+        return True
 
     def snapshot(self) -> list[dict]:
         return [{"id": j.id, "title": j.title, "state": "queued", "meta": j.meta}
