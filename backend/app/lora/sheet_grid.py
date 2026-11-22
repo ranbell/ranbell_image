@@ -3,6 +3,10 @@
 Strengths across the top, LoRA files down the side, and above them what was
 held fixed (models, seed, sampling, prompt). The PNG carries no metadata —
 like the dataset export, nothing in it says where the files live.
+
+``strength_only`` keeps the strength labels and nothing else written: no
+title, settings, prompt, section headings or LoRA names. For posting, where
+the prompt is not meant to be read off the picture.
 """
 from __future__ import annotations
 
@@ -60,16 +64,18 @@ def _wrap(draw, text: str, font, width: int, max_lines: int) -> list[str]:
     return lines
 
 
-def compose(sheet: dict, open_image: Callable[[str], Image.Image | None]) -> bytes:
+def compose(sheet: dict, open_image: Callable[[str], Image.Image | None],
+            strength_only: bool = False) -> bytes:
     """Build the PNG. ``open_image(sha256)`` returns the picture or None."""
     m = sheet["models"]
     info = (f"{m['unet']}  ·  seed {sheet['seed']}  ·  {sheet['steps']} steps  ·  cfg {sheet['cfg']:g}"
             f"  ·  {sheet['sampler']}/{sheet['scheduler']}  ·  {sheet['width']}x{sheet['height']}")
     return _draw(sheet["name"], info, sheet["prompt"], sh.columns(sheet),
-                 [_section(sheet, "", sh.grid(sheet))], open_image)
+                 [_section(sheet, "", sh.grid(sheet))], open_image, strength_only)
 
 
-def compose_stack(sheets: list[dict], open_image: Callable[[str], Image.Image | None]) -> bytes:
+def compose_stack(sheets: list[dict], open_image: Callable[[str], Image.Image | None],
+                  strength_only: bool = False) -> bytes:
     """Several sheets stacked on shared strength columns. The header says what
     they all share; each section's heading says what sets that sheet apart."""
     from . import sheet_compare as cmp
@@ -81,7 +87,7 @@ def compose_stack(sheets: list[dict], open_image: Callable[[str], Image.Image | 
     sections = [_section(s, "  ·  ".join(d) or s["name"], cmp.aligned_grid(s, cols))
                 for s, d in zip(sheets, per)]
     return _draw(title, "  ·  ".join(common), prompts.pop() if len(prompts) == 1 else "",
-                 cols, sections, open_image)
+                 cols, sections, open_image, strength_only)
 
 
 def _section(sheet: dict, heading: str, keys: list[list[str]]) -> dict:
@@ -103,19 +109,23 @@ def _cell_width(n_cols: int, sections: list[dict]) -> int:
 
 
 def _draw(title: str, info: str, prompt: str, cols: list[dict], sections: list[dict],
-          open_image: Callable[[str], Image.Image | None]) -> bytes:
+          open_image: Callable[[str], Image.Image | None], strength_only: bool = False) -> bytes:
     big, small = _font(20), _font(15)
     probe = ImageDraw.Draw(Image.new("RGB", (1, 1)))
     cw = _cell_width(len(cols), sections)
-    width = LABEL_W + cw * len(cols) + PAD
-    title_lines = _wrap(probe, title, big, width - 2 * PAD, 2)
-    info_lines = _wrap(probe, info, small, width - 2 * PAD, 3) if info else []
-    prompt_lines = _wrap(probe, prompt, small, width - 2 * PAD, 4) if prompt else []
-    top = PAD + 26 * len(title_lines) + 20 * (len(info_lines) + len(prompt_lines)) + PAD
+    label_w = PAD if strength_only else LABEL_W
+    width = label_w + cw * len(cols) + PAD
+    if strength_only:
+        title_lines, info_lines, prompt_lines, top = [], [], [], 0
+    else:
+        title_lines = _wrap(probe, title, big, width - 2 * PAD, 2)
+        info_lines = _wrap(probe, info, small, width - 2 * PAD, 3) if info else []
+        prompt_lines = _wrap(probe, prompt, small, width - 2 * PAD, 4) if prompt else []
+        top = PAD + 26 * len(title_lines) + 20 * (len(info_lines) + len(prompt_lines)) + PAD
     for sec in sections:
         sec["cell_h"] = max(1, round(cw * sec["ratio"]))
         sec["heading_lines"] = (_wrap(probe, sec["heading"], small, width - 2 * PAD, 2)
-                                if sec["heading"] else [])
+                                if sec["heading"] and not strength_only else [])
     body = sum((SECTION_H * bool(sec["heading_lines"]) + 18 * max(0, len(sec["heading_lines"]) - 1))
                + sec["cell_h"] * len(sec["keys"]) for sec in sections)
     height = top + HEAD_H + body + PAD
@@ -131,7 +141,7 @@ def _draw(title: str, info: str, prompt: str, cols: list[dict], sections: list[d
         y += 20
 
     for ci, col in enumerate(cols):
-        x = LABEL_W + ci * cw
+        x = label_w + ci * cw
         d.text((x + cw // 2, top + HEAD_H // 2), column_label(col), font=big, fill=FG,
                anchor="mm")
 
@@ -147,7 +157,7 @@ def _draw(title: str, info: str, prompt: str, cols: list[dict], sections: list[d
         cell_h = sec["cell_h"]
         for row, row_keys in zip(sec["rows"], sec["keys"]):
             _draw_row(d, out, probe, row, row_keys, sec["renders"], y0, cell_h, open_image,
-                      big, small, cw)
+                      big, small, cw, label_w)
             y0 += cell_h
 
     buf = io.BytesIO()
@@ -156,18 +166,18 @@ def _draw(title: str, info: str, prompt: str, cols: list[dict], sections: list[d
 
 
 def _draw_row(d, out, probe, row, row_keys, renders, y0, cell_h, open_image, big, small,
-              cw=CELL_W):
-    label = _wrap(probe, row_label(row), big, LABEL_W - 2 * PAD, 3)
+              cw=CELL_W, label_w=LABEL_W):
+    label = _wrap(probe, row_label(row), big, LABEL_W - 2 * PAD, 3) if label_w == LABEL_W else []
     ty = y0 + PAD
     for line in label:
         d.text((PAD, ty), line, font=big, fill=FG)
         ty += 24
-    if row.get("trigger"):
+    if label and row.get("trigger"):
         for line in _wrap(probe, row["trigger"], small, LABEL_W - 2 * PAD, 2):
             d.text((PAD, ty + 4), line, font=small, fill=DIM)
             ty += 19
     for ci, key in enumerate(row_keys):
-        x0 = LABEL_W + ci * cw
+        x0 = label_w + ci * cw
         if not key:  # this sheet has no such column
             continue
         r = renders.get(key) or {}

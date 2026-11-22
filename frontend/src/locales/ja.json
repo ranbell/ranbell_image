@@ -2308,6 +2308,8 @@
     "drawRest": "続きを描く",
     "newSeed": "シードを変えて複製",
     "savePng": "PNG で保存",
+    "strengthOnly": "強度のみ",
+    "strengthOnlyHint": "保存する PNG に強度だけを書きます（タイトル・設定・プロンプト・LoRA 名を省く）",
     "delete": "削除",
     "confirmDelete": "もう一度押すと削除（描いた絵は残ります）",
     "baseCol": "0（なし）",

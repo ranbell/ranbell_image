@@ -474,6 +474,42 @@ def test_stack_png_has_a_section_per_sheet():
     assert not both.info  # no metadata
 
 
+def test_strength_only_png_writes_nothing_but_the_strengths():
+    # For posting: the prompt, settings and LoRA names must not be readable
+    # off the picture. Only the strength row and the cells remain.
+    import io
+
+    from app.lora import sheet_grid
+    from PIL import Image
+
+    a = sh.new_sheet(_body())
+    b = sh.new_sheet(_body(seed=7))
+    s = a
+    first = sh.grid(s)[0][0]
+    s["renders"][first].update(status=sh.DONE, sha256="aa")
+
+    def open_image(sha):
+        return Image.new("RGB", (64, 96), (200, 0, 0)) if sha == "aa" else None
+
+    cols = len(sh.columns(s))
+    cell_h = round(sheet_grid.CELL_W * s["height"] / s["width"])
+    pad, cw = sheet_grid.PAD, sheet_grid.CELL_W
+    with Image.open(io.BytesIO(sheet_grid.compose(s, open_image, strength_only=True))) as im:
+        assert not im.text
+        # no title/settings/prompt block above, no LoRA-name column beside
+        assert im.size == (pad + cw * cols + pad, sheet_grid.HEAD_H + cell_h * len(s["rows"]) + pad)
+        assert im.getpixel((pad + cw // 2, sheet_grid.HEAD_H + cell_h // 2)) == (200, 0, 0)
+        # the left margin is bare: no label written where the LoRA name was
+        margin = im.crop((0, sheet_grid.HEAD_H, pad, im.height))
+        assert margin.getcolors() == [(margin.width * margin.height, sheet_grid.BG)]
+
+    # stacked: no section headings either, just the cells one under the other
+    with Image.open(io.BytesIO(sheet_grid.compose_stack([a, b], lambda sha: None,
+                                                        strength_only=True))) as im:
+        rows = len(a["rows"]) + len(b["rows"])
+        assert im.height == sheet_grid.HEAD_H + cell_h * rows + pad
+
+
 def test_prefill_takes_the_shape_from_the_picture_itself():
     # The latent said 1024x1024, but the picture on disk is 832x1216 (cropped,
     # or drawn by a graph whose size node ranbell cannot read): the file wins.

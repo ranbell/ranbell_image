@@ -20,6 +20,8 @@ const { t } = useI18n()
 const current = ref(null)
 const busy = ref(false)
 const confirmDelete = ref(false)
+// Save PNG with only the strength labels written on it, for posting.
+const strengthOnly = ref(false)
 const editingName = ref(false)
 const nameDraft = ref('')
 const lightbox = ref(null)      // { r, c }
@@ -203,7 +205,11 @@ onBeforeUnmount(() => { alive = false; stop() })
             class="px-2.5 py-1 rounded-lg bg-amber-700/70 hover:bg-amber-600 text-xs">{{ t('loraSheet.drawRest') }}</button>
           <button type="button" :disabled="busy" @click="duplicateNewSeed"
             class="px-2.5 py-1 rounded-lg bg-gray-800 hover:bg-gray-700 text-xs">🎲 {{ t('loraSheet.newSeed') }}</button>
-          <a :href="`/api/lora/sheets/${current.id}/grid.png`" download
+          <label class="flex items-center gap-1 px-2 py-1 rounded-lg bg-gray-800 text-xs cursor-pointer"
+            :title="t('loraSheet.strengthOnlyHint')">
+            <input type="checkbox" v-model="strengthOnly" class="accent-amber-400"> {{ t('loraSheet.strengthOnly') }}
+          </label>
+          <a :href="`/api/lora/sheets/${current.id}/grid.png${strengthOnly ? '?strength_only=true' : ''}`" download
             class="px-2.5 py-1 rounded-lg bg-gray-800 hover:bg-gray-700 text-xs">⬇ {{ t('loraSheet.savePng') }}</a>
           <button type="button" @click="deleteSheet" class="px-2.5 py-1 rounded-lg text-xs"
             :class="confirmDelete ? 'bg-red-700 text-white' : 'bg-gray-800 hover:bg-gray-700'">

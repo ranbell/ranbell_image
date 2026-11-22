@@ -2308,6 +2308,8 @@
     "drawRest": "Draw the rest",
     "newSeed": "Duplicate with a new seed",
     "savePng": "Save PNG",
+    "strengthOnly": "Strength only",
+    "strengthOnlyHint": "Write only the strengths on the saved PNG (no title, settings, prompt or LoRA names)",
     "delete": "Delete",
     "confirmDelete": "Press again to delete (pictures stay)",
     "baseCol": "0 (none)",

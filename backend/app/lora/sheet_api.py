@@ -455,15 +455,16 @@ def _png(data: bytes, name: str) -> Response:
 
 
 @router.get("/sheets/{sheet_id}/grid.png")
-async def sheet_png(sheet_id: str, request: Request):
+async def sheet_png(sheet_id: str, request: Request, strength_only: bool = False):
     sheet = await _load(request, sheet_id)
     data = await asyncio.get_running_loop().run_in_executor(
-        None, sheet_grid.compose, sheet, await _opener(request, [sheet]))
+        None, sheet_grid.compose, sheet, await _opener(request, [sheet]), strength_only)
     return _png(data, sheet["name"])
 
 
 class StackBody(BaseModel):
     ids: list[str] = Field(min_length=1, max_length=12)
+    strength_only: bool = False
 
 
 @router.post("/sheets/stack.png")
@@ -471,5 +472,5 @@ async def stack_png(body: StackBody, request: Request):
     """Several sheets stacked on shared strength columns, as one picture."""
     sheets = [await _load(request, i) for i in dict.fromkeys(body.ids)]
     data = await asyncio.get_running_loop().run_in_executor(
-        None, sheet_grid.compose_stack, sheets, await _opener(request, sheets))
+        None, sheet_grid.compose_stack, sheets, await _opener(request, sheets), body.strength_only)
     return _png(data, "lora_sheets_" + str(len(sheets)))

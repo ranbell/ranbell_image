@@ -20,6 +20,8 @@ const { t } = useI18n()
 
 const sheets = ref([])
 const busy = ref(false)
+// Save PNG with only the strength labels written on it, for posting.
+const strengthOnly = ref(false)
 const lightbox = ref(null)
 let pollTimer = null
 let alive = true
@@ -65,7 +67,7 @@ async function savePng() {
   try {
     const resp = await fetch('/api/lora/sheets/stack.png', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids: sheets.value.map(s => s.id) }),
+      body: JSON.stringify({ ids: sheets.value.map(s => s.id), strength_only: strengthOnly.value }),
     })
     if (!resp.ok) throw new Error(`${resp.status}`)
     const url = URL.createObjectURL(await resp.blob())
@@ -88,6 +90,10 @@ onBeforeUnmount(() => { alive = false; clearTimeout(pollTimer) })
         <h4 class="font-semibold">{{ t('loraSheet.stackTitle', { n: sheets.length }) }}</h4>
         <span v-if="sheets.some(s => s.drawing)" class="text-[11px] text-amber-300 motion-safe:animate-pulse">{{ t('loraSheet.drawing') }}</span>
         <div class="ml-auto flex flex-wrap gap-1.5">
+          <label class="flex items-center gap-1 px-2 py-1 rounded-lg bg-gray-800 text-xs cursor-pointer"
+            :title="t('loraSheet.strengthOnlyHint')">
+            <input type="checkbox" v-model="strengthOnly" class="accent-amber-400"> {{ t('loraSheet.strengthOnly') }}
+          </label>
           <button type="button" :disabled="busy || !sheets.length" @click="savePng"
             class="px-2.5 py-1 rounded-lg bg-gray-800 hover:bg-gray-700 text-xs">⬇ {{ t('loraSheet.savePng') }}</button>
           <button type="button" @click="emit('close')"
