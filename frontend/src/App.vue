@@ -2,7 +2,7 @@
 import { ref, computed, watch, onMounted, onUnmounted, nextTick, defineAsyncComponent } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { jobLabel, jobProgress } from './jobLabel.js'
-import { saveAndSyncToken, getToken } from './apiToken.js'
+import { saveAndSyncToken } from './apiToken.js'
 import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide } from 'd3-force'
 import SceneSheetEditor from './components/refine/SceneSheetEditor.vue'
 import RefineSteps from './components/refine/RefineSteps.vue'
@@ -2196,7 +2196,8 @@ async function handleJobFinished(job) {
 
 function startJobStream() {
   if (_jobEventSource) return
-  const es = new EventSource(`/api/jobs/stream?token=${encodeURIComponent(getToken())}`)
+  // The cookie carries the token: none in the URL, where logs would keep it.
+  const es = new EventSource('/api/jobs/stream')
   _jobEventSource = es
 
   es.onopen = () => { jobStreamConnected.value = true }

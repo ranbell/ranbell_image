@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     # Origins other than the app's own that may call the API from a browser
     # (e.g. ["http://other-tool:5173"]). The screens are served from the same
     # origin as /api, so none is needed; "*" let any page read the token.
+    # This is not a way to serve the screens apart from the API: their streams
+    # (EventSource) authenticate with the same-origin cookie only. Keep the
+    # screens and the API on one origin, behind one reverse proxy.
     cors_origins: list[str] = []
 
     # File watcher

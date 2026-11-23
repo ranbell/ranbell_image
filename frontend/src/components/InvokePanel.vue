@@ -90,7 +90,7 @@ const workflows = ref([])
 async function _loadWorkflows() {
   if (workflows.value.length > 0) return
   try {
-    const r = await fetch(`/api/comfy/workflows?token=${encodeURIComponent(getToken())}`)
+    const r = await fetch('/api/comfy/workflows')
     if (r.ok) workflows.value = await r.json()
   } catch {}
 }

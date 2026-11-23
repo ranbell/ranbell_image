@@ -8,7 +8,6 @@
  */
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getToken } from '../apiToken.js'
 import ActressDiaryModal from './muse/ActressDiaryModal.vue'
 import CharacterGallery from './CharacterGallery.vue'
 
@@ -744,9 +743,8 @@ function scheduleRefresh(scroll = false) {
 function openStream(id) {
   closeStream()
   if (!id) return
-  es = new EventSource(
-    `/api/muse/sessions/${id}/stream?token=${encodeURIComponent(getToken())}`,
-  )
+  // The cookie carries the token: none in the URL, where logs would keep it.
+  es = new EventSource(`/api/muse/sessions/${id}/stream`)
   es.onopen = () => { streamLive.value = true }
   es.onmessage = (ev) => {
     let data = null

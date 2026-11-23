@@ -19,7 +19,9 @@ services:
 
       # Browser origins other than the app's own that may call the API (CORS).
       # None is needed for the app itself; leave it unset unless a tool served
-      # from another origin calls the API from a browser.
+      # from another origin calls the API from a browser. The app's own screens
+      # must be served from the same origin as the API (one reverse proxy for
+      # both): their live streams authenticate with a same-origin cookie only.
       # CORS_ORIGINS: '["http://my-tool.lan:5173"]'
 
       # NOTE ON EMBED_DIM / EMBED_DIM_SMALL / EMBED_MODEL

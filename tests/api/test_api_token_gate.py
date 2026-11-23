@@ -51,20 +51,23 @@ def test_a_post_is_held_to_the_same_rule(client):
     assert client.post(NOWHERE, json={}).status_code == STOPPED
 
 
-@pytest.mark.parametrize("how", ["header", "bearer", "query", "cookie"])
+@pytest.mark.parametrize("how", ["header", "bearer", "cookie"])
 def test_each_way_of_showing_the_token_is_accepted(client, how):
-    """The screen uses the header; EventSource and <img> cannot, so query and cookie exist."""
+    """The screen uses the header; EventSource and <img> cannot, so the cookie exists."""
     tok = settings.api_token
     if how == "header":
         r = client.get(NOWHERE, headers={"X-API-Token": tok})
     elif how == "bearer":
         r = client.get(NOWHERE, headers={"Authorization": f"Bearer {tok}"})
-    elif how == "query":
-        r = client.get(NOWHERE, params={"token": tok})
     else:
         client.cookies.set("api_token", tok)
         r = client.get(NOWHERE)
     assert r.status_code == PAST_THE_GATE
+
+
+def test_the_token_is_not_taken_from_the_query_string(client):
+    """A URL is kept in proxy and access logs and in browser history (2026-11-24)."""
+    assert client.get(NOWHERE, params={"token": settings.api_token}).status_code == STOPPED
 
 
 def test_a_wrong_header_is_not_rescued_by_nothing_else(client):
@@ -96,6 +99,33 @@ def test_the_token_is_not_handed_to_anything_else(client, site):
     r = client.get("/api/token", headers=headers)
     assert r.status_code == 403
     assert settings.api_token not in r.text
+
+
+# Browsers send Sec-Fetch-Site only to HTTPS and localhost, so the app opened
+# as http://<LAN address>:3100 got 403 on its own page (2026-11-24). Without
+# the header, the Referer says whose page it is.
+
+def test_the_apps_own_page_over_plain_http_gets_the_token(client):
+    r = client.get("/api/token", headers={"Referer": "http://testserver/lora"})
+    assert r.status_code == 200 and r.json() == {"token": settings.api_token}
+
+
+@pytest.mark.parametrize("referer", [
+    "http://evil.example/",            # another page
+    "http://testserver:8188/",         # another service on this host
+    "not a url",
+])
+def test_a_referer_from_elsewhere_gets_no_token(client, referer):
+    r = client.get("/api/token", headers={"Referer": referer})
+    assert r.status_code == 403
+    assert settings.api_token not in r.text
+
+
+def test_the_header_outranks_the_referer(client):
+    """Where the browser does say, what it says decides."""
+    r = client.get("/api/token", headers={"Sec-Fetch-Site": "cross-site",
+                                          "Referer": "http://testserver/"})
+    assert r.status_code == 403
 
 
 def test_another_page_gets_no_cors_answer(client):

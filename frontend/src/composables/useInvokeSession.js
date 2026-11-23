@@ -139,9 +139,11 @@ function _closeEventSource() {
   }
 }
 
-function _connectEventSource(sessionId, token) {
+function _connectEventSource(sessionId) {
   _closeEventSource()
-  const url = `/api/invoke/stream/${sessionId}?token=${encodeURIComponent(token)}`
+  // No token in the URL (it would sit in logs and history): the cookie is
+  // sent with a same-origin EventSource.
+  const url = `/api/invoke/stream/${sessionId}`
   _eventSource = new EventSource(url)
 
   _eventSource.onmessage = (e) => {
@@ -279,7 +281,7 @@ async function summon(token, locale = 'en') {
     if (!r.ok) throw new Error(await r.text())
     const data = await r.json()
     invokeSessionId.value = data.session_id
-    _connectEventSource(data.session_id, token)
+    _connectEventSource(data.session_id)
   } catch (err) {
     invokeLoading.value = false
     console.error('Invoke summon failed:', err)
@@ -329,7 +331,7 @@ async function _launchLineage(endpoint, payload, token, locale) {
     if (!r.ok) throw new Error(await r.text())
     const data = await r.json()
     invokeSessionId.value = data.session_id
-    _connectEventSource(data.session_id, token)
+    _connectEventSource(data.session_id)
   } catch (err) {
     invokeLoading.value = false
     console.error(`Invoke ${endpoint} failed:`, err)

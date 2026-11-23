@@ -792,7 +792,7 @@ for i, jid in enumerate(queue):
 ```javascript
 // App.vue
 function startJobStream() {
-  const es = new EventSource(`/api/jobs/stream?token=${encodeURIComponent(getToken())}`)
+  const es = new EventSource('/api/jobs/stream')  // the same-origin cookie carries the token
 
   es.addEventListener('snapshot', (e) => {
     const { jobs, resources, lanes } = JSON.parse(e.data)

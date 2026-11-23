@@ -322,6 +322,23 @@ def _from_another_origin(request: Request) -> bool:
     return site is not None and site not in ("same-origin", "none")
 
 
+def _from_own_page(request: Request) -> bool:
+    """A request sent by this app's own page.
+
+    Sec-Fetch-Site says so where the browser sends it, but it sends it only to
+    HTTPS and localhost: a page opened as http://<LAN address>:3100 has none.
+    There the Referer stands in. The browser puts the page's own address there
+    on a same-origin fetch, and another page cannot make it ours.
+    """
+    site = request.headers.get("sec-fetch-site")
+    if site is not None:
+        return site == "same-origin"
+    from urllib.parse import urlsplit
+
+    referer = urlsplit(request.headers.get("referer", ""))
+    return bool(referer.netloc) and referer.netloc == request.headers.get("host")
+
+
 @app.middleware("http")
 async def verify_api_token(request: Request, call_next):
     path = request.url.path
@@ -330,14 +347,15 @@ async def verify_api_token(request: Request, call_next):
     if path == "/api/token":
         # Handed to the app's own page only, never to another page or a script:
         # a script has the token from where the server was configured.
-        if request.headers.get("sec-fetch-site") != "same-origin":
+        if not _from_own_page(request):
             return JSONResponse({"detail": "Forbidden"}, status_code=403)
         return await call_next(request)
     if path.startswith("/api"):
+        # Never from the query string: a URL is kept in proxy and access logs
+        # and in browser history. EventSource and <img> use the cookie.
         given = (
             request.headers.get("X-API-Token")
             or request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
-            or request.query_params.get("token", "")
         )
         if not given:
             # The cookie is the one credential a browser attaches by itself, so
