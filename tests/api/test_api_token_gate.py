@@ -110,6 +110,25 @@ def test_the_apps_own_page_over_plain_http_gets_the_token(client):
     assert r.status_code == 200 and r.json() == {"token": settings.api_token}
 
 
+# The real address has a port, and it reaches the backend through nginx. nginx
+# sent `Host $host`, which drops the port: Host "localhost" against Referer
+# "localhost:3100" was 403 on the app's own page, and the screens fell back to
+# the default token (2026-11-27). The test above, with no port, could not see it.
+
+def test_the_page_on_its_port_gets_the_token(client):
+    r = client.get("/api/token", headers={"Host": "lan-host:3100",
+                                          "Referer": "http://lan-host:3100/"})
+    assert r.status_code == 200
+
+
+def test_nginx_hands_the_backend_the_port():
+    conf = (ROOT / "frontend" / "nginx.conf").read_text()
+    assert "proxy_set_header Host $http_host;" in conf, (
+        "nginx.conf: Host は $http_host で渡す（$host はポートを落とし、"
+        "/api/token が自分のページに 403 を返す）"
+    )
+
+
 @pytest.mark.parametrize("referer", [
     "http://evil.example/",            # another page
     "http://testserver:8188/",         # another service on this host
