@@ -482,7 +482,7 @@ watch(() => props.show, async (val) => {
   } else {
     invokeOpen.value = false
   }
-})
+}, { immediate: true })  // App mounts this on first open, already showing
 
 // ── Oracle countdown ──────────────────────────────────────────────────────────
 const oracleCountdown = ref('')
