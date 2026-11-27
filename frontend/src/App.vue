@@ -2005,6 +2005,10 @@ async function setImageRating(img, n) {
     body: JSON.stringify({ rating: newRating }),
   })
   img.star_rating = newRating
+  // The detail panel holds the full document fetched for it, not the grid's
+  // row: set the row too, or the grid shows the old stars after closing.
+  const row = images.value.find(i => i.sha256 === img.sha256)
+  if (row) row.star_rating = newRating
   if (selected.value?.sha256 === img.sha256) {
     selected.value = { ...selected.value, star_rating: newRating }
   }
