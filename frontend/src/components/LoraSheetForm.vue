@@ -156,6 +156,25 @@ function swapAspect() {
   const f = form.value
   ;[f.aspect_w, f.aspect_h] = [f.aspect_h, f.aspect_w]
 }
+// Presets fill the two numbers; the numbers stay editable. The select shows
+// the preset the numbers equal (12:16 is 3:4), else "custom".
+const ASPECT_PRESETS = {
+  square: [[1, 1]],
+  portrait: [[4, 5], [3, 4], [2, 3], [9, 16], [1, 2]],
+  landscape: [[5, 4], [4, 3], [3, 2], [16, 9], [2, 1], [21, 9]],
+}
+const aspectPreset = computed({
+  get() {
+    const { aspect_w: w, aspect_h: h } = form.value
+    const hit = Object.values(ASPECT_PRESETS).flat().find(([a, b]) => a * h === b * w)
+    return hit ? `${hit[0]}:${hit[1]}` : ''
+  },
+  set(v) {
+    if (!v) return
+    const [a, b] = v.split(':').map(Number)
+    Object.assign(form.value, { aspect_w: a, aspect_h: b })
+  },
+})
 const canCreate = computed(() => form.value.rows.length && form.value.prompt.trim() && !problems.value.length
   && form.value.models.unet && form.value.models.clip && form.value.models.vae
   && strengths.value.length && !busy.value)
@@ -346,6 +365,13 @@ defineExpose({ startNew })
     <label class="flex flex-col gap-1 text-[11px] text-gray-400">
       {{ t('loraSheet.size') }}
       <span class="flex items-center gap-1">
+        <select v-model="aspectPreset" :title="t('loraSheet.aspectPreset')"
+          class="px-1.5 py-1 rounded-lg bg-gray-900 border border-gray-700 text-xs">
+          <option value="">{{ t('loraSheet.aspectCustom') }}</option>
+          <optgroup v-for="(list, group) in ASPECT_PRESETS" :key="group" :label="t(`loraSheet.aspectGroup.${group}`)">
+            <option v-for="[a, b] in list" :key="`${a}:${b}`" :value="`${a}:${b}`">{{ a }}:{{ b }}</option>
+          </optgroup>
+        </select>
         <input v-model.number="form.aspect_w" type="number" min="1" :title="t('loraSheet.aspect')"
           class="w-16 px-2 py-1 rounded-lg bg-gray-900 border border-gray-700 text-xs" />
         :
