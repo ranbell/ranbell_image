@@ -53,10 +53,24 @@ function sizeFor(aw, ah, mp) {
   const snap = v => Math.min(4096, Math.max(64, Math.round(v / 16) * 16))
   return { width: snap(Math.sqrt(area * r)), height: snap(Math.sqrt(area / r)) }
 }
+// A rendered picture's sides are snapped to 16 or 32, so a 9:16 picture is
+// 928×1664 and its exact ratio is 29:52. A small exact ratio is kept (768×1344
+// is 4:7); otherwise the nearest common ratio within 2%, else the exact one.
+const COMMON_RATIOS = [[1, 1], [5, 4], [4, 3], [3, 2], [8, 5], [16, 9], [2, 1], [7, 3]]
+  .flatMap(([a, b]) => (a === b ? [[a, b]] : [[a, b], [b, a]]))
 function reduceRatio(w, h) {
+  const W = Math.round(w), H = Math.round(h)
   const g = (a, b) => (b ? g(b, a % b) : a)
-  const d = g(Math.round(w), Math.round(h)) || 1
-  return [Math.round(w) / d, Math.round(h) / d]
+  const d = g(W, H) || 1
+  const exact = [W / d, H / d]
+  if (exact[0] <= 21 && exact[1] <= 21) return exact
+  const r = W / H
+  let best = null, err = 0.02
+  for (const [a, b] of COMMON_RATIOS) {
+    const e = Math.abs(a / b - r) / r
+    if (e <= err) { best = [a, b]; err = e }
+  }
+  return best || exact
 }
 function toast(msg, type = 'info') { emit('toast', { msg, type }) }
 // Mirrors backend sheet._clean_strengths: rounded to 4 places, deduplicated,
